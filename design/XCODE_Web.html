@@ -1,0 +1,2365 @@
+<!doctype html>
+<!--
+  XCODE Web  |  responsive web app UI/UX
+  Version 0.9  (21 September 2026)
+
+  Changelog
+  0.9  21 Sep 2026  Revenue (today without a record is not counted as a shortfall): week grid, daily capture with reason for no revenue, expandable daily performance against expected.
+  0.8  21 Sep 2026  Setup review: permissions tick what they need and untick what depends on them; weekly targets are dated so past reports keep the old target; setup lists and the people you can manage follow your own scope; company rename checked for blanks and duplicates; Enter adds a company; saving with no changes does nothing; owner always sees every company; clearer hints.
+  0.7  21 Sep 2026  Sign in fix: screens no longer use forms, which sandboxed previews block, so Sign in did nothing. Enter key still works. Remove access and Stop now confirm on the page instead of a browser pop up.
+  0.6  21 Sep 2026  Setup: People and access (add people, role, what they can see, single permissions, approval limit, remove access), PSV companies, Vehicles with weekly target and vehicle report, Recurring costs and savings with frequency, period and vehicle split, Change log. Sign in fixes and demo logins on screen.
+  0.5  21 Sep 2026  Dashboard after sign in. Left menu, cards and filters all driven by granular permissions and data scope. Demo view as switcher.
+  0.4  21 Sep 2026  Every sign in is mobile number and PIN. Email is used only to deliver one time codes (new device, first PIN, PIN reset).
+  0.3  21 Sep 2026  Renamed to XCODE Web. All web screens held in this one file. Version shown on screen.
+  0.2  21 Sep 2026  Email replaces phone number as the login. Email code for new devices and PIN reset.
+  0.1  21 Sep 2026  First sign in design: phone number and 4 digit PIN.
+
+  Screens in this file: Sign in, Set up or reset PIN, Email code, Choose PIN, Sign in paused, Dashboard (with left menu and Your access), People and access, Person, PSV companies, Vehicles, Vehicle with report, Recurring costs and savings, Recurring item, Change log.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F6F3EC">
+<title>XCODE Web v0.9</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cream: #F6F3EC; --navy: #14213D; --grey: #4F5B6B;
+    --blue: #1D5FD6; --blue-dark: #1647A6; --blue-busy: #3F6FC9;
+    --line: #CFC8B8; --card-line: #E4DFD3;
+    --red: #B42318; --red-bg: #FDECEA; --red-line: #F3C1BB; --red-text: #8A1C12;
+    --amber-bg: #FFF4DE; --amber-line: #E7C27A; --amber-text: #6B4200;
+    --green-bg: #E3F1E8; --green: #1E6B3A; --white: #FFFFFF;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--cream); color: var(--navy);
+    font-family: 'Figtree', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 16px; line-height: 1.45; -webkit-text-size-adjust: 100%;
+  }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 3px solid rgba(29, 95, 214, 0.45); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  .page { min-height: 100%; display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 32px 24px 0; }
+  .brand-mark { width: 38px; height: 38px; border-radius: 10px; background: var(--navy); display: grid; place-items: center; }
+  .brand-name { font-size: 18px; font-weight: 700; letter-spacing: 0.04em; display: block; }
+  .brand-sub { font-size: 13px; color: var(--grey); display: block; }
+
+  .main { flex: 1; display: flex; flex-direction: column; padding: 28px 24px 16px; }
+  .panel { width: 100%; }
+  .screen { display: flex; flex-direction: column; gap: 16px; }
+
+  h1 { margin: 0; font-size: 28px; font-weight: 700; line-height: 1.2; }
+  .lead { margin: 6px 0 0; color: var(--grey); overflow-wrap: anywhere; }
+  .lead strong { color: var(--navy); }
+  .small { margin: 0; font-size: 14px; color: var(--grey); }
+
+  .field { display: flex; flex-direction: column; gap: 8px; }
+  .field-head { display: flex; justify-content: space-between; align-items: center; }
+  label { font-size: 15px; font-weight: 600; }
+  .input {
+    width: 100%; height: 56px; padding: 0 16px;
+    background: var(--white); border: 1px solid var(--line); border-radius: 12px; font-size: 19px;
+  }
+  .input:focus { outline: 3px solid rgba(29, 95, 214, 0.35); outline-offset: 1px; border-color: var(--blue); }
+  .input.digits { font-size: 22px; letter-spacing: 0.4em; }
+  .input.digits::placeholder { letter-spacing: normal; font-size: 17px; }
+  .input[aria-invalid="true"] { border: 2px solid var(--red); }
+
+  .field-error { margin: 0; display: flex; gap: 6px; align-items: flex-start; font-size: 14px; color: var(--red); }
+  .field-error svg { flex-shrink: 0; margin-top: 1px; }
+
+  .check { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; padding-top: 10px; font-size: 15px; font-weight: 400; cursor: pointer; }
+  .check input { width: 22px; height: 22px; margin: 0; flex-shrink: 0; accent-color: var(--blue); }
+
+  .banner { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; font-size: 15px; }
+  .banner svg { flex-shrink: 0; margin-top: 2px; }
+  .banner.error { background: var(--red-bg); border: 1px solid var(--red-line); color: var(--red-text); }
+  .banner.offline { background: var(--amber-bg); border: 1px solid var(--amber-line); color: var(--amber-text); }
+  .demo { margin: 0; padding: 10px 14px; border: 1px dashed var(--line); border-radius: 12px; font-size: 14px; color: var(--grey); }
+  .demo strong { color: var(--navy); letter-spacing: 0.08em; }
+
+  .btn {
+    height: 56px; border-radius: 999px; font-size: 17px; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; width: 100%;
+  }
+  .btn-primary { background: var(--blue); color: var(--white); border: 0; }
+  .btn-primary:hover { background: var(--blue-dark); }
+  .btn-primary[aria-busy="true"] { background: var(--blue-busy); cursor: progress; }
+  .btn-outline { background: transparent; color: var(--blue); border: 2px solid var(--blue); }
+  .link-btn {
+    min-height: 44px; padding: 0 8px; border: 0; background: transparent;
+    color: var(--blue); font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .link-btn:hover:not(:disabled) { color: var(--blue-dark); text-decoration: underline; }
+  .link-btn:disabled { color: var(--grey); cursor: default; font-weight: 500; }
+  .row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
+  .start { padding-left: 0; }
+  .end { padding-right: 0; }
+
+  .icon-circle { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; }
+  .icon-circle.bad { background: var(--red-bg); color: var(--red); }
+  .icon-circle.good { background: var(--green-bg); color: var(--green); }
+
+  .foot-note { margin: auto 0 0; padding-top: 24px; text-align: center; font-size: 14px; color: var(--grey); }
+  .version { margin: 8px 0 0; text-align: center; font-size: 12px; color: var(--grey); }
+  .legal { display: none; }
+
+  /* ===== Dashboard cards (shared look) ===== */
+  .card { background: var(--white); border: 1px solid var(--card-line); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .card header { display: flex; flex-direction: column; gap: 2px; }
+  .card-title { margin: 0; font-size: 16px; font-weight: 700; line-height: 1.3; }
+  .card-sub { margin: 0; font-size: 13px; color: var(--grey); }
+  .card-value { margin: 4px 0 0; font-size: 30px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .card-value.bad, .card-list .r.bad strong { color: var(--red); }
+  .card-note { margin: 0; font-size: 14px; color: var(--grey); }
+  .bar { height: 8px; background: #EFEBE3; border-radius: 999px; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: var(--blue); border-radius: 999px; }
+  .card-list { list-style: none; margin: 4px 0 0; padding: 0; }
+  .card-list li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid #EFEBE3; }
+  .card-list .l, .card-list .r { display: flex; flex-direction: column; min-width: 0; }
+  .card-list .r { text-align: right; align-items: flex-end; flex-shrink: 0; max-width: 60%; }
+  .card-list strong { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card-list small { font-size: 13px; color: var(--grey); }
+  .card-action { margin-top: 6px; align-self: flex-start; min-height: 44px; padding: 0 20px; border-radius: 999px; border: 2px solid var(--blue); background: transparent; color: var(--blue); font-size: 15px; font-weight: 600; cursor: pointer; }
+  .card-action:hover { background: #EEF3FD; }
+  .card-action.primary { background: var(--blue); color: var(--white); }
+  .card-action.primary:hover { background: var(--blue-dark); }
+
+  .seg { display: inline-flex; background: #EFEBE3; border-radius: 999px; padding: 4px; gap: 2px; }
+  .seg button { min-height: 40px; padding: 0 16px; border: 0; background: transparent; border-radius: 999px; font-size: 14px; font-weight: 600; color: var(--grey); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--white); color: var(--navy); box-shadow: 0 1px 3px rgba(20, 33, 61, 0.15); }
+  .scope-select { height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); font-size: 15px; }
+  .scope-chip { display: inline-flex; align-items: center; min-height: 36px; padding: 0 12px; border-radius: 999px; background: #EFEBE3; font-size: 14px; font-weight: 600; }
+  .demo-as { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--grey); }
+  .demo-as select { height: 36px; max-width: 220px; border: 1px dashed var(--line); border-radius: 8px; background: var(--white); padding: 0 8px; font-size: 14px; }
+
+  .access-meta { margin: 0 0 8px; display: grid; gap: 8px; }
+  .access-meta div { display: flex; flex-direction: column; }
+  .access-meta dt { font-size: 13px; color: var(--grey); }
+  .access-meta dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+  .access-group { margin: 16px 0 4px; font-size: 14px; font-weight: 700; }
+  .access-list { margin: 0; padding-left: 20px; }
+  .access-list li { padding: 3px 0; font-size: 15px; }
+  .access-list em { font-style: normal; font-size: 12px; font-weight: 600; color: var(--blue-dark); background: #E8EFFC; padding: 1px 6px; border-radius: 6px; white-space: nowrap; }
+  /* ===== Web app shell ===== */
+  .app-shell { min-height: 100%; display: flex; flex-direction: column; }
+  .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 20px; background: var(--white); border-bottom: 1px solid var(--card-line); }
+  .tb-brand { display: flex; align-items: center; gap: 10px; }
+  .spacer { flex: 1; }
+  .icon-btn { width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: transparent; border-radius: 10px; cursor: pointer; color: var(--navy); }
+  .icon-btn:hover { background: #F3F0E8; }
+  .menu-btn { display: none; }
+  .user-wrap { position: relative; }
+  .user-btn { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 8px; border: 0; background: transparent; border-radius: 12px; cursor: pointer; text-align: left; }
+  .user-btn:hover { background: #F3F0E8; }
+  .avatar-sm { width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; background: var(--navy); color: var(--white); display: grid; place-items: center; font-size: 14px; font-weight: 700; }
+  .user-name { display: block; font-size: 14px; font-weight: 600; }
+  .user-role { display: block; font-size: 12px; color: var(--grey); }
+  .user-menu { position: absolute; right: 0; top: 52px; min-width: 200px; padding: 6px; background: var(--white); border: 1px solid var(--card-line); border-radius: 12px; box-shadow: 0 8px 24px rgba(20, 33, 61, 0.12); }
+  .user-menu button { display: block; width: 100%; min-height: 44px; padding: 0 12px; border: 0; background: transparent; border-radius: 8px; text-align: left; font-size: 15px; cursor: pointer; }
+  .user-menu button:hover { background: #F3F0E8; }
+
+  .app-body { flex: 1; display: flex; min-height: 0; }
+  .sidebar { width: 248px; flex-shrink: 0; padding: 16px 12px; background: var(--white); border-right: 1px solid var(--card-line); overflow-y: auto; }
+  .sidebar ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .nav-item { display: flex; align-items: center; width: 100%; min-height: 42px; padding: 0 12px; border: 0; background: transparent; border-radius: 10px; font-size: 15px; text-align: left; cursor: pointer; }
+  .nav-item:hover { background: #F3F0E8; }
+  .nav-item[aria-current="page"] { background: #E8EFFC; color: var(--blue-dark); font-weight: 700; }
+  .nav-group { margin-top: 14px; }
+  .nav-group-btn { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 36px; padding: 0 12px; border: 0; background: transparent; font-size: 13px; font-weight: 700; color: var(--grey); cursor: pointer; }
+  .nav-group-btn svg { transition: transform 0.15s; }
+  .nav-group-btn[aria-expanded="false"] svg { transform: rotate(-90deg); }
+  .scrim { position: fixed; inset: 64px 0 0 0; background: rgba(20, 33, 61, 0.35); z-index: 25; }
+
+  .content { flex: 1; min-width: 0; padding: 28px 32px 48px; }
+  .page-title { margin: 0; font-size: 28px; font-weight: 700; }
+  .page-sub { margin: 4px 0 0; color: var(--grey); overflow-wrap: anywhere; }
+  .filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 20px 0 24px; padding: 12px; background: var(--white); border: 1px solid var(--card-line); border-radius: 14px; }
+  .filterbar .scope { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+  .module { max-width: 560px; margin-top: 20px; }
+
+  .access-dialog { width: min(520px, calc(100% - 32px)); max-height: calc(100% - 64px); padding: 0; border: 1px solid var(--card-line); border-radius: 16px; color: var(--navy); }
+  .access-dialog::backdrop { background: rgba(20, 33, 61, 0.4); }
+  .dialog-head { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; background: var(--white); border-bottom: 1px solid var(--card-line); }
+  .dialog-head h2 { margin: 0; font-size: 20px; }
+  .dialog-body { padding: 16px 20px 24px; }
+
+  @media (max-width: 899px) {
+    .menu-btn { display: grid; }
+    .sidebar { position: fixed; top: 64px; bottom: 0; left: 0; z-index: 30; transform: translateX(-100%); transition: transform 0.2s; box-shadow: 0 8px 24px rgba(20, 33, 61, 0.18); }
+    .sidebar.open { transform: none; }
+    .content { padding: 20px 16px 40px; }
+    .user-text { display: none; }
+    .topbar { padding: 0 8px 0 4px; gap: 6px; }
+    .demo-as span { display: none; }
+    .demo-as select { max-width: 130px; }
+    .tb-brand .brand-sub { display: none; }
+  }
+  @media (max-width: 480px) {
+    .filterbar { flex-direction: column; align-items: stretch; }
+    .seg { display: grid; grid-template-columns: repeat(3, 1fr); }
+    .seg button { padding: 0 6px; }
+    .scope-select { width: 100%; }
+    .cards { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) { .sidebar, .nav-group-btn svg { transition: none; } }
+
+  /* ===== Setup screens: lists and forms ===== */
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .btn-pill { min-height: 44px; padding: 0 20px; border-radius: 999px; border: 2px solid var(--blue); background: var(--blue); color: var(--white); font-size: 15px; font-weight: 600; cursor: pointer; }
+  .btn-pill:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
+  .btn-pill.outline { background: transparent; color: var(--blue); }
+  .btn-pill.outline:hover { background: #EEF3FD; }
+  .btn-pill.danger { background: transparent; border-color: var(--red); color: var(--red); }
+  .btn-pill.danger:hover { background: var(--red-bg); }
+  .btn-pill:disabled { opacity: 0.5; cursor: not-allowed; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 20px; padding: 12px; background: var(--white); border: 1px solid var(--card-line); border-radius: 14px; }
+  .table-card { margin-top: 16px; background: var(--white); border: 1px solid var(--card-line); border-radius: 14px; overflow: hidden; }
+  table.list { width: 100%; border-collapse: collapse; }
+  .list th { padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: var(--grey); background: #FBF9F4; border-bottom: 1px solid var(--card-line); }
+  .list td { padding: 12px 16px; border-bottom: 1px solid #EFEBE3; font-size: 15px; vertical-align: top; }
+  .list tr:last-child td { border-bottom: 0; }
+  .list td small { display: block; font-size: 13px; color: var(--grey); }
+  .list .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .row-btn { min-height: 32px; padding: 0; border: 0; background: transparent; color: var(--blue); font-size: 15px; font-weight: 700; text-align: left; cursor: pointer; }
+  .row-btn:hover { text-decoration: underline; }
+  .status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; background: #EFEBE3; white-space: nowrap; }
+  .status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .status.ok { background: var(--green-bg); color: var(--green); }
+  .status.warn { background: var(--amber-bg); color: var(--amber-text); }
+  .status.off { background: var(--red-bg); color: var(--red-text); }
+  .empty-row { padding: 24px 16px; color: var(--grey); text-align: center; }
+
+  .form { max-width: 780px; margin-top: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .form .card { gap: 14px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .f { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .f > label, .f .lbl { font-size: 14px; font-weight: 600; }
+  .f input[type="text"], .f input[type="tel"], .f input[type="email"], .f input[type="date"], .f select {
+    width: 100%; height: 48px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); font-size: 16px;
+  }
+  .f input:focus, .f select:focus, .money input:focus { outline: 3px solid rgba(29, 95, 214, 0.3); outline-offset: 1px; border-color: var(--blue); }
+  .f input[aria-invalid="true"], .f select[aria-invalid="true"], .money input[aria-invalid="true"] { border: 2px solid var(--red); }
+  .f input:disabled, .f select:disabled { background: #F3F0E8; color: var(--grey); }
+  .hint { margin: 0; font-size: 13px; color: var(--grey); }
+  .err { margin: 0; display: flex; gap: 6px; align-items: flex-start; font-size: 13px; color: var(--red); }
+  .err svg { flex-shrink: 0; margin-top: 1px; }
+  .money { display: flex; align-items: stretch; width: 100%; }
+  .money span { display: flex; align-items: center; padding: 0 12px; border: 1px solid var(--line); border-right: 0; border-radius: 10px 0 0 10px; background: #FBF9F4; font-size: 15px; color: var(--grey); }
+  .money input { flex: 1; min-width: 0; height: 48px; padding: 0 12px; border: 1px solid var(--line); border-radius: 0 10px 10px 0; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .opts { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+  .opt { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 15px; cursor: pointer; }
+  .opt input { width: 20px; height: 20px; margin: 0; flex-shrink: 0; accent-color: var(--blue); }
+  .opt input:disabled + span { color: var(--grey); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { min-height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--white); font-size: 14px; font-weight: 600; cursor: pointer; }
+  .chip:hover { border-color: var(--blue); color: var(--blue-dark); }
+  .perm-group { padding-top: 12px; border-top: 1px solid #EFEBE3; }
+  .perm-group h3 { margin: 0 0 4px; display: flex; justify-content: space-between; gap: 8px; font-size: 15px; }
+  .perm-group h3 small { font-size: 13px; font-weight: 500; color: var(--grey); }
+  .tag { margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .tag.add { background: #E8EFFC; color: var(--blue-dark); }
+  .tag.rem { background: var(--red-bg); color: var(--red-text); }
+  .note { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--amber-bg); color: var(--amber-text); font-size: 14px; }
+  .note.info { background: #E8EFFC; color: var(--blue-dark); }
+  .alloc-co { margin: 8px 0 0; font-size: 13px; font-weight: 700; color: var(--grey); }
+  .alloc-row { display: grid; grid-template-columns: minmax(0, 1fr) 170px; gap: 12px; align-items: center; min-height: 52px; border-top: 1px solid #EFEBE3; }
+  .alloc-row .money input { height: 44px; }
+  .balance { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px; border-radius: 10px; font-weight: 700; }
+  .balance.ok { background: var(--green-bg); color: var(--green); }
+  .balance.bad { background: var(--red-bg); color: var(--red-text); }
+  .preview { margin: 0; padding-left: 20px; }
+  .preview li { padding: 2px 0; font-variant-numeric: tabular-nums; }
+  .form-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .form-actions .grow { flex: 1; }
+  .report-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .stat { padding: 12px; border: 1px solid #EFEBE3; border-radius: 10px; }
+  .stat small { display: block; font-size: 13px; color: var(--grey); }
+  .stat strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+  .stat strong.bad { color: var(--red); }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60; max-width: calc(100% - 32px); padding: 12px 18px; border-radius: 12px; background: var(--navy); color: var(--white); font-size: 15px; box-shadow: 0 8px 24px rgba(20, 33, 61, 0.25); }
+  .login-help { margin: 0; padding: 12px 14px; border: 1px dashed var(--line); border-radius: 12px; font-size: 14px; color: var(--grey); }
+  .login-help strong { color: var(--navy); }
+  .login-help ul { margin: 6px 0 0; padding-left: 18px; }
+
+  @media (max-width: 720px) {
+    .grid2 { grid-template-columns: minmax(0, 1fr); }
+    table.list thead { display: none; }
+    table.list, .list tbody, .list tr, .list td { display: block; width: 100%; }
+    .list tr { padding: 8px 0; border-bottom: 1px solid #EFEBE3; }
+    .list tr:last-child { border-bottom: 0; }
+    .list td { padding: 4px 16px; border: 0; }
+    .list td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--grey); }
+    .list .num { text-align: left; }
+    .alloc-row { grid-template-columns: minmax(0, 1fr) 140px; }
+  }
+
+  /* ===== Revenue ===== */
+  .week-nav { display: flex; align-items: center; gap: 4px; }
+  .week-nav strong { min-width: 176px; text-align: center; font-size: 15px; }
+  .icon-btn:disabled { opacity: 0.35; cursor: default; background: transparent; }
+  .wk-sum { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.3; }
+  .wk-sum small { font-size: 12px; color: var(--grey); }
+  .wk-sum strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .rev-wrap { overflow-x: auto; }
+  table.rev { width: 100%; min-width: 900px; border-collapse: collapse; }
+  .rev th { padding: 10px 8px; font-size: 12px; font-weight: 600; color: var(--grey); text-align: left; white-space: nowrap; background: #FBF9F4; border-bottom: 1px solid var(--card-line); }
+  .rev th span { display: block; font-size: 16px; font-weight: 700; color: var(--navy); }
+  .rev th.today { box-shadow: inset 0 -3px 0 var(--blue); }
+  .rev th.today span { color: var(--blue-dark); }
+  .rev td { padding: 6px 8px; border-bottom: 1px solid #EFEBE3; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .rev td.today { background: #F7F9FE; }
+  .rev .num { text-align: right; }
+  .rev .veh { position: sticky; left: 0; z-index: 1; min-width: 140px; text-align: left; background: var(--white); }
+  .rev th.veh, .rev tfoot .veh { background: #FBF9F4; }
+  .rev td.veh small { display: block; padding-left: 24px; font-size: 12px; color: var(--grey); }
+  .exp svg { margin-right: 6px; vertical-align: -3px; transform: rotate(-90deg); transition: transform 0.15s; }
+  .exp[aria-expanded="true"] svg { transform: none; }
+  .cell { display: inline-flex; align-items: center; justify-content: flex-end; min-width: 68px; min-height: 36px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; font: inherit; font-variant-numeric: tabular-nums; color: var(--navy); }
+  button.cell { cursor: pointer; }
+  button.cell:hover { background: #F3F0E8; }
+  .cell.st-missing { justify-content: center; font-size: 13px; font-weight: 700; color: var(--red); }
+  button.cell.st-missing { border: 1px dashed var(--red); }
+  .rsn { padding: 2px 8px; border-radius: 999px; background: #EFEBE3; font-size: 12px; font-weight: 700; color: var(--navy); white-space: nowrap; }
+  .pct { font-weight: 700; }
+  .pct.low { color: var(--red); }
+  .rev tfoot td { font-weight: 700; background: #FBF9F4; border-bottom: 0; }
+  .rev tr.detail > td { padding: 4px 12px 16px; background: #FBF9F4; }
+  table.mini { width: 100%; max-width: 760px; margin-left: 24px; border-collapse: collapse; }
+  .mini th { padding: 8px; font-size: 12px; font-weight: 600; color: var(--grey); text-align: left; border-bottom: 1px solid var(--card-line); }
+  .mini td { padding: 6px 8px; font-size: 14px; border-bottom: 1px solid #EAE5DA; font-variant-numeric: tabular-nums; }
+  .mini .num { text-align: right; }
+  .mini tr.muted td { color: var(--grey); }
+  .mini tr.total td { font-weight: 700; border-bottom: 0; }
+  .gap.below { color: var(--red); }
+  .gap.above { color: var(--green); }
+  .pbar { width: 120px; height: 6px; border-radius: 999px; background: #E6E1D6; overflow: hidden; }
+  .pbar span { display: block; height: 100%; background: var(--blue); }
+  .pbar.low span { background: var(--red); }
+  .rev-form { display: flex; flex-direction: column; gap: 14px; }
+  .money.big input { height: 56px; font-size: 24px; }
+  .or { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 13px; color: var(--grey); }
+  .or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--card-line); }
+  .reasons { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .reason { min-height: 48px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); font-size: 15px; font-weight: 600; cursor: pointer; }
+  .reason[aria-pressed="true"] { border: 2px solid var(--blue); background: #E8EFFC; color: var(--blue-dark); }
+  @media (max-width: 600px) { .reasons { grid-template-columns: repeat(2, minmax(0, 1fr)); } .week-nav strong { min-width: 0; } }
+
+  @media (min-width: 720px) {
+    .brand { padding: 28px 48px 0; }
+    .main { align-items: center; justify-content: center; padding: 24px 24px 40px; gap: 20px; }
+    .panel {
+      width: 440px; padding: 40px; background: var(--white);
+      border: 1px solid var(--card-line); border-radius: 20px;
+      box-shadow: 0 8px 24px rgba(20, 33, 61, 0.06);
+    }
+    .input, .btn { height: 52px; }
+    .foot-note { margin: 0; padding-top: 0; }
+    .version { display: none; }
+    .legal { display: block; margin: 0; padding: 0 48px 24px; font-size: 13px; color: var(--grey); }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="brand">
+    <span class="brand-mark" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="14" rx="2"/><path d="M4 11h16"/><path d="M8 17v3"/><path d="M16 17v3"/></svg>
+    </span>
+    <span><span class="brand-name">XCODE</span><span class="brand-sub">Fleet finance</span></span>
+  </header>
+
+  <main class="main">
+    <div class="panel">
+
+      <!-- 1. Sign in: mobile number and PIN -->
+      <section class="screen" id="s-signin">
+        <div>
+          <h1>Sign in</h1>
+          <p class="lead">Use the mobile number your admin registered for you.</p>
+        </div>
+        <div class="banner offline" id="offline-banner" role="status" hidden>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2l20 20"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M5 12.5a10 10 0 0 1 5-2.7"/><path d="M19 12.5a10 10 0 0 0-3-2.1"/><path d="M12 20h.01"/></svg>
+          <span>No internet. Signing in needs network.</span>
+        </div>
+        <div class="field">
+          <label for="phone">Mobile number</label>
+          <input class="input" id="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="0712 345 678">
+          <p class="field-error" id="phone-error" hidden></p>
+        </div>
+        <div class="field">
+          <div class="field-head">
+            <label for="pin">PIN</label>
+            <button type="button" class="link-btn end" id="toggle-pin" aria-controls="pin" aria-pressed="false" style="min-height:36px">Show</button>
+          </div>
+          <input class="input digits" id="pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="4 numbers" maxlength="4">
+          <p class="field-error" id="pin-error" hidden></p>
+        </div>
+        <div class="banner error" id="signin-banner" role="alert" hidden></div>
+        <button type="button" data-submit class="btn btn-primary" id="signin-btn">Sign in</button>
+        <div class="row">
+          <button type="button" class="link-btn start" id="first-time">First time here?</button>
+          <button type="button" class="link-btn end" id="forgot">Forgot PIN?</button>
+        </div>
+        <div class="login-help"><strong>Demo logins</strong>
+          <ul>
+            <li>Owner: 0733 520 614, PIN 4826</li>
+            <li>Revenue clerk: 0712 345 678, PIN 2580</li>
+            <li>Office admin: 0722 410 355, PIN 1379, then an email code</li>
+            <li>Fleet manager: 0700 111 222, no PIN yet, sets one with an email code</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 2. Set up or reset PIN: mobile number -->
+      <section class="screen" id="s-setup" hidden>
+        <div>
+          <h1 id="setup-title">Set up your PIN</h1>
+          <p class="lead">Enter your mobile number. We will send a code to the email address your admin registered for you.</p>
+        </div>
+        <div class="field">
+          <label for="setup-phone">Mobile number</label>
+          <input class="input" id="setup-phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="0712 345 678">
+          <p class="field-error" id="setup-error" hidden></p>
+        </div>
+        <div class="banner error" id="setup-banner" role="alert" hidden></div>
+        <button type="button" data-submit class="btn btn-primary" id="setup-btn">Send code</button>
+        <button type="button" class="link-btn start" data-back style="align-self:flex-start">Back to sign in</button>
+      </section>
+
+      <!-- 3. Email code -->
+      <section class="screen" id="s-code" hidden>
+        <div>
+          <h1>Check your email</h1>
+          <p class="lead" id="code-lead"></p>
+        </div>
+        <div class="field">
+          <label for="code">6 digit code</label>
+          <input class="input digits" id="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 numbers" maxlength="6">
+          <p class="field-error" id="code-error" hidden></p>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="remember">
+          <span id="remember-label"></span>
+        </label>
+        <button type="button" data-submit class="btn btn-primary" id="code-btn">Confirm code</button>
+        <div class="row">
+          <button type="button" class="link-btn start" id="resend">Send a new code</button>
+          <button type="button" class="link-btn end" data-back>Cancel</button>
+        </div>
+        <p class="small">No email? Check your spam folder, or ask your admin to confirm your email address.</p>
+        <p class="demo" id="demo-code">Demo only: your code is <strong></strong></p>
+      </section>
+
+      <!-- 4. Choose PIN -->
+      <section class="screen" id="s-newpin" hidden>
+        <div>
+          <h1 id="newpin-title">Choose your PIN</h1>
+          <p class="lead" id="newpin-lead"></p>
+        </div>
+        <div class="field">
+          <label for="new-pin">New PIN</label>
+          <input class="input digits" id="new-pin" type="password" inputmode="numeric" autocomplete="new-password" placeholder="4 numbers" maxlength="4">
+        </div>
+        <div class="field">
+          <label for="confirm-pin">Type it again</label>
+          <input class="input digits" id="confirm-pin" type="password" inputmode="numeric" autocomplete="new-password" placeholder="4 numbers" maxlength="4">
+        </div>
+        <div class="banner error" id="new-banner" role="alert" hidden></div>
+        <button type="button" data-submit class="btn btn-primary">Save PIN</button>
+      </section>
+
+      <!-- 5. Sign in paused -->
+      <section class="screen" id="s-locked" hidden>
+        <div class="icon-circle bad" aria-hidden="true">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        </div>
+        <div>
+          <h1>Sign in paused</h1>
+          <p class="lead">Five wrong PINs for <strong id="locked-phone"></strong>. Reset your PIN with an email code now, or try again in 15 minutes.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="locked-reset">Reset PIN</button>
+        <button type="button" class="btn btn-outline" data-back>Back to sign in</button>
+      </section>
+
+    </div>
+
+    <p class="foot-note">New here? Your admin adds you with your mobile number and email address.</p>
+    <p class="version">XCODE Web v0.9</p>
+  </main>
+  <p class="legal">Every sign in is recorded against your name. XCODE Web v0.9</p>
+</div>
+
+<!-- ===== Web app shell: shown after sign in ===== -->
+<div class="app-shell" id="app" hidden>
+  <header class="topbar">
+    <button type="button" class="icon-btn menu-btn" id="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>
+    </button>
+    <span class="tb-brand">
+      <span class="brand-mark" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="14" rx="2"/><path d="M4 11h16"/><path d="M8 17v3"/><path d="M16 17v3"/></svg></span>
+      <span><span class="brand-name">XCODE</span><span class="brand-sub">Fleet finance</span></span>
+    </span>
+    <span class="spacer"></span>
+    <label class="demo-as"><span>Demo: view as</span><select id="view-as" aria-label="Demo: view as"></select></label>
+    <div class="user-wrap">
+      <button type="button" class="user-btn" id="user-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="user-menu">
+        <span class="avatar-sm" id="user-initials" aria-hidden="true"></span>
+        <span class="user-text"><span class="user-name" id="user-name"></span><span class="user-role" id="user-role"></span></span>
+      </button>
+      <div class="user-menu" id="user-menu" role="menu" hidden>
+        <button type="button" role="menuitem" id="open-access">Your access</button>
+        <button type="button" role="menuitem" id="app-sign-out">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-body">
+    <nav class="sidebar" id="sidebar" aria-label="Main"></nav>
+    <div class="scrim" id="scrim" hidden></div>
+    <main class="content">
+      <h1 class="page-title" id="page-title">Dashboard</h1>
+      <p class="page-sub" id="page-sub"></p>
+
+      <div id="view-dashboard">
+        <div class="filterbar">
+          <div class="seg" role="group" aria-label="Period">
+            <button type="button" data-period="today">Today</button>
+            <button type="button" data-period="week">This week</button>
+            <button type="button" data-period="month">This month</button>
+          </div>
+          <div class="scope" id="scope"></div>
+        </div>
+        <div class="cards" id="cards"></div>
+      </div>
+
+      <div id="view-module" class="module" hidden>
+        <article class="card">
+          <header><h2 class="card-title" id="module-title"></h2><p class="card-sub" id="module-sub"></p></header>
+          <p class="card-note" id="module-note"></p>
+          <button type="button" class="card-action" id="module-back">Back to dashboard</button>
+        </article>
+      </div>
+      <div id="view-setup" hidden></div>
+      <p class="version" style="display:block;margin-top:32px;text-align:left">XCODE Web v0.9</p>
+    </main>
+  </div>
+
+  <dialog class="access-dialog" id="access-dialog" aria-labelledby="access-title">
+    <div class="dialog-head">
+      <h2 id="access-title">Your access</h2>
+      <button type="button" class="icon-btn" id="close-access" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body" id="access-body"></div>
+  </dialog>
+  <dialog class="access-dialog" id="rev-dialog" aria-labelledby="rev-title"></dialog>
+</div>
+
+<script>
+/* ===== Shared: demo data, permissions, schedules and dashboard. Identical in XCODE Web and XCODE Mobile. ===== */
+window.XDATA = (function () {
+  'use strict';
+
+  var COMPANIES = { ZG: 'Zuri Genesis', MT: 'Metro Trans' };
+  var TODAY = 21;                                   // Monday 21 Sep 2026. Weeks run Monday to Sunday.
+  var TODAY_ISO = '2026-09-21';
+  var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  function parseISO(s) { var p = s.split('-'); return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])); }
+  function toISO(dt) { return dt.toISOString().slice(0, 10); }
+  function fmtDate(dt) { if (typeof dt === 'string') dt = parseISO(dt); return dt.getUTCDate() + ' ' + MON[dt.getUTCMonth()] + ' ' + dt.getUTCFullYear(); }
+  function dateOf(d) { return new Date(Date.UTC(2026, 8, d)); }
+  function day(n) { return n + ' Sep 2026'; }
+  function ordinal(n) { var s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+
+  /* weekly = weekly performance target. from = in the fleet from (no gaps are counted before it). */
+  var VEHICLES = [
+    { reg: 'KDA 482M', co: 'ZG', weekly: 63000, from: '2025-03-01' },
+    { reg: 'KCY 117T', co: 'ZG', weekly: 59500, from: '2023-06-12' },
+    { reg: 'KDG 905B', co: 'ZG', weekly: 66500, from: '2025-07-01' },
+    { reg: 'KDK 336X', co: 'ZG', weekly: 56000, from: '2025-10-15' },
+    { reg: 'KDM 071C', co: 'ZG', weekly: 52500, from: '2022-11-01' },
+    { reg: 'KBZ 640Q', co: 'MT', weekly: 49000, from: '2021-04-20' },
+    { reg: 'KCR 258H', co: 'MT', weekly: 56000, from: '2024-02-01' },
+    { reg: 'KDE 713L', co: 'MT', weekly: 63000, from: '2025-05-05' },
+    { reg: 'KDJ 094P', co: 'MT', weekly: 59500, from: '2025-08-18' }
+  ];
+
+  /* Weekly targets are dated. A change applies from its date; past days keep the target they had. */
+  VEHICLES.forEach(function (v) { v.targets = [{ from: v.from, weekly: v.weekly }]; });
+  VEHICLES.filter(function (v) { return v.reg === 'KCR 258H'; })[0].targets = [{ from: '2024-02-01', weekly: 52500 }, { from: '2026-09-18', weekly: 56000 }];
+  function targetOn(v, iso) {
+    var t = v.targets[0].weekly;
+    v.targets.forEach(function (x) { if (x.from <= iso) t = x.weekly; });
+    return t;
+  }
+
+  function rng(seed) {
+    var s = 0;
+    for (var i = 0; i < seed.length; i++) s = (s * 31 + seed.charCodeAt(i)) >>> 0;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      var t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /* Revenue records: { amt } or { reason }. A missing day is a gap, never a zero. */
+  var REASONS = ['Garage', 'Arrest', 'No Crew', 'Other'];
+  var REV = {};
+  VEHICLES.forEach(function (v) {
+    var r = rng(v.reg), daily = v.weekly / 7;
+    REV[v.reg] = {};
+    for (var d = 1; d < TODAY; d++) {
+      var x = r();
+      REV[v.reg][d] = x < 0.05 ? { reason: REASONS[Math.floor(r() * 4)] } : { amt: Math.round(daily * (0.78 + r() * 0.34) / 50) * 50 };
+    }
+  });
+  function set(reg, d, val) { if (val === null) delete REV[reg][d]; else REV[reg][d] = val; }
+  set('KDG 905B', 20, null); set('KCR 258H', 19, null); set('KCR 258H', 20, null);
+  set('KDJ 094P', 17, null); set('KDJ 094P', 20, null); set('KDK 336X', 20, { reason: 'Garage' });
+  set('KDA 482M', 21, { amt: 9350 }); set('KCY 117T', 21, { amt: 7900 }); set('KDK 336X', 21, { reason: 'Garage' });
+  set('KDM 071C', 21, { amt: 6800 }); set('KBZ 640Q', 21, { amt: 7450 }); set('KDE 713L', 21, { amt: 8650 });
+
+  var REPAIRS = [
+    { reg: 'KDJ 094P', day: 5, amt: 3300 }, { reg: 'KDA 482M', day: 8, amt: 14000 },
+    { reg: 'KCR 258H', day: 12, amt: 4800 }, { reg: 'KBZ 640Q', day: 15, amt: 9500 },
+    { reg: 'KDK 336X', day: 20, amt: 18500 }, { reg: 'KDK 336X', day: 21, amt: 6200 }
+  ];
+
+  /* ---------- Recurring costs and savings ----------
+     freq: { kind: 'daily' } | { kind: 'weekly', day: 0 to 6 } | { kind: 'monthly', date: 1 to 28 or 'last' }
+     alloc: the split across vehicles. It must add up to amount. */
+  var CATEGORIES = ['Running costs', 'Repairs and upkeep', 'Crew costs', 'Fixed commitments'];
+  var ZG = ['KDA 482M', 'KCY 117T', 'KDG 905B', 'KDK 336X', 'KDM 071C'], MT = ['KBZ 640Q', 'KCR 258H', 'KDE 713L', 'KDJ 094P'];
+  function even(regs, each) { return regs.map(function (r) { return { reg: r, amt: each }; }); }
+  var RECURRING = [
+    { id: 'r1', name: 'Loan repayment', type: 'cost', category: 'Fixed commitments', amount: 65000, freq: { kind: 'monthly', date: 5 }, start: '2025-03-05', end: '2028-02-05', alloc: [{ reg: 'KDA 482M', amt: 65000 }] },
+    { id: 'r2', name: 'Loan repayment', type: 'cost', category: 'Fixed commitments', amount: 72000, freq: { kind: 'monthly', date: 10 }, start: '2025-07-10', end: '2028-06-10', alloc: [{ reg: 'KDG 905B', amt: 72000 }] },
+    { id: 'r3', name: 'Loan repayment', type: 'cost', category: 'Fixed commitments', amount: 58000, freq: { kind: 'monthly', date: 15 }, start: '2025-10-15', end: '2028-09-15', alloc: [{ reg: 'KDK 336X', amt: 58000 }] },
+    { id: 'r4', name: 'Loan repayment', type: 'cost', category: 'Fixed commitments', amount: 45000, freq: { kind: 'monthly', date: 20 }, start: '2024-02-20', end: '2027-01-20', alloc: [{ reg: 'KCR 258H', amt: 45000 }] },
+    { id: 'r5', name: 'Loan repayment', type: 'cost', category: 'Fixed commitments', amount: 68000, freq: { kind: 'monthly', date: 25 }, start: '2025-05-25', end: '2028-04-25', alloc: [{ reg: 'KDE 713L', amt: 68000 }] },
+    { id: 'r6', name: 'Loan repayment', type: 'cost', category: 'Fixed commitments', amount: 62000, freq: { kind: 'monthly', date: 28 }, start: '2025-08-28', end: '2028-07-28', alloc: [{ reg: 'KDJ 094P', amt: 62000 }] },
+    { id: 'r7', name: 'Insurance, Zuri Genesis fleet', type: 'cost', category: 'Fixed commitments', amount: 47000, freq: { kind: 'monthly', date: 1 }, start: '2026-01-01', end: '',
+      alloc: [{ reg: 'KDA 482M', amt: 9800 }, { reg: 'KCY 117T', amt: 9200 }, { reg: 'KDG 905B', amt: 10400 }, { reg: 'KDK 336X', amt: 9000 }, { reg: 'KDM 071C', amt: 8600 }] },
+    { id: 'r8', name: 'Insurance, Metro Trans fleet', type: 'cost', category: 'Fixed commitments', amount: 36400, freq: { kind: 'monthly', date: 1 }, start: '2026-01-01', end: '',
+      alloc: [{ reg: 'KBZ 640Q', amt: 8200 }, { reg: 'KCR 258H', amt: 8800 }, { reg: 'KDE 713L', amt: 9900 }, { reg: 'KDJ 094P', amt: 9500 }] },
+    { id: 'r9', name: 'SACCO fee, Zuri Genesis', type: 'cost', category: 'Fixed commitments', amount: 15000, freq: { kind: 'monthly', date: 1 }, start: '2025-01-01', end: '', alloc: even(ZG, 3000) },
+    { id: 'r10', name: 'SACCO fee, Metro Trans', type: 'cost', category: 'Fixed commitments', amount: 10000, freq: { kind: 'monthly', date: 1 }, start: '2025-01-01', end: '', alloc: even(MT, 2500) },
+    { id: 'r11', name: 'Stage fees', type: 'cost', category: 'Running costs', amount: 1800, freq: { kind: 'daily' }, start: '2025-01-01', end: '', alloc: even(ZG.concat(MT), 200) },
+    { id: 'r12', name: 'Owner savings', type: 'savings', category: '', amount: 25000, freq: { kind: 'weekly', day: 6 }, start: '2026-01-03', end: '', alloc: even(ZG, 5000) },
+    { id: 'r13', name: 'SACCO savings', type: 'savings', category: '', amount: 1200, freq: { kind: 'daily' }, start: '2026-01-01', end: '', alloc: even(MT, 300) }
+  ];
+
+  function postsOn(item, dt) {
+    if (dt < parseISO(item.start)) return false;
+    if (item.end && dt > parseISO(item.end)) return false;
+    var f = item.freq;
+    if (f.kind === 'daily') return true;
+    if (f.kind === 'weekly') return dt.getUTCDay() === f.day;
+    var last = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate();
+    return dt.getUTCDate() === (f.date === 'last' ? last : Math.min(f.date, last));
+  }
+  function nextPostings(item, n, fromISO) {
+    var out = [], dt = parseISO(fromISO || TODAY_ISO);
+    for (var i = 0; i < 1200 && out.length < n; i++) {
+      if (postsOn(item, dt)) out.push(new Date(dt.getTime()));
+      dt.setUTCDate(dt.getUTCDate() + 1);
+      if (item.end && dt > parseISO(item.end)) break;
+    }
+    return out;
+  }
+  function freqText(f) {
+    if (f.kind === 'daily') return 'Every day';
+    if (f.kind === 'weekly') return 'Every ' + DAYS[f.day];
+    return f.date === 'last' ? 'Last day of every month' : 'Every month on the ' + ordinal(f.date);
+  }
+  function perMonth(item) {
+    var k = item.freq.kind;
+    return Math.round(item.amount * (k === 'daily' ? 30.4 : k === 'weekly' ? 4.35 : 1));
+  }
+
+  /* ---------- Permission catalogue: every key is one thing a person may see or do ---------- */
+  var CATALOGUE = [
+    { group: 'Dashboard', items: [
+      ['dash.capture', "See today's capture for my vehicles"], ['dash.float', 'See my petty cash float'],
+      ['dash.revenue', 'See revenue totals'], ['dash.net', 'See net contribution and weakest vehicles'],
+      ['dash.costs', 'See cost totals'], ['dash.gaps', 'See missing revenue days'],
+      ['dash.pettycash', 'See petty cash waiting for approval'], ['dash.commitments', 'See renewals due'],
+      ['dash.edits', 'See records edited after capture'] ] },
+    { group: 'Revenue', items: [
+      ['revenue.view', 'View revenue records'], ['revenue.capture', 'Capture revenue'],
+      ['revenue.no_earnings', 'Record a no earnings reason'], ['revenue.correct', 'Correct revenue after the day'] ] },
+    { group: 'Petty cash', items: [
+      ['pettycash.spend', 'Record spending from my float'], ['pettycash.view_all', 'View every float'],
+      ['pettycash.approve_item', 'Approve single entries'], ['pettycash.approve_day', 'Approve a whole day'],
+      ['pettycash.issue', 'Record money sent to a float'], ['pettycash.issue_negative', 'Send money that takes a float below zero'] ] },
+    { group: 'Office bills', items: [
+      ['bills.view', 'View office bills'], ['bills.capture', 'Capture office bills'], ['bills.approve', 'Approve office bills'] ] },
+    { group: 'Recurring costs and savings', items: [
+      ['commitments.view', 'View recurring costs and savings'], ['commitments.manage', 'Set up, change and stop recurring costs and savings'] ] },
+    { group: 'Reports', items: [ ['reports.view', 'View reports'], ['reports.export', 'Export reports'] ] },
+    { group: 'Setup', items: [
+      ['companies.manage', 'Set up PSV companies'], ['vehicles.manage', 'Set up vehicles and weekly targets'],
+      ['people.view', 'View people'], ['people.manage', 'Add people, choose their role and what they can see, remove access'],
+      ['access.manage', 'Change single permissions and approval limits for a person'], ['audit.view', 'View the change log'] ] }
+  ];
+  /* A permission can need another. Ticking one ticks what it needs; unticking one unticks what depends on it. */
+  var NEEDS = {
+    'dash.capture': ['revenue.capture'], 'dash.float': ['pettycash.spend'],
+    'revenue.capture': ['revenue.view'], 'revenue.no_earnings': ['revenue.capture'], 'revenue.correct': ['revenue.view'],
+    'pettycash.approve_item': ['pettycash.view_all'], 'pettycash.approve_day': ['pettycash.approve_item'],
+    'pettycash.issue': ['pettycash.view_all'], 'pettycash.issue_negative': ['pettycash.issue'],
+    'bills.capture': ['bills.view'], 'bills.approve': ['bills.view'],
+    'commitments.manage': ['commitments.view'], 'reports.export': ['reports.view'],
+    'people.manage': ['people.view'], 'access.manage': ['people.manage']
+  };
+  function withNeeds(perms, key) {
+    var out = perms.slice(), stack = [key];
+    while (stack.length) { var k = stack.pop(); if (out.indexOf(k) < 0) out.push(k); (NEEDS[k] || []).forEach(function (n) { if (out.indexOf(n) < 0) stack.push(n); }); }
+    return out;
+  }
+  function withoutDependents(perms, key) {
+    var drop = [key], changed = true;
+    while (changed) {
+      changed = false;
+      Object.keys(NEEDS).forEach(function (k) {
+        if (drop.indexOf(k) < 0 && NEEDS[k].some(function (n) { return drop.indexOf(n) >= 0; })) { drop.push(k); changed = true; }
+      });
+    }
+    return perms.filter(function (k) { return drop.indexOf(k) < 0; });
+  }
+
+  var ALL = [];
+  CATALOGUE.forEach(function (g) { g.items.forEach(function (i) { ALL.push(i[0]); }); });
+
+  var ROLES = {
+    owner:   { label: 'Owner', perms: ALL.filter(function (k) { return ['dash.capture', 'dash.float', 'pettycash.spend'].indexOf(k) < 0; }) },
+    admin:   { label: 'Office admin', perms: ['dash.revenue', 'dash.costs', 'dash.gaps', 'dash.commitments', 'dash.edits', 'revenue.view', 'revenue.correct',
+               'bills.view', 'bills.capture', 'commitments.view', 'commitments.manage', 'reports.view', 'reports.export',
+               'companies.manage', 'vehicles.manage', 'people.view', 'people.manage', 'audit.view'] },
+    manager: { label: 'Fleet manager', perms: ['dash.float', 'dash.revenue', 'dash.costs', 'dash.gaps', 'revenue.view', 'revenue.capture',
+               'revenue.no_earnings', 'revenue.correct', 'pettycash.spend', 'reports.view'] },
+    clerk:   { label: 'Revenue clerk', perms: ['dash.capture', 'dash.gaps', 'revenue.view', 'revenue.capture', 'revenue.no_earnings'] }
+  };
+
+  /* People: a role is a starting set. Each person can have permissions added or removed, a data scope and an approval limit. */
+  var USERS = {
+    '0733520614': { first: 'Antony', last: 'Maina', title: 'Owner, all companies', role: 'owner', email: 'antony.maina@shamayah.co.ke',
+                    pin: '4826', trusted: true, scope: { all: true }, extra: [], removed: [], approveLimit: null, revoked: false },
+    '0722410355': { first: 'Peter', last: 'Otieno', title: 'Office admin, all companies', role: 'admin', email: 'peter.otieno@zurigenesis.co.ke',
+                    pin: '1379', trusted: false, scope: { all: true }, extra: ['pettycash.view_all', 'pettycash.approve_item', 'dash.pettycash'], removed: [], approveLimit: 5000, revoked: false },
+    '0700111222': { first: 'Brian', last: 'Mwangi', title: 'Fleet manager, Metro Trans', role: 'manager', email: 'brian.mwangi@metrotrans.co.ke',
+                    pin: null, trusted: false, scope: { companies: ['MT'] }, extra: [], removed: [], float: { balance: 1150, entries: 4, waiting: 7850 }, revoked: false },
+    '0712345678': { first: 'Wanjiru', last: 'Kamau', title: 'Revenue clerk, Zuri Genesis', role: 'clerk', email: 'wanjiru.kamau@zurigenesis.co.ke',
+                    pin: '2580', trusted: true, scope: { vehicles: ['KDA 482M', 'KCY 117T', 'KDG 905B', 'KDK 336X'] }, extra: [], removed: [], revoked: false }
+  };
+
+  function permsFor(u) {
+    if (u.revoked) return [];
+    var base = ROLES[u.role].perms.filter(function (k) { return u.removed.indexOf(k) < 0; });
+    u.extra.forEach(function (k) { if (base.indexOf(k) < 0) base.push(k); });
+    return base;
+  }
+
+  /* Change log: every setup and access change is recorded. */
+  var LOG = [
+    { when: '20 Sep 2026 16:05', who: 'Antony Maina', what: 'Added "Approve single entries" and "View every float" for Peter Otieno with a limit of KES 5,000' },
+    { when: '18 Sep 2026 09:12', who: 'Peter Otieno', what: 'Changed weekly target for KCR 258H from KES 52,500 to KES 56,000' },
+    { when: '15 Sep 2026 11:40', who: 'Antony Maina', what: 'Changed what Wanjiru Kamau can see to 4 vehicles' }
+  ];
+  function log(who, what) {
+    var n = new Date(), hh = String(n.getHours()).padStart(2, '0'), mm = String(n.getMinutes()).padStart(2, '0');
+    LOG.unshift({ when: '21 Sep 2026 ' + hh + ':' + mm, who: who, what: what });
+  }
+
+  return { COMPANIES: COMPANIES, TODAY: TODAY, TODAY_ISO: TODAY_ISO, day: day, DAYS: DAYS, VEHICLES: VEHICLES, REV: REV, REPAIRS: REPAIRS,
+           CATEGORIES: CATEGORIES, RECURRING: RECURRING, targetOn: targetOn, NEEDS: NEEDS, withNeeds: withNeeds, withoutDependents: withoutDependents, postsOn: postsOn, nextPostings: nextPostings, freqText: freqText, perMonth: perMonth,
+           ordinal: ordinal, parseISO: parseISO, toISO: toISO, fmtDate: fmtDate, dateOf: dateOf,
+           PETTY_QUEUE: PETTY_QUEUE_INIT(), RENEWALS: RENEWALS_INIT(), EDITS: EDITS_INIT(),
+           CATALOGUE: CATALOGUE, ROLES: ROLES, users: USERS, permsFor: permsFor, LOG: LOG, log: log };
+
+  function PETTY_QUEUE_INIT() {
+    return [
+      { manager: 'Brian Mwangi', oldest: 19, items: [
+        { what: 'Fuel top up', reg: 'KDE 713L', amt: 3500 }, { what: 'Wash', reg: 'KBZ 640Q', amt: 400 },
+        { what: 'Stage fees', reg: 'KCR 258H', amt: 650 }, { what: 'Spares', reg: 'KDJ 094P', amt: 3300 } ] },
+      { manager: 'Samuel Njoroge', oldest: 20, items: [
+        { what: 'Fare cards', reg: 'KDA 482M', amt: 1200 }, { what: 'Spares', reg: 'KDM 071C', amt: 2000 } ] }
+    ];
+  }
+  function RENEWALS_INIT() {
+    return [
+      { reg: 'KDK 336X', item: 'Insurance', due: '28 Sep 2026', days: 7 },
+      { reg: 'KBZ 640Q', item: 'Licence', due: '9 Oct 2026', days: 18 },
+      { reg: 'KDA 482M', item: 'Licence', due: '14 Oct 2026', days: 23 }
+    ];
+  }
+  function EDITS_INIT() {
+    return [
+      { reg: 'KDE 713L', what: 'Revenue for 20 Sep 2026', from: 8400, to: 7900, by: 'Brian Mwangi', on: 21 },
+      { reg: 'KCY 117T', what: 'Revenue for 18 Sep 2026', from: 7500, to: 8200, by: 'Wanjiru Kamau', on: 19 },
+      { reg: 'KBZ 640Q', what: 'Revenue for 10 Sep 2026', from: 6900, to: 7400, by: 'Brian Mwangi', on: 11 },
+      { reg: 'KDA 482M', what: 'Fuel on 12 Sep 2026', from: 4500, to: 5400, by: 'Samuel Njoroge', on: 13 },
+      { reg: 'KDM 071C', what: 'Revenue for 8 Sep 2026', from: 7200, to: 6400, by: 'Samuel Njoroge', on: 9 }
+    ];
+  }
+})();
+
+window.XDASH = (function () {
+  'use strict';
+  var D = window.XDATA;
+
+  function kes(n) { return 'KES ' + Math.round(Math.abs(n)).toLocaleString('en-GB'); }
+  function money(n) { return n < 0 ? kes(n) + ' loss' : kes(n); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function has(u, k) { return D.permsFor(u).indexOf(k) >= 0; }
+  function range(a, b) { var r = []; for (var i = a; i <= b; i++) r.push(i); return r; }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+  function inScope(u, v) {
+    if (u.scope.all) return true;
+    return u.scope.vehicles ? u.scope.vehicles.indexOf(v.reg) >= 0 : u.scope.companies.indexOf(v.co) >= 0;
+  }
+  function vehicles(u, co) { return D.VEHICLES.filter(function (v) { return inScope(u, v) && (co === 'all' || v.co === co); }); }
+  function companies(u) {
+    var seen = [];
+    vehicles(u, 'all').forEach(function (v) { if (seen.indexOf(v.co) < 0) seen.push(v.co); });
+    return seen.map(function (c) { return { id: c, name: D.COMPANIES[c] }; });
+  }
+  function scopeLabel(u) {
+    if (u.scope.all) return 'All companies';
+    if (u.scope.vehicles) return 'Your ' + plural(u.scope.vehicles.length, 'vehicle', 'vehicles') + ': ' + u.scope.vehicles.join(', ');
+    return u.scope.companies.map(function (c) { return D.COMPANIES[c]; }).join(' and ');
+  }
+  function scopeShort(u) {
+    if (u.scope.all) return 'All companies';
+    if (u.scope.vehicles) return plural(u.scope.vehicles.length, 'vehicle', 'vehicles');
+    return u.scope.companies.map(function (c) { return D.COMPANIES[c]; }).join(', ');
+  }
+  function periodDays(p) { return p === 'month' ? range(1, D.TODAY) : [D.TODAY]; }
+  function periodLabel(p) {
+    return { today: 'Today, 21 Sep 2026', week: 'This week, 21 to 27 Sep 2026', month: 'This month, 1 to 21 Sep 2026' }[p];
+  }
+  function fromDay(v) {                    // first day of September 2026 the vehicle was in the fleet
+    var f = D.parseISO(v.from);
+    if (f <= D.dateOf(1)) return 1;
+    return f.getUTCMonth() === 8 && f.getUTCFullYear() === 2026 ? f.getUTCDate() : 99;
+  }
+
+  /* One vehicle over a set of days. Recurring items post on their own dates. */
+  function vehicleDays(v, days) {
+    var t = { revenue: 0, target: 0, running: 0, repairs: 0, crew: 0, fixed: 0, savings: 0, posts: [] };
+    var from = fromDay(v);
+    days.forEach(function (d) {
+      if (d < from) return;
+      var r = D.REV[v.reg] && D.REV[v.reg][d];
+      var amt = r && r.amt ? r.amt : 0;
+      t.revenue += amt;
+      t.target += D.targetOn(v, D.toISO(D.dateOf(d))) / 7;
+      t.running += Math.round(amt * 0.32 / 10) * 10;          // stands in for captured fuel and running spend
+      t.crew += Math.round(amt * 0.15 / 10) * 10;             // stands in for captured crew pay
+      D.REPAIRS.forEach(function (x) { if (x.reg === v.reg && x.day === d) t.repairs += x.amt; });
+      var dt = D.dateOf(d);
+      D.RECURRING.forEach(function (it) {
+        if (!D.postsOn(it, dt)) return;
+        it.alloc.forEach(function (a) {
+          if (a.reg !== v.reg) return;
+          t.posts.push({ day: d, name: it.name, type: it.type, category: it.category, amt: a.amt });
+          if (it.type === 'savings') t.savings += a.amt;
+          else if (it.category === 'Running costs') t.running += a.amt;
+          else if (it.category === 'Repairs and upkeep') t.repairs += a.amt;
+          else if (it.category === 'Crew costs') t.crew += a.amt;
+          else t.fixed += a.amt;
+        });
+      });
+    });
+    t.target = Math.round(t.target);
+    t.costs = t.running + t.repairs + t.crew + t.fixed;
+    t.net = t.revenue - t.costs;
+    return t;
+  }
+
+  function totals(vs, days) {
+    var t = { revenue: 0, target: 0, running: 0, repairs: 0, crew: 0, fixed: 0, savings: 0, per: [] };
+    vs.forEach(function (v) {
+      var x = vehicleDays(v, days);
+      ['revenue', 'target', 'running', 'repairs', 'crew', 'fixed', 'savings'].forEach(function (k) { t[k] += x[k]; });
+      t.per.push({ reg: v.reg, co: v.co, net: x.net });
+    });
+    t.costs = t.running + t.repairs + t.crew + t.fixed;
+    t.net = t.revenue - t.costs;
+    return t;
+  }
+
+  function vehicleReport(reg, period) {
+    var v = D.VEHICLES.filter(function (x) { return x.reg === reg; })[0];
+    return vehicleDays(v, periodDays(period));
+  }
+
+  function build(u, period, co) {
+    var vs = vehicles(u, co), days = periodDays(period), pl = periodLabel(period);
+    var cards = [];
+
+    if (has(u, 'dash.capture')) {
+      var pending = vs.filter(function (v) { return !D.REV[v.reg][D.TODAY]; });
+      cards.push({ id: 'capture', title: "Today's revenue", sub: 'Your vehicles, 21 Sep 2026',
+        value: (vs.length - pending.length) + ' of ' + vs.length + ' captured',
+        note: pending.length ? plural(pending.length, 'vehicle', 'vehicles') + ' still to capture' : 'Every vehicle has a record for today.',
+        list: pending.map(function (v) { return { left: v.reg, leftSub: D.COMPANIES[v.co], right: 'Not captured yet' }; }),
+        action: 'Capture revenue', primary: true, go: 'revenue' });
+    }
+    if (has(u, 'dash.float') && u.float) {
+      var f = u.float;
+      cards.push({ id: 'float', title: 'My petty cash float', sub: 'Balance now', value: f.balance < 0 ? kes(f.balance) + ' below zero' : kes(f.balance), bad: f.balance < 0,
+        note: plural(f.entries, 'entry', 'entries') + ', ' + kes(f.waiting) + ', waiting for approval',
+        action: 'Record spending', primary: true, go: 'float' });
+    }
+
+    var t = (has(u, 'dash.revenue') || has(u, 'dash.net') || has(u, 'dash.costs')) ? totals(vs, days) : null;
+
+    if (has(u, 'dash.revenue')) {
+      var pct = t.target ? Math.round(t.revenue / t.target * 100) : 0;
+      var note = pct + '% of target ' + kes(t.target) + ', from each vehicle\u2019s weekly target';
+      if (period !== 'month') {
+        var got = vs.filter(function (v) { return D.REV[v.reg][D.TODAY]; }).length;
+        note += '. ' + got + ' of ' + vs.length + ' vehicles have a record so far.';
+      }
+      cards.push({ id: 'revenue', title: 'Revenue', sub: pl, value: kes(t.revenue), bar: pct, note: note, go: 'revenue' });
+    }
+    if (has(u, 'dash.net')) {
+      var worst = t.per.slice().sort(function (a, b) { return a.net - b.net; }).slice(0, 3);
+      cards.push({ id: 'net', title: 'Net contribution', sub: 'Revenue less all costs. ' + pl, value: money(t.net), bad: t.net < 0,
+        note: (t.savings ? kes(t.savings) + ' set aside as savings, leaving ' + money(t.net - t.savings) + '. ' : '') + 'Weakest ' + plural(worst.length, 'vehicle', 'vehicles') + ':',
+        list: worst.map(function (w) { return { left: w.reg, leftSub: D.COMPANIES[w.co], right: money(w.net), bad: w.net < 0 }; }), go: 'reports' });
+    }
+    if (has(u, 'dash.costs')) {
+      cards.push({ id: 'costs', title: 'Costs', sub: pl, value: kes(t.costs),
+        list: [ { left: 'Running costs', right: kes(t.running) }, { left: 'Repairs and upkeep', right: kes(t.repairs) },
+                { left: 'Crew costs', right: kes(t.crew) }, { left: 'Fixed commitments', right: kes(t.fixed), rightSub: 'Posted on their due dates' } ], go: 'reports' });
+    }
+    if (has(u, 'dash.gaps')) {
+      var rows = [], total = 0;
+      vs.forEach(function (v) {
+        var miss = range(Math.max(1, fromDay(v)), D.TODAY - 1).filter(function (d) { return !D.REV[v.reg][d]; });
+        if (miss.length) { total += miss.length; rows.push({ left: v.reg, leftSub: D.COMPANIES[v.co], right: plural(miss.length, 'day', 'days'), rightSub: 'Oldest ' + D.day(miss[0]), bad: true, n: miss.length }); }
+      });
+      rows.sort(function (a, b) { return b.n - a.n; });
+      cards.push({ id: 'gaps', title: 'Missing revenue days', sub: '1 to 20 Sep 2026. No record and no reason.', value: plural(total, 'day', 'days'), bad: total > 0,
+        note: total ? 'On ' + plural(rows.length, 'vehicle', 'vehicles') + '. Always this month, whatever period you pick.' : 'Every vehicle has a record for every day.',
+        list: rows, action: has(u, 'revenue.capture') || has(u, 'revenue.correct') ? 'Fill the gaps' : null, go: 'revenue' });
+    }
+    if (has(u, 'dash.pettycash')) {
+      var entries = 0, amount = 0;
+      var q = D.PETTY_QUEUE.map(function (m) {
+        var a = m.items.reduce(function (s, i) { return s + i.amt; }, 0);
+        entries += m.items.length; amount += a;
+        return { left: m.manager, leftSub: 'Oldest ' + D.day(m.oldest), right: kes(a), rightSub: plural(m.items.length, 'entry', 'entries') };
+      });
+      var limitNote = kes(amount) + ' in total.';
+      if (u.approveLimit) {
+        var over = 0;
+        D.PETTY_QUEUE.forEach(function (m) { m.items.forEach(function (i) { if (i.amt > u.approveLimit) over++; }); });
+        limitNote += ' You can approve entries up to ' + kes(u.approveLimit) + (over ? '. ' + plural(over, 'entry is', 'entries are') + ' above your limit.' : '. All are within your limit.');
+      }
+      cards.push({ id: 'pettycash', title: 'Petty cash to approve', sub: 'All managers', value: plural(entries, 'entry', 'entries'), note: limitNote,
+        list: q, action: has(u, 'pettycash.approve_item') ? 'Review entries' : null, go: 'approvals' });
+    }
+    if (has(u, 'dash.commitments')) {
+      var due = D.RENEWALS.filter(function (r) { return vs.some(function (v) { return v.reg === r.reg; }); });
+      cards.push({ id: 'renewals', title: 'Renewals due', sub: 'Next 30 days', value: plural(due.length, 'renewal', 'renewals'),
+        list: due.map(function (r) { return { left: r.reg, leftSub: r.item, right: r.due, rightSub: 'In ' + plural(r.days, 'day', 'days'), bad: r.days <= 7 }; }), go: 'recurring' });
+    }
+    if (has(u, 'dash.edits')) {
+      var ed = D.EDITS.filter(function (e) { return days.indexOf(e.on) >= 0 && vs.some(function (v) { return v.reg === e.reg; }); });
+      cards.push({ id: 'edits', title: 'Edited after capture', sub: pl, value: plural(ed.length, 'record', 'records'),
+        note: ed.length ? '' : 'Nothing was changed after capture in this period.',
+        list: ed.map(function (e) { return { left: e.reg, leftSub: e.what, right: (e.fromLabel || kes(e.from)) + ' to ' + (e.toLabel || kes(e.to)), rightSub: e.by + ', ' + D.day(e.on) }; }), go: 'changelog' });
+    }
+    return { cards: cards, periodLabel: pl };
+  }
+
+  function cardHTML(c) {
+    var h = '<article class="card" aria-labelledby="c-' + c.id + '">';
+    h += '<header><h2 class="card-title" id="c-' + c.id + '">' + esc(c.title) + '</h2><p class="card-sub">' + esc(c.sub) + '</p></header>';
+    h += '<p class="card-value' + (c.bad ? ' bad' : '') + '">' + esc(c.value) + '</p>';
+    if (c.bar != null) h += '<div class="bar" aria-hidden="true"><span style="width:' + Math.min(c.bar, 100) + '%"></span></div>';
+    if (c.note) h += '<p class="card-note">' + esc(c.note) + '</p>';
+    if (c.list && c.list.length) {
+      h += '<ul class="card-list">';
+      c.list.forEach(function (r) {
+        h += '<li><span class="l"><strong>' + esc(r.left) + '</strong>' + (r.leftSub ? '<small>' + esc(r.leftSub) + '</small>' : '') + '</span>' +
+             '<span class="r' + (r.bad ? ' bad' : '') + '"><strong>' + esc(r.right) + '</strong>' + (r.rightSub ? '<small>' + esc(r.rightSub) + '</small>' : '') + '</span></li>';
+      });
+      h += '</ul>';
+    }
+    if (c.action) h += '<button type="button" class="card-action' + (c.primary ? ' primary' : '') + '" data-go="' + c.go + '">' + esc(c.action) + '</button>';
+    return h + '</article>';
+  }
+
+  function accessHTML(u) {
+    var p = D.permsFor(u);
+    var h = '<dl class="access-meta"><div><dt>Role</dt><dd>' + esc(D.ROLES[u.role].label) + '</dd></div>' +
+            '<div><dt>Can see</dt><dd>' + esc(scopeLabel(u)) + '</dd></div>' +
+            (u.approveLimit ? '<div><dt>Approval limit</dt><dd>' + kes(u.approveLimit) + ' per entry</dd></div>' : '') + '</dl>';
+    D.CATALOGUE.forEach(function (g) {
+      var mine = g.items.filter(function (i) { return p.indexOf(i[0]) >= 0; });
+      if (!mine.length) return;
+      h += '<h3 class="access-group">' + esc(g.group) + '</h3><ul class="access-list">';
+      mine.forEach(function (i) { h += '<li>' + esc(i[1]) + (u.extra.indexOf(i[0]) >= 0 ? ' <em>Added for this person</em>' : '') + '</li>'; });
+      h += '</ul>';
+    });
+    return h;
+  }
+
+  function emptyHTML() {
+    return '<article class="card"><header><h2 class="card-title">Nothing to show yet</h2><p class="card-sub">Your admin decides what you can see here.</p></header></article>';
+  }
+
+  return { build: build, cardHTML: cardHTML, accessHTML: accessHTML, emptyHTML: emptyHTML, companies: companies,
+           scopeLabel: scopeLabel, scopeShort: scopeShort, has: has, esc: esc, kes: kes, money: money, plural: plural,
+           periodLabel: periodLabel, vehicleReport: vehicleReport };
+})();
+
+/* ===== Revenue: daily records, reasons, expected per day ===== */
+window.XREV = (function () {
+  'use strict';
+  var D = window.XDATA;
+  var REASONS = ['Garage', 'Arrest', 'No Crew', 'Other'];
+  var DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  function addDays(iso, n) { var dt = D.parseISO(iso); dt.setUTCDate(dt.getUTCDate() + n); return D.toISO(dt); }
+  function weekStart(iso) { var dt = D.parseISO(iso), w = dt.getUTCDay(); return addDays(iso, w === 0 ? -6 : 1 - w); }
+  function weekDays(start) { var out = []; for (var i = 0; i < 7; i++) out.push(addDays(start, i)); return out; }
+  function dow(iso) { return DOW[D.parseISO(iso).getUTCDay()]; }
+  function dom(iso) { return String(D.parseISO(iso).getUTCDate()); }
+  function longDate(iso) { return dow(iso) + ' ' + D.fmtDate(iso); }
+  function rangeLabel(start) {
+    var a = D.parseISO(start), b = D.parseISO(addDays(start, 6));
+    return a.getUTCDate() + (a.getUTCMonth() !== b.getUTCMonth() ? ' ' + MON[a.getUTCMonth()] : '') + ' to ' + D.fmtDate(b);
+  }
+  function dnum(iso) { var dt = D.parseISO(iso); return dt.getUTCFullYear() === 2026 && dt.getUTCMonth() === 8 ? dt.getUTCDate() : null; }
+  function tracked(iso) { return iso >= '2026-09-01' && iso <= D.TODAY_ISO; }      // demo data covers 1 Sep 2026 to today
+  function vehicle(reg) { return D.VEHICLES.filter(function (v) { return v.reg === reg; })[0]; }
+  function get(reg, iso) { var d = dnum(iso); return d && D.REV[reg] ? D.REV[reg][d] : undefined; }
+  function expected(v, iso) { return iso >= v.from ? Math.round(D.targetOn(v, iso) / 7) : 0; }
+  function status(v, iso) {
+    if (iso > D.TODAY_ISO) return 'future';
+    if (!tracked(iso) || iso < v.from) return 'none';
+    var r = get(v.reg, iso);
+    return !r ? 'missing' : r.amt ? 'amount' : 'reason';
+  }
+  /* A day with no revenue needs a reason before a later day can be captured. */
+  function earliestMissing(v, beforeISO) {
+    var iso = v.from > '2026-09-01' ? v.from : '2026-09-01';
+    for (; iso < beforeISO && iso <= D.TODAY_ISO; iso = addDays(iso, 1)) if (!get(v.reg, iso)) return iso;
+    return null;
+  }
+  function canEdit(u, v, iso) {
+    var st = status(v, iso), has = function (k) { return D.permsFor(u).indexOf(k) >= 0; };
+    if (st === 'missing') return has('revenue.capture');
+    if (st === 'amount' || st === 'reason') return iso === D.TODAY_ISO ? has('revenue.capture') || has('revenue.correct') : has('revenue.correct');
+    return false;
+  }
+  function label(r) { return !r ? 'nothing' : r.amt ? 'KES ' + r.amt.toLocaleString('en-GB') : r.reason + (r.note ? ' (' + r.note + ')' : ''); }
+  function save(reg, iso, rec, who) {
+    var d = dnum(iso), old = D.REV[reg][d];
+    D.REV[reg][d] = rec;
+    if (old && iso < D.TODAY_ISO) {                                   // changed after the day: recorded
+      D.EDITS.unshift({ reg: reg, what: 'Revenue for ' + D.fmtDate(iso), from: old.amt || 0, to: rec.amt || 0,
+        fromLabel: old.amt ? null : old.reason, toLabel: rec.amt ? null : rec.reason, by: who, on: D.TODAY });
+      D.log(who, 'Changed revenue for ' + reg + ' on ' + D.fmtDate(iso) + ' from ' + label(old) + ' to ' + label(rec));
+    }
+  }
+  /* Words, not a minus sign: 'KES 1,200 below', 'KES 350 above', 'On target'. */
+  function gap(actual, exp) {
+    var g = actual - exp;
+    return g === 0 ? 'On target' : 'KES ' + Math.abs(g).toLocaleString('en-GB') + (g > 0 ? ' above' : ' below');
+  }
+  return { REASONS: REASONS, addDays: addDays, weekStart: weekStart, weekDays: weekDays, dow: dow, dom: dom, longDate: longDate, rangeLabel: rangeLabel,
+           vehicle: vehicle, get: get, expected: expected, status: status, earliestMissing: earliestMissing, canEdit: canEdit, save: save, gap: gap };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+
+  /* Demo accounts, keyed by mobile number. In production every check runs on the server;
+     the page never holds PINs, codes or full email addresses. */
+  var USERS = window.XDATA.users;
+  var RULES = { pinTries: 5, codeTries: 5, codeMinutes: 10, resendSeconds: 60, codesPerHour: 5 };
+
+  var st = {
+    phone: '', user: null,
+    flow: 'device',            // device: new browser after a correct PIN | setpin: first PIN or reset
+    code: null, codeTries: 0, codeDead: false, codeSentAt: 0, sends: [], resendTimer: null,
+    pinTries: {}, locked: {}, busy: false
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* Screens are plain sections, not forms: sandboxed previews and some webviews block form submission,
+     which stopped sign in. The primary button and the Enter key call the handler directly. */
+  var submitHandlers = {};
+  function onSubmit(id, fn) {
+    submitHandlers[id] = fn;
+    var el = $(id), fake = { preventDefault: function () {} };
+    el.addEventListener('click', function (e) { if (e.target.closest('[data-submit]')) fn(fake); });
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox' && e.target.type !== 'radio') { e.preventDefault(); fn(fake); }
+    });
+  }
+  function submitScreen(id) { submitHandlers[id]({ preventDefault: function () {} }); }
+  var isPhone = window.matchMedia('(max-width: 719px)');
+  var ALERT = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>';
+
+  function show(name) {
+    ['signin', 'setup', 'code', 'newpin', 'locked'].forEach(function (s) { $('s-' + s).hidden = (s !== name); });
+    var focus = { signin: 'phone', setup: 'setup-phone', code: 'code', newpin: 'new-pin' }[name];
+    if (focus) setTimeout(function () { $(focus).focus(); }, 30);
+  }
+  function setMsg(el, msg) {
+    el.innerHTML = msg ? ALERT + '<span></span>' : '';
+    if (msg) el.querySelector('span').textContent = msg;
+  }
+  function fieldError(input, box, msg) {
+    input.setAttribute('aria-invalid', msg ? 'true' : 'false');
+    box.hidden = !msg; setMsg(box, msg);
+  }
+  function banner(box, msg) { box.hidden = !msg; setMsg(box, msg); }
+  function busyBtn(btn, on, text) {
+    st.busy = on; btn.setAttribute('aria-busy', on ? 'true' : 'false');
+    if (!btn.dataset.idle) btn.dataset.idle = btn.textContent;
+    btn.textContent = on ? text : btn.dataset.idle;
+  }
+  function digits(v) { return (v || '').replace(/\D/g, ''); }
+  function normalisePhone(v) {
+    var d = digits(v);
+    if (d.indexOf('254') === 0) d = '0' + d.slice(3);
+    else if (/^[17]/.test(d)) d = '0' + d;
+    return d.slice(0, 10);
+  }
+  function formatPhone(d) {
+    if (d.length <= 4) return d;
+    if (d.length <= 7) return d.slice(0, 4) + ' ' + d.slice(4);
+    return d.slice(0, 4) + ' ' + d.slice(4, 7) + ' ' + d.slice(7);
+  }
+  function phoneProblem(d) {
+    if (!d) return 'Enter your mobile number.';
+    if (!/^0[17]\d{8}$/.test(d)) return 'Enter all 10 numbers, starting 07 or 01.';
+    return '';
+  }
+  function maskEmail(e) { var p = e.split('@'); return p[0].charAt(0) + '•••@' + p[1]; }
+  function weakPin(p) { return /^(\d)\1{3}$/.test(p) || '0123456789'.indexOf(p) >= 0 || '9876543210'.indexOf(p) >= 0; }
+  function tries(n) { return n + (n === 1 ? ' try' : ' tries'); }
+
+  function updateOnline() { $('offline-banner').hidden = navigator.onLine; }
+  window.addEventListener('online', updateOnline);
+  window.addEventListener('offline', updateOnline);
+
+  ['phone', 'setup-phone'].forEach(function (id) {
+    $(id).addEventListener('input', function (e) {
+      e.target.value = formatPhone(normalisePhone(e.target.value));
+      if (id === 'phone') { fieldError($('phone'), $('phone-error'), ''); banner($('signin-banner'), ''); }
+      else { fieldError($('setup-phone'), $('setup-error'), ''); banner($('setup-banner'), ''); }
+    });
+  });
+  ['pin', 'new-pin', 'confirm-pin'].forEach(function (id) {
+    $(id).addEventListener('input', function (e) {
+      e.target.value = digits(e.target.value).slice(0, 4);
+      if (id === 'pin') { fieldError($('pin'), $('pin-error'), ''); banner($('signin-banner'), ''); }
+      else { banner($('new-banner'), ''); $('new-pin').removeAttribute('aria-invalid'); $('confirm-pin').removeAttribute('aria-invalid'); }
+    });
+  });
+  $('toggle-pin').addEventListener('click', function () {
+    var shown = $('pin').type === 'text';
+    $('pin').type = shown ? 'password' : 'text';
+    this.textContent = shown ? 'Show' : 'Hide';
+    this.setAttribute('aria-pressed', shown ? 'false' : 'true');
+  });
+
+  /* ---------- 1. Sign in ---------- */
+  onSubmit('s-signin', function (e) {
+    e.preventDefault();
+    if (st.busy) return;
+    var d = normalisePhone($('phone').value), p = $('pin').value;
+    var pe = phoneProblem(d);
+    var pinErr = p.length === 4 ? '' : (p ? 'Your PIN has 4 numbers.' : 'Enter your PIN.');
+    fieldError($('phone'), $('phone-error'), pe);
+    banner($('signin-banner'), '');
+
+    var u = USERS[d];
+    if (!pe && u && u.revoked) return banner($('signin-banner'), 'This number no longer has access. Ask your admin.');
+    if (!pe && u && !u.pin) {                    // registered but never set a PIN: go straight to setup
+      fieldError($('pin'), $('pin-error'), '');
+      st.phone = d; st.user = u; st.flow = 'setpin';
+      return sendCode('You have not set a PIN yet. ');
+    }
+    fieldError($('pin'), $('pin-error'), pinErr);
+    if (pe || pinErr) return;
+    if (st.locked[d]) { $('locked-phone').textContent = formatPhone(d); st.phone = d; st.user = u; return show('locked'); }
+
+    busyBtn($('signin-btn'), true, 'Signing in…');
+    setTimeout(function () {
+      busyBtn($('signin-btn'), false);
+      if (!u) return banner($('signin-banner'), 'This number is not registered. Ask your admin to add you.');
+      st.phone = d; st.user = u;
+      if (p !== u.pin) {
+        var n = (st.pinTries[d] || 0) + 1;
+        st.pinTries[d] = n;
+        $('pin').value = '';
+        if (n >= RULES.pinTries) { st.locked[d] = true; $('locked-phone').textContent = formatPhone(d); return show('locked'); }
+        $('pin').setAttribute('aria-invalid', 'true');
+        return banner($('signin-banner'), 'Wrong PIN. ' + tries(RULES.pinTries - n) + ' left before sign in is paused.');
+      }
+      st.pinTries[d] = 0;
+      $('pin').value = '';
+      if (u.trusted) return finish('Welcome, ' + u.first);
+      st.flow = 'device';
+      sendCode('New device. ');
+    }, 700);
+  });
+
+  function openSetup(reset) {
+    $('setup-title').textContent = reset ? 'Reset your PIN' : 'Set up your PIN';
+    $('setup-phone').value = $('phone').value;
+    fieldError($('setup-phone'), $('setup-error'), '');
+    banner($('setup-banner'), '');
+    show('setup');
+  }
+  $('first-time').addEventListener('click', function () { openSetup(false); });
+  $('forgot').addEventListener('click', function () { openSetup(true); });
+  $('locked-reset').addEventListener('click', function () { st.flow = 'setpin'; sendCode(''); });
+
+  /* ---------- 2. Set up or reset ---------- */
+  onSubmit('s-setup', function (e) {
+    e.preventDefault();
+    if (st.busy) return;
+    var d = normalisePhone($('setup-phone').value);
+    var pe = phoneProblem(d);
+    fieldError($('setup-phone'), $('setup-error'), pe);
+    if (pe) return;
+    busyBtn($('setup-btn'), true, 'Sending…');
+    setTimeout(function () {
+      busyBtn($('setup-btn'), false);
+      var u = USERS[d];
+      if (!u) return banner($('setup-banner'), 'This number is not registered. Ask your admin to add you.');
+      if (u.revoked) return banner($('setup-banner'), 'This number no longer has access. Ask your admin.');
+      st.phone = d; st.user = u; st.flow = 'setpin';
+      sendCode('');
+    }, 600);
+  });
+
+  /* ---------- 3. Email code ---------- */
+  function sendCode(prefix) {
+    var now = Date.now();
+    st.sends = st.sends.filter(function (t) { return now - t < 3600000; });
+    show('code');
+    if (st.sends.length >= RULES.codesPerHour) {
+      return fieldError($('code'), $('code-error'), 'You have asked for ' + RULES.codesPerHour + ' codes this hour. Try again later or call your admin.');
+    }
+    st.sends.push(now);
+    st.code = String(Math.floor(100000 + Math.random() * 900000));
+    st.codeTries = 0; st.codeDead = false; st.codeSentAt = now;
+
+    var lead = $('code-lead'); lead.textContent = '';
+    lead.append(
+      document.createTextNode((prefix || '') + 'We sent a code to '),
+      Object.assign(document.createElement('strong'), { textContent: maskEmail(st.user.email) }),
+      document.createTextNode(', the email your admin registered. It works for ' + RULES.codeMinutes + ' minutes.')
+    );
+    var device = isPhone.matches ? 'phone' : 'computer';
+    $('remember-label').textContent = 'Remember this ' + device + '. Next time you only need your number and PIN.';
+    $('remember').checked = isPhone.matches;
+    $('code').value = '';
+    fieldError($('code'), $('code-error'), '');
+    $('demo-code').querySelector('strong').textContent = st.code.slice(0, 3) + ' ' + st.code.slice(3);
+    startResendTimer();
+  }
+  function startResendTimer() {
+    var n = RULES.resendSeconds, btn = $('resend');
+    clearInterval(st.resendTimer);
+    btn.disabled = true; btn.textContent = 'Send a new code in ' + n + 's';
+    st.resendTimer = setInterval(function () {
+      n -= 1;
+      if (n <= 0) { clearInterval(st.resendTimer); btn.disabled = false; btn.textContent = 'Send a new code'; return; }
+      btn.textContent = 'Send a new code in ' + n + 's';
+    }, 1000);
+  }
+  $('resend').addEventListener('click', function () { sendCode(''); });
+
+  $('code').addEventListener('input', function (e) {
+    e.target.value = digits(e.target.value).slice(0, 6);
+    if (!st.codeDead) fieldError($('code'), $('code-error'), '');
+    if (e.target.value.length === 6 && !st.codeDead) submitScreen('s-code');
+  });
+
+  onSubmit('s-code', function (e) {
+    e.preventDefault();
+    if (st.busy) return;
+    var c = $('code').value;
+    if (st.codeDead || !st.code) return fieldError($('code'), $('code-error'), 'This code no longer works. Tap Send a new code.');
+    if (c.length !== 6) return fieldError($('code'), $('code-error'), c ? 'The code has 6 numbers.' : 'Enter the code from your email.');
+    if (Date.now() - st.codeSentAt > RULES.codeMinutes * 60000) { st.codeDead = true; return fieldError($('code'), $('code-error'), 'This code has expired. Tap Send a new code.'); }
+
+    busyBtn($('code-btn'), true, 'Checking…');
+    setTimeout(function () {
+      busyBtn($('code-btn'), false);
+      if (c !== st.code) {
+        st.codeTries += 1; $('code').value = '';
+        if (st.codeTries >= RULES.codeTries) {
+          st.codeDead = true; clearInterval(st.resendTimer);
+          $('resend').disabled = false; $('resend').textContent = 'Send a new code';
+          return fieldError($('code'), $('code-error'), 'Too many wrong codes. Tap Send a new code.');
+        }
+        return fieldError($('code'), $('code-error'), 'That code is wrong. ' + tries(RULES.codeTries - st.codeTries) + ' left.');
+      }
+      st.code = null; clearInterval(st.resendTimer);
+      st.user.trusted = $('remember').checked;
+      if (st.flow === 'setpin') openNewPin();
+      else finish('Welcome, ' + st.user.first);
+    }, 500);
+  });
+
+  /* ---------- 4. Choose PIN ---------- */
+  function openNewPin() {
+    var reset = !!st.user.pin;
+    $('newpin-title').textContent = reset ? 'Choose a new PIN' : 'Choose your PIN';
+    $('newpin-lead').textContent = reset
+      ? 'Pick 4 numbers only you know. Your old PIN stops working now.'
+      : 'Hi ' + st.user.first + '. Pick 4 numbers only you know. You will sign in with your mobile number and this PIN.';
+    $('new-pin').value = ''; $('confirm-pin').value = '';
+    banner($('new-banner'), '');
+    show('newpin');
+  }
+  onSubmit('s-newpin', function (e) {
+    e.preventDefault();
+    var a = $('new-pin').value, b = $('confirm-pin').value, msg = '';
+    if (a.length !== 4) msg = 'Your PIN must be 4 numbers.';
+    else if (weakPin(a)) msg = 'Too easy to guess. Avoid numbers in a row like 1234, or the same number four times.';
+    else if (st.user.pin && a === st.user.pin) msg = 'Pick a PIN different from your old one.';
+    else if (a !== b) { msg = 'The two PINs do not match. Type them again.'; $('confirm-pin').value = ''; }
+    if (msg) {
+      $('new-pin').setAttribute('aria-invalid', 'true'); $('confirm-pin').setAttribute('aria-invalid', 'true');
+      return banner($('new-banner'), msg);
+    }
+    var reset = !!st.user.pin;
+    st.user.pin = a;
+    st.pinTries[st.phone] = 0;
+    delete st.locked[st.phone];
+    finish(reset ? 'PIN changed, ' + st.user.first : 'Welcome, ' + st.user.first);
+  });
+
+  /* ---------- 6. Done ---------- */
+  function finish() { window.XAPP.open(st.phone); }
+  window.XSIGNIN = { reset: function () { st.user = null; $('pin').value = ''; show('signin'); } };
+
+  document.querySelectorAll('[data-back]').forEach(function (b) {
+    b.addEventListener('click', function () { clearInterval(st.resendTimer); banner($('signin-banner'), ''); show('signin'); });
+  });
+})();
+</script>
+<script>
+/* ===== Web app shell, dashboard and setup ===== */
+window.XAPP = (function () {
+  'use strict';
+  var D = window.XDATA, X = window.XDASH;
+  var esc = X.esc, kes = X.kes, plural = X.plural;
+  var $ = function (id) { return document.getElementById(id); };
+  var cur = { phone: null, period: 'month', co: 'all', view: 'dashboard', collapsed: {}, form: null, errors: {}, vPeriod: 'month', rFilter: 'all', vFilter: 'all', renameCo: null, coErr: '' };
+  var CHEVRON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  var ALERT = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>';
+
+  /* Every menu entry names the one permission that shows it. */
+  var NAV = [
+    { item: { id: 'dashboard', label: 'Dashboard', perm: 'dash' } },
+    { item: { id: 'revenue', label: 'Revenue', perm: 'revenue.view' } },
+    { group: 'Spend', items: [
+      { id: 'float', label: 'My float', perm: 'pettycash.spend', session: 4 },
+      { id: 'approvals', label: 'Approvals', perm: 'pettycash.approve_item', session: 4 },
+      { id: 'floats', label: 'All floats', perm: 'pettycash.view_all', session: 4 },
+      { id: 'bills', label: 'Office bills', perm: 'bills.view', session: 5 } ] },
+    { item: { id: 'reports', label: 'Reports', perm: 'reports.view', session: 6 } },
+    { group: 'Setup', items: [
+      { id: 'companies', label: 'PSV companies', perm: 'companies.manage' },
+      { id: 'vehicles', label: 'Vehicles', perm: 'vehicles.manage' },
+      { id: 'recurring', label: 'Recurring costs and savings', perm: 'commitments.view' },
+      { id: 'people', label: 'People and access', perm: 'people.view' },
+      { id: 'changelog', label: 'Change log', perm: 'audit.view' } ] }
+  ];
+  var PARENT = { person: 'people', vehicle: 'vehicles', 'recurring-form': 'recurring' };
+  var SETUP = ['revenue', 'people', 'person', 'companies', 'vehicles', 'vehicle', 'recurring', 'recurring-form', 'changelog'];
+
+  function user() { return D.users[cur.phone]; }
+  function me() { var u = user(); return u.first + ' ' + u.last; }
+  function allowed(u, i) {
+    if (!i) return false;
+    return i.perm === 'dash' ? D.permsFor(u).some(function (k) { return k.indexOf('dash.') === 0; }) : X.has(u, i.perm);
+  }
+  function findItem(id) {
+    id = PARENT[id] || id;
+    var hit = null;
+    NAV.forEach(function (n) { (n.item ? [n.item] : n.items).forEach(function (i) { if (i.id === id) hit = i; }); });
+    return hit;
+  }
+  function permLabel(key) {
+    var hit = key;
+    D.CATALOGUE.forEach(function (g) { g.items.forEach(function (i) { if (i[0] === key) hit = i[1]; }); });
+    return hit;
+  }
+  function fmtPhone(d) { return d.slice(0, 4) + ' ' + d.slice(4, 7) + ' ' + d.slice(7); }
+  function normalisePhone(v) {
+    var d = (v || '').replace(/\D/g, '');
+    if (d.indexOf('254') === 0) d = '0' + d.slice(3); else if (/^[17]/.test(d)) d = '0' + d;
+    return d.slice(0, 10);
+  }
+  function num(v) { var n = parseInt(String(v || '').replace(/\D/g, ''), 10); return isNaN(n) ? 0 : n; }
+  function grp(n) { return n ? Number(n).toLocaleString('en-GB') : ''; }
+  function toast(msg) {
+    var t = document.createElement('div');
+    t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function () { t.remove(); }, 4000);
+  }
+
+  /* ---------- Shell ---------- */
+  function open(phone) {
+    cur.phone = phone;
+    var u = user();
+    cur.period = (X.has(u, 'dash.capture') || X.has(u, 'dash.float')) ? 'today' : 'month';
+    cur.co = 'all'; cur.view = 'dashboard'; cur.form = null;
+    document.querySelector('.page').hidden = true;
+    $('app').hidden = false;
+    fillViewAs(); render();
+    window.scrollTo(0, 0);
+  }
+  function fillViewAs() {
+    var s = $('view-as'); s.innerHTML = '';
+    Object.keys(D.users).forEach(function (p) {
+      var u = D.users[p]; if (u.revoked) return;
+      var o = document.createElement('option');
+      o.value = p; o.textContent = u.first + ' ' + u.last + ', ' + D.ROLES[u.role].label;
+      o.selected = p === cur.phone; s.appendChild(o);
+    });
+  }
+  function render() {
+    var u = user(), focusId = document.activeElement && document.activeElement.id;
+    $('user-initials').textContent = u.first.charAt(0) + u.last.charAt(0);
+    $('user-name').textContent = u.first + ' ' + u.last;
+    $('user-role').textContent = D.ROLES[u.role].label;
+    if (cur.view !== 'dashboard' && !allowed(u, findItem(cur.view))) cur.view = 'dashboard';
+    renderNav();
+    $('view-dashboard').hidden = cur.view !== 'dashboard';
+    $('view-module').hidden = true; $('view-setup').hidden = true;
+    if (cur.view === 'dashboard') renderDash();
+    else if (SETUP.indexOf(cur.view) >= 0) renderSetup();
+    else renderModule();
+    if (focusId && $(focusId) && $(focusId) !== document.body) $(focusId).focus();
+  }
+  function navButton(i) {
+    var active = (PARENT[cur.view] || cur.view) === i.id;
+    return '<li><button type="button" class="nav-item" data-view="' + i.id + '"' + (active ? ' aria-current="page"' : '') + '>' + esc(i.label) + '</button></li>';
+  }
+  function renderNav() {
+    var u = user(), h = '';
+    NAV.forEach(function (n) {
+      if (n.item) { if (allowed(u, n.item)) h += '<ul>' + navButton(n.item) + '</ul>'; return; }
+      var items = n.items.filter(function (i) { return allowed(u, i); });
+      if (!items.length) return;
+      var openG = !cur.collapsed[n.group];
+      h += '<div class="nav-group"><button type="button" class="nav-group-btn" data-group="' + n.group + '" aria-expanded="' + openG + '">' + n.group + CHEVRON + '</button>';
+      if (openG) h += '<ul>' + items.map(navButton).join('') + '</ul>';
+      h += '</div>';
+    });
+    $('sidebar').innerHTML = h;
+  }
+  function head(title, sub) { $('page-title').textContent = title; $('page-sub').textContent = sub || ''; }
+
+  function renderDash() {
+    var u = user(), cos = X.companies(u);
+    head('Dashboard', X.scopeLabel(u));
+    document.querySelectorAll('[data-period]').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.period === cur.period ? 'true' : 'false'); });
+    var s = $('scope');
+    if (u.scope.vehicles) s.innerHTML = '<span class="scope-chip">' + u.scope.vehicles.length + ' vehicles</span>';
+    else if (cos.length > 1) {
+      s.innerHTML = '<label for="co-select">Company</label><select class="scope-select" id="co-select"><option value="all">All companies</option>' +
+        cos.map(function (c) { return '<option value="' + c.id + '"' + (cur.co === c.id ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('') + '</select>';
+      $('co-select').addEventListener('change', function (e) { cur.co = e.target.value; renderDash(); });
+    } else s.innerHTML = '<span class="scope-chip">' + esc(cos[0] ? cos[0].name : '') + '</span>';
+    var b = X.build(u, cur.period, cur.co);
+    $('cards').innerHTML = b.cards.length ? b.cards.map(X.cardHTML).join('') : X.emptyHTML();
+  }
+  function renderModule() {
+    var i = findItem(cur.view);
+    head(i.label, '');
+    $('view-module').hidden = false;
+    $('module-title').textContent = i.label;
+    $('module-sub').textContent = 'You see this because you can: ' + permLabel(i.perm) + '.';
+    $('module-note').textContent = 'This screen is designed in session ' + i.session + ' of the plan.';
+  }
+  function setView(id) {
+    if (id === 'capture' || id === 'corrections') id = 'revenue';
+    if (!allowed(user(), findItem(id))) return;
+    cur.view = id; cur.errors = {}; cur.confirm = null; closeDrawer(); render();
+    window.scrollTo(0, 0);
+  }
+
+  /* ---------- Setup: shared bits ---------- */
+  function errP(id) { return cur.errors[id] ? '<p class="err" id="' + id + '-err">' + ALERT + '<span>' + esc(cur.errors[id]) + '</span></p>' : ''; }
+  function invalid(id) { return cur.errors[id] ? ' aria-invalid="true" aria-describedby="' + id + '-err"' : ''; }
+  function textF(id, label, val, o) {
+    o = o || {};
+    return '<div class="f"><label for="' + id + '">' + label + '</label><input id="' + id + '" type="' + (o.type || 'text') + '" value="' + esc(val) + '"' +
+      (o.attrs || '') + (o.disabled ? ' disabled' : '') + invalid(id) + '>' + (o.hint ? '<p class="hint" id="' + id + '-hint">' + o.hint + '</p>' : '') + errP(id) + '</div>';
+  }
+  function moneyF(id, label, val, o) {
+    o = o || {};
+    return '<div class="f"><label for="' + id + '">' + label + '</label><div class="money"><span>KES</span><input id="' + id + '" type="text" inputmode="numeric" data-money value="' + grp(val) + '"' +
+      (o.disabled ? ' disabled' : '') + invalid(id) + '></div>' + (o.hint ? '<p class="hint" id="' + id + '-hint">' + o.hint + '</p>' : '') + errP(id) + '</div>';
+  }
+  function selectF(id, label, options, val, o) {
+    o = o || {};
+    return '<div class="f"><label for="' + id + '">' + label + '</label><select id="' + id + '"' + (o.disabled ? ' disabled' : '') + invalid(id) + '>' +
+      options.map(function (x) { return '<option value="' + esc(x[0]) + '"' + (String(x[0]) === String(val) ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('') +
+      '</select>' + (o.hint ? '<p class="hint">' + o.hint + '</p>' : '') + errP(id) + '</div>';
+  }
+  function summaryBanner() {
+    var n = Object.keys(cur.errors).length;
+    return n ? '<div class="banner error" role="alert">' + ALERT + '<span>' + (n === 1 ? 'Fix the highlighted field to save.' : 'Fix the ' + n + ' highlighted fields to save.') + '</span></div>' : '';
+  }
+  function companyOptions() { return Object.keys(D.COMPANIES).map(function (c) { return [c, D.COMPANIES[c]]; }); }
+  /* Setup lists respect the editor's own scope: nobody sets up vehicles they cannot see. */
+  function myVehicles() {
+    var u = user();
+    return D.VEHICLES.filter(function (v) { return u.scope.all || (u.scope.vehicles ? u.scope.vehicles.indexOf(v.reg) >= 0 : u.scope.companies.indexOf(v.co) >= 0); })
+      .slice().sort(function (a, b) { return a.reg < b.reg ? -1 : 1; });
+  }
+  function myCompanyOptions() {
+    var cos = []; myVehicles().forEach(function (v) { if (cos.indexOf(v.co) < 0) cos.push(v.co); });
+    var u = user();
+    return companyOptions().filter(function (c) { return u.scope.all || cos.indexOf(c[0]) >= 0 || (u.scope.companies || []).indexOf(c[0]) >= 0; });
+  }
+  function personVehicles(p) {
+    return D.VEHICLES.filter(function (v) { return p.scope.all || (p.scope.vehicles ? p.scope.vehicles.indexOf(v.reg) >= 0 : p.scope.companies.indexOf(v.co) >= 0); }).map(function (v) { return v.reg; });
+  }
+  /* You only see and manage people whose access sits inside your own. */
+  function canSeePerson(p) {
+    var u = user();
+    if (u.scope.all) return true;
+    if (p.scope.all) return false;
+    var mine = myVehicles().map(function (v) { return v.reg; });
+    return personVehicles(p).every(function (r) { return mine.indexOf(r) >= 0; });
+  }
+  function touchesMine(item) { var mine = myVehicles().map(function (v) { return v.reg; }); return item.alloc.some(function (a) { return mine.indexOf(a.reg) >= 0; }); }
+  function focusFirstError() { var k = Object.keys(cur.errors)[0]; if (k && $(k)) $(k).focus(); }
+
+  function renderSetup() {
+    var v = $('view-setup'); v.hidden = false;
+    var fn = { people: viewPeople, person: viewPerson, companies: viewCompanies, vehicles: viewVehicles, vehicle: viewVehicle,
+               recurring: viewRecurring, 'recurring-form': viewRecurringForm, changelog: viewLog, revenue: viewRevenue }[cur.view];
+    v.innerHTML = fn();
+    if (cur.view === 'recurring-form') liveRecurring();
+  }
+
+  /* ---------- People and access ---------- */
+  function viewPeople() {
+    var u = user();
+    head('People and access', 'Everyone who can sign in, what they can see and what they can do.');
+    var keys = Object.keys(D.users).filter(function (ph) { return canSeePerson(D.users[ph]); });
+    var rows = keys.map(function (ph) {
+      var p = D.users[ph], st = p.revoked ? ['off', 'No access'] : (!p.pin ? ['warn', 'Waiting for first sign in'] : ['ok', 'Active']);
+      var ch = p.extra.length + p.removed.length;
+      return '<tr><td data-label="Name"><button type="button" class="row-btn" data-act="open-person" data-id="' + ph + '">' + esc(p.first + ' ' + p.last) + '</button><small>' + esc(p.email) + '</small></td>' +
+        '<td data-label="Mobile" class="num">' + fmtPhone(ph) + '</td>' +
+        '<td data-label="Role">' + esc(D.ROLES[p.role].label) + (ch ? '<small>' + plural(ch, 'change', 'changes') + ' from the role</small>' : '') + '</td>' +
+        '<td data-label="Can see">' + esc(X.scopeShort(p)) + (p.approveLimit ? '<small>Approves up to ' + kes(p.approveLimit) + '</small>' : '') + '</td>' +
+        '<td data-label="Sign in"><span class="status ' + st[0] + '">' + st[1] + '</span></td></tr>';
+    }).join('');
+    var h = '<div class="toolbar"><span class="hint">' + plural(keys.length, 'person', 'people') + '</span><span style="flex:1"></span>' +
+      (X.has(u, 'people.manage') ? '<button type="button" class="btn-pill" data-act="new-person">Add person</button>' : '') + '</div>';
+    h += '<div class="table-card"><table class="list"><thead><tr><th>Name</th><th>Mobile</th><th>Role</th><th>Can see</th><th>Sign in</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    var recent = D.LOG.slice(0, 5);
+    h += '<article class="card" style="margin-top:16px"><header><h2 class="card-title">Recent changes</h2><p class="card-sub">Every change to people, access and setup is recorded</p></header><ul class="card-list">' +
+      recent.map(function (l) { return '<li><span class="l"><strong>' + esc(l.what) + '</strong><small>' + esc(l.who) + '</small></span><span class="r"><small>' + esc(l.when) + '</small></span></li>'; }).join('') + '</ul></article>';
+    return h;
+  }
+
+  function personPerms(role) { return D.ROLES[role].perms.slice(); }
+  function newPerson() {
+    cur.form = { key: null, first: '', last: '', mobile: '', email: '', role: 'clerk', scopeMode: 'vehicles', companies: [], vehicles: [], perms: personPerms('clerk'), limit: '' };
+  }
+  function loadPerson(ph) {
+    var p = D.users[ph];
+    cur.form = { key: ph, first: p.first, last: p.last, mobile: fmtPhone(ph), email: p.email, role: p.role,
+      scopeMode: p.scope.all ? 'all' : p.scope.vehicles ? 'vehicles' : 'companies',
+      companies: (p.scope.companies || []).slice(), vehicles: (p.scope.vehicles || []).slice(),
+      perms: D.permsFor(Object.assign({}, p, { revoked: false })), limit: p.approveLimit || '' };
+  }
+  function needsLimit(perms) { return ['pettycash.approve_item', 'pettycash.approve_day', 'bills.approve'].some(function (k) { return perms.indexOf(k) >= 0; }); }
+  function personRights() {
+    var u = user(), f = cur.form, self = f.key === cur.phone, manage = X.has(u, 'people.manage');
+    var ownerLock = f.key && D.users[f.key].role === 'owner' && u.role !== 'owner';
+    return {
+      details: manage && !ownerLock,
+      role: manage && !self && !ownerLock,
+      scope: manage && !self && !ownerLock,
+      perms: X.has(u, 'access.manage') && !self && !ownerLock,
+      remove: manage && !self && !ownerLock && !!f.key,
+      self: self, ownerLock: ownerLock, manage: manage
+    };
+  }
+  function viewPerson() {
+    var f = cur.form, r = personRights(), u = user();
+    var existing = f.key ? D.users[f.key] : null;
+    head(f.key ? f.first + ' ' + f.last : 'Add person', f.key ? 'Mobile ' + fmtPhone(f.key) : 'They sign in with this mobile number and set their own PIN with an email code.');
+    var roleP = D.ROLES[f.role].perms;
+    var h = '<div class="form">' + summaryBanner();
+    if (!r.manage) h += '<p class="note">You can view people but not change them.</p>';
+    else if (r.self) h += '<p class="note">This is you. You can change your details, but not your own role, permissions or what you can see.</p>';
+    else if (r.ownerLock) h += '<p class="note">Only the owner can change the owner’s access.</p>';
+    if (existing && existing.revoked) h += '<p class="note">This person has no access. They cannot sign in.</p>';
+
+    h += '<article class="card"><header><h2 class="card-title">Details</h2></header><div class="grid2">' +
+      textF('p-first', 'First name', f.first, { disabled: !r.details, attrs: ' autocomplete="off"' }) +
+      textF('p-last', 'Last name', f.last, { disabled: !r.details, attrs: ' autocomplete="off"' }) +
+      textF('p-mobile', 'Mobile number', f.mobile, { type: 'tel', disabled: !r.details, attrs: ' inputmode="numeric" placeholder="0712 345 678"', hint: 'Used to sign in. Changing it signs them out of every device.' }) +
+      textF('p-email', 'Email', f.email, { type: 'email', disabled: !r.details, attrs: ' autocapitalize="none" spellcheck="false" placeholder="name@company.co.ke"', hint: 'Only used to send one time codes.' }) +
+      '</div></article>';
+
+    var roles = Object.keys(D.ROLES).filter(function (k) { return k !== 'owner' || u.role === 'owner'; }).map(function (k) { return [k, D.ROLES[k].label]; });
+    h += '<article class="card"><header><h2 class="card-title">Role</h2><p class="card-sub">A starting set of permissions. You can change single permissions further down.</p></header>' +
+      selectF('p-role', 'Role', roles, f.role, { disabled: !r.role, hint: f.key ? 'Changing the role resets single permissions to the new role.' : '' }) + '</article>';
+
+    h += '<article class="card"><header><h2 class="card-title">What they can see</h2><p class="card-sub">Every number, list and report is limited to this.</p></header><div class="opts" role="radiogroup" aria-label="What they can see">' +
+      [['all', 'All companies'], ['companies', 'Chosen companies'], ['vehicles', 'Chosen vehicles']].filter(function (o) { return o[0] !== 'all' || u.scope.all; }).map(function (o) {
+        return '<label class="opt"><input type="radio" name="p-scope" value="' + o[0] + '"' + (f.scopeMode === o[0] ? ' checked' : '') + (r.scope && f.role !== 'owner' ? '' : ' disabled') + '><span>' + o[1] + '</span></label>';
+      }).join('') + '</div>';
+    if (f.scopeMode === 'companies') {
+      h += '<div class="opts" id="p-scope-list">' + myCompanyOptions().map(function (c) {
+        return '<label class="opt"><input type="checkbox" data-scope-co="' + c[0] + '"' + (f.companies.indexOf(c[0]) >= 0 ? ' checked' : '') + (r.scope ? '' : ' disabled') + '><span>' + esc(c[1]) + '</span></label>';
+      }).join('') + '</div>';
+    } else if (f.scopeMode === 'vehicles') {
+      h += '<div id="p-scope-list">' + myCompanyOptions().map(function (c) {
+        var vs = myVehicles().filter(function (v) { return v.co === c[0]; });
+        if (!vs.length) return '';
+        return '<p class="alloc-co">' + esc(c[1]) + '</p><div class="opts">' + vs.map(function (v) {
+          return '<label class="opt"><input type="checkbox" data-scope-veh="' + v.reg + '"' + (f.vehicles.indexOf(v.reg) >= 0 ? ' checked' : '') + (r.scope ? '' : ' disabled') + '><span>' + v.reg + '</span></label>';
+        }).join('') + '</div>';
+      }).join('') + '</div>';
+    } else h += '<p class="hint">' + (f.role === 'owner' ? 'The owner always sees every company.' : 'Includes any company added later.') + '</p>';
+    h += errP('p-scope') + '</article>';
+
+    var changes = f.perms.filter(function (k) { return roleP.indexOf(k) < 0; }).length + roleP.filter(function (k) { return f.perms.indexOf(k) < 0; }).length;
+    h += '<article class="card"><header><h2 class="card-title">Permissions</h2><p class="card-sub">' + f.perms.length + ' ticked. ' +
+      (changes ? plural(changes, 'change', 'changes') + ' from the ' + esc(D.ROLES[f.role].label) + ' role, marked below.' : 'Same as the ' + esc(D.ROLES[f.role].label) + ' role.') + '</p></header>';
+    if (!r.perms && r.manage && !r.self && !r.ownerLock) h += '<p class="note">Changing single permissions needs \u201c' + esc(permLabel('access.manage')) + '\u201d. The role’s permissions apply.</p>';
+    if (cur.permNote) h += '<p class="note info" role="status">' + esc(cur.permNote) + '</p>';
+    if (r.perms && changes) h += '<div class="chips"><button type="button" class="chip" data-act="match-role">Match the role again</button></div>';
+    D.CATALOGUE.forEach(function (g) {
+      var on = g.items.filter(function (i) { return f.perms.indexOf(i[0]) >= 0; }).length;
+      h += '<div class="perm-group"><h3>' + esc(g.group) + '<small>' + on + ' of ' + g.items.length + '</small></h3><div>';
+      g.items.forEach(function (i) {
+        var ticked = f.perms.indexOf(i[0]) >= 0, inRole = roleP.indexOf(i[0]) >= 0;
+        var tag = ticked && !inRole ? '<span class="tag add">Added</span>' : (!ticked && inRole ? '<span class="tag rem">Removed</span>' : '');
+        var needs = (D.NEEDS[i[0]] || []).map(permLabel);
+        h += '<label class="opt"><input type="checkbox" id="perm-' + i[0].replace('.', '-') + '" data-perm="' + i[0] + '"' + (ticked ? ' checked' : '') + (r.perms ? '' : ' disabled') + '><span>' + esc(i[1]) + tag +
+          (needs.length ? '<small class="hint" style="display:block">Needs: ' + esc(needs.join(', ')) + '</small>' : '') + '</span></label>';
+      });
+      h += '</div></div>';
+    });
+    h += errP('p-perms') + '</article>';
+
+    if (needsLimit(f.perms)) {
+      h += '<article class="card"><header><h2 class="card-title">Approval limit</h2><p class="card-sub">The most they can approve in one entry.</p></header>' +
+        moneyF('p-limit', 'Limit per entry', f.limit, { disabled: !r.perms, hint: 'Leave empty for no limit.' }) + '</article>';
+    }
+
+    h += '<div class="form-actions">';
+    if (r.manage) h += '<button type="button" class="btn-pill" data-act="save-person">' + (f.key ? 'Save changes' : 'Add person') + '</button>';
+    h += '<button type="button" class="btn-pill outline" data-act="to-people">' + (r.manage ? 'Cancel' : 'Back') + '</button><span class="grow"></span>';
+    if (r.remove) {
+      h += '<button type="button" class="btn-pill outline" data-act="signout-person">Sign out of all devices</button>';
+      h += existing.revoked ? '<button type="button" class="btn-pill outline" data-act="restore-person">Give access back</button>'
+                            : '<button type="button" class="btn-pill danger" data-act="revoke-person">' + (cur.confirm === 'revoke-person' ? 'Tap again to remove access' : 'Remove access') + '</button>';
+    }
+    return h + '</div></div>';
+  }
+
+  function savePerson() {
+    var f = cur.form, e = {}, mobile = normalisePhone(f.mobile), email = f.email.trim().toLowerCase();
+    if (!f.first.trim()) e['p-first'] = 'Enter a first name.';
+    if (!f.last.trim()) e['p-last'] = 'Enter a last name.';
+    if (!/^0[17]\d{8}$/.test(mobile)) e['p-mobile'] = 'Enter all 10 numbers, starting 07 or 01.';
+    else if (D.users[mobile] && mobile !== f.key) e['p-mobile'] = 'This number already belongs to ' + D.users[mobile].first + ' ' + D.users[mobile].last + '.';
+    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(email)) e['p-email'] = 'Enter an email address like name@company.co.ke';
+    else Object.keys(D.users).forEach(function (k) { if (k !== f.key && D.users[k].email === email) e['p-email'] = 'This email already belongs to ' + D.users[k].first + ' ' + D.users[k].last + '.'; });
+    if (f.scopeMode === 'companies' && !f.companies.length) e['p-scope'] = 'Tick at least one company.';
+    if (f.scopeMode === 'vehicles' && !f.vehicles.length) e['p-scope'] = 'Tick at least one vehicle.';
+    if (!f.perms.length) e['p-perms'] = 'Tick at least one permission.';
+    cur.errors = e;
+    if (Object.keys(e).length) { render(); focusFirstError(); return; }
+
+    var roleP = D.ROLES[f.role].perms;
+    var extra = f.perms.filter(function (k) { return roleP.indexOf(k) < 0; });
+    var removed = roleP.filter(function (k) { return f.perms.indexOf(k) < 0; });
+    if (f.role === 'owner') f.scopeMode = 'all';
+    if (f.scopeMode === 'all' && !user().scope.all) f.scopeMode = 'companies';
+    var scope = f.scopeMode === 'all' ? { all: true } : f.scopeMode === 'companies' ? { companies: f.companies.slice() } : { vehicles: f.vehicles.slice() };
+    var limit = needsLimit(f.perms) ? (num(f.limit) || null) : null;
+    var name = f.first.trim() + ' ' + f.last.trim();
+    var tmp = { scope: scope };
+
+    if (!f.key) {
+      D.users[mobile] = { first: f.first.trim(), last: f.last.trim(), title: D.ROLES[f.role].label + ', ' + X.scopeShort(tmp), role: f.role, email: email,
+        pin: null, trusted: false, scope: scope, extra: extra, removed: removed, approveLimit: limit, revoked: false };
+      D.log(me(), 'Added ' + name + ' as ' + D.ROLES[f.role].label + ', can see ' + X.scopeShort(tmp) + (extra.length + removed.length ? ', with ' + plural(extra.length + removed.length, 'permission change', 'permission changes') : ''));
+      toast(name + ' added. They sign in with ' + fmtPhone(mobile) + ' and set a PIN with an email code.');
+    } else {
+      var p = D.users[f.key], before = D.permsFor(Object.assign({}, p, { revoked: false }));
+      var same = p.first === f.first.trim() && p.last === f.last.trim() && p.email === email && mobile === f.key && p.role === f.role &&
+        JSON.stringify(p.scope) === JSON.stringify(scope) && (p.approveLimit || null) === limit && before.slice().sort().join() === f.perms.slice().sort().join();
+      if (same) { toast('No changes to save.'); cur.form = null; cur.errors = {}; cur.view = 'people'; render(); return; }
+      if (p.role !== f.role) D.log(me(), 'Changed role for ' + name + ' from ' + D.ROLES[p.role].label + ' to ' + D.ROLES[f.role].label);
+      if (JSON.stringify(p.scope) !== JSON.stringify(scope)) D.log(me(), 'Changed what ' + name + ' can see to ' + X.scopeShort(tmp));
+      var added = f.perms.filter(function (k) { return before.indexOf(k) < 0; }), gone = before.filter(function (k) { return f.perms.indexOf(k) < 0; });
+      if (p.role === f.role && (added.length || gone.length)) D.log(me(), 'Changed permissions for ' + name + ': ' + [added.length ? 'added ' + added.map(permLabel).join(', ') : '', gone.length ? 'removed ' + gone.map(permLabel).join(', ') : ''].filter(Boolean).join('; '));
+      if ((p.approveLimit || null) !== limit) D.log(me(), 'Changed approval limit for ' + name + ' to ' + (limit ? kes(limit) : 'no limit'));
+      if (p.first + ' ' + p.last !== name || p.email !== email) D.log(me(), 'Changed details for ' + name);
+      Object.assign(p, { first: f.first.trim(), last: f.last.trim(), email: email, role: f.role, scope: scope, extra: extra, removed: removed, approveLimit: limit,
+        title: D.ROLES[f.role].label + ', ' + X.scopeShort(tmp) });
+      if (mobile !== f.key) {
+        D.users[mobile] = p; delete D.users[f.key]; p.trusted = false;
+        D.log(me(), 'Changed mobile number for ' + name + ' and signed them out of every device');
+        if (cur.phone === f.key) cur.phone = mobile;
+      }
+      toast('Changes saved for ' + name + '.');
+    }
+    cur.form = null; cur.errors = {}; cur.view = 'people'; fillViewAs(); render();
+  }
+
+  /* ---------- PSV companies ---------- */
+  function viewCompanies() {
+    head('PSV companies', 'Every vehicle belongs to one company.');
+    var addErr = cur.coErrFor === 'add' ? cur.coErr : '';
+    var h = '<div class="toolbar"><div class="f" style="flex:1;min-width:220px"><label for="new-co">New PSV company</label><input id="new-co" type="text" placeholder="Company name" data-enter="add-co"' + (addErr ? ' aria-invalid="true" aria-describedby="new-co-err"' : '') + '>' +
+      (addErr ? '<p class="err" id="new-co-err">' + ALERT + '<span>' + esc(addErr) + '</span></p>' : '') + '</div>' +
+      '<button type="button" class="btn-pill" data-act="add-co" style="align-self:flex-end">Add company</button></div>';
+    h += '<div class="table-card"><table class="list"><thead><tr><th>Company</th><th>Vehicles</th><th></th></tr></thead><tbody>';
+    Object.keys(D.COMPANIES).forEach(function (c) {
+      var n = D.VEHICLES.filter(function (v) { return v.co === c; }).length;
+      if (cur.renameCo === c) {
+        h += '<tr><td colspan="3"><div class="toolbar" style="margin:0;border:0;padding:0"><div class="f" style="flex:1;min-width:200px"><label for="rename-co">New name</label><input id="rename-co" type="text" data-enter="save-rename" data-enter-id="' + c + '" value="' + esc(D.COMPANIES[c]) + '"' + (cur.coErrFor === 'rename' ? ' aria-invalid="true" aria-describedby="rename-co-err"' : '') + '>' +
+          (cur.coErrFor === 'rename' ? '<p class="err" id="rename-co-err">' + ALERT + '<span>' + esc(cur.coErr) + '</span></p>' : '') + '</div>' +
+          '<button type="button" class="btn-pill" data-act="save-rename" data-id="' + c + '" style="align-self:flex-end">Save</button><button type="button" class="btn-pill outline" data-act="cancel-rename" style="align-self:flex-end">Cancel</button></div></td></tr>';
+      } else {
+        h += '<tr><td data-label="Company"><strong>' + esc(D.COMPANIES[c]) + '</strong></td><td data-label="Vehicles" class="num">' + n + '</td>' +
+          '<td><button type="button" class="row-btn" data-act="rename-co" data-id="' + c + '">Rename</button></td></tr>';
+      }
+    });
+    return h + '</tbody></table></div>';
+  }
+  function addCompany() {
+    var name = $('new-co').value.trim();
+    var clash = Object.keys(D.COMPANIES).some(function (c) { return D.COMPANIES[c].toLowerCase() === name.toLowerCase(); });
+    cur.coErr = !name ? 'Enter the company name.' : clash ? 'This company already exists.' : '';
+    cur.coErrFor = cur.coErr ? 'add' : null;
+    if (cur.coErr) { render(); $('new-co').focus(); return; }
+    D.COMPANIES['C' + Date.now()] = name;
+    D.log(me(), 'Added PSV company ' + name);
+    toast(name + ' added.'); render();
+  }
+
+  /* ---------- Vehicles ---------- */
+  function viewVehicles() {
+    var u = user();
+    head('Vehicles', 'Registration, company, weekly target, and the recurring costs and savings that post to each vehicle.');
+    var list = myVehicles().filter(function (v) { return cur.vFilter === 'all' || v.co === cur.vFilter; });
+    var h = '<div class="toolbar"><label for="v-filter" class="hint">Company</label><select class="scope-select" id="v-filter"><option value="all">All companies</option>' +
+      myCompanyOptions().map(function (c) { return '<option value="' + c[0] + '"' + (cur.vFilter === c[0] ? ' selected' : '') + '>' + esc(c[1]) + '</option>'; }).join('') + '</select>' +
+      '<span class="hint">' + plural(list.length, 'vehicle', 'vehicles') + '</span><span style="flex:1"></span>' +
+      (X.has(u, 'vehicles.manage') ? '<button type="button" class="btn-pill" data-act="new-vehicle">Add vehicle</button>' : '') + '</div>';
+    h += '<div class="table-card"><table class="list"><thead><tr><th>Registration</th><th>Company</th><th class="num">Weekly target</th><th>In the fleet from</th><th>Recurring items</th></tr></thead><tbody>';
+    h += list.length ? list.map(function (v) {
+      var items = D.RECURRING.filter(function (i) { return i.alloc.some(function (a) { return a.reg === v.reg; }) && (!i.end || i.end >= D.TODAY_ISO); }).length;
+      return '<tr><td data-label="Registration"><button type="button" class="row-btn" data-act="open-vehicle" data-id="' + v.reg + '">' + v.reg + '</button></td>' +
+        '<td data-label="Company">' + esc(D.COMPANIES[v.co]) + '</td><td data-label="Weekly target" class="num">' + kes(v.weekly) + '<small>About ' + kes(v.weekly / 7) + ' a day</small></td>' +
+        '<td data-label="In the fleet from">' + D.fmtDate(v.from) + '</td><td data-label="Recurring items">' + items + '</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="empty-row">No vehicles in this company yet.</td></tr>';
+    return h + '</tbody></table></div>';
+  }
+  function normaliseReg(v) {
+    var s = (v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return /^K[A-Z]{2}\d{3}[A-Z]$/.test(s) ? s.slice(0, 3) + ' ' + s.slice(3) : null;
+  }
+  function viewVehicle() {
+    var f = cur.form, isNew = !f.key;
+    head(isNew ? 'Add vehicle' : f.key, isNew ? 'It shows on reports and the dashboard straight away.' : D.COMPANIES[f.co]);
+    var h = '<div class="form">' + summaryBanner();
+    h += '<article class="card"><header><h2 class="card-title">Vehicle</h2></header><div class="grid2">' +
+      textF('v-reg', 'Registration number', isNew ? f.reg : f.key, { disabled: !isNew, attrs: ' autocapitalize="characters" placeholder="KDA 482M"', hint: isNew ? 'Kenyan format, for example KDA 482M.' : 'A registration cannot change. Add the vehicle again if it is re registered.' }) +
+      selectF('v-co', 'PSV company', [['', 'Choose a company']].concat(companyOptions()), f.co) +
+      moneyF('v-weekly', 'Weekly performance target', f.weekly, { hint: (f.weekly ? 'About ' + kes(num(f.weekly) / 7) + ' a day.' : 'Revenue you expect in a Monday to Sunday week.') + (isNew ? '' : ' A change applies from today. Past days keep their old target.') }) +
+      textF('v-from', 'In the fleet from', f.from, { type: 'date', hint: 'Missing revenue days are only counted from this date.' }) +
+      '</div>' + targetHistory(f.key) + '</article>';
+    h += '<div class="form-actions"><button type="button" class="btn-pill" data-act="save-vehicle">' + (isNew ? 'Add vehicle' : 'Save changes') + '</button><button type="button" class="btn-pill outline" data-act="to-vehicles">Cancel</button></div>';
+
+    if (!isNew) {
+      var r = X.vehicleReport(f.key, cur.vPeriod);
+      var stat = function (l, v, bad) { return '<div class="stat"><small>' + l + '</small><strong' + (bad ? ' class="bad"' : '') + '>' + v + '</strong></div>'; };
+      h += '<article class="card"><header><h2 class="card-title">Vehicle report</h2><p class="card-sub">' + X.periodLabel(cur.vPeriod) + '. Recurring items post on their own dates.</p></header>' +
+        '<div class="seg" role="group" aria-label="Period"><button type="button" data-vperiod="week" aria-pressed="' + (cur.vPeriod === 'week') + '">This week</button><button type="button" data-vperiod="month" aria-pressed="' + (cur.vPeriod === 'month') + '">This month</button></div>' +
+        '<div class="report-grid">' + stat('Revenue', kes(r.revenue)) + stat('Target', kes(r.target)) + stat('Running costs', kes(r.running)) + stat('Repairs and upkeep', kes(r.repairs)) +
+        stat('Crew costs', kes(r.crew)) + stat('Fixed commitments', kes(r.fixed)) + stat('Net contribution', X.money(r.net), r.net < 0) + stat('Savings set aside', kes(r.savings)) +
+        stat('After savings', X.money(r.net - r.savings), r.net - r.savings < 0) + '</div>';
+      var agg = {};
+      r.posts.forEach(function (p) { var k = p.name + '|' + p.type; agg[k] = agg[k] || { name: p.name, type: p.type, category: p.category, n: 0, total: 0, days: [] }; agg[k].n++; agg[k].total += p.amt; agg[k].days.push(p.day); });
+      var rows = Object.keys(agg).map(function (k) { return agg[k]; });
+      h += '<h3 class="access-group">Recurring postings in this period</h3>' + (rows.length ? '<ul class="card-list">' + rows.map(function (a) {
+        var when = a.n <= 3 ? a.days.map(D.day).join(', ') : a.n + ' postings, ' + D.day(a.days[0]) + ' to ' + D.day(a.days[a.n - 1]);
+        return '<li><span class="l"><strong>' + esc(a.name) + '</strong><small>' + (a.type === 'savings' ? 'Savings' : esc(a.category)) + '. ' + when + '</small></span><span class="r"><strong>' + kes(a.total) + '</strong></span></li>';
+      }).join('') + '</ul>' : '<p class="hint">Nothing posted in this period.</p>') + '</article>';
+
+      var items = D.RECURRING.filter(function (i) { return i.alloc.some(function (a) { return a.reg === f.key; }); });
+      h += '<article class="card"><header><h2 class="card-title">Recurring costs and savings for ' + f.key + '</h2><p class="card-sub">This vehicle’s share of each item</p></header>' +
+        (items.length ? '<ul class="card-list">' + items.map(function (i) {
+          var share = i.alloc.filter(function (a) { return a.reg === f.key; })[0].amt, stopped = i.end && i.end < D.TODAY_ISO;
+          var nameCell = X.has(user(), 'commitments.view') ? '<button type="button" class="row-btn" data-act="open-recurring" data-id="' + i.id + '">' + esc(i.name) + '</button>' : '<strong>' + esc(i.name) + '</strong>';
+          return '<li><span class="l">' + nameCell + '<small>' + D.freqText(i.freq) + (stopped ? '. Stopped' : '') + '</small></span><span class="r"><strong>' + kes(share) + '</strong><small>' + (i.alloc.length > 1 ? 'of ' + kes(i.amount) : 'each time') + '</small></span></li>';
+        }).join('') + '</ul>' : '<p class="hint">None yet.</p>') +
+        (X.has(user(), 'commitments.manage') ? '<button type="button" class="card-action" data-act="new-recurring-for" data-id="' + f.key + '">Add recurring cost or saving for ' + f.key + '</button>' : '') + '</article>';
+    }
+    return h + '</div>';
+  }
+  function targetHistory(reg) {
+    if (!reg) return '';
+    var v = D.VEHICLES.filter(function (x) { return x.reg === reg; })[0];
+    if (v.targets.length < 2) return '';
+    return '<div><p class="lbl" style="margin:0;font-size:14px;font-weight:600">Target history</p><ul class="card-list">' + v.targets.slice().reverse().map(function (t, i) {
+      return '<li><span class="l"><strong>' + kes(t.weekly) + ' a week</strong></span><span class="r"><small>' + (i === 0 ? 'From ' : 'Was from ') + D.fmtDate(t.from) + '</small></span></li>';
+    }).join('') + '</ul></div>';
+  }
+  function saveVehicle() {
+    var f = cur.form, e = {}, isNew = !f.key, reg = isNew ? normaliseReg(f.reg) : f.key;
+    if (isNew) {
+      if (!f.reg.trim()) e['v-reg'] = 'Enter the registration number.';
+      else if (!reg) e['v-reg'] = 'Use the Kenyan format, for example KDA 482M.';
+      else if (D.VEHICLES.some(function (v) { return v.reg === reg; })) e['v-reg'] = reg + ' is already in the fleet.';
+    }
+    if (!f.co) e['v-co'] = 'Choose the PSV company.';
+    if (!num(f.weekly)) e['v-weekly'] = 'Enter the weekly target in KES.';
+    if (!f.from) e['v-from'] = 'Enter the date it joined the fleet.';
+    cur.errors = e;
+    if (Object.keys(e).length) { render(); focusFirstError(); return; }
+    if (isNew) {
+      D.VEHICLES.push({ reg: reg, co: f.co, weekly: num(f.weekly), from: f.from, targets: [{ from: f.from, weekly: num(f.weekly) }] });
+      D.REV[reg] = {};
+      D.log(me(), 'Added vehicle ' + reg + ' to ' + D.COMPANIES[f.co] + ' with a weekly target of ' + kes(num(f.weekly)));
+      toast(reg + ' added.');
+      cur.form = { key: reg, co: f.co, weekly: num(f.weekly), from: f.from }; cur.view = 'vehicle';
+    } else {
+      var v = D.VEHICLES.filter(function (x) { return x.reg === reg; })[0];
+      var changed = v.weekly !== num(f.weekly) || v.co !== f.co || v.from !== f.from;
+      if (!changed) { toast('No changes to save.'); return; }
+      if (v.weekly !== num(f.weekly)) {
+        D.log(me(), 'Changed weekly target for ' + reg + ' from ' + kes(v.weekly) + ' to ' + kes(num(f.weekly)) + ', from ' + D.fmtDate(D.TODAY_ISO));
+        var last = v.targets[v.targets.length - 1];
+        if (last.from === D.TODAY_ISO) last.weekly = num(f.weekly); else v.targets.push({ from: D.TODAY_ISO, weekly: num(f.weekly) });
+      }
+      if (v.co !== f.co) D.log(me(), 'Moved ' + reg + ' from ' + D.COMPANIES[v.co] + ' to ' + D.COMPANIES[f.co]);
+      if (v.from !== f.from) { D.log(me(), 'Changed in the fleet from date for ' + reg + ' to ' + D.fmtDate(f.from)); v.targets[0].from = f.from < v.targets[0].from ? f.from : v.targets[0].from; }
+      v.co = f.co; v.weekly = num(f.weekly); v.from = f.from;
+      toast('Changes saved for ' + reg + '.');
+    }
+    cur.errors = {}; render();
+  }
+
+  /* ---------- Recurring costs and savings ---------- */
+  var PICKS = [
+    { name: 'Loan repayment', type: 'cost', category: 'Fixed commitments', freq: 'monthly' },
+    { name: 'Insurance', type: 'cost', category: 'Fixed commitments', freq: 'monthly' },
+    { name: 'SACCO fee', type: 'cost', category: 'Fixed commitments', freq: 'monthly' },
+    { name: 'Stage fees', type: 'cost', category: 'Running costs', freq: 'daily' },
+    { name: 'Savings', type: 'savings', category: '', freq: 'weekly' }
+  ];
+  function viewRecurring() {
+    var u = user(), canEdit = X.has(u, 'commitments.manage');
+    head('Recurring costs and savings', 'Set once. Each posts to its vehicles on its own dates and shows in their reports.');
+    var list = D.RECURRING.filter(function (i) { return (cur.rFilter === 'all' || i.type === cur.rFilter) && touchesMine(i); })
+      .slice().sort(function (a, b) {
+        var sa = a.end && a.end < D.TODAY_ISO ? 1 : 0, sb = b.end && b.end < D.TODAY_ISO ? 1 : 0;
+        return sa - sb || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      });
+    var h = '<div class="toolbar"><div class="seg" role="group" aria-label="Show"><button type="button" data-rfilter="all" aria-pressed="' + (cur.rFilter === 'all') + '">All</button><button type="button" data-rfilter="cost" aria-pressed="' + (cur.rFilter === 'cost') + '">Costs</button><button type="button" data-rfilter="savings" aria-pressed="' + (cur.rFilter === 'savings') + '">Savings</button></div>' +
+      '<span style="flex:1"></span>' + (canEdit ? '<button type="button" class="btn-pill" data-act="new-recurring">Add recurring cost or saving</button>' : '') + '</div>';
+    h += '<div class="table-card"><table class="list"><thead><tr><th>Item</th><th class="num">Amount each time</th><th>How often</th><th>Vehicles</th><th>Period</th><th>Next posting</th></tr></thead><tbody>';
+    h += list.map(function (i) {
+      var stopped = i.end && i.end < D.TODAY_ISO, next = stopped ? null : D.nextPostings(i, 1)[0];
+      var regs = i.alloc.map(function (a) { return a.reg; });
+      return '<tr><td data-label="Item"><button type="button" class="row-btn" data-act="open-recurring" data-id="' + i.id + '">' + esc(i.name) + '</button><small>' + (i.type === 'savings' ? 'Savings' : esc(i.category)) + '</small></td>' +
+        '<td data-label="Amount each time" class="num">' + kes(i.amount) + '<small>About ' + kes(D.perMonth(i)) + ' a month</small></td>' +
+        '<td data-label="How often">' + D.freqText(i.freq) + '</td>' +
+        '<td data-label="Vehicles">' + plural(regs.length, 'vehicle', 'vehicles') + '<small>' + esc(regs.slice(0, 2).join(', ') + (regs.length > 2 ? ' and ' + (regs.length - 2) + ' more' : '')) + '</small></td>' +
+        '<td data-label="Period">' + D.fmtDate(i.start) + (i.end ? ' to ' + D.fmtDate(i.end) : '<small>No end date</small>') + '</td>' +
+        '<td data-label="Next posting">' + (stopped ? '<span class="status off">Stopped</span>' : next ? D.fmtDate(next) : '<span class="status off">Finished</span>') + '</td></tr>';
+    }).join('');
+    if (!list.length) h += '<tr><td colspan="6" class="empty-row">Nothing here yet.</td></tr>';
+    return h + '</tbody></table></div>';
+  }
+  function newRecurring(reg) {
+    cur.form = { id: null, name: '', type: 'cost', category: 'Fixed commitments', amount: '', freqKind: 'monthly', weekDay: 6, monthDate: 1,
+      start: D.TODAY_ISO, end: '', noEnd: true, sel: reg ? [reg] : [], alloc: {}, manual: false };
+  }
+  function loadRecurring(id) {
+    var i = D.RECURRING.filter(function (x) { return x.id === id; })[0], alloc = {};
+    i.alloc.forEach(function (a) { alloc[a.reg] = a.amt; });
+    cur.form = { id: id, name: i.name, type: i.type, category: i.category || 'Fixed commitments', amount: i.amount, freqKind: i.freq.kind,
+      weekDay: i.freq.day != null ? i.freq.day : 6, monthDate: i.freq.date || 1, start: i.start, end: i.end, noEnd: !i.end,
+      sel: i.alloc.map(function (a) { return a.reg; }), alloc: alloc, manual: true };
+  }
+  function formItem() {
+    var f = cur.form;
+    return { start: f.start || D.TODAY_ISO, end: f.noEnd ? '' : f.end, amount: num(f.amount),
+      freq: f.freqKind === 'daily' ? { kind: 'daily' } : f.freqKind === 'weekly' ? { kind: 'weekly', day: +f.weekDay } : { kind: 'monthly', date: f.monthDate === 'last' ? 'last' : +f.monthDate } };
+  }
+  function splitEvenly() {
+    var f = cur.form, total = num(f.amount), n = f.sel.length;
+    if (!n) return;
+    var base = Math.floor(total / n), rem = total - base * n;
+    f.alloc = {};
+    f.sel.forEach(function (r, idx) { f.alloc[r] = base + (idx < rem ? 1 : 0); });
+  }
+  function allocated() { var f = cur.form; return f.sel.reduce(function (s, r) { return s + num(f.alloc[r]); }, 0); }
+  function viewRecurringForm() {
+    var f = cur.form, u = user(), can = X.has(u, 'commitments.manage'), item = f.id ? D.RECURRING.filter(function (x) { return x.id === f.id; })[0] : null;
+    var stopped = item && item.end && item.end < D.TODAY_ISO;
+    head(f.id ? f.name : 'Add recurring cost or saving', f.id ? D.freqText(item.freq) : 'It posts to the vehicles you choose on every due date in its period.');
+    if (!f.manual) splitEvenly();
+    var h = '<div class="form">' + summaryBanner();
+    if (!can) h += '<p class="note">You can view this item but not change it.</p>';
+    if (item && !stopped && item.start < D.TODAY_ISO) h += '<p class="note info">Changes apply from ' + D.fmtDate(D.TODAY_ISO) + '. Postings before that stay as they were.</p>';
+    if (stopped) h += '<p class="note">Stopped. The last posting was on or before ' + D.fmtDate(item.end) + '.</p>';
+    var dis = !can || stopped;
+
+    h += '<article class="card"><header><h2 class="card-title">What it is</h2></header>';
+    if (!f.id && can) h += '<div class="chips" aria-label="Quick picks">' + PICKS.map(function (p, idx) { return '<button type="button" class="chip" data-act="pick" data-id="' + idx + '">' + p.name + '</button>'; }).join('') + '</div>';
+    h += '<div class="grid2">' + textF('r-name', 'Name', f.name, { disabled: dis, attrs: ' placeholder="For example Loan repayment"' }) +
+      '<div class="f"><span class="lbl" id="r-type-lbl">Type</span><div class="opts" role="radiogroup" aria-labelledby="r-type-lbl">' +
+      [['cost', 'Cost'], ['savings', 'Savings']].map(function (o) { return '<label class="opt"><input type="radio" name="r-type" value="' + o[0] + '"' + (f.type === o[0] ? ' checked' : '') + (dis ? ' disabled' : '') + '><span>' + o[1] + '</span></label>'; }).join('') +
+      '</div><p class="hint">' + (f.type === 'savings' ? 'Savings are set aside, not counted as a cost.' : 'Costs reduce net contribution.') + '</p></div>' +
+      (f.type === 'cost' ? selectF('r-cat', 'Cost type', D.CATEGORIES.map(function (c) { return [c, c]; }), f.category, { disabled: dis }) : '') +
+      moneyF('r-amount', 'Amount each time', f.amount, { disabled: dis, hint: 'The total. Split it across vehicles below.' }) + '</div></article>';
+
+    h += '<article class="card"><header><h2 class="card-title">How often</h2></header><div class="opts" role="radiogroup" aria-label="How often">' +
+      [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month']].map(function (o) {
+        return '<label class="opt"><input type="radio" name="r-freq" value="' + o[0] + '"' + (f.freqKind === o[0] ? ' checked' : '') + (dis ? ' disabled' : '') + '><span>' + o[1] + '</span></label>';
+      }).join('') + '</div><div class="grid2">';
+    if (f.freqKind === 'weekly') h += selectF('r-day', 'On', D.DAYS.map(function (d, i) { return [i, d]; }).slice(1).concat([[0, 'Sunday']]), f.weekDay, { disabled: dis });
+    if (f.freqKind === 'monthly') {
+      var dates = []; for (var d = 1; d <= 28; d++) dates.push([d, 'The ' + D.ordinal(d)]);
+      dates.push(['last', 'The last day']);
+      h += selectF('r-date', 'On', dates, f.monthDate, { disabled: dis, hint: 'For the 29th to the 31st, choose the last day so short months are covered.' });
+    }
+    h += '</div><div class="grid2">' + textF('r-start', 'Starts', f.start, { type: 'date', disabled: dis || (item && item.start < D.TODAY_ISO), hint: item && item.start < D.TODAY_ISO ? 'Already running. Changes start today.' : 'A start date before today also adds the earlier postings to past reports.' }) +
+      '<div class="f">' + (f.noEnd ? '' : '<label for="r-end">Ends</label><input id="r-end" type="date" value="' + esc(f.end) + '"' + (dis ? ' disabled' : '') + invalid('r-end') + '>') + errP('r-end') +
+      '<label class="opt"><input type="checkbox" id="r-noend"' + (f.noEnd ? ' checked' : '') + (dis ? ' disabled' : '') + '><span>No end date</span></label></div></div></article>';
+
+    h += '<article class="card"><header><h2 class="card-title">Vehicles</h2><p class="card-sub">Split the amount across one or more vehicles. It must add up exactly.</p></header>';
+    if (!dis) h += '<div class="chips">' + myCompanyOptions().map(function (c) { return '<button type="button" class="chip" data-act="sel-co" data-id="' + c[0] + '">All ' + esc(c[1]) + '</button>'; }).join('') +
+      '<button type="button" class="chip" data-act="sel-clear">Clear</button><button type="button" class="chip" data-act="split">Split equally</button></div>';
+    myCompanyOptions().forEach(function (c) {
+      var vs = myVehicles().filter(function (v) { return v.co === c[0]; });
+      if (!vs.length) return;
+      h += '<p class="alloc-co">' + esc(c[1]) + '</p>';
+      vs.forEach(function (v) {
+        var on = f.sel.indexOf(v.reg) >= 0, id = 'alloc-' + v.reg.replace(' ', '');
+        h += '<div class="alloc-row"><label class="opt"><input type="checkbox" data-sel="' + v.reg + '" id="sel-' + v.reg.replace(' ', '') + '"' + (on ? ' checked' : '') + (dis ? ' disabled' : '') + '><span>' + v.reg + '</span></label>' +
+          (on ? '<div class="money"><span>KES</span><input id="' + id + '" type="text" inputmode="numeric" data-alloc="' + v.reg + '" aria-label="Share for ' + v.reg + '" value="' + grp(f.alloc[v.reg]) + '"' + (dis ? ' disabled' : '') + '></div>' : '<span></span>') + '</div>';
+      });
+    });
+    h += '<div id="r-balance"></div>' + errP('r-alloc') + '</article>';
+    h += '<article class="card"><header><h2 class="card-title">What will post</h2><p class="card-sub">Worked out for you</p></header><div id="r-preview"></div></article>';
+
+    h += '<div class="form-actions">';
+    if (can && !stopped) h += '<button type="button" class="btn-pill" data-act="save-recurring">' + (f.id ? 'Save changes' : 'Add') + '</button>';
+    h += '<button type="button" class="btn-pill outline" data-act="to-recurring">' + (can && !stopped ? 'Cancel' : 'Back') + '</button><span class="grow"></span>';
+    if (can && item && !stopped) h += '<button type="button" class="btn-pill danger" data-act="stop-recurring">' + (cur.confirm === 'stop-recurring' ? 'Tap again to stop from today' : 'Stop from today') + '</button>';
+    return h + '</div></div>';
+  }
+  function liveRecurring() {
+    var f = cur.form;
+    if (!f.manual) {
+      splitEvenly();
+      f.sel.forEach(function (r) { var el = document.querySelector('[data-alloc="' + r + '"]'); if (el && el !== document.activeElement) el.value = grp(f.alloc[r]); });
+    }
+    var total = num(f.amount), got = allocated(), diff = total - got, b = $('r-balance');
+    if (b) {
+      var ok = f.sel.length && total && diff === 0;
+      b.className = 'balance ' + (ok ? 'ok' : 'bad');
+      b.setAttribute('role', 'status');
+      b.innerHTML = '<span>Allocated ' + kes(got) + ' of ' + kes(total) + '</span><span>' +
+        (!f.sel.length ? 'Tick at least one vehicle' : !total ? 'Enter the amount' : diff === 0 ? 'Balanced' : diff > 0 ? kes(diff) + ' still to allocate' : kes(-diff) + ' too much') + '</span>';
+    }
+    var p = $('r-preview');
+    if (p) {
+      var it = formItem();
+      if (!total || !f.sel.length) { p.innerHTML = '<p class="hint">Enter the amount and choose vehicles to see the postings.</p>'; return; }
+      if (it.end && it.end < it.start) { p.innerHTML = '<p class="hint">The end date is before the start date.</p>'; return; }
+      var next = D.nextPostings(it, 5, it.start > D.TODAY_ISO ? it.start : D.TODAY_ISO);
+      p.innerHTML = next.length ? '<ol class="preview">' + next.map(function (dt) { return '<li>' + D.fmtDate(dt) + ': ' + kes(total) + ' across ' + plural(f.sel.length, 'vehicle', 'vehicles') + '</li>'; }).join('') + '</ol>' +
+        '<p class="hint">About ' + kes(D.perMonth(it)) + ' a month. ' + (f.type === 'savings' ? 'Shown as savings in each vehicle report.' : 'Counted under ' + f.category + ' in each vehicle report.') + '</p>'
+        : '<p class="hint">No postings from today in this period.</p>';
+    }
+  }
+  function saveRecurring() {
+    var f = cur.form, e = {}, it = formItem();
+    if (!f.name.trim()) e['r-name'] = 'Enter a name.';
+    if (!num(f.amount)) e['r-amount'] = 'Enter the amount in KES.';
+    if (!f.start) e['r-start'] = 'Enter the start date.';
+    if (!f.noEnd && (!f.end || f.end < f.start)) e['r-end'] = 'The end date must be on or after the start date.';
+    if (!f.sel.length) e['r-alloc'] = 'Tick at least one vehicle.';
+    else if (allocated() !== num(f.amount)) e['r-alloc'] = 'The split must add up to ' + kes(num(f.amount)) + '. It is ' + kes(allocated()) + '.';
+    cur.errors = e;
+    if (Object.keys(e).length) { render(); focusFirstError(); return; }
+    var rec = { name: f.name.trim(), type: f.type, category: f.type === 'cost' ? f.category : '', amount: num(f.amount), freq: it.freq,
+      start: f.start, end: it.end, alloc: f.sel.map(function (r) { return { reg: r, amt: num(f.alloc[r]) }; }) };
+    if (f.id) {
+      var o = D.RECURRING.filter(function (x) { return x.id === f.id; })[0];
+      var same = JSON.stringify([o.name, o.type, o.category, o.amount, o.freq, o.end, o.alloc]) === JSON.stringify([rec.name, rec.type, rec.category, rec.amount, rec.freq, rec.end, rec.alloc]);
+      if (same) { toast('No changes to save.'); cur.form = null; cur.errors = {}; cur.view = 'recurring'; render(); return; }
+    }
+    var desc = rec.name + ', ' + kes(rec.amount) + ', ' + D.freqText(rec.freq).toLowerCase() + ', ' + plural(rec.alloc.length, 'vehicle', 'vehicles');
+    if (!f.id) {
+      rec.id = 'r' + Date.now(); D.RECURRING.push(rec);
+      D.log(me(), 'Added recurring ' + (rec.type === 'savings' ? 'saving' : 'cost') + ': ' + desc);
+      toast(rec.name + ' added. It now posts to ' + plural(rec.alloc.length, 'vehicle', 'vehicles') + '.');
+    } else {
+      var old = D.RECURRING.filter(function (x) { return x.id === f.id; })[0];
+      if (old.start < D.TODAY_ISO) {                              // keep history: close the old version, start a new one today
+        old.end = '2026-09-20';
+        rec.id = 'r' + Date.now(); rec.start = D.TODAY_ISO; D.RECURRING.push(rec);
+        D.log(me(), 'Changed ' + old.name + ' from ' + D.fmtDate(D.TODAY_ISO) + ': ' + desc);
+      } else {
+        Object.assign(old, rec);
+        D.log(me(), 'Changed ' + desc);
+      }
+      toast('Changes saved for ' + rec.name + '.');
+    }
+    cur.form = null; cur.errors = {}; cur.view = 'recurring'; render();
+  }
+
+  /* ---------- Revenue ---------- */
+  var R = window.XREV;
+  cur.week = R.weekStart(D.TODAY_ISO); cur.revCo = 'all'; cur.revOpen = {}; cur.rev = null;
+  var ARROW_L = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>';
+  var ARROW_R = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>';
+  function revVehicles() { return myVehicles().filter(function (v) { return cur.revCo === 'all' || v.co === cur.revCo; }); }
+  function amt(n) { return Number(n).toLocaleString('en-GB'); }
+  function counted(st, d) { return st === 'amount' || st === 'reason' || (st === 'missing' && d < D.TODAY_ISO); }   /* today with no record yet is not a shortfall */
+
+  function viewRevenue() {
+    var u = user(), days = R.weekDays(cur.week), vs = revVehicles(), cos = myCompanyOptions(), thisWeek = R.weekStart(D.TODAY_ISO);
+    head('Revenue', '');
+    var sumA = 0, sumE = 0, dayTot = days.map(function () { return 0; });
+    var rows = vs.map(function (v) {
+      var tA = 0, tE = 0, open = !!cur.revOpen[v.reg];
+      var cells = days.map(function (d, i) {
+        var st = R.status(v, d), r = R.get(v.reg, d), can = R.canEdit(u, v, d);
+        if (counted(st, d)) { tE += R.expected(v, d); if (r && r.amt) { tA += r.amt; dayTot[i] += r.amt; } }
+        var inner = st === 'amount' ? amt(r.amt) : st === 'reason' ? '<span class="rsn">' + esc(r.reason) + '</span>' : st === 'missing' ? (can ? 'Enter' : 'Missing') : '';
+        var cls = 'cell st-' + st;
+        return '<td class="num' + (d === D.TODAY_ISO ? ' today' : '') + '">' + (can
+          ? '<button type="button" class="' + cls + '" data-act="rev-edit" data-reg="' + v.reg + '" data-iso="' + d + '" aria-label="' + v.reg + ', ' + R.longDate(d) + '">' + inner + '</button>'
+          : '<span class="' + cls + '">' + inner + '</span>') + '</td>';
+      }).join('');
+      sumA += tA; sumE += tE;
+      var p = tE ? Math.round(tA / tE * 100) : null;
+      return '<tr><td class="veh"><button type="button" class="row-btn exp" data-act="rev-toggle" data-reg="' + v.reg + '" aria-expanded="' + open + '">' + CHEVRON + v.reg + '</button><small>' + esc(D.COMPANIES[v.co]) + '</small></td>' +
+        cells + '<td class="num"><strong>' + amt(tA) + '</strong></td><td class="num">' + (p == null ? '' : '<span class="pct' + (p < 90 ? ' low' : '') + '">' + p + '%</span>') + '</td></tr>' +
+        (open ? '<tr class="detail"><td colspan="10">' + detailTable(v, days) + '</td></tr>' : '');
+    }).join('');
+    var pct = sumE ? Math.round(sumA / sumE * 100) : 0;
+
+    var h = '<div class="toolbar"><div class="week-nav"><button type="button" class="icon-btn" data-act="wk-prev" aria-label="Previous week"' + (cur.week <= '2026-08-31' ? ' disabled' : '') + '>' + ARROW_L + '</button>' +
+      '<strong>' + R.rangeLabel(cur.week) + '</strong><button type="button" class="icon-btn" data-act="wk-next" aria-label="Next week"' + (cur.week >= thisWeek ? ' disabled' : '') + '>' + ARROW_R + '</button></div>';
+    if (cos.length > 1) h += '<select class="scope-select" id="rev-co" aria-label="Company"><option value="all">All companies</option>' +
+      cos.map(function (c) { return '<option value="' + c[0] + '"' + (cur.revCo === c[0] ? ' selected' : '') + '>' + esc(c[1]) + '</option>'; }).join('') + '</select>';
+    h += '<span style="flex:1"></span><div class="wk-sum"><small>Week to date</small><strong>' + kes(sumA) + '</strong><small>of ' + kes(sumE) + ' expected, ' + pct + '%</small></div></div>';
+    h += '<div class="table-card rev-wrap"><table class="rev"><thead><tr><th class="veh">Vehicle</th>' +
+      days.map(function (d) { return '<th class="num' + (d === D.TODAY_ISO ? ' today' : '') + '">' + R.dow(d) + '<span>' + R.dom(d) + '</span></th>'; }).join('') +
+      '<th class="num">Week</th><th class="num">vs expected</th></tr></thead><tbody>' + (rows || '<tr><td colspan="10" class="empty-row">No vehicles.</td></tr>') + '</tbody>' +
+      '<tfoot><tr><td class="veh">All vehicles</td>' + dayTot.map(function (t) { return '<td class="num">' + (t ? amt(t) : '') + '</td>'; }).join('') +
+      '<td class="num">' + amt(sumA) + '</td><td class="num">' + (sumE ? pct + '%' : '') + '</td></tr></tfoot></table></div>';
+    return h;
+  }
+
+  function detailTable(v, days) {
+    var tA = 0, tE = 0;
+    var rows = days.map(function (d) {
+      var st = R.status(v, d), r = R.get(v.reg, d), e = R.expected(v, d);
+      var day = '<td>' + R.dow(d) + ' ' + R.dom(d) + '</td>';
+      if (st === 'none') return '<tr class="muted">' + day + '<td colspan="4">Not counted</td></tr>';
+      if (st === 'future') return '<tr class="muted">' + day + '<td class="num">' + amt(e) + '</td><td></td><td></td><td></td></tr>';
+      if (st === 'missing') { if (d < D.TODAY_ISO) tE += e; return '<tr>' + day + '<td class="num">' + amt(e) + '</td><td class="num"><span class="cell st-missing">' + (d < D.TODAY_ISO ? 'No record' : 'Not yet') + '</span></td><td></td><td></td></tr>'; }
+      var a = r.amt || 0, p = e ? Math.round(a / e * 100) : 0;
+      tA += a; tE += e;
+      return '<tr>' + day + '<td class="num">' + amt(e) + '</td><td class="num">' + (r.amt ? amt(a) : '<span class="rsn">' + esc(r.reason) + '</span>') + '</td>' +
+        '<td class="num"><span class="gap ' + (a < e ? 'below' : a > e ? 'above' : '') + '">' + R.gap(a, e) + '</span></td>' +
+        '<td><div class="pbar' + (p < 90 ? ' low' : '') + '"><span style="width:' + Math.min(p, 100) + '%"></span></div></td></tr>';
+    }).join('');
+    return '<table class="mini"><thead><tr><th>Day</th><th class="num">Expected</th><th class="num">Revenue</th><th class="num">Difference</th><th></th></tr></thead><tbody>' + rows +
+      '<tr class="total"><td>To date</td><td class="num">' + amt(tE) + '</td><td class="num">' + amt(tA) + '</td><td class="num"><span class="gap ' + (tA < tE ? 'below' : tA > tE ? 'above' : '') + '">' + R.gap(tA, tE) + '</span></td><td></td></tr></tbody></table>';
+  }
+
+  function openRev(reg, iso) {
+    var v = R.vehicle(reg), info = '', target = iso;
+    if (R.status(v, iso) === 'missing') { var first = R.earliestMissing(v, iso); if (first) { info = 'Fill ' + R.longDate(first) + ' first.'; iso = first; } }
+    if (!R.canEdit(user(), v, iso)) return;
+    var r = R.get(reg, iso);
+    cur.rev = { reg: reg, iso: iso, target: target, amount: r && r.amt ? r.amt : '', reason: r && r.reason ? r.reason : '', note: r && r.note ? r.note : '', err: '', info: info, existing: !!r };
+    renderRevDialog();
+    if (!$('rev-dialog').open) $('rev-dialog').showModal();
+    setTimeout(function () { var el = $(cur.rev && cur.rev.reason === 'Other' ? 'rev-note' : 'rev-amt'); if (el) el.focus(); }, 30);
+  }
+  function renderRevDialog() {
+    var e = cur.rev, v = R.vehicle(e.reg), canReason = X.has(user(), 'revenue.no_earnings');
+    var h = '<div class="dialog-head"><div><h2 id="rev-title">' + e.reg + '</h2><p class="card-sub">' + R.longDate(e.iso) + '. Expected ' + kes(R.expected(v, e.iso)) + '</p></div>' +
+      '<button type="button" class="icon-btn" data-act="rev-close" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg></button></div>' +
+      '<div class="dialog-body rev-form">';
+    if (e.info) h += '<p class="note">' + esc(e.info) + '</p>';
+    h += '<div class="f"><label for="rev-amt">Revenue</label><div class="money big"><span>KES</span><input id="rev-amt" type="text" inputmode="numeric" autocomplete="off" data-money value="' + grp(e.amount) + '"></div></div>';
+    if (canReason) {
+      h += '<p class="or"><span>or no revenue</span></p><div class="reasons" role="group" aria-label="No revenue reason">' +
+        R.REASONS.map(function (x) { return '<button type="button" class="reason" data-act="rev-reason" data-id="' + x + '" aria-pressed="' + (e.reason === x) + '">' + x + '</button>'; }).join('') + '</div>';
+      if (e.reason === 'Other') h += '<div class="f"><label for="rev-note">What happened</label><input id="rev-note" type="text" maxlength="80" value="' + esc(e.note) + '"></div>';
+    }
+    if (e.err) h += '<p class="err" role="alert">' + ALERT + '<span>' + esc(e.err) + '</span></p>';
+    h += '<div class="form-actions"><button type="button" class="btn-pill" data-act="rev-save">Save</button><button type="button" class="btn-pill outline" data-act="rev-close">Cancel</button></div></div>';
+    $('rev-dialog').innerHTML = h;
+  }
+  function closeRev() { cur.rev = null; if ($('rev-dialog').open) $('rev-dialog').close(); }
+  function saveRev() {
+    var e = cur.rev, a = num(e.amount);
+    if (!a && !e.reason) e.err = 'Enter the revenue or pick a reason.';
+    else if (e.reason === 'Other' && !e.note.trim()) e.err = 'Say what happened.';
+    else e.err = '';
+    if (e.err) { renderRevDialog(); return; }
+    var rec = a ? { amt: a } : (e.reason === 'Other' ? { reason: 'Other', note: e.note.trim() } : { reason: e.reason });
+    var old = R.get(e.reg, e.iso);
+    if (!old || JSON.stringify(old) !== JSON.stringify(rec)) R.save(e.reg, e.iso, rec, me());
+    var list = revVehicles(), from = list.map(function (v) { return v.reg; }).indexOf(e.reg), day = e.target;
+    var next = list.slice(from).concat(list.slice(0, from)).filter(function (v) { return R.status(v, day) === 'missing' && R.canEdit(user(), v, day); })[0];
+    render();
+    if (next) openRev(next.reg, day); else closeRev();
+  }
+
+  $('rev-dialog').addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-act]'); if (!b || !cur.rev) return;
+    if (b.dataset.act === 'rev-close') closeRev();
+    else if (b.dataset.act === 'rev-save') saveRev();
+    else if (b.dataset.act === 'rev-reason') {
+      cur.rev.reason = cur.rev.reason === b.dataset.id ? '' : b.dataset.id; cur.rev.amount = ''; cur.rev.err = '';
+      renderRevDialog();
+      var el = $(cur.rev.reason === 'Other' ? 'rev-note' : 'rev-amt'); if (el && cur.rev.reason === 'Other') el.focus();
+    }
+  });
+  $('rev-dialog').addEventListener('input', function (ev) {
+    var t = ev.target; if (!cur.rev) return;
+    if (t.id === 'rev-amt') {
+      t.value = grp(num(t.value)); cur.rev.amount = t.value; cur.rev.err = '';
+      if (cur.rev.reason) { var had = cur.rev.reason; cur.rev.reason = ''; if (had === 'Other') { renderRevDialog(); var el = $('rev-amt'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); } else document.querySelectorAll('#rev-dialog .reason').forEach(function (x) { x.setAttribute('aria-pressed', 'false'); }); }
+    }
+    if (t.id === 'rev-note') cur.rev.note = t.value;
+  });
+  $('rev-dialog').addEventListener('keydown', function (ev) { if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') { ev.preventDefault(); saveRev(); } });
+  $('rev-dialog').addEventListener('close', function () { cur.rev = null; });
+
+  /* ---------- Change log ---------- */
+  function viewLog() {
+    head('Change log', 'Who changed what in setup, people and access.');
+    return '<div class="table-card"><table class="list"><thead><tr><th>When</th><th>Who</th><th>What changed</th></tr></thead><tbody>' +
+      D.LOG.map(function (l) { return '<tr><td data-label="When" style="white-space:nowrap">' + esc(l.when) + '</td><td data-label="Who">' + esc(l.who) + '</td><td data-label="What changed">' + esc(l.what) + '</td></tr>'; }).join('') +
+      '</tbody></table></div>';
+  }
+
+  /* ---------- Setup events ---------- */
+  $('view-setup').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-act]');
+    if (b) {
+      var act = b.dataset.act, id = b.dataset.id, f = cur.form;
+      if (act !== 'revoke-person' && act !== 'stop-recurring') cur.confirm = null;
+      switch (act) {
+        case 'wk-prev': cur.week = R.addDays(cur.week, -7); break;
+        case 'wk-next': cur.week = R.addDays(cur.week, 7); break;
+        case 'rev-toggle': cur.revOpen[b.dataset.reg] = !cur.revOpen[b.dataset.reg]; break;
+        case 'rev-edit': openRev(b.dataset.reg, b.dataset.iso); return;
+        case 'new-person': newPerson(); cur.errors = {}; cur.permNote = ''; cur.view = 'person'; break;
+        case 'open-person': if (!canSeePerson(D.users[id])) return; loadPerson(id); cur.errors = {}; cur.permNote = ''; cur.view = 'person'; break;
+        case 'to-people': cur.form = null; cur.errors = {}; cur.view = 'people'; break;
+        case 'match-role': f.perms = personPerms(f.role); cur.permNote = ''; break;
+        case 'save-person': savePerson(); return;
+        case 'signout-person': D.users[f.key].trusted = false; D.log(me(), 'Signed ' + f.first + ' ' + f.last + ' out of every device'); toast(f.first + ' is signed out of every device.'); return;
+        case 'revoke-person':
+          if (cur.confirm !== 'revoke-person') { cur.confirm = 'revoke-person'; render(); return; }
+          cur.confirm = null;
+          Object.assign(D.users[f.key], { revoked: true, trusted: false }); D.log(me(), 'Removed access for ' + f.first + ' ' + f.last);
+          toast('Access removed for ' + f.first + ' ' + f.last + '.'); cur.view = 'people'; cur.form = null; fillViewAs(); break;
+        case 'restore-person': D.users[f.key].revoked = false; D.log(me(), 'Gave access back to ' + f.first + ' ' + f.last); toast('Access given back.'); fillViewAs(); break;
+        case 'add-co': addCompany(); return;
+        case 'rename-co': cur.renameCo = id; cur.coErr = ''; cur.coErrFor = null; break;
+        case 'cancel-rename': cur.renameCo = null; cur.coErr = ''; cur.coErrFor = null; break;
+        case 'save-rename':
+          var nm = $('rename-co').value.trim();
+          var dup = Object.keys(D.COMPANIES).some(function (c) { return c !== id && D.COMPANIES[c].toLowerCase() === nm.toLowerCase(); });
+          cur.coErr = !nm ? 'Enter the new name.' : dup ? 'Another company already has this name.' : '';
+          if (cur.coErr) { cur.coErrFor = 'rename'; break; }
+          if (nm !== D.COMPANIES[id]) { D.log(me(), 'Renamed ' + D.COMPANIES[id] + ' to ' + nm); D.COMPANIES[id] = nm; toast('Company renamed to ' + nm + '.'); }
+          cur.renameCo = null; cur.coErrFor = null; break;
+        case 'new-vehicle': cur.form = { key: null, reg: '', co: cur.vFilter !== 'all' ? cur.vFilter : '', weekly: '', from: D.TODAY_ISO }; cur.errors = {}; cur.view = 'vehicle'; break;
+        case 'open-vehicle':
+          var v = D.VEHICLES.filter(function (x) { return x.reg === id; })[0];
+          cur.form = { key: v.reg, co: v.co, weekly: v.weekly, from: v.from }; cur.errors = {}; cur.view = 'vehicle'; break;
+        case 'to-vehicles': cur.form = null; cur.errors = {}; cur.view = 'vehicles'; break;
+        case 'save-vehicle': saveVehicle(); return;
+        case 'new-recurring': newRecurring(); cur.errors = {}; cur.view = 'recurring-form'; break;
+        case 'new-recurring-for': if (!X.has(user(), 'commitments.view')) return; newRecurring(id); cur.errors = {}; cur.view = 'recurring-form'; break;
+        case 'open-recurring': if (!X.has(user(), 'commitments.view')) return; loadRecurring(id); cur.errors = {}; cur.view = 'recurring-form'; break;
+        case 'to-recurring': cur.form = null; cur.errors = {}; cur.view = 'recurring'; break;
+        case 'pick':
+          var p = PICKS[+id];
+          Object.assign(f, { name: p.name, type: p.type, category: p.category || f.category, freqKind: p.freq });
+          if (p.freq === 'weekly') f.weekDay = 6;
+          break;
+        case 'sel-co': myVehicles().forEach(function (x) { if (x.co === id && f.sel.indexOf(x.reg) < 0) f.sel.push(x.reg); }); if (f.manual) splitEvenly(); f.manual = false; break;
+        case 'sel-clear': f.sel = []; f.alloc = {}; f.manual = false; break;
+        case 'split': f.manual = false; break;
+        case 'save-recurring': saveRecurring(); return;
+        case 'stop-recurring':
+          var it = D.RECURRING.filter(function (x) { return x.id === f.id; })[0];
+          if (cur.confirm !== 'stop-recurring') { cur.confirm = 'stop-recurring'; render(); return; }
+          cur.confirm = null;
+          it.end = '2026-09-20'; D.log(me(), 'Stopped ' + it.name + ' from ' + D.fmtDate(D.TODAY_ISO)); toast(it.name + ' stopped.');
+          cur.form = null; cur.view = 'recurring'; break;
+        default: return;
+      }
+      render(); window.scrollTo(0, act.indexOf('open') === 0 || act.indexOf('new') === 0 || act.indexOf('to-') === 0 ? 0 : window.scrollY);
+      return;
+    }
+    var vp = e.target.closest('[data-vperiod]'); if (vp) { cur.vPeriod = vp.dataset.vperiod; render(); return; }
+    var rf = e.target.closest('[data-rfilter]'); if (rf) { cur.rFilter = rf.dataset.rfilter; render(); }
+  });
+
+  $('view-setup').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || !e.target.dataset || !e.target.dataset.enter) return;
+    e.preventDefault();
+    var b = document.querySelector('[data-act="' + e.target.dataset.enter + '"]' + (e.target.dataset.enterId ? '[data-id="' + e.target.dataset.enterId + '"]' : ''));
+    if (b) b.click();
+  });
+  $('view-setup').addEventListener('input', function (e) {
+    var t = e.target, f = cur.form;
+    if (t.hasAttribute('data-money')) { var n = num(t.value); t.value = grp(n); }
+    if (!f) return;
+    var map = { 'p-first': 'first', 'p-last': 'last', 'p-email': 'email', 'p-limit': 'limit', 'v-reg': 'reg', 'v-weekly': 'weekly', 'r-name': 'name', 'r-amount': 'amount' };
+    if (t.id === 'p-mobile') { var d = normalisePhone(t.value); t.value = d.length <= 4 ? d : d.length <= 7 ? d.slice(0, 4) + ' ' + d.slice(4) : fmtPhone(d); f.mobile = t.value; }
+    else if (map[t.id]) f[map[t.id]] = t.value;
+    if (t.id === 'v-reg') { t.value = t.value.toUpperCase(); f.reg = t.value; }
+    if (t.id === 'v-weekly' && $('v-weekly-hint')) $('v-weekly-hint').textContent = num(t.value) ? 'About ' + kes(num(t.value) / 7) + ' a day' : 'Revenue you expect in a Monday to Sunday week.';
+    if (t.dataset.alloc) { f.alloc[t.dataset.alloc] = num(t.value); f.manual = true; }
+    if (cur.view === 'recurring-form') liveRecurring();
+  });
+
+  $('view-setup').addEventListener('change', function (e) {
+    var t = e.target, f = cur.form;
+    if (t.id === 'v-filter') { cur.vFilter = t.value; render(); return; }
+    if (t.id === 'rev-co') { cur.revCo = t.value; render(); return; }
+    if (!f) return;
+    if (t.id === 'p-role') { f.role = t.value; f.perms = personPerms(t.value); if (t.value === 'owner') f.scopeMode = 'all'; cur.permNote = ''; render(); return; }
+    if (t.name === 'p-scope') { f.scopeMode = t.value; render(); return; }
+    if (t.dataset.scopeCo) { toggle(f.companies, t.dataset.scopeCo, t.checked); return; }
+    if (t.dataset.scopeVeh) { toggle(f.vehicles, t.dataset.scopeVeh, t.checked); return; }
+    if (t.dataset.perm) {
+      var before = f.perms.slice();
+      f.perms = t.checked ? D.withNeeds(f.perms, t.dataset.perm) : D.withoutDependents(f.perms, t.dataset.perm);
+      var plus = f.perms.filter(function (k) { return before.indexOf(k) < 0 && k !== t.dataset.perm; });
+      var minus = before.filter(function (k) { return f.perms.indexOf(k) < 0 && k !== t.dataset.perm; });
+      cur.permNote = plus.length ? 'Also ticked, because it is needed: ' + plus.map(permLabel).join(', ') + '.' :
+                     minus.length ? 'Also unticked, because it needs this: ' + minus.map(permLabel).join(', ') + '.' : '';
+      render(); return;
+    }
+    if (t.id === 'v-co') { f.co = t.value; return; }
+    if (t.id === 'v-from') { f.from = t.value; return; }
+    if (t.name === 'r-type') { f.type = t.value; render(); return; }
+    if (t.id === 'r-cat') { f.category = t.value; liveRecurring(); return; }
+    if (t.name === 'r-freq') { f.freqKind = t.value; render(); return; }
+    if (t.id === 'r-day') { f.weekDay = +t.value; liveRecurring(); return; }
+    if (t.id === 'r-date') { f.monthDate = t.value === 'last' ? 'last' : +t.value; liveRecurring(); return; }
+    if (t.id === 'r-start') { f.start = t.value; liveRecurring(); return; }
+    if (t.id === 'r-end') { f.end = t.value; liveRecurring(); return; }
+    if (t.id === 'r-noend') { f.noEnd = t.checked; if (!t.checked && !f.end) f.end = ''; render(); return; }
+    if (t.dataset.sel) { toggle(f.sel, t.dataset.sel, t.checked); if (!t.checked) delete f.alloc[t.dataset.sel]; render(); }
+  });
+  function toggle(arr, v, on) { var i = arr.indexOf(v); if (on && i < 0) arr.push(v); if (!on && i >= 0) arr.splice(i, 1); }
+
+  /* ---------- Shell events ---------- */
+  $('sidebar').addEventListener('click', function (e) {
+    var g = e.target.closest('[data-group]'), v = e.target.closest('[data-view]');
+    if (g) { cur.collapsed[g.dataset.group] = !cur.collapsed[g.dataset.group]; renderNav(); }
+    else if (v) { cur.form = null; setView(v.dataset.view); }
+  });
+  $('cards').addEventListener('click', function (e) { var b = e.target.closest('[data-go]'); if (b) setView(b.dataset.go); });
+  $('module-back').addEventListener('click', function () { setView('dashboard'); });
+  document.querySelectorAll('[data-period]').forEach(function (b) {
+    b.addEventListener('click', function () { cur.period = b.dataset.period; renderDash(); });
+  });
+  $('view-as').addEventListener('change', function (e) { open(e.target.value); });
+
+  function closeDrawer() { $('sidebar').classList.remove('open'); $('scrim').hidden = true; $('menu-btn').setAttribute('aria-expanded', 'false'); }
+  $('menu-btn').addEventListener('click', function () {
+    var o = !$('sidebar').classList.contains('open');
+    $('sidebar').classList.toggle('open', o); $('scrim').hidden = !o; this.setAttribute('aria-expanded', o ? 'true' : 'false');
+  });
+  $('scrim').addEventListener('click', closeDrawer);
+
+  function closeMenu() { $('user-menu').hidden = true; $('user-btn').setAttribute('aria-expanded', 'false'); }
+  $('user-btn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    var o = $('user-menu').hidden;
+    $('user-menu').hidden = !o; this.setAttribute('aria-expanded', o ? 'true' : 'false');
+  });
+  document.addEventListener('click', function (e) { if (!e.target.closest('.user-wrap')) closeMenu(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeMenu(); closeDrawer(); } });
+
+  $('open-access').addEventListener('click', function () {
+    closeMenu();
+    $('access-body').innerHTML = X.accessHTML(user());
+    $('access-dialog').showModal();
+  });
+  $('close-access').addEventListener('click', function () { $('access-dialog').close(); });
+  $('app-sign-out').addEventListener('click', function () {
+    closeMenu(); closeDrawer();
+    $('app').hidden = true;
+    document.querySelector('.page').hidden = false;
+    window.XSIGNIN.reset();
+  });
+
+  return { open: open };
+})();
+</script>
+</body>
+</html>

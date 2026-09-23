@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "XCode",
+    "slug": "xcode",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": { "bundleIdentifier": "com.xcode", "supportsTablet": true },
+    "android": { "package": "com.xcode" },
+    "plugins": ["expo-secure-store"]
+  }
+}

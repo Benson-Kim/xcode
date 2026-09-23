@@ -1,0 +1,75 @@
+# GitLab Duo Agent Platform flow execution configuration.
+#
+# SECURITY NOTE: this file is read from the DEFAULT BRANCH only, and its
+# setup_script runs with the triggering user's credentials in every future
+# flow. Review changes here like production code.
+#
+# Design rules for this file:
+#   - No privileged operations. Nothing runs as root, no packages are
+#     installed, and nothing is written outside /tmp.
+#   - No persistence. Nothing is appended to /etc/environment, /etc/profile.d,
+#     ~/.bashrc or ~/.profile, and nothing is symlinked into /usr/bin or
+#     /usr/local/bin. The sandbox is left exactly as it was found.
+#   - Pinned downloads and loud failures. The SDK version is exact and a
+#     failed step exits non-zero instead of being swallowed by `|| true`.
+#
+# AGENT NOTE: each setup_script entry runs in its own shell, so exported
+# variables do NOT carry across entries or into the flow. Invoke the
+# toolchain by absolute path:
+#     /tmp/bin/dotnet      <- use this (wrapper, sets invariant globalization)
+#     /tmp/dotnet/dotnet   <- raw SDK, only if you need the unwrapped binary
+#
+# GLOBALIZATION: the sandbox image may ship without ICU, which makes `dotnet`
+# abort with SIGABRT (exit 134). The previous version of this file installed
+# libicu with apt-get as root; the wrapper below sets
+# DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 instead, which needs no privileges.
+# The durable fix is <InvariantGlobalization>true</InvariantGlobalization> in
+# apps/api/Auth.Api.csproj and tests/api/Auth.Tests.csproj, after which the
+# wrapper can be dropped in favour of /tmp/dotnet/dotnet directly.
+#
+# DATABASE: Docker is not available in the flow sandbox, so SQL Server cannot
+# be started here. Automated tests use the EF Core SQLite provider; SQL Server
+# remains the runtime provider and is exercised by CI service containers.
+
+setup_script:
+  - mkdir -p /tmp/dotnet /tmp/bin
+
+  - curl -fsSL --proto '=https' --tlsv1.2 https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh || { echo "FATAL: could not fetch dotnet-install.sh"; exit 1; }
+
+  # Exact SDK version, not `--channel 10.0`, so every flow provisions an
+  # identical toolchain. Bump deliberately when the project targets a new SDK.
+  - bash /tmp/dotnet-install.sh --version 10.0.100 --install-dir /tmp/dotnet --no-path || { echo "FATAL: .NET SDK install failed"; exit 1; }
+
+  - |
+    cat > /tmp/bin/dotnet <<'SH'
+    #!/bin/sh
+    # Session-local wrapper. Keeps .NET env out of the sandbox's shell
+    # profile: the settings live here instead of in ~/.bashrc or
+    # /etc/environment, so nothing leaks into later sessions.
+    export DOTNET_ROOT=/tmp/dotnet
+    export DOTNET_CLI_TELEMETRY_OPTOUT=1
+    export DOTNET_NOLOGO=1
+    export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+    exec /tmp/dotnet/dotnet "$@"
+    SH
+    chmod +x /tmp/bin/dotnet
+
+  - /tmp/bin/dotnet --version || { echo "FATAL: dotnet is installed but not runnable"; exit 1; }
+
+  - node --version || { echo "FATAL: node is missing from the sandbox image"; exit 1; }
+
+network_policy:
+  include_recommended_allowed: true
+  # Exact hosts only. Wildcards such as *.microsoft.com and *.azureedge.net
+  # were removed: both are shared-tenant CDNs that any third party can publish
+  # behind, so they grant far more egress than this project needs.
+  allowed_domains:
+    # .NET SDK installer script and the CDN it redirects to.
+    - "dot.net"
+    - "builds.dotnet.microsoft.com"
+    - "ci.dot.net"
+    # NuGet restore for apps/api and tests/api.
+    - "api.nuget.org"
+    - "globalcdn.nuget.org"
+    # npm restore for apps/web, apps/mobile and packages/shared.
+    - "registry.npmjs.org"

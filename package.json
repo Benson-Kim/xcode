@@ -1,0 +1,20 @@
+{
+  "name": "xcode",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "apps/mobile",
+    "packages/shared"
+  ],
+  "scripts": {
+    "build:shared": "npm run build -w @xcode/shared",
+    "test:shared": "npm run test -w @xcode/shared",
+    "dev:web": "npm run dev -w @xcode/web",
+    "build:web": "npm run build -w @xcode/web",
+    "test:web": "npm run test -w @xcode/web",
+    "dev:mobile": "npm run start -w @xcode/mobile"
+  },
+  "engines": {
+    "node": "^22.13.0 || >=24"
+  }
+}
