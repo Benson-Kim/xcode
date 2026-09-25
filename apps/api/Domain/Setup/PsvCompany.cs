@@ -1,0 +1,51 @@
+
+namespace Auth.Domain.Setup;
+
+public sealed class PsvCompany : IOrganizationEntity
+{
+     Guid IOrganizationEntity.OrganizationId
+     {
+          get => OrganizationId;
+          set => throw new InvalidOperationException("Tenant cannot change.");
+     }
+     private PsvCompany() { }
+     public Guid Id { get; private set; } = Guid.NewGuid();
+     public Guid OrganizationId { get; private set; }
+     public string Name { get; private set; } = "";
+     public string NormalizedName { get; private set; } = "";
+     public PsvCompany(Guid organizationId, string name)
+     {
+          if (organizationId == Guid.Empty)
+               throw new ArgumentException("Organization is required.");
+          OrganizationId = organizationId;
+          Rename(name);
+     }
+     public bool Rename(string name)
+     {
+          var value = SetupValue.Name(name);
+          if (value == Name) return false;
+          Name = value;
+          NormalizedName = value.ToUpperInvariant();
+          return true;
+     }
+}
+
+public static class SetupValue
+{
+     public static string Name(string? value)
+     {
+          value = value?.Trim();
+          if (string.IsNullOrWhiteSpace(value) || value.Length > 160)
+               throw new ArgumentException("Name must contain 1-160 characters.");
+
+          return value;
+     }
+     public static decimal Money(decimal value)
+     {
+          if (value <= 0 || value > 999999999999.99m || decimal.Round(value, 2) != value)
+               throw new ArgumentException("Amount must be positive with at most two decimal places.");
+
+          return value;
+     }
+
+}

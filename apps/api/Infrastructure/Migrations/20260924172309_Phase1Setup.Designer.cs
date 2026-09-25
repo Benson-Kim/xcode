@@ -4,6 +4,7 @@ using Auth.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Auth.Api.Infrastructure.Migrations
 {
     [DbContext(typeof(AuthDb))]
-    partial class AuthDbModelSnapshot : ModelSnapshot
+    [Migration("20260924172309_Phase1Setup")]
+    partial class Phase1Setup
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -213,10 +216,6 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.Property<bool>("Active")
                         .HasColumnType("bit");
-
-                    b.Property<decimal?>("ApprovalLimit")
-                        .HasPrecision(14, 2)
-                        .HasColumnType("decimal(14,2)");
 
                     b.Property<string>("FirstName")
                         .IsRequired()
@@ -712,7 +711,7 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasIndex("OrganizationId", "CompanyId");
 
-                    b.ToTable("SetupCompanyScopes");
+                    b.ToTable("SetupCompanyScope");
                 });
 
             modelBuilder.Entity("Auth.Domain.Setup.SetupDataScope", b =>
@@ -728,7 +727,7 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasKey("OrganizationId", "UserId");
 
-                    b.ToTable("SetupDataScopes");
+                    b.ToTable("SetupDataScope");
                 });
 
             modelBuilder.Entity("Auth.Domain.Setup.SetupVehicleScope", b =>
@@ -746,7 +745,7 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasIndex("OrganizationId", "VehicleId");
 
-                    b.ToTable("SetupVehicleScopes");
+                    b.ToTable("SetupVehicleScope");
                 });
 
             modelBuilder.Entity("Auth.Domain.Setup.VehicleTarget", b =>

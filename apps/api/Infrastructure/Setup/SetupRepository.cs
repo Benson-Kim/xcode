@@ -1,0 +1,169 @@
+using System.Text.Json;
+using Auth.Application;
+using Auth.Application.Setup;
+using Auth.Domain.Setup;
+using Microsoft.EntityFrameworkCore;
+
+namespace Auth.Infrastructure.Setup;
+
+public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizations, IUnitOfWork unitOfWork, IClock clock) : ISetupRepository
+{
+    private IQueryable<FleetVehicle> VisibleVehicles(SetupActor actor) => db
+        .Set<FleetVehicle>()
+        .Where(v => actor.AllCompanies || actor.CompanyIds.Contains(v.CompanyId) || actor.VehicleIds.Contains(v.Id));
+
+    private IQueryable<PsvCompany> VisibleCompanies(SetupActor actor) => db
+        .Set<PsvCompany>()
+        .Where(c => actor.AllCompanies || actor.CompanyIds.Contains(c.Id) ||
+                VisibleVehicles(actor).Any(v => v.CompanyId == c.Id));
+
+    private IQueryable<RecurringItem> VisibleRecurring(SetupActor actor) => db
+        .Set<RecurringItem>()
+        .Where(i => actor.AllCompanies || i.Versions.Any(v => v.Allocations.Any(a => VisibleVehicles(actor).Any(vehicle => vehicle.Id == a.VehicleId))));
+
+    public async Task<Page<CompanyDto>> Companies(SetupActor actor, int page, int pageSize, CancellationToken ct)
+    {
+        var query = VisibleCompanies(actor).AsNoTracking();
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .OrderBy(c => c.Name)
+            .ThenBy(c => c.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(c => new CompanyDto(c.Id, c.Name, VisibleVehicles(actor).Count(v => v.CompanyId == c.Id))).ToListAsync(ct);
+        return new(items, page, pageSize, total);
+    }
+
+    public Task<PsvCompany?> Company(SetupActor actor, Guid id, CancellationToken ct) =>
+        VisibleCompanies(actor).SingleOrDefaultAsync(c => c.Id == id, ct);
+
+    public Task<bool> CompanyNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct)
+        => db
+        .Set<PsvCompany>()
+        .AnyAsync(c => c.OrganizationId == organizationId && c.NormalizedName == normalizedName && c.Id != except, ct);
+
+    public async Task<Page<VehicleDto>> Vehicles(SetupActor actor, int page, int pageSize, CancellationToken ct)
+    {
+        var query = VisibleVehicles(actor).AsNoTracking();
+        var total = await query.CountAsync(ct);
+        var rows = await query
+            .OrderBy(v => v.Registration)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(v => new
+            {
+                v.Id,
+                v.CompanyId,
+                CompanyName = db.Set<PsvCompany>().Where(c => c.Id == v.CompanyId).Select(c => c.Name).First(),
+                v.Registration,
+                v.JoinedOn,
+                Targets = v.Targets.OrderBy(t => t.Revision).Select(t => new TargetDto(t.EffectiveFrom, t.WeeklyAmount, t.Revision)).ToList()
+            })
+            .ToListAsync(ct);
+        return new(rows.Select(v => new VehicleDto(v.Id, v.CompanyId, v.CompanyName, v.Registration, v.JoinedOn,
+
+        v.Targets
+            .Where(t => t.EffectiveFrom <= (actor.Today < v.JoinedOn ? v.JoinedOn : actor.Today))
+            .OrderByDescending(t => t.EffectiveFrom)
+            .ThenByDescending(t => t.Revision)
+            .Select(t => t.WeeklyAmount)
+            .FirstOrDefault(), v.Targets))
+            .ToList(), page, pageSize, total);
+
+    }
+
+    public Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct) => VisibleVehicles(actor)
+        .Include(v => v.Targets)
+        .SingleOrDefaultAsync(v => v.Id == id, ct);
+
+    public Task<bool> RegistrationExists(Guid organizationId, string registration, CancellationToken ct)
+        => db
+        .Set<FleetVehicle>()
+        .AnyAsync(v => v.OrganizationId == organizationId && v.Registration == registration, ct);
+
+    public async Task<Page<RecurringDto>> Recurring(SetupActor actor, int page, int pageSize, CancellationToken ct)
+    {
+        var query = VisibleRecurring(actor).AsNoTracking();
+        var total = await query.CountAsync(ct);
+        var ids = await query.OrderBy(i => i.Id).Skip((page - 1) * pageSize).Take(pageSize).Select(i => i.Id).ToListAsync(ct);
+        var visibleIds = VisibleVehicles(actor).Select(v => v.Id);
+        // Project only the editor's allocation shares; never expose another scope's vehicles or amounts.
+        var rows = await db.Set<RecurringVersion>().AsNoTracking().Where(v => ids.Contains(v.ItemId) && !db
+            .Set<RecurringVersion>()
+            .Any(other => other.ItemId == v.ItemId && other.Revision > v.Revision))
+            .Select(v => new
+            {
+                v.ItemId,
+                v.Id,
+                v.Revision,
+                v.Name,
+                v.Kind,
+                v.Category,
+                v.Frequency,
+                v.Day,
+                v.LastDay,
+                v.Start,
+                v.End,
+                StoppedFrom = db.Set<RecurringItem>().Where(i => i.Id == v.ItemId).Select(i => i.StoppedFrom).First(),
+                Allocations = v.Allocations.Where(a => visibleIds.Contains(a.VehicleId)).Select(a => new VehicleShare(a.VehicleId, a.Amount)).ToList()
+            }).ToListAsync(ct);
+        return new(rows.Select(v => new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
+
+        v.Allocations.Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom, v.Allocations)).ToList(), page, pageSize, total);
+    }
+
+    public Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct)
+        => VisibleRecurring(actor).Include(i => i.Versions).ThenInclude(v => v.Allocations).SingleOrDefaultAsync(i => i.Id == id, ct);
+
+    public async Task<VehicleReport> Report(SetupActor actor, Guid vehicleId, DateOnly from, DateOnly through, CancellationToken ct)
+    {
+        // A bounded, deterministic projection of immutable schedule versions: due dates post automatically,
+        // without hard deletes or a request-path mutation. A materialized ledger can consume this same rule.
+        var items = await db.Set<RecurringItem>().AsNoTracking()
+            .Where(i => i.Versions.Any(v => v.Allocations.Any(a => a.VehicleId == vehicleId)))
+            .Include(i => i.Versions).ThenInclude(v => v.Allocations).ToListAsync(ct);
+        var joined = await VisibleVehicles(actor).Where(v => v.Id == vehicleId).Select(v => v.JoinedOn).SingleAsync(ct);
+        var postings = new List<PostingDto>();
+
+        for (var day = from; day <= through; day = day.AddDays(1))
+        {
+            if (day < joined) continue;
+            foreach (var item in items)
+            {
+                var version = item.DueOn(day);
+                var share = version?.Allocations.SingleOrDefault(a => a.VehicleId == vehicleId);
+                if (version is not null && share is not null) postings.Add(new(item.Id, version.Id, day, version.Name, version.Kind, version.Category, share.Amount));
+            }
+        }
+        return new(vehicleId, from, through, postings.Where(p => p.Kind == RecurringKind.Cost).Sum(p => p.Amount),
+            postings.Where(p => p.Kind == RecurringKind.Savings).Sum(p => p.Amount), postings);
+    }
+
+    public async Task<Page<OrganizationSettingsVersion>> History(SetupActor actor, int page, int pageSize, CancellationToken ct)
+    {
+        var vehicles = VisibleVehicles(actor).Select(v => v.Id);
+        var companies = VisibleCompanies(actor).Select(c => c.Id);
+        var completeItems = db.Set<RecurringItem>().Where(i => !i.Versions.Any(v => v.Allocations.Any(a => !vehicles.Contains(a.VehicleId)))).Select(i => i.Id);
+        var query = db.Set<OrganizationSettingsVersion>().AsNoTracking().Where(v => actor.AllCompanies ||
+            (v.Section == "companies" && companies.Contains(v.EntityId)) || (v.Section == "vehicles" && vehicles.Contains(v.EntityId)) ||
+            (v.Section == "recurring" && completeItems.Contains(v.EntityId)));
+        return new(await query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize).Take(pageSize)
+            .ToListAsync(ct), page, pageSize, await query.CountAsync(ct));
+    }
+
+    public void Add(PsvCompany company) => db.Set<PsvCompany>().Add(company);
+
+    public void Add(FleetVehicle vehicle) => db.Set<FleetVehicle>().Add(vehicle);
+
+    public void Add(RecurringItem item) => db.Set<RecurringItem>().Add(item);
+
+    public async Task RecordChange(SetupActor actor, string section, Guid entityId, object? before, object after, string reason, CancellationToken ct)
+    {
+        var organization = await organizations.Get(ct) ?? throw new UnauthorizedAccessException();
+        organization.SettingsChanged();
+        db.Set<OrganizationSettingsVersion>()
+            .Add(new(actor.OrganizationId, actor.UserId, organization.SettingsVersion, section, entityId,
+            clock.UtcNow, JsonSerializer.Serialize(before), JsonSerializer.Serialize(after), reason, actor.CorrelationId));
+        unitOfWork.Audit("setup." + section, entityId.ToString(), before, after);
+    }
+}

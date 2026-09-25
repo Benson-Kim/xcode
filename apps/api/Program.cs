@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
+DotNetEnv.Env.NoClobber().TraversePath().Load();
 var builder = WebApplication.CreateBuilder(args);
 var options = builder.Configuration.GetSection("Auth").Get<AuthOptions>() ?? new();
 if (string.IsNullOrEmpty(options.SigningKey) && (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")))
@@ -20,7 +21,15 @@ builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<IClock, Auth.Infrastructure.SystemClock>();
 builder.Services.AddSingleton<TokenIssuer>();
 builder.Services.AddSingleton<AuthGate>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IOrganizationContext, organizationContext>();
+builder.Services.AddScoped<IOrganizationRepository, OrganizationRepository>();
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+builder.Services.AddSingleton<EffectiveSettingsResolver>();
+builder.Services.AddSingleton<EffectivePermissionResolver>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddSetup();
+builder.Services.AddSingleton<SettingsSectionRegistry>();
 if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")) builder.Services.AddScoped<IEmailSender, LogEmailSender>();
 else builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddDbContext<AuthDb>(o => o.UseSqlServer(builder.Configuration.GetConnectionString("Auth")));
@@ -69,6 +78,8 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapAuth();
+app.MapSetup();
+app.MapOrganization();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 if (!app.Environment.IsEnvironment("Testing"))
 {
