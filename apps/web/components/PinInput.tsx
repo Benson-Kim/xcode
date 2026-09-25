@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { PIN_HELP, validatePin } from "@xcode/shared";
 
 export function PinInput({
@@ -11,21 +12,36 @@ export function PinInput({
   onChange: (value: string) => void;
   newPin?: boolean;
 }) {
+  const [visible, setVisible] = useState(false);
   const error = newPin && value.length > 0 ? validatePin(value) : null;
 
   return (
-    <div className="space-y-2">
-      <label htmlFor="pin" className="block font-medium">
+    <div className="field">
+      <div className="field-head">
+        <label htmlFor="pin">
         {newPin ? "New PIN" : "PIN"}
-      </label>
+        </label>
+        {!newPin && (
+          <button
+            type="button"
+            className="link-button"
+            aria-controls="pin"
+            aria-pressed={visible}
+            onClick={() => setVisible((current) => !current)}
+          >
+            {visible ? "Hide" : "Show"}
+          </button>
+        )}
+      </div>
       <input
+        className="input digits"
         id="pin"
         name="pin"
-        type="password"
+        type={visible ? "text" : "password"}
         inputMode="numeric"
-        pattern="[0-9]{4,8}"
+        pattern="[0-9]{4}"
         minLength={4}
-        maxLength={8}
+        maxLength={4}
         autoComplete={newPin ? "new-password" : "current-password"}
         required
         value={value}
@@ -35,14 +51,7 @@ export function PinInput({
         aria-invalid={Boolean(error)}
         aria-describedby={newPin ? "pin-help" : undefined}
       />
-      {newPin && (
-        <p
-          id="pin-help"
-          className={error ? "text-sm text-red-700" : "text-sm text-slate-600"}
-        >
-          {PIN_HELP}
-        </p>
-      )}
+      {newPin && error && <p id="pin-help" className="field-error">{PIN_HELP}</p>}
     </div>
   );
 }

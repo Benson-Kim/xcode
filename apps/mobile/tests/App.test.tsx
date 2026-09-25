@@ -22,7 +22,7 @@ jest.mock("../src/storage", () => ({
 const tokens = {
   accessToken: "access",
   refreshToken: "refresh",
-  email: "person@example.com",
+  phoneNumber: "+254712345678",
 };
 beforeEach(() => {
   jest.mocked(authApi).mockReset();
@@ -40,7 +40,7 @@ it("AUTH-15 restored sessions start locked and unlock through the API without em
   await fireEvent.press(screen.getByText("Unlock"));
   await screen.findByText("You’re signed in");
   expect(authApi).toHaveBeenCalledWith("unlock", {
-    email: tokens.email,
+    phoneNumber: tokens.phoneNumber,
     pin: "5826",
     code: "",
   });
@@ -65,7 +65,7 @@ it("AUTH-13 revoked or unknown phones must verify before getting a session", asy
   await fireEvent.press(screen.getByText("Verify and continue"));
   await screen.findByText("You’re signed in");
   expect(authApi).toHaveBeenLastCalledWith("verify-device", {
-    email: tokens.email,
+    phoneNumber: tokens.phoneNumber,
     pin: "",
     code: "123456",
   });
@@ -99,7 +99,10 @@ it.each([
     await render(<App />);
     await waitFor(() => expect(screen.getByText(label)).not.toBeDisabled());
     await fireEvent.press(screen.getByText(label));
-    await fireEvent.changeText(screen.getByLabelText("Email"), tokens.email);
+    await fireEvent.changeText(
+      screen.getByLabelText("Mobile number"),
+      tokens.phoneNumber,
+    );
     await fireEvent.press(screen.getByText("Send verification code"));
     const pin = await screen.findByLabelText("New PIN");
     await fireEvent.changeText(pin, "4321");
@@ -112,7 +115,7 @@ it.each([
     await fireEvent.press(screen.getByText("Verify and continue"));
     await screen.findByText("You’re signed in");
     expect(authApi).toHaveBeenLastCalledWith(`${operation}/complete`, {
-      email: tokens.email,
+      phoneNumber: tokens.phoneNumber,
       pin: "6942",
       code: "123456",
     });

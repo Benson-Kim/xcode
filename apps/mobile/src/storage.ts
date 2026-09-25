@@ -9,7 +9,7 @@ const sessionKey = "xcode.session";
 const deviceKey = "xcode.device";
 
 export interface StoredSession extends SessionTokens {
-  email: string;
+  phoneNumber: string;
 }
 
 let devicePromise: Promise<string> | undefined;
@@ -30,7 +30,7 @@ export function getDeviceId(): Promise<string> {
 }
 
 export async function saveSession(session: StoredSession): Promise<void> {
-  // No PIN is persisted. Keychain/Keystore stores only session tokens and the email.
+  // No PIN is persisted. Keychain/Keystore stores only session tokens and the phone number.
   await SecureStore.setItemAsync(sessionKey, JSON.stringify(session), options);
 }
 
@@ -40,7 +40,7 @@ export async function loadSession(): Promise<StoredSession | null> {
   try {
     const session = JSON.parse(value) as StoredSession;
     if (
-      typeof session.email === "string" &&
+      typeof session.phoneNumber === "string" &&
       typeof session.accessToken === "string" &&
       typeof session.refreshToken === "string"
     )

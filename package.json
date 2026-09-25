@@ -15,6 +15,6 @@
     "dev:mobile": "npm run start -w @xcode/mobile"
   },
   "engines": {
-    "node": "^22.13.0 || >=24"
+    "node": ">=22.23.3"
   }
 }

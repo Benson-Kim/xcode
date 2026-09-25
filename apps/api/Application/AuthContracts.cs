@@ -23,7 +23,8 @@ public sealed record AuthRequest(
     string RefreshToken = ""
 );
 
-public sealed record AuthResponse(string Status, string? AccessToken = null, string? RefreshToken = null, int? RetryAfterSeconds = null);
+public sealed record AuthResponse(string Status, string? AccessToken = null, string? RefreshToken = null, int? RetryAfterSeconds = null, string? DevelopmentCode = null, string? MaskedEmail = null);
+public sealed record AuthSessionResponse(Guid UserId, string FirstName, string LastName, string Role, IReadOnlyList<string> Permissions);
 public sealed record AuthResult(int HttpStatus, AuthResponse Body)
 {
     public static AuthResult Failure() => new(401, new("authentication_failed"));

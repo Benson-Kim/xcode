@@ -16,7 +16,7 @@ public sealed class AuthTests : IDisposable
     private readonly HttpClient client;
     private const string Address = "person@example.com";
     public AuthTests() => client = app.CreateClient();
-    private AuthRequest Request(string pin = "5826", string device = "phone", string code = "", string refresh = "") => new(Address, pin, device, code, refresh);
+    private AuthRequest Request(string phoneNumber = "+254712345678", string pin = "5826", string device = "phone", string code = "", string refresh = "") => new(PhoneNumber: phoneNumber, Pin: pin, DeviceId: device, Code: code, RefreshToken: refresh);
     private async Task<(HttpStatusCode Status, AuthResponse Body)> Post(string path, AuthRequest? request = null)
     {
         var response = await client.PostAsJsonAsync("/auth/" + path, request ?? Request());
@@ -48,7 +48,7 @@ public sealed class AuthTests : IDisposable
     {
         await app.Seed();
         var wrong = await Post("sign-in", Request("9998"));
-        var unknown = await Post("sign-in", Request("9998") with { Email = "missing@example.com" });
+        var unknown = await Post("sign-in", Request("9998") with { PhoneNumber = "+254700000000" });
         Assert.Equal(unknown, wrong);
         await app.WithDb(async db => Assert.Equal(1, (await db.Users.SingleAsync()).FailedAttempts));
     }
@@ -218,7 +218,7 @@ public sealed class AuthTests : IDisposable
     {
         await app.Seed();
         var known = await Post("pin-reset/request");
-        var unknown = await Post("pin-reset/request", Request() with { Email = "missing@example.com" });
+        var unknown = await Post("pin-reset/request", Request() with { PhoneNumber = "+254700000000" });
         Assert.Equal(known, unknown);
         await Post("pin-reset/request");
         Assert.Equal(1, app.Email.Count);

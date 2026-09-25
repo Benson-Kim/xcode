@@ -32,10 +32,16 @@ public static class PinHasher
 public sealed class TokenIssuer(AuthOptions options, IClock clock)
 {
     public string Hash(string value) => Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(options.SigningKey), Encoding.UTF8.GetBytes(value)));
-    public string Access(User user, string deviceId)
+    public string Access(User user, string deviceId, Guid organizationId, string role, string firstName, string lastName, IEnumerable<string> permissions)
     {
+        var claims = new List<Claim>
+        {
+            new("sub", user.Id.ToString()), new("device", deviceId), new("version", user.SecurityVersion.ToString()),
+            new("org", organizationId.ToString()), new("role", role), new("first_name", firstName), new("last_name", lastName)
+        };
+        claims.AddRange(permissions.Select(permission => new Claim("permission", permission)));
         var jwt = new JwtSecurityToken(options.Issuer, options.Audience,
-            [new Claim("sub", user.Id.ToString()), new Claim("device", deviceId), new Claim("version", user.SecurityVersion.ToString())],
+            claims,
             clock.UtcNow.UtcDateTime, clock.UtcNow.AddMinutes(10).UtcDateTime,
             new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(options.SigningKey)), SecurityAlgorithms.HmacSha256));
         return new JwtSecurityTokenHandler().WriteToken(jwt);

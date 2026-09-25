@@ -10,6 +10,10 @@ import { authApi } from "../lib/api";
 vi.mock("../lib/api", () => ({ authApi: vi.fn() }));
 beforeEach(() => {
   vi.mocked(authApi).mockReset();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ firstName: "Test", lastName: "User", role: "Owner", permissions: [] }),
+  }));
 });
 
 it("PIN input validates repeated and sequential new PINs without rejecting existing sign-in PINs", () => {
@@ -33,8 +37,8 @@ it("PIN input validates repeated and sequential new PINs without rejecting exist
 });
 
 function fillSignIn() {
-  fireEvent.change(screen.getByLabelText("Email"), {
-    target: { value: "person@example.com" },
+  fireEvent.change(screen.getByLabelText("Mobile number"), {
+    target: { value: "+254712345678" },
   });
   fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "5826" } });
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
@@ -47,17 +51,17 @@ it("AUTH-13 sends new devices through verification before showing a session", as
   render(<AuthPanel />);
   fillSignIn();
   expect(
-    await screen.findByRole("heading", { name: "Verify this device" }),
+    await screen.findByRole("heading", { name: "Check your email" }),
   ).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Email verification code"), {
+  fireEvent.change(screen.getByLabelText("6 digit code"), {
     target: { value: "123456" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Verify and continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm code" }));
   expect(
-    await screen.findByRole("heading", { name: "You’re signed in" }),
+    await screen.findByRole("heading", { name: "Dashboard" }),
   ).toBeInTheDocument();
   expect(authApi).toHaveBeenLastCalledWith("verify-device", {
-    email: "person@example.com",
+    phoneNumber: "+254712345678",
     pin: "",
     code: "123456",
   });
@@ -78,35 +82,39 @@ it("AUTH-03 displays remaining pause time and keeps PIN reset available", async 
 });
 
 it.each([
-  ["First time? Set up PIN", "setup-pin"],
+  ["First time here?", "setup-pin"],
   ["Forgot PIN?", "pin-reset"],
 ])("%s requires code before submitting a new PIN", async (label, operation) => {
   vi.mocked(authApi)
     .mockResolvedValueOnce({ status: "check_email" })
+    .mockResolvedValueOnce({ status: "code_verified" })
     .mockResolvedValueOnce({ status: "authenticated" });
 
   render(<AuthPanel />);
   fireEvent.click(screen.getByRole("button", { name: label }));
-  fireEvent.change(screen.getByLabelText("Email"), {
-    target: { value: "person@example.com" },
+  fireEvent.change(screen.getByLabelText("Mobile number"), {
+    target: { value: "+254712345678" },
   });
   fireEvent.click(
     screen.getByRole("button", { name: "Send verification code" }),
   );
-  const pin = await screen.findByLabelText("New PIN");
-  fireEvent.change(pin, { target: { value: "1111" } });
-  fireEvent.change(screen.getByLabelText("Email verification code"), {
+  expect(await screen.findByLabelText("6 digit code")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("6 digit code"), {
     target: { value: "123456" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Verify and continue" }));
-  await waitFor(() => expect(authApi).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm code" }));
+  await waitFor(() => expect(authApi).toHaveBeenCalledTimes(2));
+  const pin = await screen.findByLabelText("New PIN");
   fireEvent.change(pin, { target: { value: "6942" } });
-  fireEvent.click(screen.getByRole("button", { name: "Verify and continue" }));
+  fireEvent.change(screen.getByLabelText("Type it again"), {
+    target: { value: "6942" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save PIN" }));
   expect(
-    await screen.findByRole("heading", { name: "You’re signed in" }),
+    await screen.findByRole("heading", { name: "Dashboard" }),
   ).toBeInTheDocument();
   expect(authApi).toHaveBeenLastCalledWith(`${operation}/complete`, {
-    email: "person@example.com",
+    phoneNumber: "+254712345678",
     pin: "6942",
     code: "123456",
   });

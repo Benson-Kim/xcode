@@ -49,7 +49,7 @@ public sealed class AuthFactory : WebApplicationFactory<Program>
         await WithDb(async db =>
         {
             await db.Database.EnsureCreatedAsync();
-            var user = new User { Email = "person@example.com", PinHash = withPin ? PinHasher.Hash("5826") : null };
+            var user = new User { Email = "person@example.com", PhoneNumber = "+254712345678", PinHash = withPin ? PinHasher.Hash("5826") : null };
             db.Users.Add(user);
             if (trusted) db.TrustedDevices.Add(new() { UserId = user.Id, DeviceId = "phone" });
             await db.SaveChangesAsync();

@@ -16,6 +16,7 @@ export type AuthStatus =
   | "authenticated"
   | "verification_required"
   | "check_email"
+  | "code_verified"
   | "paused"
   | "authentication_failed"
   | "invalid_pin"
@@ -37,6 +38,8 @@ export interface AuthResponse {
   accessToken?: string | null;
   refreshToken?: string | null;
   retryAfterSeconds?: number | null;
+  developmentCode?: string | null;
+  maskedEmail?: string | null;
 }
 
 export interface SessionTokens {
@@ -50,6 +53,7 @@ export type AuthOperation =
   | "setup-pin/request"
   | "setup-pin/complete"
   | "pin-reset/request"
+  | "pin-reset/verify"
   | "pin-reset/complete"
   | "unlock"
   | "refresh"

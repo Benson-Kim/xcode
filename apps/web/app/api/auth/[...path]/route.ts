@@ -6,13 +6,27 @@ const allowed = new Set([
   "sign-in",
   "verify-device",
   "setup-pin/request",
+  "setup-pin/verify",
   "setup-pin/complete",
   "pin-reset/request",
+  "pin-reset/verify",
   "pin-reset/complete",
   "refresh",
   "sign-out",
   "devices/current/revoke",
 ]);
+
+export async function GET(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+  const origin = request.headers.get("origin");
+  const expectedOrigin = request.nextUrl.origin;
+  if (origin && !sameOrigin(origin, request.headers.get("host"), expectedOrigin)) return NextResponse.json({ status: "invalid_request" }, { status: 403 });
+  const { path } = await context.params;
+  if (path.join("/") !== "session") return NextResponse.json({ status: "invalid_request" }, { status: 404 });
+  const access = (await cookies()).get("access")?.value;
+  if (!access) return NextResponse.json({ status: "authentication_failed" }, { status: 401 });
+  const response = await fetch(`${process.env.API_URL || "http://localhost:5000"}/auth/session`, { headers: { Authorization: `Bearer ${access}` }, cache: "no-store" });
+  return new NextResponse(await response.text(), { status: response.status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+}
 
 const cookieOptions = {
   httpOnly: true,
@@ -25,7 +39,9 @@ export async function POST(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {
-  if (request.headers.get("origin") !== request.nextUrl.origin)
+  const origin = request.headers.get("origin");
+  const expectedOrigin = request.nextUrl.origin;
+  if (origin && !sameOrigin(origin, request.headers.get("host"), expectedOrigin))
     return NextResponse.json(
       {
         status: "invalid_request",
@@ -74,6 +90,7 @@ export async function POST(
             : {}),
         },
         body: JSON.stringify({
+          phoneNumber: body.phoneNumber || "",
           email: body.email || "",
           pin: body.pin || "",
           code: body.code || "",
@@ -87,7 +104,7 @@ export async function POST(
       .json()
       .catch(() => ({ status: "authentication_failed" }))) as AuthResponse;
     const output = NextResponse.json(
-      { status: result.status, retryAfterSeconds: result.retryAfterSeconds },
+      { status: result.status, retryAfterSeconds: result.retryAfterSeconds, developmentCode: result.developmentCode, maskedEmail: result.maskedEmail },
       { status: response.status },
     );
     output.headers.set("Cache-Control", "no-store");
@@ -119,5 +136,15 @@ export async function POST(
       { status: "authentication_failed" },
       { status: 503 },
     );
+  }
+}
+
+function sameOrigin(origin: string, host: string | null, expectedOrigin: string) {
+  try {
+    const parsed = new URL(origin);
+    const expected = new URL(expectedOrigin);
+    return parsed.protocol === expected.protocol && parsed.host === (host || expected.host);
+  } catch {
+    return false;
   }
 }
