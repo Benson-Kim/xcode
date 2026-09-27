@@ -35,7 +35,8 @@ public abstract class OrganizationUseCase<TRequest, TResult>(IOrganizationContex
                Validate(request);
                var member = await repository.Membership(context.ActorId, ct);
                var permissions = await repository.Permissions(context.ActorId, ct);
-               if (member is not { Active: true } || !permissions.Contains(RequiredPermission))
+               // An empty RequiredPermission means any active member of the organization.
+               if (member is not { Active: true } || (RequiredPermission.Length > 0 && !permissions.Contains(RequiredPermission)))
                     throw new UnauthorizedAccessException();
                return await Execute(request, ct);
           }, ct);

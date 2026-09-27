@@ -19,9 +19,9 @@ public static class SetupEndpoints
         return services;
     }
 
-    public static void MapSetup(this WebApplication app)
+    // Every /setup route group maps domain failures to client responses instead of the global 500 handler.
+    public static RouteGroupBuilder WithSetupErrors(this RouteGroupBuilder group)
     {
-        var group = app.MapGroup("/setup").RequireAuthorization().WithTags("Setup");
         group.AddEndpointFilter(async (context, next) =>
         {
             try { return await next(context); }
@@ -31,10 +31,18 @@ public static class SetupEndpoints
             catch (DbUpdateConcurrencyException) { return Results.Problem(statusCode: 409, title: "Settings changed. Reload before saving."); }
             catch (DbUpdateException) { return Results.Problem(statusCode: 409, title: "A conflicting record exists. Reload before saving."); }
         });
+        return group;
+    }
+
+    public static void MapSetup(this WebApplication app)
+    {
+        var group = app.MapGroup("/setup").RequireAuthorization().WithTags("Setup").WithSetupErrors();
         group.MapGet("/access/catalog", (AccessUseCases useCases, CancellationToken ct) => useCases.Catalog(ct))
             .Produces<IReadOnlyList<PermissionGroup>>().WithName("GetAccessCatalog");
         group.MapGet("/access/roles", (AccessUseCases useCases, CancellationToken ct) => useCases.Roles(ct))
             .Produces<IReadOnlyList<AccessRole>>().WithName("ListAccessRoles");
+        group.MapGet("/access/scope-options", (AccessUseCases useCases, CancellationToken ct) => useCases.ScopeOptions(ct))
+            .Produces<ScopeOptions>().WithName("GetAccessScopeOptions");
         group.MapGet("/people", (AccessUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
             .Produces<Page<PersonDto>>().WithName("ListPeople");
         group.MapGet("/people/{id:guid}", (Guid id, AccessUseCases useCases, CancellationToken ct) => useCases.Get(id, ct))
@@ -61,10 +69,12 @@ public static class SetupEndpoints
             .WithName("CreateSetupVehicle");
         group.MapPut("/vehicles/{id:guid}", async (Guid id, SaveVehicle input, VehicleUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Save(id, input, ct) }))
             .WithName("UpdateSetupVehicle");
-        group.MapGet("/vehicles/{id:guid}/report", (Guid id, DateOnly from, DateOnly through, VehicleUseCases useCases, CancellationToken ct) => useCases.Report(id, from, through, ct))
+        group.MapGet("/vehicles/{id:guid}/report", (Guid id, VehicleUseCases useCases, CancellationToken ct, DateOnly? from = null, DateOnly? through = null, string? period = null) => useCases.Report(id, from, through, period, ct))
             .Produces<VehicleReport>().WithName("GetSetupVehicleReport");
         group.MapGet("/recurring", (RecurringUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
             .Produces<Page<RecurringDto>>().WithName("ListSetupRecurring");
+        group.MapGet("/recurring/vehicle-options", (RecurringUseCases useCases, CancellationToken ct) => useCases.VehicleOptions(ct))
+            .Produces<IReadOnlyList<VehicleOption>>().WithName("ListRecurringVehicleOptions");
         group.MapPost("/recurring", async (SaveRecurring input, RecurringUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Save(null, input, ct) }))
             .WithName("CreateSetupRecurring");
         group.MapPut("/recurring/{id:guid}", async (Guid id, SaveRecurring input, RecurringUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Save(id, input, ct) }))
@@ -73,6 +83,6 @@ public static class SetupEndpoints
             .WithName("StopSetupRecurring");
         group.MapGet("/history", (ISetupExecution execution, ISetupRepository repository, CancellationToken ct, int page = 1, int pageSize = 25) =>
             execution.Read("audit.view", actor => { SetupPagination.Validate(page, pageSize); return repository.History(actor, page, pageSize, ct); }, ct))
-            .Produces<Page<OrganizationSettingsVersion>>().WithName("ListSetupHistory");
+            .Produces<Page<HistoryEntry>>().WithName("ListSetupHistory");
     }
 }

@@ -25,10 +25,16 @@ public sealed class RecurringItem : IOrganizationEntity
      {
           if (StoppedFrom is not null)
                throw new ArgumentException("Stopped items cannot be edited.");
-          var first = Versions.Min(v => v.Start);
-          if (first < today && definition.Start != first)
+          // "Running" follows the current version's start, not the earliest start ever recorded, so a postponed item
+          // is still editable until its new start date.
+          var current = Versions.MaxBy(v => v.Revision)!;
+          var running = current.Start < today;
+          if (running && definition.Start != current.Start)
                throw new ArgumentException("An already running item's start date cannot change.");
-          Versions.Add(new(OrganizationId, Id, Versions.Max(v => v.Revision) + 1, first < today ? today : definition.Start, definition));
+          // A pending item's new version takes over from the edit date (or its earlier, backdated start), so
+          // postponing never leaves the superseded version posting in between.
+          var effectiveFrom = running || definition.Start >= today ? today : definition.Start;
+          Versions.Add(new(OrganizationId, Id, current.Revision + 1, effectiveFrom, definition));
      }
      public bool Stop(DateOnly today)
      {

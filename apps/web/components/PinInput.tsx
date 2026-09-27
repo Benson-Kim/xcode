@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { PIN_HELP, validatePin } from "@xcode/shared";
+import { AuthField, AuthFieldError, AuthInput } from "./authControls";
+import { LinkButton } from "./ui";
 
 export function PinInput({
   value,
@@ -16,42 +18,35 @@ export function PinInput({
   const error = newPin && value.length > 0 ? validatePin(value) : null;
 
   return (
-    <div className="field">
-      <div className="field-head">
-        <label htmlFor="pin">
-        {newPin ? "New PIN" : "PIN"}
-        </label>
-        {!newPin && (
-          <button
-            type="button"
-            className="link-button"
-            aria-controls="pin"
-            aria-pressed={visible}
-            onClick={() => setVisible((current) => !current)}
-          >
+    <AuthField
+      label={newPin ? "New PIN" : "PIN"}
+      htmlFor="pin"
+      action={
+        !newPin && (
+          <LinkButton align="end" compact aria-controls="pin" aria-pressed={visible} onClick={() => setVisible((current) => !current)}>
             {visible ? "Hide" : "Show"}
-          </button>
-        )}
-      </div>
-      <input
-        className="input digits"
+          </LinkButton>
+        )
+      }
+    >
+      <AuthInput
+        digits
         id="pin"
         name="pin"
         type={visible ? "text" : "password"}
         inputMode="numeric"
-        pattern="[0-9]{4}"
+        pattern="[0-9]{4,8}"
         minLength={4}
-        maxLength={4}
+        maxLength={8}
+        placeholder="4 to 8 numbers"
         autoComplete={newPin ? "new-password" : "current-password"}
         required
         value={value}
-        onChange={(event) =>
-          onChange(event.target.value.replace(/[^0-9]/g, ""))
-        }
+        onChange={(event) => onChange(event.target.value.replace(/[^0-9]/g, ""))}
         aria-invalid={Boolean(error)}
-        aria-describedby={newPin ? "pin-help" : undefined}
+        aria-describedby={error ? "pin-help" : undefined}
       />
-      {newPin && error && <p id="pin-help" className="field-error">{PIN_HELP}</p>}
-    </div>
+      {error && <AuthFieldError id="pin-help">{PIN_HELP}</AuthFieldError>}
+    </AuthField>
   );
 }

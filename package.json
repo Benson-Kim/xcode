@@ -12,9 +12,15 @@
     "dev:web": "npm run dev -w @xcode/web",
     "build:web": "npm run build -w @xcode/web",
     "test:web": "npm run test -w @xcode/web",
-    "dev:mobile": "npm run start -w @xcode/mobile"
+    "dev:mobile": "npm run start -w @xcode/mobile",
+    "lint": "eslint ."
   },
   "engines": {
     "node": ">=22.23.3"
+  },
+  "devDependencies": {
+    "eslint": "^10.11.0",
+    "eslint-config-next": "^16.3.6",
+    "typescript-eslint": "^8.70.1"
   }
 }

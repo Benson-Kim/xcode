@@ -10,6 +10,9 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
         return repository.Recurring(actor, page, pageSize, ct);
     }, ct);
 
+    public Task<IReadOnlyList<VehicleOption>> VehicleOptions(CancellationToken ct) =>
+        execution.Read("commitments.manage", actor => repository.VehicleOptions(actor, ct), ct);
+
     public Task<Guid> Save(Guid? id, SaveRecurring input, CancellationToken ct) => execution.Write("commitments.manage", async actor =>
     {
         var reason = SetupPagination.Reason(input.Reason);

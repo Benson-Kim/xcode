@@ -8,7 +8,7 @@ public static class PhoneNumber
      {
           var digits = Regex.Replace(value ?? "", @"[\s()+-]", "");
           if (Regex.IsMatch(digits, @"^0[17][0-9]{8}$")) return "+254" + digits[1..];
-          if (Regex.IsMatch(digits, @"^254[17][0-9]{8}$")) return "+" + digits[1..];
+          if (Regex.IsMatch(digits, @"^254[17][0-9]{8}$")) return "+" + digits;
           return "";
      }
 }

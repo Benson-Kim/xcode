@@ -17,4 +17,9 @@ export default [
     ...config,
     files: ["apps/web/**/*.{ts,tsx,js,mjs}"],
   })),
+  {
+    // eslint-plugin-react's "detect" calls context.getFilename(), which ESLint 10 removed; keep in step with apps/web.
+    files: ["apps/web/**/*.{ts,tsx,js,mjs}"],
+    settings: { react: { version: "19.3" }, next: { rootDir: "apps/web" } },
+  },
 ];

@@ -847,7 +847,8 @@ namespace Auth.Api.Infrastructure.Migrations
                         .IsUnique();
 
                     b.HasIndex("PhoneNumber")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[PhoneNumber] <> ''");
 
                     b.ToTable("Users");
                 });

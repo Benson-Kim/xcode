@@ -31,6 +31,8 @@ export interface AuthRequest {
   deviceId?: string;
   code?: string;
   refreshToken?: string;
+  // Web only: whether the browser keeps this device trusted after it closes.
+  rememberDevice?: boolean;
 }
 
 export interface AuthResponse {
@@ -40,6 +42,14 @@ export interface AuthResponse {
   retryAfterSeconds?: number | null;
   developmentCode?: string | null;
   maskedEmail?: string | null;
+  // With invalid_pin: the shortest new PIN the organization accepts.
+  minimumPinLength?: number | null;
+}
+
+export function pinHelp(minimumLength = 4): string {
+  return minimumLength > 4
+    ? `Use ${minimumLength}-8 digits, not all the same or an ascending/descending sequence.`
+    : PIN_HELP;
 }
 
 export interface SessionTokens {
@@ -51,6 +61,7 @@ export type AuthOperation =
   | "sign-in"
   | "verify-device"
   | "setup-pin/request"
+  | "setup-pin/verify"
   | "setup-pin/complete"
   | "pin-reset/request"
   | "pin-reset/verify"
@@ -68,7 +79,7 @@ export class AuthError extends Error {
       response.status === "paused"
         ? "Sign-in is paused. Try again when the timer ends, or reset your PIN."
         : response.status === "invalid_pin"
-          ? PIN_HELP
+          ? pinHelp(response.minimumPinLength ?? undefined)
           : httpStatus === 429
             ? "Too many requests. Please wait a minute."
             : "Authentication could not be completed. Check your details and try again.",

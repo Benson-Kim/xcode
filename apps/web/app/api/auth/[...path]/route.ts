@@ -35,6 +35,23 @@ const cookieOptions = {
   path: "/",
 };
 
+// Calls that mark this browser as a trusted device when they succeed.
+const trustingOperations = new Set(["verify-device", "setup-pin/complete", "pin-reset/complete"]);
+const rememberedSeconds = 365 * 24 * 3600;
+// The longest refresh lifetime a security policy allows; the API enforces the organization's real one.
+const refreshCookieSeconds = 90 * 24 * 3600;
+
+// The access cookie lives exactly as long as the token inside it (the organization sets that lifetime).
+function secondsUntilExpiry(token: string) {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8")) as { exp?: unknown };
+    if (typeof payload.exp === "number") return Math.max(0, payload.exp - Math.floor(Date.now() / 1000));
+  } catch {
+    // Not a JWT; fall back to the default lifetime.
+  }
+  return 600;
+}
+
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
@@ -71,7 +88,8 @@ export async function POST(
     return NextResponse.json(
       { status: "invalid_request" }, { status: 400 });
   
-  const deviceId = jar.get("device")?.value || crypto.randomUUID();
+  const existingDevice = jar.get("device")?.value;
+  const deviceId = existingDevice || crypto.randomUUID();
   const upstreamOperation =
     operation === "devices/current/revoke"
       ? `devices/${encodeURIComponent(deviceId)}/revoke`
@@ -104,22 +122,28 @@ export async function POST(
       .json()
       .catch(() => ({ status: "authentication_failed" }))) as AuthResponse;
     const output = NextResponse.json(
-      { status: result.status, retryAfterSeconds: result.retryAfterSeconds, developmentCode: result.developmentCode, maskedEmail: result.maskedEmail },
+      { status: result.status, retryAfterSeconds: result.retryAfterSeconds, developmentCode: result.developmentCode, maskedEmail: result.maskedEmail, minimumPinLength: result.minimumPinLength },
       { status: response.status },
     );
     output.headers.set("Cache-Control", "no-store");
-    output.cookies.set("device", deviceId, {
-      ...cookieOptions,
-      maxAge: 365 * 24 * 3600,
-    });
+    // "Remember this device" decides whether trust outlives the browser session. Unless the person
+    // asks for it, the device id is a session cookie: once the browser closes, the next sign-in
+    // is a new device and needs an email code again. The choice is made when trust is granted and
+    // then kept (via the remember marker) instead of re-extending the cookie on every call.
+    const trusted = response.ok && trustingOperations.has(operation) && Boolean(result.accessToken);
+    const persist = trusted ? body.rememberDevice === true : jar.get("remember")?.value === "1";
+    if (trusted || !existingDevice) {
+      output.cookies.set("device", deviceId, { ...cookieOptions, ...(persist ? { maxAge: rememberedSeconds } : {}) });
+      output.cookies.set("remember", persist ? "1" : "", { ...cookieOptions, maxAge: persist ? rememberedSeconds : 0 });
+    }
     if (response.ok && result.accessToken && result.refreshToken) {
       output.cookies.set("access", result.accessToken, {
         ...cookieOptions,
-        maxAge: 600,
+        maxAge: secondsUntilExpiry(result.accessToken),
       });
       output.cookies.set("refresh", result.refreshToken, {
         ...cookieOptions,
-        maxAge: 30 * 24 * 3600,
+        ...(persist ? { maxAge: refreshCookieSeconds } : {}),
       });
     }
     if (

@@ -2,7 +2,10 @@ namespace Auth.Application;
 
 public sealed record PermissionGroup(string Name, IReadOnlyList<PermissionItem> Items);
 public sealed record PermissionItem(string Key, string Label, IReadOnlyList<string> Needs);
-public sealed record AccessRole(Guid Id, string Name);
+public sealed record AccessRole(Guid Id, string Name, IReadOnlyList<string> Permissions);
+public sealed record ScopeCompanyOption(Guid Id, string Name);
+public sealed record ScopeVehicleOption(Guid Id, string Registration, Guid CompanyId);
+public sealed record ScopeOptions(IReadOnlyList<ScopeCompanyOption> Companies, IReadOnlyList<ScopeVehicleOption> Vehicles);
 public sealed record PersonDto(Guid Id, string FirstName, string LastName, string Email, string PhoneNumber,
     string Role, bool Active, string ScopeMode, IReadOnlyList<Guid> CompanyIds, IReadOnlyList<Guid> VehicleIds,
     IReadOnlyList<string> Permissions, decimal? ApprovalLimit, bool HasPin);
@@ -30,6 +33,9 @@ public static class PermissionCatalog
         ["Fleet manager"] = ["dash.float", "dash.revenue", "dash.costs", "dash.gaps", "revenue.view", "revenue.capture", "revenue.no_earnings", "revenue.correct", "pettycash.spend", "reports.view"],
         ["Revenue clerk"] = ["dash.capture", "dash.gaps", "revenue.view", "revenue.capture", "revenue.no_earnings"]
     };
+
+    // The single definition of what a role grants before any per-person overrides.
+    public static IReadOnlyList<string> DefaultsFor(string roleName) => WithDependencies(RolePermissions.GetValueOrDefault(roleName, []));
 
     public static IReadOnlyList<string> WithDependencies(IEnumerable<string> permissions)
     {

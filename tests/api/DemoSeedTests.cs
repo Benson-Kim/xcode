@@ -14,7 +14,7 @@ public sealed class DemoSeedTests : IDisposable
     [Fact]
     public async Task DesignLoginsSignInWithTheirPins_AndReseedingKeepsChangedPins()
     {
-        await app.WithDb(async db => { await db.Database.EnsureCreatedAsync(); await DemoSeed.Run(db); });
+        await app.WithDb(async db => { await db.Database.EnsureCreatedAsync(); await AuthFactory.AddOrganization(db); await DemoSeed.Run(db); });
         using var client = app.CreateClient();
         foreach (var (phoneNumber, email, pin) in DemoSeed.Logins.Where(l => l.Pin is not null))
         {

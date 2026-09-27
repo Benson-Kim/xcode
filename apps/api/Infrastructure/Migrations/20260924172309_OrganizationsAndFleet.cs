@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Auth.Api.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class Phase1Setup : Migration
+    public partial class OrganizationsAndFleet : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -672,11 +672,22 @@ namespace Auth.Api.Infrastructure.Migrations
                     { 2, "Savings" }
                 });
 
+            // InitialAuth never created this column (its snapshot listed it, the migration did not).
+            // Existing users get a blank number, which the filtered index below ignores.
+            migrationBuilder.AddColumn<string>(
+                name: "PhoneNumber",
+                table: "Users",
+                type: "nvarchar(13)",
+                maxLength: 13,
+                nullable: false,
+                defaultValue: "");
+
             migrationBuilder.CreateIndex(
                 name: "IX_Users_PhoneNumber",
                 table: "Users",
                 column: "PhoneNumber",
-                unique: true);
+                unique: true,
+                filter: "[PhoneNumber] <> ''");
 
             migrationBuilder.CreateIndex(
                 name: "IX_AuditEvents_OrganizationId_ActorId",
@@ -864,6 +875,10 @@ namespace Auth.Api.Infrastructure.Migrations
 
             migrationBuilder.DropIndex(
                 name: "IX_Users_PhoneNumber",
+                table: "Users");
+
+            migrationBuilder.DropColumn(
+                name: "PhoneNumber",
                 table: "Users");
         }
     }
