@@ -103,5 +103,39 @@ public sealed class AccessLifecycleTests : IDisposable
         });
     }
 
+    [Fact]
+    public async Task ChangingSomeonesAccessRenewsTheirTokenWithoutSigningThemOut()
+    {
+        await app.SeedDemo();
+        // The clerk signs in on a new device, keeping both tokens.
+        using var browser = app.CreateClient();
+        var device = "test-" + Guid.NewGuid();
+        (await browser.PostAsJsonAsync("/auth/sign-in", new AuthRequest(PhoneNumber: "0712345678", Pin: "2580", DeviceId: device))).EnsureSuccessStatusCode();
+        using var verify = await browser.PostAsJsonAsync("/auth/verify-device", new AuthRequest(PhoneNumber: "0712345678", DeviceId: device, Code: app.Email.Codes[RevenueClerk]));
+        var tokens = (await verify.Content.ReadFromJsonAsync<AuthResponse>())!;
+        async Task<HttpResponseMessage> Session(string accessToken)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/auth/session");
+            request.Headers.Authorization = new("Bearer", accessToken);
+            return await browser.SendAsync(request);
+        }
+
+        using var owner = await app.SignIn(Owner);
+        var clerk = await Find(owner, RevenueClerk);
+        // A save that changes nothing their token carries (here only their data scope) leaves the token alone.
+        (await owner.PutAsJsonAsync($"/setup/people/{clerk.Id}", Edit(clerk))).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.OK, (await Session(tokens.AccessToken!)).StatusCode);
+
+        (await owner.PutAsJsonAsync($"/setup/people/{clerk.Id}", Edit(clerk) with { Permissions = [.. clerk.Permissions, "reports.view"] })).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Session(tokens.AccessToken!)).StatusCode);
+
+        // Their refresh token still works and brings the new permissions.
+        using var refreshed = await browser.PostAsJsonAsync("/auth/refresh", new AuthRequest(DeviceId: device, RefreshToken: tokens.RefreshToken!));
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+        var renewed = (await refreshed.Content.ReadFromJsonAsync<AuthResponse>())!;
+        var session = await (await Session(renewed.AccessToken!)).Content.ReadFromJsonAsync<AuthSessionResponse>();
+        Assert.Contains("reports.view", session!.Permissions);
+    }
+
     public void Dispose() => app.Dispose();
 }

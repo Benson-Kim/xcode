@@ -35,7 +35,7 @@ public static class OrganizationEndpoints
                await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
                var reason = SetupPagination.Reason(input.Reason);
                var organization = await db.Organizations.SingleAsync(ct);
-               string before;
+               string before, after;
                switch (section)
                {
                     case "organization":
@@ -49,13 +49,17 @@ public static class OrganizationEndpoints
                               return Results.Conflict(new { detail = "This organization slug is already in use." });
                          organization.Name = name;
                          organization.Slug = slug;
+                         after = JsonSerializer.Serialize(new OrganizationDetails(name, slug), SettingsJson);
                          break;
-                    case "localization": before = await Save(db.Localizations, input.Value.Deserialize<OrganizationLocalization>(SettingsJson) ?? throw new ArgumentException("Invalid localization settings."), context.OrganizationId, ct); break;
-                    case "branding": before = await Save(db.Brandings, input.Value.Deserialize<OrganizationBranding>(SettingsJson) ?? throw new ArgumentException("Invalid branding settings."), context.OrganizationId, ct); break;
-                    case "securityPolicy": before = await Save(db.SecurityPolicies, input.Value.Deserialize<OrganizationSecurityPolicy>(SettingsJson) ?? throw new ArgumentException("Invalid security policy."), context.OrganizationId, ct); break;
+                    case "localization": (before, after) = await Save(db.Localizations, input.Value.Deserialize<OrganizationLocalization>(SettingsJson) ?? throw new ArgumentException("Invalid localization settings."), context.OrganizationId, ct); break;
+                    case "branding": (before, after) = await Save(db.Brandings, input.Value.Deserialize<OrganizationBranding>(SettingsJson) ?? throw new ArgumentException("Invalid branding settings."), context.OrganizationId, ct); break;
+                    case "securityPolicy": (before, after) = await Save(db.SecurityPolicies, input.Value.Deserialize<OrganizationSecurityPolicy>(SettingsJson) ?? throw new ArgumentException("Invalid security policy."), context.OrganizationId, ct); break;
                     default: throw new KeyNotFoundException();
                }
-               RecordChange(db, context, organization, clock, section, before, input.Value.GetRawText(), reason);
+               // Saving what is already stored changes nothing, so it adds no version or change-log entry.
+               if (before == after)
+                    return Results.Ok(new { section });
+               RecordChange(db, context, organization, clock, section, before, after, reason);
                await db.SaveChangesAsync(ct);
                return Results.Ok(new { section });
           }).WithName("UpdateOrganizationSettings");
@@ -112,7 +116,25 @@ public static class OrganizationEndpoints
           group.MapGet("/preferences", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, CancellationToken ct) =>
           {
                await EnsureMember(organizations, context.ActorId, ct);
-               return Results.Ok(await db.UserPreferences.AsNoTracking().SingleOrDefaultAsync(x => x.UserId == context.ActorId, ct) ?? new UserPreference { OrganizationId = context.OrganizationId, UserId = context.ActorId });
+               var preference = await db.UserPreferences.AsNoTracking().SingleOrDefaultAsync(x => x.UserId == context.ActorId, ct) ?? new UserPreference { OrganizationId = context.OrganizationId, UserId = context.ActorId };
+               // Which overrides the organization allows, and its own values, so the form only offers what will take effect.
+               var localization = await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationLocalization();
+               return Results.Ok(new
+               {
+                    preference.OrganizationId,
+                    preference.UserId,
+                    preference.Locale,
+                    preference.TimeZone,
+                    preference.Hour12,
+                    preference.ThemeMode,
+                    preference.ReducedMotion,
+                    preference.FontScale,
+                    localization.AllowLocaleOverride,
+                    localization.AllowTimeZoneOverride,
+                    localization.AllowHour12Override,
+                    localization.AllowThemeOverride,
+                    organization = new { localization.Locale, localization.TimeZone, localization.Hour12 },
+               });
           }).WithName("GetUserPreferences");
 
           group.MapPut("/preferences", async (SaveUserPreferences input, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, CancellationToken ct) =>
@@ -165,8 +187,8 @@ public static class OrganizationEndpoints
           if (!(await organizations.Permissions(userId, ct)).Contains(permission)) throw new UnauthorizedAccessException();
      }
 
-     // Returns the section as it was before the change, for the settings history.
-     private static async Task<string> Save<TEntity>(DbSet<TEntity> set, TEntity value, Guid organizationId, CancellationToken ct) where TEntity : class, IOrganizationEntity
+     // Returns the section as it was and as it is now saved (defaults included for any omitted field), for the settings history.
+     private static async Task<(string Before, string After)> Save<TEntity>(DbSet<TEntity> set, TEntity value, Guid organizationId, CancellationToken ct) where TEntity : class, IOrganizationEntity
      {
           value.OrganizationId = organizationId;
           if (value is OrganizationLocalization localization) localization.Validate();
@@ -180,7 +202,7 @@ public static class OrganizationEndpoints
                var entry = set.Entry(existing);
                entry.CurrentValues.SetValues(value);
           }
-          return before;
+          return (before, JsonSerializer.Serialize(existing ?? value, SettingsJson));
      }
 
      public sealed record SaveOrganizationSettings(JsonElement Value, string Reason);
