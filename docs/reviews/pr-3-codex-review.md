@@ -26,7 +26,7 @@ before this pass) · **Deferred**
 | 10 | P1 | API / settings | Settings JSON deserialized case-sensitively; camelCase edits silently dropped | Already fixed |
 | 11 | P1 | API / auth | PIN-request response leaks whether a phone number is registered (masked email) | Fixed |
 | 12 | P1 | Web / auth | Web PIN input limited to exactly 4 digits; API accepts 4–8 | Fixed |
-| 13 | P1 | Mobile | Mobile dashboard shows fabricated revenue/target/net figures | Deferred |
+| 13 | P1 | Mobile | Mobile dashboard shows fabricated revenue/target/net figures | Fixed |
 | 14 | P2 | Web / vehicles | Vehicle report "This week/This month" hardcoded to September 2026 | Fixed |
 | 15 | P2 | Web / auth | "Remember this device" checkbox is ignored; every device is trusted for a year | Fixed |
 | 16 | P2 | Web / recurring | Even split sends fractional cents (e.g. 100/3), which the API rejects | Already fixed |
@@ -39,6 +39,20 @@ before this pass) · **Deferred**
 | 23 | P2 | API / vehicles | Moving `JoinedOn` earlier leaves a zero-target gap before the first target | Fixed |
 | 24 | P2 | API / settings | Required settings-change `reason` is validated, then discarded (not audited) | Fixed |
 
+
+## Findings only on PR #1 and PR #2
+
+Codex reviewed each stacked PR separately. Most comments on #1 (`auth`) and #2 (`access`) repeat
+the findings above; these are the ones that don't.
+
+| PR | Comment | Finding | Status |
+|----|---------|---------|--------|
+| #1 | 4108093329 | `--provision-user` takes only an email, so provisioned people have no phone to sign in with | Already fixed (`--provision-user <email> --phone <mobile>`) |
+| #1 | 4108093355 | The web sign-in keeps newly chosen PINs in memory and shows them in the demo box after sign-out | Fixed: nothing keeps a chosen PIN; the demo box lists numbers only, in development |
+| #1 | 4108093368, 4108093407 | Old mobile keypad hid digits past four; "Capture revenue" did nothing | Fixed by the mobile rebuild |
+| #2 | 4108081127 | A non-owner with `people.manage` could deactivate the Owner | Already fixed (`EnsureMayManage` on deactivate and sign-out) |
+| #2 | 4108081191 | Changing a person's role or permissions leaves their current access token's claims valid until it expires | Fixed in the settings review's `AccessUseCases` change (lands with that commit): saving a name, role or permission change bumps `SecurityVersion`, so the old token is refused and the client renews with the new claims |
+| #2 | 4108081197 | Mobile dashboard showed hard-coded finances | Fixed (see #13) |
 
 ## Extra issues found while verifying
 
@@ -172,10 +186,13 @@ email". (`DevelopmentCode` still differs, but only in Development.)
 **Plan:** restore `pattern="[0-9]{4,8}"`, `minLength 4`, `maxLength 8` on the PIN and confirm
 fields; replace the "four-digit PIN" copy.
 
-### 13. Remove fabricated financial figures from the mobile dashboard — P1 — *Deferred*
+### 13. Remove fabricated financial figures from the mobile dashboard — P1
 `apps/mobile/App.tsx:528-532`
 
-Deferred: mobile is out of scope for this pass (web and API only).
+Fixed in the mobile rebuild (`feat(mobile): home, bottom menu and Your access driven by permissions`).
+The dashboard shows the same permission-gated cards as XCODE Web, at zero until their data is live,
+in the organization's currency. It no longer shows hard-coded figures. "Capture revenue" now opens
+the Revenue tab.
 
 ### 14. Calculate vehicle report ranges from the current date — P2
 `apps/web/components/SetupViews.tsx:422-423` (now `components/setup/VehiclesPage.tsx`)
@@ -276,7 +293,7 @@ join date carrying the amount that applied at the old join date.
 - **Scope assignment:** the new scope options mirror the existing server rule, under which an admin
   scoped to *companies* can't assign *vehicle* scopes, even for vehicles in their companies. That
   rule may be worth relaxing.
-- **Mobile:** #13, and `test-renderer` moved from 1.2.0 to the declared 1.3.0 in the lockfile during
-  the ESLint install.
+- **Mobile:** `test-renderer` moved from 1.2.0 to the declared 1.3.0 in the lockfile during the
+  ESLint install. #13 is fixed by the mobile rebuild.
 - **Stacked branches:** auth and access findings were fixed on `settings`. If `auth`/`access` merge
   separately, carry these fixes back or merge this branch after them.
