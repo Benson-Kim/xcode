@@ -183,6 +183,8 @@ public sealed class OrganizationBranding : IOrganizationEntity
 public sealed class OrganizationLogo : IOrganizationEntity
 {
      public const int MaxBytes = 256 * 1024;
+     // The longest data URL a MaxBytes image can produce: its base64 text plus the "data:image/...;base64," prefix.
+     private const int MaxDataUrlLength = (MaxBytes + 2) / 3 * 4 + 64;
      private static readonly Dictionary<string, byte[][]> Signatures = new()
      {
           ["image/png"] = [[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]],
@@ -198,6 +200,9 @@ public sealed class OrganizationLogo : IOrganizationEntity
      // Accepts "data:image/png;base64,..." and checks the bytes really are the declared image type.
      public static OrganizationLogo FromDataUrl(Guid organizationId, string? dataUrl, DateTimeOffset now)
      {
+          // Refuse an oversized upload before parsing or decoding any of it.
+          if (dataUrl?.Length > MaxDataUrlLength)
+               throw new ArgumentException("The logo must be at most 256 KB.");
           var match = Regex.Match(dataUrl ?? "", "^data:(image/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$");
           if (!match.Success)
                throw new ArgumentException("Upload a PNG, JPEG or WebP image.");

@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Application;
 
-public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrganizationRepository organizations)
+public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrganizationRepository organizations, IClock clock)
 {
     // Labels only, so every member can read them (for "Your access").
     public Task<IReadOnlyList<PermissionGroup>> Catalog(CancellationToken ct) => execution.Read("", _ => Task.FromResult(PermissionCatalog.Groups), ct);
@@ -83,6 +83,11 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         await AuthorizeAccessChange(actor, target, role, permissions, input.ApprovalLimit, ct);
         var phone = PhoneNumber.Normalize(input.PhoneNumber);
         var email = input.Email.Trim().ToLowerInvariant();
+        var before = target is null ? null : PersonSnapshot.Of(target);
+        var after = new PersonSnapshot(input.FirstName.Trim(), input.LastName.Trim(), email, phone, role.Name, target?.Membership.Active ?? true,
+            input.ScopeMode, input.ScopeMode == "companies" ? [.. input.CompanyIds.Distinct().Order()] : [],
+            input.ScopeMode == "vehicles" ? [.. input.VehicleIds.Distinct().Order()] : [],
+            [.. Effective(role, permissions).Order(StringComparer.Ordinal)], input.ApprovalLimit);
         var signInDetailsChanged = target is not null &&
             (!string.Equals(target.User.Email, email, StringComparison.OrdinalIgnoreCase) || target.User.PhoneNumber != phone);
         if (signInDetailsChanged)
@@ -111,6 +116,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             ApplyScope(actor.OrganizationId, user.Id, input);
             ApplyOverrides(actor.OrganizationId, user.Id, role, permissions);
             Audit(actor, "person.created", user.Id, input.Role);
+            await RecordHistory(actor, user.Id, null, after, $"Added {after.Name} as {role.Name}", ct);
             return user.Id;
         }
 
@@ -148,6 +154,14 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         ApplyScope(actor.OrganizationId, target.User.Id, input);
         ApplyOverrides(actor.OrganizationId, target.User.Id, role, permissions);
         Audit(actor, "person.updated", target.User.Id, input.Role);
+        var changes = before!.Changes(after);
+        // Their access token carries their name, role and permissions. Bumping the version makes it fail on the next
+        // request, and the client renews it with the new values, so the person is not signed out. Data scope is
+        // checked against the database on every request, so it needs no renewal.
+        if (changes.Intersect(["name", "role", "single permissions"]).Any())
+            target.User.SecurityVersion++;
+        if (changes.Count > 0)
+            await RecordHistory(actor, target.User.Id, before, after, $"Changed {JoinWords(changes)} for {after.Name}", ct);
         return target.User.Id;
     }, ct);
 
@@ -157,6 +171,10 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             throw new ArgumentException("You cannot deactivate your own access.");
         var target = (await LoadPeople(actor, ct)).SingleOrDefault(x => x.User.Id == id) ?? throw new KeyNotFoundException();
         await EnsureMayManage(actor, target, ct);
+        var before = PersonSnapshot.Of(target);
+        if (before.Active != active)
+            await RecordHistory(actor, id, before, before with { Active = active },
+                active ? $"Restored access for {before.Name}" : $"Removed access for {before.Name}", ct);
         if (active)
         {
             target.Membership.Reactivate();
@@ -181,6 +199,8 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         await EnsureMayManage(actor, target, ct);
         await RevokeSessions(id, ct);
         Audit(actor, "person.sessions_revoked", id, null);
+        var snapshot = PersonSnapshot.Of(target);
+        await RecordHistory(actor, id, snapshot, snapshot, $"Signed {snapshot.Name} out of every device", ct);
         return id;
     }, ct);
 
@@ -216,6 +236,8 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         return result;
     }
 
+    private static string ScopeModeOf(AccessPerson x) => x.Scope?.AllCompanies == true ? "all" : x.CompanyIds.Count > 0 ? "companies" : "vehicles";
+
     private static PersonDto ToDto(AccessPerson x) => new(
         x.User.Id,
         x.Membership.FirstName,
@@ -224,7 +246,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         x.User.PhoneNumber,
         x.Role.Name,
         x.Membership.Active,
-        x.Scope?.AllCompanies == true ? "all" : x.CompanyIds.Count > 0 ? "companies" : "vehicles",
+        ScopeModeOf(x),
         x.CompanyIds,
         x.VehicleIds,
         x.Permissions.ToArray(),
@@ -304,14 +326,16 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             });
     }
 
+    // What the person would hold with this role and these requested permissions, once overrides are applied.
+    private static IReadOnlySet<string> Effective(Role role, IReadOnlyList<string> permissions) => new EffectivePermissionResolver()
+        .Resolve(PermissionCatalog.DefaultsFor(role.Name), Overrides(Guid.Empty, Guid.Empty, role, permissions));
+
     // people.manage covers who someone is, their role and their data scope. Departing from the role's defaults
     // (single permissions, approval limit) needs access.manage, and nobody can grant a permission they lack.
     private async Task AuthorizeAccessChange(SetupActor actor, AccessPerson? target, Role role, IReadOnlyList<string> permissions, decimal? approvalLimit, CancellationToken ct)
     {
         var before = target is null ? Deviation.None : Deviation.From(PermissionCatalog.DefaultsFor(target.Role.Name), target.Permissions);
-        var effective = new EffectivePermissionResolver()
-            .Resolve(PermissionCatalog.DefaultsFor(role.Name), Overrides(actor.OrganizationId, Guid.Empty, role, permissions));
-        var after = Deviation.From(PermissionCatalog.DefaultsFor(role.Name), effective);
+        var after = Deviation.From(PermissionCatalog.DefaultsFor(role.Name), Effective(role, permissions));
         if (after.Same(before) && approvalLimit == target?.Membership.ApprovalLimit)
             return;
         var held = await organizations.Permissions(actor.UserId, ct);
@@ -370,8 +394,47 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         Before = before,
         After = detail,
         CorrelationId = actor.CorrelationId,
-        OccuredAt = DateTimeOffset.UtcNow
+        OccuredAt = clock.UtcNow
     });
+
+    // People and access changes join the change log beside setup and settings changes, so audit.view sees them.
+    private async Task RecordHistory(SetupActor actor, Guid personId, PersonSnapshot? before, PersonSnapshot after, string reason, CancellationToken ct)
+    {
+        var organization = await organizations.Get(ct) ?? throw new UnauthorizedAccessException();
+        organization.SettingsChanged();
+        db.Set<OrganizationSettingsVersion>().Add(new(actor.OrganizationId, actor.UserId, organization.SettingsVersion, "people", personId,
+            clock.UtcNow, JsonSerializer.Serialize(before), JsonSerializer.Serialize(after), reason, actor.CorrelationId));
+    }
+
+    // "role", "role and data scope", "name, role and data scope".
+    private static string JoinWords(IReadOnlyList<string> words) =>
+        words.Count == 1 ? words[0] : $"{string.Join(", ", words.Take(words.Count - 1))} and {words[^1]}";
+
+    // What the change log keeps about a person: sorted, so two snapshots compare by value.
+    private sealed record PersonSnapshot(string FirstName, string LastName, string Email, string PhoneNumber, string Role, bool Active,
+        string ScopeMode, Guid[] CompanyIds, Guid[] VehicleIds, string[] Permissions, decimal? ApprovalLimit)
+    {
+        public string Name => $"{FirstName} {LastName}";
+
+        public static PersonSnapshot Of(AccessPerson x) => new(x.Membership.FirstName, x.Membership.LastName, x.User.Email, x.User.PhoneNumber,
+            x.Role.Name, x.Membership.Active, ScopeModeOf(x), [.. x.CompanyIds.Distinct().Order()], [.. x.VehicleIds.Distinct().Order()],
+            [.. x.Permissions.Order(StringComparer.Ordinal)], x.Membership.ApprovalLimit);
+
+        // Single permissions count only where they depart from the role's defaults; a role change brings its own.
+        public List<string> Changes(PersonSnapshot after)
+        {
+            var changes = new List<string>();
+            if (FirstName != after.FirstName || LastName != after.LastName) changes.Add("name");
+            if (!string.Equals(Email, after.Email, StringComparison.OrdinalIgnoreCase) || PhoneNumber != after.PhoneNumber) changes.Add("sign-in details");
+            if (!Role.Equals(after.Role, StringComparison.OrdinalIgnoreCase)) changes.Add("role");
+            if (!Deviation.From(PermissionCatalog.DefaultsFor(Role), Permissions.ToHashSet(StringComparer.Ordinal))
+                .Same(Deviation.From(PermissionCatalog.DefaultsFor(after.Role), after.Permissions.ToHashSet(StringComparer.Ordinal))))
+                changes.Add("single permissions");
+            if (ScopeMode != after.ScopeMode || !CompanyIds.SequenceEqual(after.CompanyIds) || !VehicleIds.SequenceEqual(after.VehicleIds)) changes.Add("data scope");
+            if (ApprovalLimit != after.ApprovalLimit) changes.Add("approval limit");
+            return changes;
+        }
+    }
 
     private sealed record Deviation(IReadOnlySet<string> Granted, IReadOnlySet<string> Denied)
     {

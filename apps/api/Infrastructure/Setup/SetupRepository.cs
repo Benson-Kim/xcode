@@ -112,7 +112,11 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
     {
         var query = VisibleRecurring(actor).AsNoTracking();
         var total = await query.CountAsync(ct);
-        var ids = await query.OrderBy(i => i.Id).Skip((page - 1) * pageSize).Take(pageSize).Select(i => i.Id).ToListAsync(ct);
+        // Pages follow the current name, so page two continues where page one stopped.
+        var ids = await query
+            .OrderBy(i => i.Versions.OrderByDescending(v => v.Revision).Select(v => v.Name).FirstOrDefault())
+            .ThenBy(i => i.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize).Select(i => i.Id).ToListAsync(ct);
         var visibleIds = VisibleVehicles(actor).Select(v => v.Id);
         // Project only the editor's allocation shares; never expose another scope's vehicles or amounts.
         var rows = await db.Set<RecurringVersion>().AsNoTracking().Where(v => ids.Contains(v.ItemId) && !db
@@ -132,15 +136,18 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 v.Start,
                 v.End,
                 StoppedFrom = db.Set<RecurringItem>().Where(i => i.Id == v.ItemId).Select(i => i.StoppedFrom).First(),
-                Allocations = v.Allocations.Where(a => visibleIds.Contains(a.VehicleId)).Select(a => new VehicleShare(a.VehicleId, a.Amount)).ToList()
+                Allocations = v.Allocations.Where(a => visibleIds.Contains(a.VehicleId)).Select(a => new VehicleShare(a.VehicleId, a.Amount)).ToList(),
+                AllocationCount = v.Allocations.Count()
             }).ToListAsync(ct);
+        rows = [.. rows.OrderBy(v => ids.IndexOf(v.ItemId))];
         // Registrations travel with the shares so viewing commitments never needs the vehicle-management list.
         var vehicleIds = rows.SelectMany(v => v.Allocations).Select(a => a.VehicleId).Distinct().ToList();
         var registrations = await db.Set<FleetVehicle>().AsNoTracking().Where(v => vehicleIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, v => v.Registration, ct);
         return new(rows.Select(v => new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
 
         v.Allocations.Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
-        v.Allocations.Select(a => new AllocationDto(a.VehicleId, a.Amount, registrations.GetValueOrDefault(a.VehicleId))).ToList())).ToList(), page, pageSize, total);
+        v.Allocations.Select(a => new AllocationDto(a.VehicleId, a.Amount, registrations.GetValueOrDefault(a.VehicleId))).ToList(),
+        v.Allocations.Count != v.AllocationCount)).ToList(), page, pageSize, total);
     }
 
     public Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct)
