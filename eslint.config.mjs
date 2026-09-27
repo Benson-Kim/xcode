@@ -1,5 +1,6 @@
 import next from "eslint-config-next/core-web-vitals";
 import ts from "typescript-eslint";
+import reactHooks from "eslint-plugin-react-hooks";
 export default [
   {
     ignores: [
@@ -21,5 +22,16 @@ export default [
     // eslint-plugin-react's "detect" calls context.getFilename(), which ESLint 10 removed; keep in step with apps/web.
     files: ["apps/web/**/*.{ts,tsx,js,mjs}"],
     settings: { react: { version: "19.3" }, next: { rootDir: "apps/web" } },
+  },
+  {
+    // The Expo app: the same hooks rules as the web app, without the Next.js ones.
+    files: ["apps/mobile/**/*.{ts,tsx}"],
+    plugins: { "react-hooks": reactHooks },
+    rules: { "react-hooks/rules-of-hooks": "error", "react-hooks/exhaustive-deps": "error" },
+  },
+  {
+    // CommonJS config files, and jest.mock factories, which are hoisted above imports and must require.
+    files: ["**/*.cjs", "apps/mobile/tests/**/*.{ts,tsx}"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
   },
 ];
