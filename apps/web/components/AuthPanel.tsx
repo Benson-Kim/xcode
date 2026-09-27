@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   AuthError,
   pauseSeconds,
@@ -9,8 +9,11 @@ import {
   type AuthOperation,
 } from "@xcode/shared";
 import { authApi } from "../lib/api";
+import { onSessionExpired, restoreSession } from "../lib/session";
 import { PinInput } from "./PinInput";
 import { AppShell } from "./AppShell";
+import { AuthButton, AuthField, AuthHeading, AuthInput, AuthLayout, CheckRow, DemoBox } from "./authControls";
+import { Banner, LinkButton, Skeleton } from "./ui";
 
 type Screen =
   | "sign-in"
@@ -31,6 +34,7 @@ const titles: Record<Screen, string> = {
 
 export function AuthPanel() {
   const [screen, setScreen] = useState<Screen>("sign-in");
+  const [restoring, setRestoring] = useState(true);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
@@ -47,6 +51,32 @@ export function AuthPanel() {
     null,
   );
   const [livePins, setLivePins] = useState<Record<string, string>>({});
+  // The PIN that produced the current device challenge, so "Send a new code" can repeat that
+  // sign-in instead of submitting an empty PIN (a failed attempt). Never rendered.
+  const challengePin = useRef("");
+
+  useEffect(() => {
+    let active = true;
+    // A page refresh keeps the session cookies: pick the session back up instead of asking
+    // for the PIN again. (The cookies only outlive the browser when the device is remembered.)
+    void restoreSession().then((signedIn) => {
+      if (!active) return;
+      if (signedIn) setScreen("authenticated");
+      setRestoring(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(
+    () =>
+      onSessionExpired(() => {
+        navigate("sign-in");
+        setMessage("Your session has ended. Sign in again.");
+      }),
+    [],
+  );
 
   useEffect(() => {
     const tick = () => setRemaining(pauseSeconds(pausedUntil));
@@ -64,6 +94,7 @@ export function AuthPanel() {
     setMessage("");
     setDevelopmentCode("");
     setMaskedEmail("");
+    challengePin.current = "";
     if (next === "sign-in" || next === "authenticated") setPinFlow(null);
   }
 
@@ -90,26 +121,30 @@ export function AuthPanel() {
 
   async function execute(
     operation: AuthOperation | "devices/current/revoke",
-    overrides: Partial<Pick<AuthRequest, "pin" | "code">> = {},
+    overrides: Partial<Pick<AuthRequest, "phoneNumber" | "pin" | "code">> = {},
   ) {
     setBusy(true);
     setMessage("");
 
     try {
+      const submittedPhone = overrides.phoneNumber ?? phoneNumber;
+      const submittedPin = overrides.pin ?? pin;
       const result = await authApi(operation, {
-        phoneNumber,
-        pin: overrides.pin ?? pin,
+        phoneNumber: submittedPhone,
+        pin: submittedPin,
         code: overrides.code ?? code,
+        rememberDevice,
       });
       setDevelopmentCode(result.developmentCode || "");
       setMaskedEmail(result.maskedEmail || "");
 
       if (result.status === "authenticated") {
-        if (changingPin && pin)
-          setLivePins((current) => ({ ...current, [phoneNumber]: pin }));
+        if (changingPin && submittedPin)
+          setLivePins((current) => ({ ...current, [submittedPhone]: submittedPin }));
         navigate("authenticated");
         setPausedUntil(0);
       } else if (result.status === "verification_required") {
+        challengePin.current = submittedPin;
         setDevelopmentCode(result.developmentCode || "");
         setCode("");
         setScreen("verify-device");
@@ -141,20 +176,37 @@ export function AuthPanel() {
     }
   }
 
-  function submit(event: FormEvent) {
+  function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    // Browser autofill can fill fields without an input event React sees. Submit what is on
+    // screen and bring state in line, so the next render does not wipe the filled values.
+    const fields = new FormData(event.currentTarget);
+    const digits = (value: string) => value.replace(/[^0-9]/g, "");
+    const field = (name: string, current: string, clean = (value: string) => value) => {
+      const value = fields.get(name);
+      return typeof value === "string" ? clean(value) : current;
+    };
+    const submittedPhone = field("phoneNumber", phoneNumber);
+    const submittedPin = field("pin", pin, digits);
+    const submittedConfirm = field("confirmPin", confirmPin, digits);
+    const submittedCode = field("code", code, digits);
+    setPhoneNumber(submittedPhone);
+    setPin(submittedPin);
+    setConfirmPin(submittedConfirm);
+    setCode(submittedCode);
+
     if (screen === "verify-code") {
-      if (code.length === 6 && pinFlow)
-        void execute(`${pinFlow}/verify` as AuthOperation, { pin: "" });
+      if (submittedCode.length === 6 && pinFlow)
+        void execute(`${pinFlow}/verify` as AuthOperation, { phoneNumber: submittedPhone, pin: "", code: submittedCode });
       return;
     }
 
-    if (changingPin && requested && validatePin(pin)) {
-      setMessage(validatePin(pin)!);
+    if (changingPin && requested && validatePin(submittedPin)) {
+      setMessage(validatePin(submittedPin)!);
       return;
     }
-    if (changingPin && requested && pin !== confirmPin) {
+    if (changingPin && requested && submittedPin !== submittedConfirm) {
       setMessage("The PINs do not match.");
       return;
     }
@@ -162,244 +214,188 @@ export function AuthPanel() {
     const operation = changingPin
       ? (`${screen}/${requested ? "complete" : "request"}` as AuthOperation)
       : (screen as AuthOperation);
-    void execute(operation);
+    void execute(operation, { phoneNumber: submittedPhone, pin: submittedPin, code: submittedCode });
   }
 
-  return (
-    <section
-      className={
-        screen === "authenticated" ? "auth-panel auth-panel-app" : "auth-panel"
-      }
-      aria-labelledby="auth-title"
-    >
-      {screen === "authenticated" ? (
-        <AppShell onSignOut={() => void execute("sign-out")} />
-      ) : (
-        <div className="auth-heading">
-          <h1 id="auth-title">
-            {screen === "setup-pin" && requested
-              ? "Choose your PIN"
-              : screen === "pin-reset" && requested
-                ? "Choose a new PIN"
-                : titles[screen]}
-          </h1>
-          <p className="lead">
-            {screen === "sign-in"
-              ? "Use the mobile number your admin registered for you."
-              : screen === "verify-device" || screen === "verify-code"
-                ? `We sent a code to ${maskedEmail || "your registered email"}. It is valid for 10 minutes.`
-                : requested
-                  ? "Your code is confirmed. Choose a new four-digit PIN."
-                  : "Enter your mobile number. We will send a code to the email address your admin registered for you."}
-          </p>
-        </div>
-      )}
-      {screen !== "authenticated" && (
-        <form onSubmit={submit} className="auth-form">
-          {screen !== "verify-device" &&
-            screen !== "verify-code" &&
-            !requested && (
-              <div className="field">
-                <label htmlFor="phoneNumber">Mobile number</label>
-                <input
-                  className="input"
-                  id="phoneNumber"
-                  type="tel"
-                  autoComplete="tel"
-                  required
-                  value={phoneNumber}
-                  readOnly={requested}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                />
-              </div>
-            )}
+  if (screen === "authenticated" && !restoring) return <AppShell onSignOut={() => void execute("sign-out")} />;
 
-          {screen === "sign-in" || (changingPin && requested) ? (
-            <PinInput value={pin} onChange={setPin} newPin={changingPin} />
-          ) : null}
+  const verifying = screen === "verify-device" || screen === "verify-code";
+  const title =
+    screen === "setup-pin" && requested ? "Choose your PIN" : screen === "pin-reset" && requested ? "Choose a new PIN" : titles[screen];
+  const lead =
+    screen === "sign-in"
+      ? "Use the mobile number your admin registered for you."
+      : verifying
+        ? `We sent a code to ${maskedEmail || "your registered email"}. It is valid for 10 minutes.`
+        : requested
+          ? "Your code is confirmed. Choose a new PIN of 4 to 8 digits."
+          : "Enter your mobile number. We will send a code to the email address your admin registered for you.";
+
+  return (
+    <AuthLayout>
+      {restoring ? (
+        <section aria-busy="true" aria-labelledby="auth-title" className="flex flex-col gap-4">
+          <AuthHeading title="Signing you in" lead="Checking for your session..." />
+          <Skeleton className="h-14 rounded-xl" />
+          <Skeleton className="h-14 rounded-full" />
+        </section>
+      ) : (
+        <form onSubmit={submit} aria-labelledby="auth-title" className="flex flex-col gap-4">
+          <AuthHeading title={title} lead={lead} />
+
+          {!verifying && !requested && (
+            <AuthField label="Mobile number" htmlFor="phoneNumber">
+              <AuthInput
+                id="phoneNumber"
+                name="phoneNumber"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="0712 345 678"
+                required
+                value={phoneNumber}
+                onChange={(event) => setPhoneNumber(event.target.value)}
+              />
+            </AuthField>
+          )}
+
+          {(screen === "sign-in" || (changingPin && requested)) && <PinInput value={pin} onChange={setPin} newPin={changingPin} />}
 
           {changingPin && requested && (
-            <div className="field">
-              <label htmlFor="confirmPin">Type it again</label>
-              <input
-                className="input digits"
+            <AuthField label="Type it again" htmlFor="confirmPin">
+              <AuthInput
+                digits
                 id="confirmPin"
+                name="confirmPin"
                 type="password"
                 inputMode="numeric"
-                maxLength={4}
+                maxLength={8}
+                placeholder="4 to 8 numbers"
                 autoComplete="new-password"
                 required
                 value={confirmPin}
-                onChange={(event) =>
-                  setConfirmPin(event.target.value.replace(/[^0-9]/g, ""))
-                }
+                onChange={(event) => setConfirmPin(event.target.value.replace(/[^0-9]/g, ""))}
                 aria-invalid={confirmPin.length > 0 && confirmPin !== pin}
               />
-            </div>
+            </AuthField>
           )}
 
-          {(screen === "verify-device" || screen === "verify-code") && (
-            <div className="field">
-              <label htmlFor="code">6 digit code</label>
-              <input
-                className="input digits"
-                id="code"
-                autoComplete="one-time-code"
-                inputMode="numeric"
-                pattern="[0-9]{6}"
-                maxLength={6}
-                required
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, ""))}
-              />
-            </div>
-          )}
-
-          {(screen === "verify-device" || screen === "verify-code") && (
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={rememberDevice}
-                onChange={(event) => setRememberDevice(event.target.checked)}
-              />
-              <span>Remember this device</span>
-            </label>
+          {verifying && (
+            <>
+              <AuthField label="6 digit code" htmlFor="code">
+                <AuthInput
+                  digits
+                  id="code"
+                  name="code"
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  placeholder="6 numbers"
+                  required
+                  value={code}
+                  onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ""))}
+                />
+              </AuthField>
+              <CheckRow label="Remember this device" checked={rememberDevice} onChange={(event) => setRememberDevice(event.target.checked)} />
+            </>
           )}
 
           {remaining > 0 && screen === "sign-in" && (
-            <p role="timer" className="banner offline">
-              Sign-in paused. Try again in {Math.floor(remaining / 60)}:
-              {String(remaining % 60).padStart(2, "0")}, or reset your PIN.
-            </p>
+            <Banner tone="offline" role="timer">
+              Sign-in paused. Try again in {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}, or reset your PIN.
+            </Banner>
           )}
+          {message && (!remaining || screen !== "sign-in") && <Banner>{message}</Banner>}
 
-          <button
-            className="btn btn-primary"
-            disabled={busy || (remaining > 0 && screen === "sign-in")}
-            type="submit"
-          >
+          <AuthButton type="submit" aria-busy={busy || undefined} disabled={busy || (remaining > 0 && screen === "sign-in")}>
             {busy
               ? "Please wait..."
               : changingPin && !requested
-                ? "Send verification code"
+                ? "Send code"
                 : changingPin && requested
                   ? "Save PIN"
-                  : screen === "verify-device" || screen === "verify-code"
+                  : verifying
                     ? "Confirm code"
-                    : screen === "sign-in"
-                      ? "Sign in"
-                      : "Verify and continue"}
-          </button>
+                    : "Sign in"}
+          </AuthButton>
 
           {remaining > 0 && screen === "sign-in" && (
-            <button
-              className="btn btn-outline"
-              type="button"
-              disabled={busy}
-              onClick={() => beginPinReset(true)}
-            >
+            <AuthButton tone="outline" disabled={busy} onClick={() => beginPinReset(true)}>
               Reset PIN
-            </button>
+            </AuthButton>
           )}
 
-          {(screen === "verify-device" ||
-            screen === "verify-code" ||
-            (changingPin && requested)) && (
-            <button
-              className="link-button"
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                if (screen === "verify-device") void execute("sign-in");
-                else if (pinFlow)
-                  void execute(`${pinFlow}/request` as AuthOperation, {
-                    pin: "",
-                    code: "",
-                  });
-              }}
-            >
-              Send a new code
-            </button>
+          {screen === "sign-in" ? (
+            <div className="flex flex-wrap items-center justify-between gap-1">
+              <LinkButton
+                align="start"
+                disabled={busy}
+                onClick={() => {
+                  setPinFlow("setup-pin");
+                  navigate("setup-pin");
+                }}
+              >
+                First time here?
+              </LinkButton>
+              <LinkButton align="end" disabled={busy} onClick={() => beginPinReset()}>
+                Forgot PIN?
+              </LinkButton>
+            </div>
+          ) : verifying ? (
+            <div className="flex flex-wrap items-center justify-between gap-1">
+              <LinkButton
+                align="start"
+                disabled={busy}
+                onClick={() => {
+                  if (screen === "verify-device") {
+                    if (challengePin.current) void execute("sign-in", { pin: challengePin.current });
+                    else navigate("sign-in");
+                  } else if (pinFlow) void execute(`${pinFlow}/request` as AuthOperation, { pin: "", code: "" });
+                }}
+              >
+                Send a new code
+              </LinkButton>
+              <LinkButton align="end" disabled={busy} onClick={() => navigate(screen === "verify-code" && pinFlow ? pinFlow : "sign-in")}>
+                Cancel
+              </LinkButton>
+            </div>
+          ) : (
+            <LinkButton align="start" className="self-start" disabled={busy} onClick={() => navigate("sign-in")}>
+              Back to sign in
+            </LinkButton>
           )}
 
-          {(screen === "verify-device" || screen === "verify-code") && (
+          {verifying && (
             <>
-              <p className="small">
-                No email? Check your spam folder, or ask your admin to confirm
-                your email address.
-              </p>
+              <p className="m-0 text-sm text-grey">No email? Check your spam folder, or ask your admin to confirm your email address.</p>
               {developmentCode && (
-                <p className="demo">
-                  Demo only: your code is{" "}
-                  <strong>{formattedDevelopmentCode}</strong>
-                </p>
+                <DemoBox data-demo-code={developmentCode}>
+                  Demo only: your code is <strong className="tracking-[0.08em] text-navy">{formattedDevelopmentCode}</strong>
+                </DemoBox>
               )}
             </>
           )}
+
+          {screen === "sign-in" && (
+            <DemoBox help>
+              <strong className="text-navy">Demo logins</strong>
+              <ul className="mt-1.5 mb-0 list-disc pl-4.5">
+                {[
+                  ["Owner", "0733 520 614"],
+                  ["Revenue clerk", "0712 345 678"],
+                  ["Office admin", "0722 410 355"],
+                  ["Fleet manager", "0700 111 222"],
+                ].map(([label, phone]) => (
+                  <li key={phone}>
+                    {label}: {phone}, {livePins[phone] ? `PIN ${livePins[phone]}` : "PIN set by the user"}
+                  </li>
+                ))}
+              </ul>
+            </DemoBox>
+          )}
         </form>
       )}
-
-      {message && (!remaining || screen !== "sign-in") && (
-        <p role="status" className="banner error">
-          {message}
-        </p>
-      )}
-
-      {screen !== "authenticated" && (
-        <nav className="auth-links" aria-label="Authentication options">
-          {screen !== "sign-in" && (
-            <button disabled={busy} onClick={() => navigate("sign-in")}>
-              Back to sign in
-            </button>
-          )}
-
-          {screen !== "setup-pin" && screen !== "verify-code" && (
-            <button
-              disabled={busy}
-              onClick={() => {
-                setPinFlow("setup-pin");
-                navigate("setup-pin");
-              }}
-            >
-              First time here?
-            </button>
-          )}
-
-          {screen !== "pin-reset" && (
-            <button disabled={busy} onClick={() => beginPinReset()}>
-              Forgot PIN?
-            </button>
-          )}
-          {screen === "verify-code" && (
-            <button
-              disabled={busy}
-              onClick={() => navigate(pinFlow || "sign-in")}
-            >
-              Cancel
-            </button>
-          )}
-        </nav>
-      )}
-      {screen === "sign-in" && (
-        <div className="login-help">
-          <strong>Demo logins</strong>
-          <ul>
-            {[
-              ["Owner", "0733 520 614"],
-              ["Revenue clerk", "0712 345 678"],
-              ["Office admin", "0722 410 355"],
-              ["Fleet manager", "0700 111 222"],
-            ].map(([label, phone]) => (
-              <li key={phone}>
-                {label}: {phone},{" "}
-                {livePins[phone]
-                  ? `PIN ${livePins[phone]}`
-                  : "PIN set by the user"}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </section>
+    </AuthLayout>
   );
 }
