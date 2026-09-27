@@ -1,9 +1,6 @@
 import { AuthPanel } from "../components/AuthPanel";
 
+// Sign-in screens until there is a session, then the app shell.
 export default function Home() {
-  return (
-    <main className="min-h-screen flex items-center justify-center p-6">
-      <AuthPanel />
-    </main>
-  );
+  return <AuthPanel />;
 }

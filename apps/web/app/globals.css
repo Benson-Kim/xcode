@@ -1,31 +1,78 @@
+@import url("https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 @source "../components";
 
-body {
-  background: #f1f5f9;
-  color: #0f172a;
-  font-family: Arial, Helvetica, sans-serif;
+/* Design tokens from design/XCODE_Web.html. Components style themselves with these utilities. */
+@theme {
+  --font-sans: "Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
+
+  --color-cream: #f6f3ec;
+  --color-navy: #14213d;
+  /* The brand mark, avatar and toast: the organization's secondary colour. */
+  --color-brand: #14213d;
+  --color-grey: #4f5b6b;
+  --color-blue: #1d5fd6;
+  --color-blue-dark: #1647a6;
+  --color-blue-busy: #3f6fc9;
+  --color-blue-soft: #e8effc;
+  --color-blue-tint: #eef3fd;
+  --color-blue-wash: #f7f9fe;
+  --color-line: #cfc8b8;
+  --color-card-line: #e4dfd3;
+  --color-divider: #efebe3;
+  --color-paper: #fbf9f4;
+  --color-hover: #f3f0e8;
+  --color-red: #b42318;
+  --color-red-bg: #fdecea;
+  --color-red-line: #f3c1bb;
+  --color-red-text: #8a1c12;
+  --color-amber-bg: #fff4de;
+  --color-amber-line: #e7c27a;
+  --color-amber-text: #6b4200;
+  --color-green: #1e6b3a;
+  --color-green-bg: #e3f1e8;
+  --color-green-line: #b8ddc3;
+
+  --shadow-panel: 0 8px 24px rgb(20 33 61 / 6%);
+  --shadow-menu: 0 8px 24px rgb(20 33 61 / 12%);
+  --shadow-drawer: 0 8px 24px rgb(20 33 61 / 18%);
+  --shadow-toast: 0 8px 24px rgb(20 33 61 / 25%);
+  --shadow-seg: 0 1px 3px rgb(20 33 61 / 15%);
 }
-button,
-input {
-  font: inherit;
-}
-button {
-  cursor: pointer;
-}
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-input {
-  border: 1px solid #94a3b8;
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  width: 100%;
-  background: white;
-}
-input:focus-visible,
-button:focus-visible {
-  outline: 3px solid #38bdf8;
-  outline-offset: 2px;
+
+@layer base {
+  html,
+  body {
+    min-height: 100%;
+  }
+  body {
+    background-color: var(--color-cream);
+    color: var(--color-navy);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.45;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1,
+  h2,
+  h3,
+  p {
+    overflow-wrap: anywhere;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-blue) 45%, transparent);
+    outline-offset: 2px;
+  }
+  /* The person's "Reduce motion" preference, on top of the operating system's. */
+  [data-reduced-motion="true"] *,
+  [data-reduced-motion="true"] *::before,
+  [data-reduced-motion="true"] *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }
