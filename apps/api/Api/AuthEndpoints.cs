@@ -19,13 +19,23 @@ public static class AuthEndpoints
         group.MapPost("/unlock", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.SignIn(r, ct), ct));
         group.MapPost("/verify-device", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.VerifyDevice(r), ct));
         group.MapPost("/setup-pin/request", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.RequestPin(r, CodePurpose.FirstSetup, ct), ct));
+        group.MapPost("/setup-pin/verify", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.VerifyCode(r, CodePurpose.FirstSetup), ct));
         group.MapPost("/setup-pin/complete", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.CompletePin(r, CodePurpose.FirstSetup), ct));
         group.MapPost("/pin-reset/request", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.RequestPin(r, CodePurpose.PinReset, ct), ct));
+        group.MapPost("/pin-reset/verify", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.VerifyCode(r, CodePurpose.PinReset), ct));
         group.MapPost("/pin-reset/complete", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.CompletePin(r, CodePurpose.PinReset), ct));
         group.MapPost("/refresh", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.Refresh(r), ct));
         group.MapPost("/sign-out", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.SignOut(r), ct));
         group.MapPost("/devices/{id}/revoke", (string id, ClaimsPrincipal principal, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) =>
             Run(new(DeviceId: id), db, gate, () => s.RevokeDevice(Guid.Parse(principal.FindFirstValue("sub")!), id), ct)).RequireAuthorization();
+        group.MapGet("/session", (ClaimsPrincipal principal) =>
+            Results.Ok(new AuthSessionResponse(
+                Guid.Parse(principal.FindFirstValue("sub")!),
+                principal.FindFirstValue("first_name") ?? "",
+                principal.FindFirstValue("last_name") ?? "",
+                principal.FindFirstValue("role") ?? "",
+                principal.FindAll("permission").Select(x => x.Value).ToArray())))
+            .RequireAuthorization();
     }
     private static async Task<IResult> Run(AuthRequest r, AuthDb db, AuthGate gate, Func<Task<AuthResult>> action, CancellationToken ct)
     {

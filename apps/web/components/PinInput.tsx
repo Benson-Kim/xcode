@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { PIN_HELP, validatePin } from "@xcode/shared";
+import { AuthField, AuthFieldError, AuthInput } from "./authControls";
+import { LinkButton } from "./ui";
 
 export function PinInput({
   value,
@@ -11,38 +14,39 @@ export function PinInput({
   onChange: (value: string) => void;
   newPin?: boolean;
 }) {
+  const [visible, setVisible] = useState(false);
   const error = newPin && value.length > 0 ? validatePin(value) : null;
 
   return (
-    <div className="space-y-2">
-      <label htmlFor="pin" className="block font-medium">
-        {newPin ? "New PIN" : "PIN"}
-      </label>
-      <input
+    <AuthField
+      label={newPin ? "New PIN" : "PIN"}
+      htmlFor="pin"
+      action={
+        !newPin && (
+          <LinkButton align="end" compact aria-controls="pin" aria-pressed={visible} onClick={() => setVisible((current) => !current)}>
+            {visible ? "Hide" : "Show"}
+          </LinkButton>
+        )
+      }
+    >
+      <AuthInput
+        digits
         id="pin"
         name="pin"
-        type="password"
+        type={visible ? "text" : "password"}
         inputMode="numeric"
         pattern="[0-9]{4,8}"
         minLength={4}
         maxLength={8}
+        placeholder="4 to 8 numbers"
         autoComplete={newPin ? "new-password" : "current-password"}
         required
         value={value}
-        onChange={(event) =>
-          onChange(event.target.value.replace(/[^0-9]/g, ""))
-        }
+        onChange={(event) => onChange(event.target.value.replace(/[^0-9]/g, ""))}
         aria-invalid={Boolean(error)}
-        aria-describedby={newPin ? "pin-help" : undefined}
+        aria-describedby={error ? "pin-help" : undefined}
       />
-      {newPin && (
-        <p
-          id="pin-help"
-          className={error ? "text-sm text-red-700" : "text-sm text-slate-600"}
-        >
-          {PIN_HELP}
-        </p>
-      )}
-    </div>
+      {error && <AuthFieldError id="pin-help">{PIN_HELP}</AuthFieldError>}
+    </AuthField>
   );
 }

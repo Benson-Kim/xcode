@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using Auth.Application;
 using Auth.Domain;
 using Auth.Infrastructure;
@@ -49,12 +52,53 @@ public sealed class AuthFactory : WebApplicationFactory<Program>
         await WithDb(async db =>
         {
             await db.Database.EnsureCreatedAsync();
-            var user = new User { Email = "person@example.com", PinHash = withPin ? PinHasher.Hash("5826") : null };
-            db.Users.Add(user);
+            await AddOrganization(db);
+            // Provisioning gives the person the membership and role that token issuance requires.
+            var user = await UserProvisioning.Provision(db, new("person@example.com", "+254712345678", "Revenue clerk"));
+            user.PinHash = withPin ? PinHasher.Hash("5826") : null;
             if (trusted) db.TrustedDevices.Add(new() { UserId = user.Id, DeviceId = "phone" });
             await db.SaveChangesAsync();
         });
     }
+    // Invariant globalization (see Auth.Tests.csproj) cannot resolve IANA zones such as Africa/Nairobi on Windows,
+    // so test organizations use UTC.
+    public static async Task AddOrganization(AuthDb db)
+    {
+        db.Provisioning = true;
+        var organization = new Organization { Slug = "demo-fleet", Name = "Demo Fleet" };
+        db.Organizations.Add(organization);
+        db.Localizations.Add(new OrganizationLocalization { OrganizationId = organization.Id, TimeZone = "UTC" });
+        db.Brandings.Add(new OrganizationBranding { OrganizationId = organization.Id });
+        db.SecurityPolicies.Add(new OrganizationSecurityPolicy { OrganizationId = organization.Id });
+        await db.SaveChangesAsync();
+        db.Provisioning = false;
+    }
+    public Task SeedDemo() => WithDb(async db =>
+    {
+        await db.Database.EnsureCreatedAsync();
+        await AddOrganization(db);
+        await DemoSeed.Run(db);
+    });
+    // Signs a demo login in on a fresh device through the real sign-in and email-code flow.
+    public async Task<HttpClient> SignIn(string email)
+    {
+        var (phoneNumber, _, pin) = DemoSeed.Logins.Single(x => x.Email == email);
+        var client = CreateClient();
+        var device = "test-" + Guid.NewGuid();
+        using var signIn = await client.PostAsJsonAsync("/auth/sign-in", new AuthRequest(PhoneNumber: phoneNumber, Pin: pin!, DeviceId: device));
+        if (signIn.StatusCode != HttpStatusCode.Accepted) throw new InvalidOperationException($"Sign-in for {email} returned {signIn.StatusCode}.");
+        using var verify = await client.PostAsJsonAsync("/auth/verify-device", new AuthRequest(PhoneNumber: phoneNumber, DeviceId: device, Code: Email.Codes[email]));
+        verify.EnsureSuccessStatusCode();
+        var tokens = await verify.Content.ReadFromJsonAsync<AuthResponse>();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens!.AccessToken);
+        return client;
+    }
+    public Task Policy(Action<OrganizationSecurityPolicy> change) => WithDb(async db =>
+    {
+        db.Provisioning = true;
+        change(await db.SecurityPolicies.IgnoreQueryFilters().SingleAsync());
+        await db.SaveChangesAsync();
+    });
     public async Task WithDb(Func<AuthDb, Task> action)
     {
         using var scope = Services.CreateScope();
