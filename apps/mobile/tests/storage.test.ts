@@ -1,43 +1,48 @@
 import * as SecureStore from "expo-secure-store";
-import {
-  clearSession,
-  getDeviceId,
-  loadSession,
-  saveSession,
-} from "../src/storage";
+import { clearSession, forgetPerson, getDeviceId, loadSession, matchesPinCheck, savePerson, savePinCheck, saveSession } from "../src/lib/storage";
 
-it("uses device-only secure storage for session tokens without storing a PIN", async () => {
-  const session = {
-    email: "person@example.com",
-    accessToken: "jwt",
-    refreshToken: "refresh",
-  };
+const session = { phoneNumber: "0712345678", accessToken: "jwt", refreshToken: "refresh" };
+
+it("keeps session tokens in device-only secure storage", async () => {
   await saveSession(session);
-  expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
-    "xcode.session",
-    JSON.stringify(session),
-    { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY },
-  );
-  jest
-    .mocked(SecureStore.getItemAsync)
-    .mockResolvedValueOnce(JSON.stringify(session));
+  expect(SecureStore.setItemAsync).toHaveBeenCalledWith("xcode.session", JSON.stringify(session), {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
   expect(await loadSession()).toEqual(session);
   await clearSession();
-  expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(
-    "xcode.session",
-    expect.any(Object),
-  );
-});
-it("discards malformed session state", async () => {
-  jest.mocked(SecureStore.getItemAsync).mockResolvedValueOnce("not json");
   expect(await loadSession()).toBeNull();
-  expect(SecureStore.deleteItemAsync).toHaveBeenCalled();
 });
+
+it("discards malformed session state", async () => {
+  await SecureStore.setItemAsync("xcode.session", "not json");
+  expect(await loadSession()).toBeNull();
+  expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith("xcode.session", expect.any(Object));
+});
+
+it("checks a PIN offline without storing it", async () => {
+  expect(await matchesPinCheck("2580")).toBeNull();
+  await savePinCheck("2580");
+  expect(await matchesPinCheck("2580")).toBe(true);
+  expect(await matchesPinCheck("2581")).toBe(false);
+  expect(await SecureStore.getItemAsync("xcode.pin-check")).not.toContain("2580");
+});
+
+it("switch user forgets the person but keeps the installation id", async () => {
+  const device = await getDeviceId();
+  await saveSession(session);
+  await savePerson({ phoneNumber: session.phoneNumber, firstName: "Wanjiru", lastName: "Kamau", role: "Revenue clerk", permissions: [], pinLength: 4 });
+  await savePinCheck("2580");
+  await forgetPerson();
+  expect(await loadSession()).toBeNull();
+  expect(await matchesPinCheck("2580")).toBeNull();
+  expect(await getDeviceId()).toBe(device);
+});
+
 it("concurrent requests share a single persistent installation identifier", async () => {
-  jest.mocked(SecureStore.getItemAsync).mockResolvedValue(null);
-  expect(await Promise.all([getDeviceId(), getDeviceId()])).toEqual([
-    "stable-test-device",
-    "stable-test-device",
-  ]);
-  expect(SecureStore.setItemAsync).toHaveBeenCalledTimes(1);
+  await jest.isolateModulesAsync(async () => {
+    const store = require("expo-secure-store");
+    const { getDeviceId: fresh } = require("../src/lib/storage");
+    expect(await Promise.all([fresh(), fresh()])).toEqual(["stable-test-device", "stable-test-device"]);
+    expect(store.setItemAsync).toHaveBeenCalledTimes(1);
+  });
 });
