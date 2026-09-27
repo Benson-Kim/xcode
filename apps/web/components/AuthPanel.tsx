@@ -50,7 +50,6 @@ export function AuthPanel() {
   const [pinFlow, setPinFlow] = useState<"setup-pin" | "pin-reset" | null>(
     null,
   );
-  const [livePins, setLivePins] = useState<Record<string, string>>({});
   // The PIN that produced the current device challenge, so "Send a new code" can repeat that
   // sign-in instead of submitting an empty PIN (a failed attempt). Never rendered.
   const challengePin = useRef("");
@@ -139,8 +138,6 @@ export function AuthPanel() {
       setMaskedEmail(result.maskedEmail || "");
 
       if (result.status === "authenticated") {
-        if (changingPin && submittedPin)
-          setLivePins((current) => ({ ...current, [submittedPhone]: submittedPin }));
         navigate("authenticated");
         setPausedUntil(0);
       } else if (result.status === "verification_required") {
@@ -377,7 +374,8 @@ export function AuthPanel() {
             </>
           )}
 
-          {screen === "sign-in" && (
+          {/* Demo numbers for development only. A PIN someone chose is never kept or shown. */}
+          {screen === "sign-in" && process.env.NODE_ENV !== "production" && (
             <DemoBox help>
               <strong className="text-navy">Demo logins</strong>
               <ul className="mt-1.5 mb-0 list-disc pl-4.5">
@@ -388,7 +386,7 @@ export function AuthPanel() {
                   ["Fleet manager", "0700 111 222"],
                 ].map(([label, phone]) => (
                   <li key={phone}>
-                    {label}: {phone}, {livePins[phone] ? `PIN ${livePins[phone]}` : "PIN set by the user"}
+                    {label}: {phone}
                   </li>
                 ))}
               </ul>

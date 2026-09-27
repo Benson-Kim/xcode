@@ -169,6 +169,38 @@ it.each([
   });
 });
 
+it("never keeps or shows a PIN someone just chose", async () => {
+  // Signed in, the app shell also loads the organization's appearance; this test has none.
+  vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+    url.includes("/auth/session")
+      ? { ok: true, status: 200, json: async () => ({ firstName: "Test", lastName: "User", role: "Owner", permissions: [] }) }
+      : { ok: false, status: 404, json: async () => ({}) },
+  ));
+  vi.mocked(authApi)
+    .mockResolvedValueOnce({ status: "check_email" })
+    .mockResolvedValueOnce({ status: "code_verified" })
+    .mockResolvedValueOnce({ status: "authenticated" })
+    .mockResolvedValueOnce({ status: "signed_out" });
+  await renderPanel();
+  fireEvent.click(screen.getByRole("button", { name: "First time here?" }));
+  // One of the demo numbers the sign-in page lists.
+  fireEvent.change(screen.getByLabelText("Mobile number"), { target: { value: "0712 345 678" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send code" }));
+  fireEvent.change(await screen.findByLabelText("6 digit code"), { target: { value: "123456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm code" }));
+  fireEvent.change(await screen.findByLabelText("New PIN"), { target: { value: "6942" } });
+  fireEvent.change(screen.getByLabelText("Type it again"), { target: { value: "6942" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save PIN" }));
+  await screen.findByRole("heading", { name: "Dashboard" });
+
+  const userMenu = await waitFor(() => document.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!);
+  fireEvent.click(userMenu);
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Sign out" }));
+  await screen.findByRole("heading", { name: "Sign in" });
+  expect(screen.getByText("Revenue clerk: 0712 345 678")).toBeInTheDocument();
+  expect(document.body).not.toHaveTextContent("6942");
+});
+
 it("picks the session back up after a page refresh", async () => {
   vi.mocked(restoreSession).mockResolvedValue(true);
   render(<AuthPanel />);
