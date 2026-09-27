@@ -13,6 +13,7 @@ public sealed partial class AuthDb(DbContextOptions<AuthDb> options, Auth.Applic
     public DbSet<OrganizationMembership> Memberships => Set<OrganizationMembership>();
     public DbSet<OrganizationLocalization> Localizations => Set<OrganizationLocalization>();
     public DbSet<OrganizationBranding> Brandings => Set<OrganizationBranding>();
+    public DbSet<OrganizationLogo> Logos => Set<OrganizationLogo>();
     public DbSet<OrganizationSecurityPolicy> SecurityPolicies => Set<OrganizationSecurityPolicy>();
     public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
     public DbSet<Role> Roles => Set<Role>();

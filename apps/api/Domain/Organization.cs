@@ -150,7 +150,8 @@ public sealed class OrganizationBranding : IOrganizationEntity
      public string? LogoDark { get; set; }
      public string LogoAlt { get; set; } = "XCODE";
      public string? Favicon { get; set; }
-     public string Primary { get; set; } = "#1647A6";
+     // The design's primary blue; organizations change it under Brand.
+     public string Primary { get; set; } = "#1D5FD6";
      public string Secondary { get; set; } = "#14213D";
      public string Accent { get; set; } = "#1E6B3A";
      public string? Domain { get; set; }
@@ -175,6 +176,56 @@ public sealed class OrganizationBranding : IOrganizationEntity
           if (SupportEmail is not null && (SupportEmail.Length > 320 || !System.Net.Mail.MailAddress.TryCreate(SupportEmail, out _)))
                throw new ArgumentException("Invalid support email.");
      }
+}
+
+// The organization's uploaded logo. Raster images only: an SVG can carry script, and the logo is served
+// back to every member.
+public sealed class OrganizationLogo : IOrganizationEntity
+{
+     public const int MaxBytes = 256 * 1024;
+     private static readonly Dictionary<string, byte[][]> Signatures = new()
+     {
+          ["image/png"] = [[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]],
+          ["image/jpeg"] = [[0xFF, 0xD8, 0xFF]],
+          ["image/webp"] = [[0x52, 0x49, 0x46, 0x46]],
+     };
+
+     public Guid OrganizationId { get; set; }
+     public string ContentType { get; set; } = "";
+     public byte[] Data { get; set; } = [];
+     public DateTimeOffset UpdatedAt { get; set; }
+
+     // Accepts "data:image/png;base64,..." and checks the bytes really are the declared image type.
+     public static OrganizationLogo FromDataUrl(Guid organizationId, string? dataUrl, DateTimeOffset now)
+     {
+          var match = Regex.Match(dataUrl ?? "", "^data:(image/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$");
+          if (!match.Success)
+               throw new ArgumentException("Upload a PNG, JPEG or WebP image.");
+          byte[] data;
+          try
+          {
+               data = Convert.FromBase64String(match.Groups[2].Value);
+          }
+          catch (FormatException)
+          {
+               throw new ArgumentException("The image could not be read.");
+          }
+          if (data.Length is 0 or > MaxBytes)
+               throw new ArgumentException("The logo must be at most 256 KB.");
+          var type = match.Groups[1].Value;
+          var isWebp = type != "image/webp" || data.Length > 12 && data.AsSpan(8, 4).SequenceEqual("WEBP"u8);
+          if (!Signatures[type].Any(signature => data.AsSpan().StartsWith(signature)) || !isWebp)
+               throw new ArgumentException("The file is not the image type it claims to be.");
+          return new OrganizationLogo
+          {
+               OrganizationId = organizationId,
+               ContentType = type,
+               Data = data,
+               UpdatedAt = now
+          };
+     }
+
+     public string ToDataUrl() => $"data:{ContentType};base64,{Convert.ToBase64String(Data)}";
 }
 
 public sealed class OrganizationSecurityPolicy : IOrganizationEntity
