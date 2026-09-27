@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import type { Page } from "../../lib/types";
-import { useSetupData } from "../../lib/useSetupData";
+import { useResource, useStreamedList } from "../../lib/data";
 import { kes, plural } from "../../lib/format";
 import { Banner, Button, CellNote, DataTable, FormSkeleton, PageHeader, RowButton, SegmentedControl, Spacer, StatusBadge, Td, Toolbar, Tr } from "../ui";
-import { LIST, recurringCategoryNames, type RecurringItem, type VehicleOption } from "./shared";
+import { recurringCategoryNames, type RecurringItem, type VehicleOption } from "./shared";
 import { formatDateOnly, recurringFrequency, recurringMonthlyEstimate, recurringNextPosting, todayDateOnly } from "../recurringPresentation";
 import { RecurringEditor } from "../RecurringEditor";
 
@@ -20,26 +19,34 @@ export function RecurringPage({
   openItem?: string;
   newForVehicle?: string;
 }) {
-  const recurring = useSetupData<Page<RecurringItem>>(`recurring${LIST}`);
+  const recurring = useStreamedList<RecurringItem>("setup/recurring");
   // Viewing needs only commitments access: shares carry their registration. The vehicle picker is for editors.
-  const options = useSetupData<VehicleOption[]>(canManage ? "recurring/vehicle-options" : null);
+  const options = useResource<VehicleOption[]>(canManage ? "setup/recurring/vehicle-options" : null);
   const [filter, setFilter] = useState<Filter>("all");
   const [editing, setEditing] = useState<string | null>(newForVehicle ? "new" : (openItem ?? null));
-  const items = recurring.data?.items ?? [];
+  const items = recurring.items;
 
   if (editing) {
     const item = editing === "new" ? undefined : items.find((candidate) => candidate.id === editing);
-    const waiting = recurring.loading || (canManage && options.loading);
-    if (waiting || (editing !== "new" && !item))
+    // An existing item opens as soon as the page holding it arrives; a new one opens straight away. The
+    // vehicle picker fills in when its own request lands.
+    if (editing !== "new" && !item) {
+      const stillLoading = recurring.loading || recurring.pendingRows > 0;
       return (
         <section>
-          <PageHeader title={editing === "new" ? "Add recurring cost or saving" : "Recurring cost or saving"} />
-          {recurring.error ? <Banner className="mt-5">{recurring.error}</Banner> : <FormSkeleton cards={3} label="Loading the recurring item" />}
+          <PageHeader title="Recurring cost or saving" />
+          {recurring.error || !stillLoading ? (
+            <Banner className="mt-5">{recurring.error || "This item is no longer in your list."}</Banner>
+          ) : (
+            <FormSkeleton cards={3} label="Loading the recurring item" />
+          )}
         </section>
       );
+    }
     return (
       <RecurringEditor
         item={item}
+        vehiclesLoading={canManage && options.loading}
         vehicles={editorVehicles(options.data ?? [], item)}
         preselectVehicle={editing === "new" ? newForVehicle : undefined}
         canEdit={canManage}
@@ -85,6 +92,7 @@ export function RecurringPage({
           { label: "Next posting" },
         ]}
         loading={recurring.loading}
+        pendingRows={recurring.pendingRows}
         loadingLabel="Loading recurring costs and savings"
         isEmpty={!visible.length}
         emptyMessage="Nothing here yet."

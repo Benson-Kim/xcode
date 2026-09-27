@@ -8,6 +8,8 @@
 
   --color-cream: #f6f3ec;
   --color-navy: #14213d;
+  /* The brand mark, avatar and toast: the organization's secondary colour. */
+  --color-brand: #14213d;
   --color-grey: #4f5b6b;
   --color-blue: #1d5fd6;
   --color-blue-dark: #1647a6;
@@ -62,7 +64,15 @@
     cursor: pointer;
   }
   :focus-visible {
-    outline: 3px solid rgb(29 95 214 / 45%);
+    outline: 3px solid color-mix(in srgb, var(--color-blue) 45%, transparent);
     outline-offset: 2px;
+  }
+  /* The person's "Reduce motion" preference, on top of the operating system's. */
+  [data-reduced-motion="true"] *,
+  [data-reduced-motion="true"] *::before,
+  [data-reduced-motion="true"] *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }

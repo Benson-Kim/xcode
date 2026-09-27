@@ -48,6 +48,3 @@ export const recurringCategoryNames: Record<number, string> = {
   3: "Crew costs",
   4: "Fixed commitments",
 };
-
-// Lists show everything up to the API's page limit.
-export const LIST = "?pageSize=100";

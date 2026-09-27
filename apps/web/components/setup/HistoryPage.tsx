@@ -1,10 +1,9 @@
 "use client";
 
-import type { Page } from "../../lib/types";
-import { useSetupData } from "../../lib/useSetupData";
+import { useStreamedList } from "../../lib/data";
 import { formatDateTime } from "../../lib/format";
 import { Banner, DataTable, PageHeader, Td, Tr } from "../ui";
-import { LIST, type HistoryRow } from "./shared";
+import type { HistoryRow } from "./shared";
 
 const sections: Record<string, string> = {
   companies: "PSV companies",
@@ -17,8 +16,8 @@ const sections: Record<string, string> = {
 };
 
 export function HistoryPage() {
-  const history = useSetupData<Page<HistoryRow>>(`history${LIST}`);
-  const rows = history.data?.items ?? [];
+  const history = useStreamedList<HistoryRow>("setup/history");
+  const rows = history.items;
   return (
     <section>
       <PageHeader title="Change log" description="Who changed what in setup and organization settings." />
@@ -26,6 +25,7 @@ export function HistoryPage() {
       <DataTable
         columns={[{ label: "When" }, { label: "Who" }, { label: "What changed" }]}
         loading={history.loading}
+        pendingRows={history.pendingRows}
         loadingLabel="Loading the change log"
         isEmpty={!rows.length}
         emptyMessage="No setup changes yet."

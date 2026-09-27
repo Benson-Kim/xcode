@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-const allowedMethods = new Set(["GET", "POST", "PUT"]);
+const allowedMethods = new Set(["GET", "POST", "PUT", "DELETE"]);
 
 export async function GET(
   request: NextRequest,
@@ -24,6 +24,13 @@ export async function PUT(
   return proxy(request, context, "PUT");
 }
 
+export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return proxy(request, context, "DELETE");
+}
+
 async function proxy(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
@@ -42,7 +49,7 @@ async function proxy(
   const { path } = await context.params;
   const operation = path.join("/");
   if (
-    !/^(companies|vehicles|recurring|history|preferences|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy)|access\/(catalog|roles|scope-options)|people)(\/[^/]+)*$/.test(
+    !/^(companies|vehicles|recurring|history|preferences|appearance|organization\/logo|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy)|access\/(catalog|roles|scope-options)|people)(\/[^/]+)*$/.test(
       operation,
     )
   )
@@ -56,7 +63,7 @@ async function proxy(
       { status: 401 },
     );
 
-  const body = method === "GET" ? undefined : await request.text();
+  const body = method === "GET" || method === "DELETE" ? undefined : await request.text();
   try {
     const response = await fetch(
       `${process.env.API_URL || "http://localhost:5000"}/setup/${operation}${request.nextUrl.search}`,

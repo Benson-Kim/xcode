@@ -4,11 +4,12 @@ import { TableRowsSkeleton } from "./skeleton";
 
 export type Column = { label: string; numeric?: boolean; hidden?: boolean };
 
-// A list in a card (.table-card / table.list). While loading it shows placeholder rows, never the
+// A list in a card. While loading it shows placeholder rows, never the
 // empty message; below 720px each row becomes a stack of labelled cells.
 export function DataTable({
   columns,
   loading = false,
+  pendingRows = 0,
   isEmpty = false,
   emptyMessage,
   loadingLabel = "Loading",
@@ -17,6 +18,8 @@ export function DataTable({
 }: {
   columns: Column[];
   loading?: boolean;
+  // Placeholder rows after the rows already shown, while more pages are on their way.
+  pendingRows?: number;
   isEmpty?: boolean;
   emptyMessage: ReactNode;
   loadingLabel?: string;
@@ -24,8 +27,16 @@ export function DataTable({
   children?: ReactNode;
 }) {
   return (
-    <div className={cn("mt-4 overflow-hidden rounded-[14px] border border-card-line bg-white", className)}>
-      <table className="w-full border-collapse max-[720px]:block" aria-busy={loading || undefined}>
+    <div
+      className={cn(
+        "mt-4 overflow-hidden rounded-[14px] border border-card-line bg-white",
+        className,
+      )}
+    >
+      <table
+        className="w-full border-collapse max-[720px]:block"
+        aria-busy={loading || pendingRows > 0 || undefined}
+      >
         {loading && <caption className="sr-only">{loadingLabel}</caption>}
         <thead className="max-[720px]:hidden">
           <tr>
@@ -38,7 +49,11 @@ export function DataTable({
                   column.numeric && "text-right",
                 )}
               >
-                {column.hidden ? <span className="sr-only">{column.label}</span> : column.label}
+                {column.hidden ? (
+                  <span className="sr-only">{column.label}</span>
+                ) : (
+                  column.label
+                )}
               </th>
             ))}
           </tr>
@@ -48,12 +63,23 @@ export function DataTable({
             <TableRowsSkeleton columns={columns.length} />
           ) : isEmpty ? (
             <tr className="max-[720px]:block">
-              <td colSpan={columns.length} className="px-4 py-6 text-center text-grey max-[720px]:block">
+              <td
+                colSpan={columns.length}
+                className="px-4 py-6 text-center text-grey max-[720px]:block"
+              >
                 {emptyMessage}
               </td>
             </tr>
           ) : (
-            children
+            <>
+              {children}
+              {pendingRows > 0 && (
+                <TableRowsSkeleton
+                  columns={columns.length}
+                  rows={pendingRows}
+                />
+              )}
+            </>
           )}
         </tbody>
       </table>
@@ -87,15 +113,22 @@ export function Td({
       className={cn(
         "border-b border-divider px-4 py-3 align-top text-[15px]",
         "max-[720px]:block max-[720px]:w-full max-[720px]:border-0 max-[720px]:py-1",
-        label && "max-[720px]:before:block max-[720px]:before:text-xs max-[720px]:before:text-grey max-[720px]:before:content-[attr(data-label)]",
-        numeric && "text-right whitespace-nowrap tabular-nums max-[720px]:text-left",
+        label &&
+          "max-[720px]:before:block max-[720px]:before:text-xs max-[720px]:before:text-grey max-[720px]:before:content-[attr(data-label)]",
+        numeric &&
+          "text-right whitespace-nowrap tabular-nums max-[720px]:text-left",
         className,
       )}
     />
   );
 }
 
-// Secondary line under a cell value (td small).
+// Secondary line under a cell value.
 export function CellNote({ className, ...props }: ComponentProps<"small">) {
-  return <small {...props} className={cn("block text-[13px] text-grey", className)} />;
+  return (
+    <small
+      {...props}
+      className={cn("block text-[13px] text-grey", className)}
+    />
+  );
 }

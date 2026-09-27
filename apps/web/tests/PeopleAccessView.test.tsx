@@ -4,7 +4,7 @@ import { PeopleAccessView } from "../components/PeopleAccessView";
 import { renderInApp } from "./renderInApp";
 
 const responses: Record<string, unknown> = {
-  "/api/setup/people?pageSize=100": { items: [], pageNumber: 1, pageSize: 100, total: 0 },
+  "/api/setup/people?page=1&pageSize=25": { items: [], pageNumber: 1, pageSize: 25, total: 0 },
   "/api/setup/access/catalog": [
     {
       name: "Revenue",

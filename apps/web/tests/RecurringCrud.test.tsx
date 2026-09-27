@@ -42,7 +42,7 @@ beforeEach(() => {
 it("reads recurring items with the reference summary and hides Add without manage permission", async () => {
   // A view-only user has no vehicle access: every vehicle endpoint is forbidden.
   const fetchMock = mockFetch(async (input) => {
-    if (String(input).endsWith("/recurring?pageSize=100"))
+    if (String(input).endsWith("/recurring?page=1&pageSize=25"))
       return new Response(JSON.stringify({ items: [{ ...item, frequency: 1, day: null, amount: 1000, start: "2026-09-27", allocations: [{ vehicleId: vehicle.id, amount: 1000, registration: vehicle.registration }] }], pageNumber: 1, pageSize: 25, total: 1 }), { status: 200 });
     return new Response(JSON.stringify({ title: "Not permitted in this organization or data scope." }), { status: 403 });
   });
@@ -59,7 +59,7 @@ it("reads recurring items with the reference summary and hides Add without manag
   expect(nextPosting.closest("td")).toHaveAttribute("data-label", "Next posting");
   expect(screen.queryByRole("button", { name: "Add recurring cost or saving" })).not.toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(["/api/setup/recurring?pageSize=100"]);
+  expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(["/api/setup/recurring?page=1&pageSize=25"]);
 });
 
 it("creates a recurring item with a balanced vehicle share", async () => {

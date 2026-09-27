@@ -1,9 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { requestSetup } from "./requestSetup";
-import { useSetupData } from "../lib/useSetupData";
-import { Banner, Button, Card, CardHeader, Choice, ChoiceGroup, Field, FormActions, FormLayout, FormSkeleton, Grid2, PageHeader, SelectInput, TextInput, useToast } from "./ui";
+import { apiRequest } from "../lib/data";
+import { useResource } from "../lib/data";
+import { useAppearance } from "../lib/appearance";
+import {
+  Banner,
+  Button,
+  Card,
+  CardHeader,
+  Choice,
+  ChoiceGroup,
+  Field,
+  FormActions,
+  FormLayout,
+  FormSkeleton,
+  Grid2,
+  PageHeader,
+  SelectInput,
+  TextInput,
+  useToast,
+} from "./ui";
 
 type Preferences = {
   locale?: string | null;
@@ -14,11 +31,12 @@ type Preferences = {
   fontScale: number;
 };
 
-const description = "How XCODE looks for you. Organization defaults apply where you leave a field empty.";
+const description =
+  "How XCODE looks for you. Organization defaults apply where you leave a field empty.";
 
 // Personal display preferences: open to every active member, separate from organization administration.
 export function PreferencesView() {
-  const loaded = useSetupData<Preferences>("preferences");
+  const loaded = useResource<Preferences>("setup/preferences");
   if (loaded.error)
     return (
       <section>
@@ -38,15 +56,20 @@ export function PreferencesView() {
 
 function PreferencesForm({ initial }: { initial: Preferences }) {
   const toast = useToast();
+  const { refresh } = useAppearance();
   const [preferences, setPreferences] = useState(initial);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function save() {
     setBusy(true);
     try {
-      await requestSetup("preferences", { method: "PUT", body: JSON.stringify(preferences) });
+      await apiRequest("setup/preferences", {
+        method: "PUT",
+        body: JSON.stringify(preferences),
+      });
       setError("");
       toast("Your preferences saved.");
+      refresh();
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -62,25 +85,78 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
           <CardHeader title="Display" />
           <Grid2>
             <Field id="pref-locale" label="Locale override">
-              <TextInput value={preferences.locale || ""} placeholder="Use organization default" onChange={(event) => setPreferences({ ...preferences, locale: event.target.value || null })} />
+              <TextInput
+                value={preferences.locale || ""}
+                placeholder="Use organization default"
+                onChange={(event) =>
+                  setPreferences({
+                    ...preferences,
+                    locale: event.target.value || null,
+                  })
+                }
+              />
             </Field>
             <Field id="pref-zone" label="Time-zone override">
-              <TextInput value={preferences.timeZone || ""} placeholder="Use organization default" onChange={(event) => setPreferences({ ...preferences, timeZone: event.target.value || null })} />
+              <TextInput
+                value={preferences.timeZone || ""}
+                placeholder="Use organization default"
+                onChange={(event) =>
+                  setPreferences({
+                    ...preferences,
+                    timeZone: event.target.value || null,
+                  })
+                }
+              />
             </Field>
             <Field id="pref-theme" label="Theme">
-              <SelectInput value={preferences.themeMode || "system"} onChange={(event) => setPreferences({ ...preferences, themeMode: event.target.value })}>
+              <SelectInput
+                value={preferences.themeMode || "system"}
+                onChange={(event) =>
+                  setPreferences({
+                    ...preferences,
+                    themeMode: event.target.value,
+                  })
+                }
+              >
                 <option value="system">System</option>
                 <option value="light">Light</option>
                 <option value="dark">Dark</option>
               </SelectInput>
             </Field>
             <Field id="pref-font" label="Font scale" hint="1 to 3.">
-              <TextInput type="number" min="1" max="3" step="0.1" value={preferences.fontScale} onChange={(event) => setPreferences({ ...preferences, fontScale: Number(event.target.value) })} />
+              <TextInput
+                type="number"
+                min="1"
+                max="3"
+                step="0.1"
+                value={preferences.fontScale}
+                onChange={(event) =>
+                  setPreferences({
+                    ...preferences,
+                    fontScale: Number(event.target.value),
+                  })
+                }
+              />
             </Field>
           </Grid2>
           <ChoiceGroup label="Accessibility">
-            <Choice label="Reduce motion" checked={preferences.reducedMotion} onChange={(event) => setPreferences({ ...preferences, reducedMotion: event.target.checked })} />
-            <Choice label="Use 12-hour time" checked={preferences.hour12 ?? false} onChange={(event) => setPreferences({ ...preferences, hour12: event.target.checked })} />
+            <Choice
+              label="Reduce motion"
+              checked={preferences.reducedMotion}
+              onChange={(event) =>
+                setPreferences({
+                  ...preferences,
+                  reducedMotion: event.target.checked,
+                })
+              }
+            />
+            <Choice
+              label="Use 12-hour time"
+              checked={preferences.hour12 ?? false}
+              onChange={(event) =>
+                setPreferences({ ...preferences, hour12: event.target.checked })
+              }
+            />
           </ChoiceGroup>
           <FormActions>
             <Button disabled={busy} onClick={() => void save()}>

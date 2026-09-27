@@ -1,20 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { requestSetup } from "../requestSetup";
-import type { Page } from "../../lib/types";
-import { useSetupData } from "../../lib/useSetupData";
+import { apiRequest } from "../../lib/data";
+import { useStreamedList } from "../../lib/data";
 import { Banner, Button, DataTable, Field, PageHeader, RowButton, TextInput, Toolbar, Td, Tr, useToast } from "../ui";
-import { LIST, type Company } from "./shared";
+import type { Company } from "./shared";
 
 export function CompaniesPage() {
-  const companies = useSetupData<Page<Company>>(`companies${LIST}`);
+  const companies = useStreamedList<Company>("setup/companies");
   const toast = useToast();
   const [name, setName] = useState("");
   const [addError, setAddError] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string; error: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const rows = companies.data?.items ?? [];
+  const rows = companies.items;
 
   async function add() {
     const trimmed = name.trim();
@@ -22,7 +21,7 @@ export function CompaniesPage() {
     if (rows.some((company) => company.name.toLowerCase() === trimmed.toLowerCase())) return setAddError("This company already exists.");
     setBusy(true);
     try {
-      await requestSetup("companies", { method: "POST", body: JSON.stringify({ name: trimmed, reason: `Added PSV company ${trimmed}` }) });
+      await apiRequest("setup/companies", { method: "POST", body: JSON.stringify({ name: trimmed, reason: `Added PSV company ${trimmed}` }) });
       setName("");
       setAddError("");
       toast(`${trimmed} added.`);
@@ -43,7 +42,7 @@ export function CompaniesPage() {
     if (trimmed === company.name) return setRenaming(null);
     setBusy(true);
     try {
-      await requestSetup(`companies/${company.id}`, { method: "PUT", body: JSON.stringify({ name: trimmed, reason: `Renamed ${company.name} to ${trimmed}` }) });
+      await apiRequest(`setup/companies/${company.id}`, { method: "PUT", body: JSON.stringify({ name: trimmed, reason: `Renamed ${company.name} to ${trimmed}` }) });
       setRenaming(null);
       toast(`Company renamed to ${trimmed}.`);
       companies.reload();
@@ -79,6 +78,7 @@ export function CompaniesPage() {
       <DataTable
         columns={[{ label: "Company" }, { label: "Vehicles", numeric: true }, { label: "Actions", hidden: true }]}
         loading={companies.loading}
+        pendingRows={companies.pendingRows}
         loadingLabel="Loading companies"
         isEmpty={!rows.length}
         emptyMessage="No PSV companies yet. Add the first one above."

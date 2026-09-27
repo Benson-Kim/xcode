@@ -1,22 +1,28 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { requestSetup } from "./requestSetup";
-import { useSetupData } from "../lib/useSetupData";
+import { apiRequest } from "../lib/data";
+import { useResource } from "../lib/data";
+import { useAppearance } from "../lib/appearance";
 import {
   Banner,
+  BrandIcon,
   Button,
   Card,
   CardHeader,
   Choice,
   ChoiceGroup,
+  ColorInput,
   Field,
+  FileButton,
   FormActions,
   FormLayout,
   FormSkeleton,
   Grid2,
+  Hint,
   PageHeader,
   SelectInput,
+  Skeleton,
   TextInput,
   useToast,
 } from "./ui";
@@ -62,7 +68,10 @@ type Settings = {
   };
 };
 
-type Section = keyof Pick<Settings, "organization" | "localization" | "branding" | "securityPolicy">;
+type Section = keyof Pick<
+  Settings,
+  "organization" | "localization" | "branding" | "securityPolicy"
+>;
 
 // Change-log wording for each section.
 const reasons: Record<Section, string> = {
@@ -80,7 +89,7 @@ const saved: Record<Section, string> = {
 };
 
 export function OrganizationSettingsView() {
-  const loaded = useSetupData<Settings>("organization/settings");
+  const loaded = useResource<Settings>("setup/organization/settings");
   if (loaded.error)
     return (
       <section>
@@ -91,36 +100,68 @@ export function OrganizationSettingsView() {
   if (loaded.loading || !loaded.data)
     return (
       <section>
-        <PageHeader title="Organization settings" description="Defaults for everyone in the organization." />
+        <PageHeader
+          title="Organization settings"
+          description="Defaults for everyone in the organization."
+        />
         <FormSkeleton cards={4} label="Loading organization settings" />
       </section>
     );
   return <SettingsForm initial={loaded.data} />;
 }
 
+const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const LOGO_MAX_BYTES = 256 * 1024;
+
+function readAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("The image could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
 function SettingsForm({ initial }: { initial: Settings }) {
   const toast = useToast();
+  // Saved settings show at once: the shell reloads branding and formats after each save.
+  const { appearance, loading: appearanceLoading, refresh } = useAppearance();
+  const [logoBusy, setLogoBusy] = useState(false);
   const [settings, setSettings] = useState(initial);
   const [errors, setErrors] = useState<Partial<Record<Section, string>>>({});
   const [busy, setBusy] = useState<Section | null>(null);
-  const update = <T extends Section>(section: T, value: Partial<Settings[T]>) => setSettings({ ...settings, [section]: { ...settings[section], ...value } });
+  const update = <T extends Section>(section: T, value: Partial<Settings[T]>) =>
+    setSettings({ ...settings, [section]: { ...settings[section], ...value } });
 
   async function save(section: Section) {
     let value: object = settings[section];
     if (section === "organization") {
       const name = settings.organization.name.trim();
       const slug = settings.organization.slug.trim();
-      if (!name || name.length > 200 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 100) {
-        setErrors({ ...errors, organization: "Enter an organization name and a lowercase slug using letters, numbers, and hyphens." });
+      if (
+        !name ||
+        name.length > 200 ||
+        !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ||
+        slug.length > 100
+      ) {
+        setErrors({
+          ...errors,
+          organization:
+            "Enter an organization name and a lowercase slug using letters, numbers, and hyphens.",
+        });
         return;
       }
       value = { name, slug };
     }
     setBusy(section);
     try {
-      await requestSetup(`organization/settings/${section}`, { method: "PUT", body: JSON.stringify({ value, reason: reasons[section] }) });
+      await apiRequest(`setup/organization/settings/${section}`, {
+        method: "PUT",
+        body: JSON.stringify({ value, reason: reasons[section] }),
+      });
       setErrors({ ...errors, [section]: undefined });
       toast(saved[section]);
+      refresh();
     } catch (reason) {
       setErrors({ ...errors, [section]: (reason as Error).message });
     } finally {
@@ -128,62 +169,274 @@ function SettingsForm({ initial }: { initial: Settings }) {
     }
   }
 
+  async function changeLogo(file: File | null) {
+    if (file && !LOGO_TYPES.includes(file.type))
+      return setErrors({
+        ...errors,
+        branding: "Upload a PNG, JPEG or WebP image.",
+      });
+    if (file && file.size > LOGO_MAX_BYTES)
+      return setErrors({
+        ...errors,
+        branding: "The logo must be at most 256 KB.",
+      });
+    setLogoBusy(true);
+    try {
+      if (file)
+        await apiRequest("setup/organization/logo", {
+          method: "PUT",
+          body: JSON.stringify({ dataUrl: await readAsDataUrl(file) }),
+        });
+      else await apiRequest("setup/organization/logo", { method: "DELETE" });
+      setErrors({ ...errors, branding: undefined });
+      toast(file ? "Logo updated." : "Logo removed.");
+      refresh();
+    } catch (reason) {
+      setErrors({ ...errors, branding: (reason as Error).message });
+    } finally {
+      setLogoBusy(false);
+    }
+  }
+
   const { organization, branding, localization, securityPolicy } = settings;
+  const logo = appearance?.branding.logo;
   return (
     <section>
-      <PageHeader title="Organization settings" description="Defaults for everyone in the organization. Each person sets their own display under Your preferences." />
+      <PageHeader
+        title="Organization settings"
+        description="Defaults for everyone in the organization. Each person sets their own display under Your preferences."
+      />
       <FormLayout>
-        <SettingsCard title="Organization details" error={errors.organization} action="Save organization details" busy={busy === "organization"} onSave={() => void save("organization")}>
+        <SettingsCard
+          title="Organization details"
+          error={errors.organization}
+          action="Save organization details"
+          busy={busy === "organization"}
+          onSave={() => void save("organization")}
+        >
           <Grid2>
             <Field id="org-name" label="Organization name">
-              <TextInput maxLength={200} value={organization.name} onChange={(event) => update("organization", { name: event.target.value })} />
+              <TextInput
+                maxLength={200}
+                value={organization.name}
+                onChange={(event) =>
+                  update("organization", { name: event.target.value })
+                }
+              />
             </Field>
-            <Field id="org-slug" label="Slug" hint="Lowercase letters, numbers and hyphens.">
-              <TextInput maxLength={100} value={organization.slug} onChange={(event) => update("organization", { slug: event.target.value })} />
+            <Field
+              id="org-slug"
+              label="Slug"
+              hint="Lowercase letters, numbers and hyphens."
+            >
+              <TextInput
+                maxLength={100}
+                value={organization.slug}
+                onChange={(event) =>
+                  update("organization", { slug: event.target.value })
+                }
+              />
             </Field>
           </Grid2>
         </SettingsCard>
 
-        <SettingsCard title="Brand" error={errors.branding} action="Save brand" busy={busy === "branding"} onSave={() => void save("branding")}>
+        <SettingsCard
+          title="Brand"
+          description="Shown to everyone as soon as you save."
+          error={errors.branding}
+          action="Save brand"
+          busy={busy === "branding"}
+          onSave={() => void save("branding")}
+        >
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-[14px] border border-card-line bg-paper">
+              {appearanceLoading ? (
+                <Skeleton className="size-10 rounded-[10px]" />
+              ) : logo ? (
+                // The logo is a data URL from the API, which next/image cannot optimise.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logo}
+                  alt={branding.logoAlt}
+                  className="size-full object-contain p-1.5"
+                />
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className="grid size-10 place-items-center rounded-[10px] bg-brand text-white"
+                >
+                  <BrandIcon />
+                </span>
+              )}
+            </span>
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <div className="flex flex-wrap gap-2">
+                <FileButton
+                  accept={LOGO_TYPES.join(",")}
+                  disabled={logoBusy}
+                  onFile={(file) => void changeLogo(file)}
+                >
+                  {logo ? "Replace logo" : "Upload logo"}
+                </FileButton>
+                {logo && (
+                  <Button
+                    tone="danger"
+                    disabled={logoBusy}
+                    onClick={() => void changeLogo(null)}
+                  >
+                    Remove logo
+                  </Button>
+                )}
+              </div>
+              <Hint>
+                PNG, JPEG or WebP, up to 256 KB. A square image works best.
+              </Hint>
+            </div>
+          </div>
           <Grid2>
             <Field id="brand-display" label="Display name">
-              <TextInput value={branding.displayName} onChange={(event) => update("branding", { displayName: event.target.value })} />
+              <TextInput
+                value={branding.displayName}
+                onChange={(event) =>
+                  update("branding", { displayName: event.target.value })
+                }
+              />
             </Field>
             <Field id="brand-legal" label="Legal name">
-              <TextInput value={branding.legalName} onChange={(event) => update("branding", { legalName: event.target.value })} />
+              <TextInput
+                value={branding.legalName}
+                onChange={(event) =>
+                  update("branding", { legalName: event.target.value })
+                }
+              />
             </Field>
             <Field id="brand-alt" label="Logo alt text">
-              <TextInput value={branding.logoAlt} onChange={(event) => update("branding", { logoAlt: event.target.value })} />
+              <TextInput
+                value={branding.logoAlt}
+                onChange={(event) =>
+                  update("branding", { logoAlt: event.target.value })
+                }
+              />
             </Field>
             <Field id="brand-email" label="Support email">
-              <TextInput type="email" value={branding.supportEmail || ""} onChange={(event) => update("branding", { supportEmail: event.target.value || undefined })} />
+              <TextInput
+                type="email"
+                value={branding.supportEmail || ""}
+                onChange={(event) =>
+                  update("branding", {
+                    supportEmail: event.target.value || undefined,
+                  })
+                }
+              />
             </Field>
             <Field id="brand-domain" label="Domain">
-              <TextInput value={branding.domain || ""} onChange={(event) => update("branding", { domain: event.target.value || undefined })} />
+              <TextInput
+                value={branding.domain || ""}
+                onChange={(event) =>
+                  update("branding", {
+                    domain: event.target.value || undefined,
+                  })
+                }
+              />
             </Field>
           </Grid2>
+          <Grid2>
+            <Field
+              id="brand-primary"
+              label="Primary colour"
+              hint="Buttons, links and the selected menu entry."
+            >
+              <ColorInput
+                pickerLabel="Pick the primary colour"
+                value={branding.primary}
+                onChange={(primary) => update("branding", { primary })}
+              />
+            </Field>
+            <Field
+              id="brand-secondary"
+              label="Secondary colour"
+              hint="The brand mark and avatar."
+            >
+              <ColorInput
+                pickerLabel="Pick the secondary colour"
+                value={branding.secondary}
+                onChange={(secondary) => update("branding", { secondary })}
+              />
+            </Field>
+            <Field
+              id="brand-accent"
+              label="Accent colour"
+              hint="Positive states, such as Active and Balanced."
+            >
+              <ColorInput
+                pickerLabel="Pick the accent colour"
+                value={branding.accent}
+                onChange={(accent) => update("branding", { accent })}
+              />
+            </Field>
+          </Grid2>
+          <Hint>
+            Colours must stay readable on white: at least 4.5 to 1 contrast.
+          </Hint>
         </SettingsCard>
 
-        <SettingsCard title="Locale and time" error={errors.localization} action="Save locale" busy={busy === "localization"} onSave={() => void save("localization")}>
+        <SettingsCard
+          title="Locale and time"
+          error={errors.localization}
+          action="Save locale"
+          busy={busy === "localization"}
+          onSave={() => void save("localization")}
+        >
           <Grid2>
             <Field id="locale" label="Locale" hint="For example en-GB.">
-              <TextInput value={localization.locale} onChange={(event) => update("localization", { locale: event.target.value })} />
+              <TextInput
+                value={localization.locale}
+                onChange={(event) =>
+                  update("localization", { locale: event.target.value })
+                }
+              />
             </Field>
-            <Field id="time-zone" label="Time zone" hint="Business dates follow this zone, for example Africa/Nairobi.">
-              <TextInput value={localization.timeZone} onChange={(event) => update("localization", { timeZone: event.target.value })} />
+            <Field
+              id="time-zone"
+              label="Time zone"
+              hint="Business dates follow this zone, for example Africa/Nairobi."
+            >
+              <TextInput
+                value={localization.timeZone}
+                onChange={(event) =>
+                  update("localization", { timeZone: event.target.value })
+                }
+              />
             </Field>
             <Field id="currency" label="Currency">
-              <TextInput value={localization.currency} onChange={(event) => update("localization", { currency: event.target.value })} />
+              <TextInput
+                value={localization.currency}
+                onChange={(event) =>
+                  update("localization", { currency: event.target.value })
+                }
+              />
             </Field>
             <Field id="date-pattern" label="Date format">
-              <SelectInput value={localization.datePattern} onChange={(event) => update("localization", { datePattern: event.target.value })}>
+              <SelectInput
+                value={localization.datePattern}
+                onChange={(event) =>
+                  update("localization", { datePattern: event.target.value })
+                }
+              >
                 <option value="short">Short</option>
                 <option value="medium">Medium</option>
                 <option value="long">Long</option>
               </SelectInput>
             </Field>
             <Field id="first-day" label="First day of week">
-              <SelectInput value={localization.firstDayOfWeek} onChange={(event) => update("localization", { firstDayOfWeek: Number(event.target.value) })}>
+              <SelectInput
+                value={localization.firstDayOfWeek}
+                onChange={(event) =>
+                  update("localization", {
+                    firstDayOfWeek: Number(event.target.value),
+                  })
+                }
+              >
                 <option value="1">Monday</option>
                 <option value="0">Sunday</option>
                 <option value="6">Saturday</option>
@@ -191,12 +444,30 @@ function SettingsForm({ initial }: { initial: Settings }) {
             </Field>
           </Grid2>
           <ChoiceGroup label="Time and overrides">
-            <Choice label="Use 12-hour time" checked={localization.hour12} onChange={(event) => update("localization", { hour12: event.target.checked })} />
-            <Choice label="Allow locale overrides" checked={localization.allowLocaleOverride} onChange={(event) => update("localization", { allowLocaleOverride: event.target.checked })} />
+            <Choice
+              label="Use 12-hour time"
+              checked={localization.hour12}
+              onChange={(event) =>
+                update("localization", { hour12: event.target.checked })
+              }
+            />
+            <Choice
+              label="Allow locale overrides"
+              checked={localization.allowLocaleOverride}
+              onChange={(event) =>
+                update("localization", {
+                  allowLocaleOverride: event.target.checked,
+                })
+              }
+            />
             <Choice
               label="Allow time-zone overrides"
               checked={localization.allowTimeZoneOverride}
-              onChange={(event) => update("localization", { allowTimeZoneOverride: event.target.checked })}
+              onChange={(event) =>
+                update("localization", {
+                  allowTimeZoneOverride: event.target.checked,
+                })
+              }
             />
           </ChoiceGroup>
         </SettingsCard>
@@ -210,32 +481,86 @@ function SettingsForm({ initial }: { initial: Settings }) {
           onSave={() => void save("securityPolicy")}
         >
           <Grid2>
-            <Field id="pin-length" label="Shortest new PIN" hint="4 to 8 digits. Existing PINs keep working.">
-              <TextInput type="number" min="4" max="8" value={securityPolicy.pinLength} onChange={(event) => update("securityPolicy", { pinLength: Number(event.target.value) })} />
+            <Field
+              id="pin-length"
+              label="Shortest new PIN"
+              hint="4 to 8 digits. Existing PINs keep working."
+            >
+              <TextInput
+                type="number"
+                min="4"
+                max="8"
+                value={securityPolicy.pinLength}
+                onChange={(event) =>
+                  update("securityPolicy", {
+                    pinLength: Number(event.target.value),
+                  })
+                }
+              />
             </Field>
-            <Field id="lockout-attempts" label="Wrong PINs before a pause" hint="1 to 10.">
+            <Field
+              id="lockout-attempts"
+              label="Wrong PINs before a pause"
+              hint="1 to 10."
+            >
               <TextInput
                 type="number"
                 min="1"
                 max="10"
                 value={securityPolicy.lockoutThreshold}
-                onChange={(event) => update("securityPolicy", { lockoutThreshold: Number(event.target.value) })}
+                onChange={(event) =>
+                  update("securityPolicy", {
+                    lockoutThreshold: Number(event.target.value),
+                  })
+                }
               />
             </Field>
             <Field id="lockout-minutes" label="Pause length in minutes">
-              <TextInput type="number" min="1" max="1440" value={securityPolicy.lockoutMinutes} onChange={(event) => update("securityPolicy", { lockoutMinutes: Number(event.target.value) })} />
+              <TextInput
+                type="number"
+                min="1"
+                max="1440"
+                value={securityPolicy.lockoutMinutes}
+                onChange={(event) =>
+                  update("securityPolicy", {
+                    lockoutMinutes: Number(event.target.value),
+                  })
+                }
+              />
             </Field>
-            <Field id="access-minutes" label="Session renews every (minutes)" hint="1 to 15.">
+            <Field
+              id="access-minutes"
+              label="Session renews every (minutes)"
+              hint="1 to 15."
+            >
               <TextInput
                 type="number"
                 min="1"
                 max="15"
                 value={securityPolicy.accessTokenMinutes}
-                onChange={(event) => update("securityPolicy", { accessTokenMinutes: Number(event.target.value) })}
+                onChange={(event) =>
+                  update("securityPolicy", {
+                    accessTokenMinutes: Number(event.target.value),
+                  })
+                }
               />
             </Field>
-            <Field id="refresh-days" label="Stay signed in for (days)" hint="1 to 90.">
-              <TextInput type="number" min="1" max="90" value={securityPolicy.refreshTokenDays} onChange={(event) => update("securityPolicy", { refreshTokenDays: Number(event.target.value) })} />
+            <Field
+              id="refresh-days"
+              label="Stay signed in for (days)"
+              hint="1 to 90."
+            >
+              <TextInput
+                type="number"
+                min="1"
+                max="90"
+                value={securityPolicy.refreshTokenDays}
+                onChange={(event) =>
+                  update("securityPolicy", {
+                    refreshTokenDays: Number(event.target.value),
+                  })
+                }
+              />
             </Field>
           </Grid2>
         </SettingsCard>

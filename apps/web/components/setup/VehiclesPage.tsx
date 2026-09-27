@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { requestSetup } from "../requestSetup";
-import type { Page } from "../../lib/types";
-import { useSetupData } from "../../lib/useSetupData";
+import { apiRequest } from "../../lib/data";
+import { useResource, useStreamedList } from "../../lib/data";
 import { useSession } from "../../lib/session-context";
 import { kes, plural } from "../../lib/format";
 import { formatDateOnly, formatDateRange, recurringFrequency, todayDateOnly } from "../recurringPresentation";
@@ -40,7 +39,7 @@ import {
   Tr,
   useToast,
 } from "../ui";
-import { LIST, recurringCategoryNames, type Company, type RecurringItem, type Vehicle, type VehicleReport } from "./shared";
+import { recurringCategoryNames, type Company, type RecurringItem, type Vehicle, type VehicleReport } from "./shared";
 
 type CompanyChoice = { id: string; name: string };
 
@@ -52,13 +51,13 @@ export function VehiclesPage({
   onAddRecurring?: (vehicleId: string) => void;
 }) {
   const { can } = useSession();
-  const vehicles = useSetupData<Page<Vehicle>>(`vehicles${LIST}`);
+  const vehicles = useStreamedList<Vehicle>("setup/vehicles");
   // Vehicle managers may not manage companies; the vehicles they see name their companies too.
-  const companyList = useSetupData<Page<Company>>(can("companies.manage") ? `companies${LIST}` : null);
+  const companyList = useStreamedList<Company>(can("companies.manage") ? "setup/companies" : null);
   const [filter, setFilter] = useState("all");
   const [editing, setEditing] = useState<Vehicle | "new" | null>(null);
-  const rows = vehicles.data?.items ?? [];
-  const companies = companyChoices(rows, companyList.data?.items);
+  const rows = vehicles.items;
+  const companies = companyChoices(rows, companyList.items);
 
   if (editing)
     return (
@@ -109,6 +108,7 @@ export function VehiclesPage({
           { label: "Recurring items" },
         ]}
         loading={vehicles.loading}
+        pendingRows={filter === "all" ? vehicles.pendingRows : 0}
         loadingLabel="Loading vehicles"
         isEmpty={!visible.length}
         emptyMessage={filter === "all" ? "No vehicles yet. Add the first one above." : "No vehicles in this company yet."}
@@ -196,7 +196,7 @@ function VehicleEditor({
     }
     setBusy(true);
     try {
-      const result = await requestSetup<{ id: string }>(isNew ? "vehicles" : `vehicles/${vehicle.id}`, {
+      const result = await apiRequest<{ id: string }>(isNew ? "setup/vehicles" : `setup/vehicles/${vehicle.id}`, {
         method: isNew ? "POST" : "PUT",
         body: JSON.stringify({
           registration,
@@ -306,7 +306,7 @@ const categories = [1, 2, 3, 4];
 
 function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
   const [period, setPeriod] = useState<"week" | "month">("month");
-  const report = useSetupData<VehicleReport>(`vehicles/${vehicle.id}/report?period=${period}`);
+  const report = useResource<VehicleReport>(`setup/vehicles/${vehicle.id}/report?period=${period}`);
   const postings = report.data?.postings ?? [];
   const byCategory = (category: number) =>
     postings.filter((posting) => posting.kind === 1 && posting.category === category).reduce((sum, posting) => sum + posting.amount, 0);
@@ -382,10 +382,10 @@ function VehicleRecurringCard({
   onAdd?: (vehicleId: string) => void;
 }) {
   const { can } = useSession();
-  const recurring = useSetupData<Page<RecurringItem>>(can("commitments.view") ? `recurring${LIST}` : null);
+  const recurring = useStreamedList<RecurringItem>(can("commitments.view") ? "setup/recurring" : null);
   if (!can("commitments.view")) return null;
   const today = todayDateOnly();
-  const items = (recurring.data?.items ?? []).filter((item) => item.allocations.some((allocation) => allocation.vehicleId === vehicle.id));
+  const items = recurring.items.filter((item) => item.allocations.some((allocation) => allocation.vehicleId === vehicle.id));
   return (
     <Card>
       <CardHeader title={`Recurring costs and savings for ${vehicle.registration}`} description="This vehicle's share of each item" />

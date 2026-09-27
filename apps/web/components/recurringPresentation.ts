@@ -1,3 +1,5 @@
+import { datePattern, formatDate } from "../lib/format";
+
 export type RecurringScheduleItem = {
   frequency: number;
   day?: number | null;
@@ -30,20 +32,21 @@ function parseDateOnly(value: string) {
   return new Date(Date.UTC(year, month - 1, day));
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-// "5 Sep 2026", the design's date format (Intl's en-GB now writes "Sept").
+// A calendar date in the organization's date format ("5 Sep 2026" by default).
 export function formatDateOnly(value: string) {
-  const date = parseDateOnly(value);
-  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+  return formatDate(parseDateOnly(value));
 }
 
-// "1 to 26 Sep 2026", or "28 Sep to 4 Oct 2026" across months.
+// "1 to 26 Sep 2026", or "28 Sep to 4 Oct 2026" across months
 export function formatDateRange(from: string, through: string) {
   const [start, end] = [parseDateOnly(from), parseDateOnly(through)];
-  if (start.getUTCFullYear() !== end.getUTCFullYear()) return `${formatDateOnly(from)} to ${formatDateOnly(through)}`;
-  const sameMonth = start.getUTCMonth() === end.getUTCMonth();
-  return `${start.getUTCDate()}${sameMonth ? "" : ` ${MONTHS[start.getUTCMonth()]}`} to ${formatDateOnly(through)}`;
+  if (
+    datePattern() !== "medium" ||
+    start.getUTCFullYear() !== end.getUTCFullYear()
+  )
+    return `${formatDateOnly(from)} to ${formatDateOnly(through)}`;
+  const [day, month] = formatDateOnly(from).split(" ");
+  return `${day}${start.getUTCMonth() === end.getUTCMonth() ? "" : ` ${month}`} to ${formatDateOnly(through)}`;
 }
 
 export function recurringNextPostings(
@@ -95,5 +98,7 @@ export function recurringFrequency(item: RecurringScheduleItem) {
 }
 
 export function recurringMonthlyEstimate(amount: number, frequency: number) {
-  return Math.round(amount * (frequency === 1 ? 30.4 : frequency === 2 ? 4.35 : 1));
+  return Math.round(
+    amount * (frequency === 1 ? 30.4 : frequency === 2 ? 4.35 : 1),
+  );
 }
