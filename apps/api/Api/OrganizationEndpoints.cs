@@ -55,14 +55,59 @@ public static class OrganizationEndpoints
                     case "securityPolicy": before = await Save(db.SecurityPolicies, input.Value.Deserialize<OrganizationSecurityPolicy>(SettingsJson) ?? throw new ArgumentException("Invalid security policy."), context.OrganizationId, ct); break;
                     default: throw new KeyNotFoundException();
                }
-               organization.SettingsChanged();
-               // The versioned history keeps the stated reason and appears in the change log; the audit row carries it too.
-               var after = input.Value.GetRawText();
-               db.Set<OrganizationSettingsVersion>().Add(new(context.OrganizationId, context.ActorId, organization.SettingsVersion, section, organization.Id, clock.UtcNow, before, after, reason, context.CorrelationId));
-               db.AuditEvents.Add(new AuditEvent { OrganizationId = context.OrganizationId, ActorId = context.ActorId, Action = "organization.settings.updated", Entity = section, Before = before, After = JsonSerializer.Serialize(new { value = input.Value, reason }, SettingsJson), CorrelationId = context.CorrelationId, OccuredAt = clock.UtcNow });
+               RecordChange(db, context, organization, clock, section, before, input.Value.GetRawText(), reason);
                await db.SaveChangesAsync(ct);
                return Results.Ok(new { section });
           }).WithName("UpdateOrganizationSettings");
+
+          group.MapPut("/organization/logo", async (SaveLogo input, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
+          {
+               await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
+               var organization = await db.Organizations.SingleAsync(ct);
+               var uploaded = OrganizationLogo.FromDataUrl(context.OrganizationId, input.DataUrl, clock.UtcNow);
+               var existing = await db.Logos.SingleOrDefaultAsync(ct);
+               var before = DescribeLogo(existing);
+               if (existing is null)
+                    db.Logos.Add(uploaded);
+               else
+                    (existing.ContentType, existing.Data, existing.UpdatedAt) = (uploaded.ContentType, uploaded.Data, uploaded.UpdatedAt);
+               RecordChange(db, context, organization, clock, "logo", before, DescribeLogo(uploaded), "Updated logo");
+               await db.SaveChangesAsync(ct);
+               return Results.Ok(new { logo = uploaded.ToDataUrl() });
+          }).WithName("UpdateOrganizationLogo");
+
+          group.MapDelete("/organization/logo", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
+          {
+               await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
+               var existing = await db.Logos.SingleOrDefaultAsync(ct);
+               if (existing is null)
+                    return Results.Ok(new { logo = (string?)null });
+               var organization = await db.Organizations.SingleAsync(ct);
+               db.Logos.Remove(existing);
+               RecordChange(db, context, organization, clock, "logo", DescribeLogo(existing), "null", "Removed logo");
+               await db.SaveChangesAsync(ct);
+               return Results.Ok(new { logo = (string?)null });
+          }).WithName("DeleteOrganizationLogo");
+
+          // What every member's screens need to look and format as the organization and the person chose.
+          group.MapGet("/appearance", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, CancellationToken ct) =>
+          {
+               await EnsureMember(organizations, context.ActorId, ct);
+               var organization = await db.Organizations.AsNoTracking().SingleAsync(ct);
+               var effective = await organizations.Settings(context.ActorId, ct);
+               var logo = await db.Logos.AsNoTracking().SingleOrDefaultAsync(ct);
+               var branding = effective.Branding;
+               return Results.Ok(new
+               {
+                    organizationName = organization.Name,
+                    settingsVersion = organization.SettingsVersion,
+                    branding = new { branding.DisplayName, branding.LogoAlt, branding.Primary, branding.Secondary, branding.Accent, logo = logo?.ToDataUrl() },
+                    formats = effective.Formats,
+                    effective.ThemeMode,
+                    effective.ReducedMotion,
+                    effective.FontScale,
+               });
+          }).WithName("GetAppearance");
 
           group.MapGet("/preferences", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, CancellationToken ct) =>
           {
@@ -86,6 +131,28 @@ public static class OrganizationEndpoints
                return Results.Ok(preference);
           }).WithName("UpdateUserPreferences");
      }
+
+     // Every settings change bumps the version, joins the change log with its reason, and is audited.
+     private static void RecordChange(AuthDb db, IOrganizationContext context, Organization organization, IClock clock, string section, string before, string after, string reason)
+     {
+          organization.SettingsChanged();
+          db.Set<OrganizationSettingsVersion>().Add(new(context.OrganizationId, context.ActorId, organization.SettingsVersion, section, organization.Id, clock.UtcNow, before, after, reason, context.CorrelationId));
+          db.AuditEvents.Add(new AuditEvent
+          {
+               OrganizationId = context.OrganizationId,
+               ActorId = context.ActorId,
+               Action = "organization.settings.updated",
+               Entity = section,
+               Before = before,
+               After = JsonSerializer.Serialize(new { value = JsonDocument.Parse(after).RootElement, reason }, SettingsJson),
+               CorrelationId = context.CorrelationId,
+               OccuredAt = clock.UtcNow,
+          });
+     }
+
+     // The history keeps the logo's shape, not the image itself.
+     private static string DescribeLogo(OrganizationLogo? logo) =>
+          logo is null ? "null" : JsonSerializer.Serialize(new { logo.ContentType, bytes = logo.Data.Length, logo.UpdatedAt }, SettingsJson);
 
      private static async Task EnsureMember(IOrganizationRepository organizations, Guid userId, CancellationToken ct)
      {
@@ -118,5 +185,6 @@ public static class OrganizationEndpoints
 
      public sealed record SaveOrganizationSettings(JsonElement Value, string Reason);
      public sealed record OrganizationDetails(string? Name, string? Slug);
+     public sealed record SaveLogo(string? DataUrl);
      public sealed record SaveUserPreferences(string? Locale, string? TimeZone, bool? Hour12, string? ThemeMode, bool ReducedMotion, double FontScale);
 }

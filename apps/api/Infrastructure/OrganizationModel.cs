@@ -33,6 +33,11 @@ public sealed partial class AuthDb
           model.Entity<OrganizationBranding>().HasKey(x => x.OrganizationId); Tenant(model.Entity<OrganizationBranding>());
           model.Entity<OrganizationSecurityPolicy>().HasKey(x => x.OrganizationId); Tenant(model.Entity<OrganizationSecurityPolicy>());
 
+          var logo = model.Entity<OrganizationLogo>();
+          logo.HasKey(x => x.OrganizationId); Tenant(logo);
+          logo.Property(x => x.ContentType).HasMaxLength(50);
+          logo.Property(x => x.Data).HasMaxLength(OrganizationLogo.MaxBytes);
+
           var preference = model.Entity<UserPreference>();
           preference.HasKey(x => new { x.OrganizationId, x.UserId }); Tenant(preference);
           preference.HasOne<OrganizationMembership>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.UserId }).OnDelete(DeleteBehavior.Restrict);
