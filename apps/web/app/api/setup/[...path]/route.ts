@@ -42,7 +42,7 @@ async function proxy(
   const { path } = await context.params;
   const operation = path.join("/");
   if (
-    !/^(companies|vehicles|recurring|history|preferences|organization\/settings|organization\/settings\/(localization|branding|securityPolicy)|access\/(catalog|roles)|people)(\/[^/]+)*$/.test(
+    !/^(companies|vehicles|recurring|history|preferences|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy)|access\/(catalog|roles|scope-options)|people)(\/[^/]+)*$/.test(
       operation,
     )
   )

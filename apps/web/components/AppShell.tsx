@@ -1,405 +1,351 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { PeopleAccessView } from "./PeopleAccessView";
 import { OrganizationSettingsView } from "./OrganizationSettingsView";
-import { requestSetup } from "./requestSetup";
+import { PreferencesView } from "./PreferencesView";
+import { Brand } from "./Brand";
+import { CompaniesPage, HistoryPage, RecurringPage, VehiclesPage } from "./setup";
 import {
-  CompaniesView,
-  HistoryView,
-  RecurringView,
-  VehiclesView,
-} from "./SetupViews";
-import type { Page, View } from "./setupTypes";
+  Card,
+  CardAction,
+  CardGridSkeleton,
+  CardHeader,
+  CardNote,
+  CardValue,
+  ChevronIcon,
+  Dialog,
+  IconButton,
+  ListSkeleton,
+  MenuIcon,
+  PageHeader,
+  SegmentedControl,
+  SubHeading,
+  ToastProvider,
+  cn,
+} from "./ui";
+import { fetchWithSession } from "../lib/session";
+import { SessionProvider, useSession, type Session } from "../lib/session-context";
+import { initials } from "../lib/format";
+import { useSetupData } from "../lib/useSetupData";
+import type { PermissionGroup, View } from "../lib/types";
 
-const navigation: { id: View; label: string }[] = [
+type NavItem = { id: View; label: string; permission?: string };
+
+// Every menu entry names the one permission that shows it (as in the design).
+const topLevel: NavItem[] = [
   { id: "dashboard", label: "Dashboard" },
-  { id: "revenue", label: "Revenue" },
-  { id: "people", label: "People and access" },
-  { id: "companies", label: "PSV companies" },
-  { id: "vehicles", label: "Vehicles" },
-  { id: "recurring", label: "Recurring costs and savings" },
-  { id: "history", label: "Change log" },
-  { id: "settings", label: "Organization settings" },
+  { id: "revenue", label: "Revenue", permission: "revenue.view" },
 ];
+const setupGroup: NavItem[] = [
+  { id: "companies", label: "PSV companies", permission: "companies.manage" },
+  { id: "vehicles", label: "Vehicles", permission: "vehicles.manage" },
+  { id: "recurring", label: "Recurring costs and savings", permission: "commitments.view" },
+  { id: "people", label: "People and access", permission: "people.view" },
+  { id: "history", label: "Change log", permission: "audit.view" },
+  { id: "settings", label: "Organization settings", permission: "organization.manage" },
+];
+
+export type ViewParams = { openItem?: string; newForVehicle?: string };
 
 export function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [view, setView] = useState<View>("dashboard");
-  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const [error, setError] = useState("");
+  const [params, setParams] = useState<ViewParams>({});
+  // Bumped on every navigation so choosing a menu entry always opens that page fresh (its list, not an open editor).
+  const [visit, setVisit] = useState(0);
+  const [session, setSession] = useState<Session | null>(null);
+  const [sessionError, setSessionError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [period, setPeriod] = useState("week");
-  type Session = {
-    firstName: string;
-    lastName: string;
-    role: string;
-    permissions: string[];
-  };
-  const [session, setSession] = useState<Session>({
-    firstName: "",
-    lastName: "",
-    role: "",
-    permissions: [],
-  });
+  const [setupOpen, setSetupOpen] = useState(true);
+  const [accessOpen, setAccessOpen] = useState(false);
+
   useEffect(() => {
-    fetch("/api/auth/session")
-      .then((response) =>
-        response.ok
-          ? response.json()
-          : Promise.reject(new Error("Session expired.")),
-      )
-      .then((value: Session) => setSession(value))
-      .catch((reason: Error) => setError(reason.message));
+    let active = true;
+    fetchWithSession("/api/auth/session")
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("Your session could not be loaded."))))
+      .then((value: Session) => active && setSession(value))
+      .catch((reason: Error) => active && setSessionError(reason.message));
+    return () => {
+      active = false;
+    };
   }, []);
-  const permissions = session.permissions;
-  const displayName =
-    [session.firstName, session.lastName].filter(Boolean).join(" ") ||
-    "Your account";
-  const visibleNavigation = navigation.filter(
-    (item) =>
-      item.id === "dashboard" ||
-      (item.id === "revenue" && permissions.includes("revenue.view")) ||
-      (item.id === "people" && permissions.includes("people.view")) ||
-      (item.id === "companies" && permissions.includes("companies.manage")) ||
-      (item.id === "vehicles" && permissions.includes("vehicles.manage")) ||
-      (item.id === "recurring" && permissions.includes("commitments.view")) ||
-      (item.id === "history" && permissions.includes("audit.view")) ||
-      (item.id === "settings" && permissions.includes("organization.manage")),
-  );
+
   useEffect(() => {
-    if (["dashboard", "revenue", "people", "settings"].includes(view)) return;
-    const path =
-      view === "companies"
-        ? "companies"
-        : view === "vehicles"
-          ? "vehicles"
-          : view === "recurring"
-            ? "recurring"
-            : "history";
-    requestSetup<Page<Record<string, unknown>>>(path)
-      .then((page) => setRows(page.items))
-      .catch((reason: Error) => setError(reason.message));
-  }, [view]);
-  function openView(next: View) {
+    const close = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      setUserMenuOpen(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, []);
+
+  const sessionState = useMemo(
+    () => ({ session, can: (permission: string) => Boolean(session?.permissions.includes(permission)) }),
+    [session],
+  );
+  const { can } = sessionState;
+  const allowed = (item: NavItem) => !item.permission || can(item.permission);
+  const displayName = session ? `${session.firstName} ${session.lastName}`.trim() : "";
+
+  function navigate(next: View, nextParams: ViewParams = {}) {
     setView(next);
+    setParams(nextParams);
+    setVisit((current) => current + 1);
     setMenuOpen(false);
     setUserMenuOpen(false);
+    window.scrollTo?.(0, 0);
   }
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <button
-          className="icon-btn menu-btn"
-          aria-label="Open menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((open) => !open)}
-        >
-          ☰
-        </button>
-        <span className="tb-brand">
-          <span className="brand-mark" aria-hidden="true">
-            ⌁
-          </span>
-          <span>
-            <span className="brand-name">XCODE</span>
-            <span className="brand-sub">Fleet finance</span>
-          </span>
-        </span>
-        <span className="spacer" />
-        <label className="demo-as">
-          <span>Demo: view as</span>
-          <select aria-label="Demo: view as" defaultValue="current">
-            <option value="current">{session.role || "Current access"}</option>
-            <option value="owner">Owner</option>
-            <option value="admin">Office admin</option>
-            <option value="manager">Fleet manager</option>
-            <option value="clerk">Revenue clerk</option>
-          </select>
-        </label>
-        <div className="user-wrap">
-          <button
-            className="user-btn"
-            aria-expanded={userMenuOpen}
-            onClick={() => setUserMenuOpen((open) => !open)}
-          >
-            <span className="avatar-sm">{displayName.slice(0, 1)}</span>
-            <span className="user-text">
-              <span className="user-name">{displayName}</span>
-              <span className="user-role">
-                {session.role || "Organization access"}
-              </span>
-            </span>
-          </button>
-          {userMenuOpen && (
-            <div className="user-menu">
-              <button onClick={() => setUserMenuOpen(false)}>
-                Your access
-              </button>
-              <button onClick={onSignOut}>Sign out</button>
-            </div>
-          )}
-        </div>
-      </header>
-      <div className="app-body">
-        <aside
-          className={`sidebar ${menuOpen ? "open" : ""}`}
-          aria-label="Main navigation"
-        >
-          <nav>
-            <button className="nav-group-btn" aria-expanded="true">
-              Overview
-            </button>
-            {visibleNavigation
-              .filter(
-                (item) => item.id === "dashboard" || item.id === "revenue",
-              )
-              .map((item) => (
-                <button
-                  className="nav-item"
-                  aria-current={view === item.id ? "page" : undefined}
-                  key={item.id}
-                  onClick={() => openView(item.id)}
-                >
-                  {item.label}
-                </button>
-              ))}
-            <button className="nav-group-btn" aria-expanded="true">
-              Setup
-            </button>
-            {visibleNavigation
-              .filter((item) => !["dashboard", "revenue"].includes(item.id))
-              .map((item) => (
-                <button
-                  className="nav-item"
-                  aria-current={view === item.id ? "page" : undefined}
-                  key={item.id}
-                  onClick={() => openView(item.id)}
-                >
-                  {item.label}
-                </button>
-              ))}
-          </nav>
-        </aside>
-        {menuOpen && (
-          <button
-            className="scrim"
-            aria-label="Close menu"
-            onClick={() => setMenuOpen(false)}
-          />
-        )}
-        <main className="content">
-            {view === "dashboard" && (
-              <>
-                <h1 className="page-title">Dashboard</h1>
-                <p className="page-sub">Your fleet at a glance, based on the access you have.</p>
-              </>
-            )}
-          {error && (
-            <p className="error-box" role="alert">
-              {error}
-            </p>
-          )}
-          {view === "people" ? (
-            <PeopleAccessView />
-          ) : view === "dashboard" ? (
-            <Dashboard
-              permissions={permissions}
-              period={period}
-              onPeriodChange={setPeriod}
-              onOpen={openView}
-            />
-          ) : (
-            <ResourceView view={view} rows={rows} error="" />
-          )}
-        </main>
-      </div>
-    </div>
-  );
-}
 
-function Dashboard({
-  permissions,
-  period,
-  onPeriodChange,
-  onOpen,
-}: {
-  permissions: string[];
-  period: string;
-  onPeriodChange: (period: string) => void;
-  onOpen: (view: View) => void;
-}) {
-  const cards = [
-    {
-      permission: "dash.capture",
-      title: "Today's revenue",
-      sub: "Your vehicles, today",
-      value: "KES 0",
-      note: "Revenue capture data will appear here.",
-      action: "Capture revenue",
-      view: "revenue" as const,
-    },
-    {
-      permission: "dash.revenue",
-      title: "Revenue",
-      sub: `This ${period}`,
-      value: "KES 0",
-      note: "No revenue records are available yet.",
-    },
-    {
-      permission: "dash.net",
-      title: "Net contribution",
-      sub: "Revenue less all costs",
-      value: "KES 0",
-      note: "Cost and revenue data will appear here.",
-    },
-    {
-      permission: "dash.costs",
-      title: "Costs",
-      sub: `This ${period}`,
-      value: "KES 0",
-      note: "Cost totals are waiting for records.",
-    },
-    {
-      permission: "dash.gaps",
-      title: "Missing revenue days",
-      sub: "No record and no reason",
-      value: "0 days",
-      note: "No gaps are available yet.",
-      action: "Open revenue",
-      view: "revenue" as const,
-    },
-    {
-      permission: "dash.commitments",
-      title: "Renewals due",
-      sub: "Upcoming commitments",
-      value: "0",
-      note: "Renewal data will appear here.",
-    },
-    {
-      permission: "dash.edits",
-      title: "Recent changes",
-      sub: "Edited after capture",
-      value: "0",
-      note: "Change history will appear here.",
-      action: "View change log",
-      view: "history" as const,
-    },
-  ].filter((card) => permissions.includes(card.permission));
+  const navButton = (item: NavItem) => (
+    <li key={item.id}>
+      <button
+        type="button"
+        aria-current={view === item.id ? "page" : undefined}
+        onClick={() => navigate(item.id)}
+        className="flex min-h-10.5 w-full items-center rounded-[10px] px-3 text-left text-[15px] hover:bg-hover aria-[current=page]:bg-blue-soft aria-[current=page]:font-bold aria-[current=page]:text-blue-dark"
+      >
+        {item.label}
+      </button>
+    </li>
+  );
+  const visibleSetup = setupGroup.filter(allowed);
+
   return (
-    <section>
-      <div className="filterbar">
-        <div className="seg" role="group" aria-label="Period">
-          {["today", "week", "month"].map((option) => (
-            <button
-              key={option}
-              aria-pressed={period === option}
-              onClick={() => onPeriodChange(option)}
+    <SessionProvider value={sessionState}>
+      <ToastProvider>
+        <div className="flex min-h-screen flex-col">
+          <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-card-line bg-white px-5 max-[899px]:gap-1.5 max-[899px]:pr-2 max-[899px]:pl-1">
+            <IconButton
+              className="hidden max-[899px]:grid"
+              aria-label="Open menu"
+              aria-expanded={menuOpen}
+              aria-controls="main-menu"
+              onClick={() => setMenuOpen((open) => !open)}
             >
-              {option === "today"
-                ? "Today"
-                : option === "week"
-                  ? "This week"
-                  : "This month"}
-            </button>
-          ))}
-        </div>
-        <div className="scope">
-          <span>Scope</span>
-          <span className="scope-chip">Your access</span>
-        </div>
-      </div>
-      <div className="cards">
-        {cards.map((card) => (
-          <article className="card" key={card.title}>
-            <header>
-              <h2 className="card-title">{card.title}</h2>
-              <p className="card-sub">{card.sub}</p>
-            </header>
-            <p className="card-value">{card.value}</p>
-            <p className="card-note">{card.note}</p>
-            {card.action && card.view && (
+              <MenuIcon />
+            </IconButton>
+            <Brand compact />
+            <span className="flex-1" />
+            <div className="relative">
               <button
-                className={`card-action ${card.title === "Today's revenue" ? "primary" : ""}`}
-                onClick={() => onOpen(card.view)}
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={userMenuOpen}
+                onClick={() => setUserMenuOpen((open) => !open)}
+                className="flex min-h-11 items-center gap-2.5 rounded-xl px-2 py-1 text-left hover:bg-hover"
               >
-                {card.action}
+                <span aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-full bg-navy text-sm font-bold text-white">
+                  {session ? initials(session.firstName, session.lastName) : ""}
+                </span>
+                <span className="max-[899px]:hidden">
+                  <span className="block text-sm font-semibold">{displayName || "Your account"}</span>
+                  <span className="block text-xs text-grey">{session?.role || "Loading your access"}</span>
+                </span>
               </button>
+              {userMenuOpen && (
+                <div role="menu" className="absolute top-13 right-0 z-40 min-w-50 rounded-xl border border-card-line bg-white p-1.5 shadow-menu">
+                  <MenuButton onClick={() => { setUserMenuOpen(false); setAccessOpen(true); }}>Your access</MenuButton>
+                  <MenuButton onClick={() => navigate("preferences")}>Your preferences</MenuButton>
+                  <MenuButton onClick={onSignOut}>Sign out</MenuButton>
+                </div>
+              )}
+            </div>
+          </header>
+          <div className="flex min-h-0 flex-1">
+            <nav
+              id="main-menu"
+              aria-label="Main"
+              className={cn(
+                "w-62 shrink-0 overflow-y-auto border-r border-card-line bg-white px-3 py-4",
+                "max-[899px]:fixed max-[899px]:top-16 max-[899px]:bottom-0 max-[899px]:left-0 max-[899px]:z-30 max-[899px]:transition-transform motion-reduce:transition-none",
+                menuOpen ? "max-[899px]:shadow-drawer" : "max-[899px]:-translate-x-full",
+              )}
+            >
+              <ul className="m-0 flex list-none flex-col gap-0.5 p-0">{topLevel.filter(allowed).map(navButton)}</ul>
+              {visibleSetup.length > 0 && (
+                <div className="mt-3.5">
+                  <button
+                    type="button"
+                    aria-expanded={setupOpen}
+                    onClick={() => setSetupOpen((open) => !open)}
+                    className="flex min-h-9 w-full items-center justify-between px-3 text-[13px] font-bold text-grey"
+                  >
+                    Setup
+                    <ChevronIcon className={cn("transition-transform motion-reduce:transition-none", !setupOpen && "-rotate-90")} />
+                  </button>
+                  {setupOpen && <ul className="m-0 flex list-none flex-col gap-0.5 p-0">{visibleSetup.map(navButton)}</ul>}
+                </div>
+              )}
+            </nav>
+            {menuOpen && (
+              <button type="button" aria-label="Close menu" onClick={() => setMenuOpen(false)} className="fixed inset-x-0 top-16 bottom-0 z-25 hidden bg-navy/35 max-[899px]:block" />
             )}
-          </article>
-        ))}
-      </div>
-    </section>
+            <main className="min-w-0 flex-1 px-8 pt-7 pb-12 max-[899px]:px-4 max-[899px]:pt-5 max-[899px]:pb-10">
+              <Page key={visit} view={view} params={params} sessionError={sessionError} onNavigate={navigate} />
+              <p className="mt-8 mb-0 text-xs text-grey">XCODE Web v0.9</p>
+            </main>
+          </div>
+          <AccessDialog open={accessOpen} onClose={() => setAccessOpen(false)} />
+        </div>
+      </ToastProvider>
+    </SessionProvider>
   );
 }
 
-function ResourceView({
+function MenuButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" role="menuitem" onClick={onClick} className="block min-h-11 w-full rounded-lg px-3 text-left text-[15px] hover:bg-hover">
+      {children}
+    </button>
+  );
+}
+
+function Page({
   view,
-  rows,
-  error,
+  params,
+  sessionError,
+  onNavigate,
 }: {
   view: View;
-  rows: Record<string, unknown>[];
-  error: string;
+  params: ViewParams;
+  sessionError: string;
+  onNavigate: (view: View, params?: ViewParams) => void;
 }) {
-  const title = navigation.find((item) => item.id === view)?.label;
-  if (view === "companies") return <CompaniesView />;
-  if (view === "vehicles") return <VehiclesView />;
-  if (view === "recurring") return <RecurringView />;
-  if (view === "history") return <HistoryView />;
-  if (view === "settings") return <OrganizationSettingsView />;
-  if (view === "revenue")
+  const { session, can } = useSession();
+  if (view === "dashboard") return <Dashboard session={session} error={sessionError} onOpen={onNavigate} />;
+  if (view === "revenue") return <RevenueModule onBack={() => onNavigate("dashboard")} />;
+  if (view === "companies") return <CompaniesPage />;
+  if (view === "vehicles")
     return (
-      <section className="module">
-        <article className="card">
-          <header>
-            <h2 className="card-title">Revenue</h2>
-            <p className="card-sub">
-              Daily capture and performance against expected revenue.
-            </p>
-          </header>
-          <p className="card-note">
-            Revenue records are not available from the current API yet.
-          </p>
-          <button className="card-action primary" disabled>
-            Capture revenue
-          </button>
-        </article>
-      </section>
+      <VehiclesPage
+        onOpenRecurring={(openItem) => onNavigate("recurring", { openItem })}
+        onAddRecurring={(newForVehicle) => onNavigate("recurring", { newForVehicle })}
+      />
     );
+  if (view === "recurring") return <RecurringPage canManage={can("commitments.manage")} {...params} />;
+  if (view === "people") return <PeopleAccessView canManageAccess={can("access.manage")} />;
+  if (view === "history") return <HistoryPage />;
+  if (view === "settings") return <OrganizationSettingsView />;
+  return <PreferencesView />;
+}
+
+const dashboardCards = [
+  { permission: "dash.capture", title: "Today's revenue", sub: "Your vehicles, today", value: "KES 0", note: "Revenue capture data will appear here.", action: "Capture revenue", view: "revenue" as const, primary: true },
+  { permission: "dash.revenue", title: "Revenue", sub: "This {period}", value: "KES 0", note: "No revenue records are available yet." },
+  { permission: "dash.net", title: "Net contribution", sub: "Revenue less all costs", value: "KES 0", note: "Cost and revenue data will appear here." },
+  { permission: "dash.costs", title: "Costs", sub: "This {period}", value: "KES 0", note: "Cost totals are waiting for records." },
+  { permission: "dash.gaps", title: "Missing revenue days", sub: "No record and no reason", value: "0 days", note: "No gaps are available yet.", action: "Open revenue", view: "revenue" as const },
+  { permission: "dash.commitments", title: "Renewals due", sub: "Upcoming commitments", value: "0", note: "Renewal data will appear here." },
+  { permission: "dash.edits", title: "Edited after capture", sub: "Records changed after they were captured", value: "0", note: "Change history will appear here.", action: "View change log", view: "history" as const },
+];
+
+const periods = [
+  { value: "today", label: "Today" },
+  { value: "week", label: "This week" },
+  { value: "month", label: "This month" },
+] as const;
+
+function Dashboard({ session, error, onOpen }: { session: Session | null; error: string; onOpen: (view: View) => void }) {
+  const [period, setPeriod] = useState<(typeof periods)[number]["value"]>("week");
+  const cards = dashboardCards.filter((card) => session?.permissions.includes(card.permission));
+  const periodLabel = period === "today" ? "today" : period === "week" ? "week" : "month";
   return (
     <section>
-      <p className="eyebrow">Organization administration</p>
-      <h1>{title}</h1>
+      <PageHeader title="Dashboard" description="Your fleet at a glance, based on the access you have." />
+      <div className="mt-5 mb-6 flex flex-wrap items-center gap-3 rounded-[14px] border border-card-line bg-white p-3 max-[480px]:flex-col max-[480px]:items-stretch">
+        <SegmentedControl
+          label="Period"
+          options={[...periods]}
+          value={period}
+          onChange={setPeriod}
+          className="max-[480px]:grid max-[480px]:grid-cols-3 max-[480px]:self-stretch"
+        />
+        <span className="flex items-center gap-2 text-sm">
+          <span className="text-grey">Scope</span>
+          <span className="inline-flex min-h-9 items-center rounded-full bg-divider px-3 font-semibold">Your access</span>
+        </span>
+      </div>
       {error ? (
-        <p className="error-box" role="alert">
-          {error}
-        </p>
-      ) : rows.length ? (
-        <div className="table-card">
-          <table className="list">
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={index}>
-                  {Object.values(row)
-                    .slice(0, 4)
-                    .map((value, cell) => (
-                      <td key={cell}>{String(value)}</td>
-                    ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Card className="max-w-140">
+          <CardHeader title="Your dashboard could not be loaded" description={error} />
+        </Card>
+      ) : !session ? (
+        <CardGridSkeleton count={3} />
+      ) : cards.length === 0 ? (
+        <Card className="max-w-140">
+          <CardHeader title="Nothing to show yet" description="Your admin decides what you can see here." />
+        </Card>
       ) : (
-        <article className="card empty-state">
-          <h2 className="card-title">No records yet</h2>
-          <p className="card-note">
-            This screen is ready for {title?.toLowerCase()} data when the API
-            provides it.
-          </p>
-        </article>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] items-start gap-4 max-[480px]:grid-cols-1">
+          {cards.map((card) => (
+            <Card key={card.title} aria-labelledby={`card-${card.permission}`}>
+              <CardHeader id={`card-${card.permission}`} title={card.title} description={card.sub.replace("{period}", periodLabel)} />
+              <CardValue>{card.value}</CardValue>
+              <CardNote>{card.note}</CardNote>
+              {card.action && card.view && (
+                <CardAction primary={card.primary} onClick={() => onOpen(card.view)}>
+                  {card.action}
+                </CardAction>
+              )}
+            </Card>
+          ))}
+        </div>
       )}
     </section>
+  );
+}
+
+// Screens not built yet are shown as a card explaining why the person sees them (the design's module view).
+function RevenueModule({ onBack }: { onBack: () => void }) {
+  return (
+    <section>
+      <PageHeader title="Revenue" />
+      <Card className="mt-5 max-w-140">
+        <CardHeader title="Revenue" description="You see this because you can: View revenue records." />
+        <CardNote>Revenue records are not available from the current API yet.</CardNote>
+        <CardAction onClick={onBack}>Back to dashboard</CardAction>
+      </Card>
+    </section>
+  );
+}
+
+// "Your access": the signed-in person's role and permissions, grouped as in the catalog.
+function AccessDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { session } = useSession();
+  const catalog = useSetupData<PermissionGroup[]>(open ? "access/catalog" : null);
+  const mine = new Set(session?.permissions ?? []);
+  return (
+    <Dialog open={open} title="Your access" onClose={onClose}>
+      <dl className="m-0 mb-2 grid gap-2">
+        <div className="flex flex-col">
+          <dt className="text-[13px] text-grey">Role</dt>
+          <dd className="m-0 font-semibold">{session?.role || "Not assigned"}</dd>
+        </div>
+      </dl>
+      {catalog.loading ? (
+        <ListSkeleton rows={4} />
+      ) : catalog.error ? (
+        <CardNote>{catalog.error}</CardNote>
+      ) : (
+        catalog.data?.map((group) => {
+          const items = group.items.filter((item) => mine.has(item.key));
+          if (!items.length) return null;
+          return (
+            <div key={group.name}>
+              <SubHeading>{group.name}</SubHeading>
+              <ul className="m-0 list-disc pl-5">
+                {items.map((item) => (
+                  <li key={item.key} className="py-0.75 text-[15px]">
+                    {item.label}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })
+      )}
+    </Dialog>
   );
 }

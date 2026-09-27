@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { OrganizationSettingsView } from "../components/OrganizationSettingsView";
+import { PreferencesView } from "../components/PreferencesView";
+import { renderInApp } from "./renderInApp";
 
 const settings = {
   organization: { name: "Demo Fleet", slug: "demo-fleet" },
@@ -62,37 +64,84 @@ beforeEach(() => {
   );
 });
 
-it("loads organization settings and personal preferences", async () => {
+it("loads organization settings without personal preferences", async () => {
   render(<OrganizationSettingsView />);
 
   expect(await screen.findByDisplayValue("Demo Fleet")).toBeInTheDocument();
+  expect(screen.getByLabelText("Organization name")).not.toHaveAttribute(
+    "readonly",
+  );
+  expect(screen.getByRole("article", { name: "Organization details" })).toBeInTheDocument();
   expect(screen.getByLabelText("Time zone")).toHaveValue("Africa/Nairobi");
-  expect(screen.getByRole("combobox", { name: "Theme" })).toHaveValue("system");
-  expect(fetch).toHaveBeenCalledWith("/api/setup/organization/settings", expect.anything());
-  expect(fetch).toHaveBeenCalledWith("/api/setup/preferences", expect.anything());
+  expect(screen.queryByLabelText("Font scale")).not.toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/setup/organization/settings",
+    expect.anything(),
+  );
+  expect(fetch).not.toHaveBeenCalledWith(
+    "/api/setup/preferences",
+    expect.anything(),
+  );
 });
 
-it("saves organization sections and user preferences through their endpoint contracts", async () => {
+it("saves organization sections through their endpoint contracts", async () => {
   render(<OrganizationSettingsView />);
   await screen.findByDisplayValue("Demo Fleet");
 
-  fireEvent.change(screen.getByLabelText("Locale"), { target: { value: "fr-FR" } });
+  fireEvent.change(screen.getByLabelText("Organization name"), {
+    target: { value: "New Fleet" },
+  });
+  fireEvent.change(screen.getByLabelText("Slug"), {
+    target: { value: "new-fleet" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save organization details" }),
+  );
+  fireEvent.change(screen.getByLabelText("Locale"), {
+    target: { value: "fr-FR" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Save locale" }));
   fireEvent.click(screen.getByRole("button", { name: "Save security" }));
-  fireEvent.change(screen.getByLabelText("Font scale"), { target: { value: "1.2" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
 
-  await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/setup/organization/settings/organization",
+      expect.objectContaining({ method: "PUT" }),
+    ),
+  );
+  expect(fetch).toHaveBeenCalledWith(
     "/api/setup/organization/settings/localization",
     expect.objectContaining({ method: "PUT" }),
-  ));
-  expect(fetch).toHaveBeenCalledWith(
-    "/api/setup/organization/settings/securityPolicy",
-    expect.objectContaining({ method: "PUT" }),
   );
-  expect(fetch).toHaveBeenCalledWith(
-    "/api/setup/preferences",
-    expect.objectContaining({ method: "PUT" }),
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/setup/organization/settings/securityPolicy",
+      expect.objectContaining({ method: "PUT" }),
+    ),
   );
-  expect(await screen.findByRole("status")).toHaveTextContent("Your preferences saved.");
+});
+
+it("lets any member load and save their own preferences", async () => {
+  renderInApp(<PreferencesView />);
+
+  expect(await screen.findByRole("combobox", { name: "Theme" })).toHaveValue(
+    "system",
+  );
+  fireEvent.change(screen.getByLabelText("Font scale"), {
+    target: { value: "1.2" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
+
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "Your preferences saved.",
+  );
+  const put = vi
+    .mocked(fetch)
+    .mock.calls.find(([, init]) => init?.method === "PUT")!;
+  expect(put[0]).toBe("/api/setup/preferences");
+  expect(JSON.parse(String(put[1]!.body))).toMatchObject({ fontScale: 1.2 });
+  expect(fetch).not.toHaveBeenCalledWith(
+    "/api/setup/organization/settings",
+    expect.anything(),
+  );
 });
