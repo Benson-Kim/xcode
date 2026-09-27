@@ -60,6 +60,24 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 Targets = v.Targets.OrderBy(t => t.Revision).Select(t => new TargetDto(t.EffectiveFrom, t.WeeklyAmount, t.Revision)).ToList()
             })
             .ToListAsync(ct);
+        // Items still posting to each vehicle: the current version allocates to it and has not ended or stopped.
+        var vehicleIds = rows.Select(v => v.Id).ToList();
+        var current = await db.Set<RecurringVersion>().AsNoTracking()
+            .Where(v => !db.Set<RecurringVersion>().Any(other => other.ItemId == v.ItemId && other.Revision > v.Revision)
+                && v.Allocations.Any(a => vehicleIds.Contains(a.VehicleId)))
+            .Select(v => new
+            {
+                v.ItemId,
+                v.End,
+                StoppedFrom = db.Set<RecurringItem>().Where(i => i.Id == v.ItemId).Select(i => i.StoppedFrom).First(),
+                Vehicles = v.Allocations.Select(a => a.VehicleId).ToList()
+            })
+            .ToListAsync(ct);
+        var recurringItems = current
+            .Where(v => (v.End == null || v.End >= actor.Today) && (v.StoppedFrom == null || v.StoppedFrom > actor.Today))
+            .SelectMany(v => v.Vehicles.Select(vehicleId => (v.ItemId, VehicleId: vehicleId)))
+            .GroupBy(x => x.VehicleId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.ItemId).Distinct().Count());
         return new(rows.Select(v => new VehicleDto(v.Id, v.CompanyId, v.CompanyName, v.Registration, v.JoinedOn,
 
         v.Targets
@@ -67,7 +85,7 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             .OrderByDescending(t => t.EffectiveFrom)
             .ThenByDescending(t => t.Revision)
             .Select(t => t.WeeklyAmount)
-            .FirstOrDefault(), v.Targets))
+            .FirstOrDefault(), v.Targets, recurringItems.GetValueOrDefault(v.Id)))
             .ToList(), page, pageSize, total);
 
     }
@@ -80,6 +98,15 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         => db
         .Set<FleetVehicle>()
         .AnyAsync(v => v.OrganizationId == organizationId && v.Registration == registration, ct);
+
+    public async Task<IReadOnlyList<VehicleOption>> VehicleOptions(SetupActor actor, CancellationToken ct) => await VisibleVehicles(actor)
+        .AsNoTracking()
+        .OrderBy(v => v.Registration)
+        .Select(v => new VehicleOption(v.Id, v.CompanyId, db.Set<PsvCompany>().Where(c => c.Id == v.CompanyId).Select(c => c.Name).First(), v.Registration))
+        .ToListAsync(ct);
+
+    public async Task<int> FirstDayOfWeek(CancellationToken ct) =>
+        await db.Localizations.AsNoTracking().Select(x => (int?)x.FirstDayOfWeek).SingleOrDefaultAsync(ct) ?? 1;
 
     public async Task<Page<RecurringDto>> Recurring(SetupActor actor, int page, int pageSize, CancellationToken ct)
     {
@@ -107,9 +134,13 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 StoppedFrom = db.Set<RecurringItem>().Where(i => i.Id == v.ItemId).Select(i => i.StoppedFrom).First(),
                 Allocations = v.Allocations.Where(a => visibleIds.Contains(a.VehicleId)).Select(a => new VehicleShare(a.VehicleId, a.Amount)).ToList()
             }).ToListAsync(ct);
+        // Registrations travel with the shares so viewing commitments never needs the vehicle-management list.
+        var vehicleIds = rows.SelectMany(v => v.Allocations).Select(a => a.VehicleId).Distinct().ToList();
+        var registrations = await db.Set<FleetVehicle>().AsNoTracking().Where(v => vehicleIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, v => v.Registration, ct);
         return new(rows.Select(v => new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
 
-        v.Allocations.Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom, v.Allocations)).ToList(), page, pageSize, total);
+        v.Allocations.Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
+        v.Allocations.Select(a => new AllocationDto(a.VehicleId, a.Amount, registrations.GetValueOrDefault(a.VehicleId))).ToList())).ToList(), page, pageSize, total);
     }
 
     public Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct)
@@ -139,7 +170,7 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             postings.Where(p => p.Kind == RecurringKind.Savings).Sum(p => p.Amount), postings);
     }
 
-    public async Task<Page<OrganizationSettingsVersion>> History(SetupActor actor, int page, int pageSize, CancellationToken ct)
+    public async Task<Page<HistoryEntry>> History(SetupActor actor, int page, int pageSize, CancellationToken ct)
     {
         var vehicles = VisibleVehicles(actor).Select(v => v.Id);
         var companies = VisibleCompanies(actor).Select(c => c.Id);
@@ -147,8 +178,11 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         var query = db.Set<OrganizationSettingsVersion>().AsNoTracking().Where(v => actor.AllCompanies ||
             (v.Section == "companies" && companies.Contains(v.EntityId)) || (v.Section == "vehicles" && vehicles.Contains(v.EntityId)) ||
             (v.Section == "recurring" && completeItems.Contains(v.EntityId)));
-        return new(await query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize).Take(pageSize)
-            .ToListAsync(ct), page, pageSize, await query.CountAsync(ct));
+        var entries = await query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(v => new HistoryEntry(v.Version, v.Section, v.EntityId, v.Reason, v.OccurredAt, v.ActorId,
+                db.Memberships.Where(m => m.UserId == v.ActorId).Select(m => m.FirstName + " " + m.LastName).FirstOrDefault() ?? ""))
+            .ToListAsync(ct);
+        return new(entries, page, pageSize, await query.CountAsync(ct));
     }
 
     public void Add(PsvCompany company) => db.Set<PsvCompany>().Add(company);

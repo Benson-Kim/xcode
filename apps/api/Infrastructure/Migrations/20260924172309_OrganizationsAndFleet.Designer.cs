@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Auth.Api.Infrastructure.Migrations
 {
     [DbContext(typeof(AuthDb))]
-    [Migration("20260924172309_Phase1Setup")]
-    partial class Phase1Setup
+    [Migration("20260924172309_OrganizationsAndFleet")]
+    partial class OrganizationsAndFleet
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -843,7 +843,8 @@ namespace Auth.Api.Infrastructure.Migrations
                         .IsUnique();
 
                     b.HasIndex("PhoneNumber")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[PhoneNumber] <> ''");
 
                     b.ToTable("Users");
                 });

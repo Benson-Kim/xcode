@@ -43,8 +43,13 @@ public sealed class FleetVehicle : IOrganizationEntity
                throw new ArgumentException("Company is required.");
           SetupValue.Money(weeklyTarget);
           var changed = CompanyId != companyId || JoinedOn != joinedOn;
+          var previousJoin = JoinedOn;
+          var targetAtPreviousJoin = TargetOn(previousJoin);
           CompanyId = companyId;
           JoinedOn = joinedOn;
+          // An earlier join date must not leave days with no target before the first recorded one.
+          if (joinedOn < previousJoin && Targets.All(t => t.EffectiveFrom > joinedOn))
+               Targets.Add(new(OrganizationId, Id, joinedOn, targetAtPreviousJoin, Targets.Max(t => t.Revision) + 1));
           // Append even for repeated edits today: history is never overwritten.
           if (TargetOn(today < joinedOn ? joinedOn : today) != weeklyTarget)
           {

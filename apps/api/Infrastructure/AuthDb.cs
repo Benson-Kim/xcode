@@ -37,7 +37,8 @@ public sealed partial class AuthDb(DbContextOptions<AuthDb> options, Auth.Applic
         model.Entity<User>().HasIndex(x => x.Email).IsUnique();
 
         model.Entity<User>().Property(x => x.PhoneNumber).HasMaxLength(13);
-        model.Entity<User>().HasIndex(x => x.PhoneNumber).IsUnique();
+        // Users provisioned before phone sign-in have no number yet; only real numbers must be unique.
+        model.Entity<User>().HasIndex(x => x.PhoneNumber).IsUnique().HasFilter("[PhoneNumber] <> ''");
 
         model.Entity<User>().Property(x => x.PinHash).HasMaxLength(256);
 

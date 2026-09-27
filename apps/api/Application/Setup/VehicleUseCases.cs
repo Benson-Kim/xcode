@@ -30,8 +30,11 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
         return vehicle.Id;
     }, ct);
 
-    public Task<VehicleReport> Report(Guid id, DateOnly from, DateOnly through, CancellationToken ct) => execution.Read("vehicles.manage", async actor =>
+    public Task<VehicleReport> Report(Guid id, DateOnly? start, DateOnly? end, string? period, CancellationToken ct) => execution.Read("vehicles.manage", async actor =>
     {
+        var (from, through) = period is not null
+            ? ReportPeriod.Current(period, actor.Today, await repository.FirstDayOfWeek(ct))
+            : (start ?? throw new ArgumentException("Choose a period, or a from and through date."), end ?? throw new ArgumentException("Choose a period, or a from and through date."));
         if (through < from || through.DayNumber - from.DayNumber > 366 || through > actor.Today)
             throw new ArgumentException("Report range must be at most 367 days and cannot include the future.");
         _ = await repository.Vehicle(actor, id, ct) ?? throw new KeyNotFoundException();
