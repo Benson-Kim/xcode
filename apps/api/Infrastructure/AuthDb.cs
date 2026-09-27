@@ -1,10 +1,29 @@
 using Auth.Domain;
+using Auth.Domain.Setup;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Infrastructure;
 
-public sealed class AuthDb(DbContextOptions<AuthDb> options) : DbContext(options)
+public sealed partial class AuthDb(DbContextOptions<AuthDb> options, Auth.Application.IOrganizationContext? organizationContext = null) : DbContext(options)
 {
+    public Guid CurrentOganizationId => organizationContext?.OrganizationId ?? Guid.Empty;
+    // only truested provisioning/seed code may set this, never a request DTO
+    public bool Provisioning { get; set; }
+    public DbSet<Organization> Organizations => Set<Organization>();
+    public DbSet<OrganizationMembership> Memberships => Set<OrganizationMembership>();
+    public DbSet<OrganizationLocalization> Localizations => Set<OrganizationLocalization>();
+    public DbSet<OrganizationBranding> Brandings => Set<OrganizationBranding>();
+    public DbSet<OrganizationLogo> Logos => Set<OrganizationLogo>();
+    public DbSet<OrganizationSecurityPolicy> SecurityPolicies => Set<OrganizationSecurityPolicy>();
+    public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<PersonRole> PersonRoles => Set<PersonRole>();
+    public DbSet<PersonPermissionOverride> PermissionOverrides => Set<PersonPermissionOverride>();
+    public DbSet<SetupDataScope> SetupDataScopes => Set<SetupDataScope>();
+    public DbSet<SetupCompanyScope> SetupCompanyScopes => Set<SetupCompanyScope>();
+    public DbSet<SetupVehicleScope> SetupVehicleScopes => Set<SetupVehicleScope>();
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<User> Users => Set<User>();
     public DbSet<VerificationCode> VerificationCodes => Set<VerificationCode>();
     public DbSet<TrustedDevice> TrustedDevices => Set<TrustedDevice>();
@@ -12,11 +31,15 @@ public sealed class AuthDb(DbContextOptions<AuthDb> options) : DbContext(options
 
     protected override void OnModelCreating(ModelBuilder model)
     {
+        ConfigureOrganizations(model);
+        ConfigureSetup(model);
+
         model.Entity<User>().Property(x => x.Email).HasMaxLength(320);
         model.Entity<User>().HasIndex(x => x.Email).IsUnique();
 
         model.Entity<User>().Property(x => x.PhoneNumber).HasMaxLength(13);
-        model.Entity<User>().HasIndex(x => x.PhoneNumber).IsUnique();
+        // Users provisioned before phone sign-in have no number yet; only real numbers must be unique.
+        model.Entity<User>().HasIndex(x => x.PhoneNumber).IsUnique().HasFilter("[PhoneNumber] <> ''");
 
         model.Entity<User>().Property(x => x.PinHash).HasMaxLength(256);
 

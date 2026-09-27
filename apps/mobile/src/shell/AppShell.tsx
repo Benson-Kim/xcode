@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { VERSION } from "../auth/AuthLayout";
+import { useEffect, useRef, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SessionEndedError, apiGet } from "../lib/api";
 import type { StoredPerson } from "../lib/storage";
-import { initials } from "../session";
-import { Banner, Button, Text, useTheme } from "../ui";
-import { IconButton, WhoRow } from "./parts";
+import { Icon, Text, useTheme } from "../ui";
+import { allowedTabs, type PermissionGroup, type Tab } from "./access";
+import { HomeScreen, ModuleScreen, MoreScreen, type Catalog } from "./screens";
 
 type Props = {
   person: StoredPerson;
@@ -14,35 +15,86 @@ type Props = {
   onSessionEnded: () => void;
 };
 
-// Signed in: who the phone is trusted for, with lock and switch user. The dashboard, bottom menu and
-// Your access, driven by the person's permissions, come with people and access.
-export function AppShell({ person, offline, onLock, onSwitchUser }: Props) {
+// The signed-in app: one screen at a time above the bottom menu. Menus show only what the person may use;
+// the server checks every action.
+export function AppShell({ person, offline, onLock, onSwitchUser, onSessionEnded }: Props) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const [tab, setTab] = useState<Tab>("home");
+  const [catalog, setCatalog] = useState<Catalog>({ groups: null, error: "" });
   const [switching, setSwitching] = useState(false);
+  const scroll = useRef<ScrollView>(null);
+  const tabs = allowedTabs(person.permissions);
+
+  // Permission names for Your access and the module screens.
+  useEffect(() => {
+    let active = true;
+    apiGet<PermissionGroup[]>("setup/access/catalog")
+      .then((groups) => active && setCatalog({ groups, error: "" }))
+      .catch((error: Error) => {
+        if (!active) return;
+        if (error instanceof SessionEndedError) return onSessionEnded();
+        setCatalog({ groups: null, error: offline ? "Connect to the internet to see your permissions." : error.message });
+      });
+    return () => {
+      active = false;
+    };
+    // onSessionEnded is stable for the life of this signed-in screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offline]);
+
+  function open(next: Tab) {
+    setTab(next);
+    scroll.current?.scrollTo({ y: 0, animated: false });
+  }
+
   return (
-    <ScrollView style={{ backgroundColor: colors.cream }} contentContainerStyle={styles.content}>
-      <View style={styles.screen}>
-        <WhoRow initials={initials(person)} name={`Hi ${person.firstName}`} role={person.role} action={<IconButton icon="lock" label="Lock app" onPress={onLock} />} />
-        {offline && <Banner tone="offline">No internet. You are seeing what this phone saved at your last sign in.</Banner>}
-        <Button
-          tone="outline"
-          busy={switching}
-          busyText="Switching…"
-          onPress={() => {
-            setSwitching(true);
-            void onSwitchUser().finally(() => setSwitching(false));
-          }}
-        >
-          Switch user
-        </Button>
-        <Text style={[styles.version, { color: colors.grey }]}>{VERSION}</Text>
+    <View style={[styles.shell, { backgroundColor: colors.cream }]}>
+      <ScrollView ref={scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {tab === "home" ? (
+          <HomeScreen person={person} offline={offline} canOpen={(target) => tabs.some((item) => item.id === target)} onOpen={open} onLock={onLock} />
+        ) : tab === "more" ? (
+          <MoreScreen
+            person={person}
+            catalog={catalog}
+            busy={switching}
+            onLock={onLock}
+            onSwitchUser={() => {
+              setSwitching(true);
+              void onSwitchUser().finally(() => setSwitching(false));
+            }}
+          />
+        ) : (
+          <ModuleScreen tab={tab} person={person} catalog={catalog} />
+        )}
+      </ScrollView>
+      <View accessibilityRole="tablist" accessibilityLabel="Main" style={[styles.nav, { borderTopColor: colors.cardLine, backgroundColor: colors.white, paddingBottom: insets.bottom }]}>
+        {tabs.map((item) => {
+          const current = item.id === tab;
+          return (
+            <Pressable
+              key={item.id}
+              accessibilityRole="tab"
+              accessibilityLabel={item.label}
+              accessibilityState={{ selected: current }}
+              onPress={() => open(item.id)}
+              style={[styles.navItem, current && { borderTopColor: colors.blue }]}
+            >
+              <Icon name={item.icon} size={24} color={current ? colors.blue : colors.grey} />
+              <Text weight="semibold" style={{ fontSize: 12, lineHeight: 16, color: current ? colors.blue : colors.grey, textDecorationLine: current ? "underline" : "none" }}>
+                {item.label}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  shell: { flex: 1 },
   content: { width: "100%", maxWidth: 420, alignSelf: "center", paddingTop: 28, paddingHorizontal: 24, paddingBottom: 32 },
-  screen: { gap: 16 },
-  version: { fontSize: 12, textAlign: "center", marginTop: 8 },
+  nav: { flexDirection: "row", borderTopWidth: 1 },
+  navItem: { flex: 1, minHeight: 64, alignItems: "center", justifyContent: "center", gap: 3, borderTopWidth: 3, borderTopColor: "transparent" },
 });

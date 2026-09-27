@@ -4,6 +4,7 @@ using Auth.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Auth.Api.Infrastructure.Migrations
 {
     [DbContext(typeof(AuthDb))]
-    partial class AuthDbModelSnapshot : ModelSnapshot
+    [Migration("20260925054855_AccessManagement")]
+    partial class AccessManagement
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -201,29 +204,6 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.HasKey("OrganizationId");
 
                     b.ToTable("Localizations");
-                });
-
-            modelBuilder.Entity("Auth.Domain.OrganizationLogo", b =>
-                {
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<byte[]>("Data")
-                        .IsRequired()
-                        .HasMaxLength(262144)
-                        .HasColumnType("varbinary(max)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.HasKey("OrganizationId");
-
-                    b.ToTable("Logos");
                 });
 
             modelBuilder.Entity("Auth.Domain.OrganizationMembership", b =>
@@ -970,15 +950,6 @@ namespace Auth.Api.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("Auth.Domain.OrganizationLocalization", b =>
-                {
-                    b.HasOne("Auth.Domain.Organization", null)
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Auth.Domain.OrganizationLogo", b =>
                 {
                     b.HasOne("Auth.Domain.Organization", null)
                         .WithMany()

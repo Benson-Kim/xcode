@@ -4,6 +4,7 @@ using Auth.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Auth.Api.Infrastructure.Migrations
 {
     [DbContext(typeof(AuthDb))]
-    partial class AuthDbModelSnapshot : ModelSnapshot
+    [Migration("20260924172309_OrganizationsAndFleet")]
+    partial class OrganizationsAndFleet
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -203,29 +206,6 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.ToTable("Localizations");
                 });
 
-            modelBuilder.Entity("Auth.Domain.OrganizationLogo", b =>
-                {
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<byte[]>("Data")
-                        .IsRequired()
-                        .HasMaxLength(262144)
-                        .HasColumnType("varbinary(max)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.HasKey("OrganizationId");
-
-                    b.ToTable("Logos");
-                });
-
             modelBuilder.Entity("Auth.Domain.OrganizationMembership", b =>
                 {
                     b.Property<Guid>("OrganizationId")
@@ -236,10 +216,6 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.Property<bool>("Active")
                         .HasColumnType("bit");
-
-                    b.Property<decimal?>("ApprovalLimit")
-                        .HasPrecision(14, 2)
-                        .HasColumnType("decimal(14,2)");
 
                     b.Property<string>("FirstName")
                         .IsRequired()
@@ -735,7 +711,7 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasIndex("OrganizationId", "CompanyId");
 
-                    b.ToTable("SetupCompanyScopes");
+                    b.ToTable("SetupCompanyScope");
                 });
 
             modelBuilder.Entity("Auth.Domain.Setup.SetupDataScope", b =>
@@ -751,7 +727,7 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasKey("OrganizationId", "UserId");
 
-                    b.ToTable("SetupDataScopes");
+                    b.ToTable("SetupDataScope");
                 });
 
             modelBuilder.Entity("Auth.Domain.Setup.SetupVehicleScope", b =>
@@ -769,7 +745,7 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasIndex("OrganizationId", "VehicleId");
 
-                    b.ToTable("SetupVehicleScopes");
+                    b.ToTable("SetupVehicleScope");
                 });
 
             modelBuilder.Entity("Auth.Domain.Setup.VehicleTarget", b =>
@@ -970,15 +946,6 @@ namespace Auth.Api.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("Auth.Domain.OrganizationLocalization", b =>
-                {
-                    b.HasOne("Auth.Domain.Organization", null)
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Auth.Domain.OrganizationLogo", b =>
                 {
                     b.HasOne("Auth.Domain.Organization", null)
                         .WithMany()

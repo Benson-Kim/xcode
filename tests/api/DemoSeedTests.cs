@@ -14,12 +14,12 @@ public sealed class DemoSeedTests : IDisposable
     [Fact]
     public async Task DesignLoginsSignInWithTheirPins_AndReseedingKeepsChangedPins()
     {
-        await app.WithDb(async db => { await db.Database.EnsureCreatedAsync(); await DemoSeed.Run(db); });
+        await app.WithDb(async db => { await db.Database.EnsureCreatedAsync(); await AuthFactory.AddOrganization(db); await DemoSeed.Run(db); });
         using var client = app.CreateClient();
-        foreach (var (phonenumber, email, pin) in DemoSeed.Logins.Where(l => l.Pin is not null))
+        foreach (var (phoneNumber, email, pin) in DemoSeed.Logins.Where(l => l.Pin is not null))
         {
             // A correct PIN on an untrusted phone asks for an email code; a wrong one is a 401.
-            var response = await client.PostAsJsonAsync("/auth/sign-in", new AuthRequest(email, pin!, "new-phone"));
+            var response = await client.PostAsJsonAsync("/auth/sign-in", new AuthRequest(PhoneNumber: phoneNumber, Pin: pin!, DeviceId: "new-phone"));
             Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         }
         await app.WithDb(async db =>
