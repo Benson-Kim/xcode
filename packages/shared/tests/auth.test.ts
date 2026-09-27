@@ -25,3 +25,11 @@ it("typed client exposes pause duration and handles empty rate-limit responses",
   const limited = vi.fn().mockResolvedValue(new Response(null, { status: 429 }));
   await expect(createAuthClient("/auth", limited)("sign-in", {})).rejects.toBeInstanceOf(AuthError);
 });
+it("explains an organization's longer minimum when a new PIN is too short", () => {
+  expect(new AuthError({ status: "invalid_pin", minimumPinLength: 6 }, 400).message).toBe(
+    "Use 6-8 digits, not all the same or an ascending/descending sequence.",
+  );
+  expect(new AuthError({ status: "invalid_pin", minimumPinLength: 4 }, 400).message).toBe(
+    "Use 4-8 digits, not all the same or an ascending/descending sequence.",
+  );
+});
