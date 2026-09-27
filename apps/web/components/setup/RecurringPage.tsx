@@ -49,7 +49,7 @@ export function RecurringPage({
         vehiclesLoading={canManage && options.loading}
         vehicles={editorVehicles(options.data ?? [], item)}
         preselectVehicle={editing === "new" ? newForVehicle : undefined}
-        canEdit={canManage}
+        canEdit={canManage && !item?.partial}
         onCancel={() => setEditing(null)}
         onSaved={() => {
           setEditing(null);
@@ -108,7 +108,9 @@ export function RecurringPage({
               </Td>
               <Td label="Amount each time" numeric>
                 {kes(item.amount)}
-                <CellNote>About {kes(recurringMonthlyEstimate(item.amount, item.frequency))} a month</CellNote>
+                <CellNote>
+                  {item.partial ? "Your vehicles' share. " : ""}About {kes(recurringMonthlyEstimate(item.amount, item.frequency))} a month
+                </CellNote>
               </Td>
               <Td label="How often">{recurringFrequency(item)}</Td>
               <Td label="Vehicles">
@@ -116,6 +118,7 @@ export function RecurringPage({
                 <CellNote>
                   {registrations.slice(0, 2).join(", ")}
                   {item.allocations.length > 2 ? ` and ${item.allocations.length - 2} more` : ""}
+                  {item.partial ? ", plus vehicles you can't see" : ""}
                 </CellNote>
               </Td>
               <Td label="Period">

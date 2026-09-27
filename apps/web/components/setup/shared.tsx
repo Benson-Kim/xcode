@@ -37,6 +37,8 @@ export type RecurringItem = {
   end?: string | null;
   stoppedFrom?: string | null;
   allocations: { vehicleId: string; amount: number; registration?: string | null }[];
+  // Also posts to vehicles outside the viewer's scope: amount and allocations are only their share, and it is read-only.
+  partial?: boolean;
 };
 
 export type Posting = { itemId: string; versionId: string; date: string; name: string; kind: number; category?: number | null; amount: number };

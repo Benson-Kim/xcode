@@ -336,7 +336,15 @@ export function RecurringEditor({
       <FormLayout>
         <ErrorSummary count={Object.keys(errors).length} />
         {saveError && <Banner>{saveError}</Banner>}
-        {!canEdit && <Note>You can view this item but not change it.</Note>}
+        {!canEdit &&
+          (item?.partial ? (
+            <Note>
+              This item also posts to vehicles you can&apos;t see, so only someone who can see all of them can change it.
+              The amounts here are your vehicles&apos; share.
+            </Note>
+          ) : (
+            <Note>You can view this item but not change it.</Note>
+          ))}
         {item && startLocked && !stopped && (
           <Note tone="info">
             Changes apply from {formatDateOnly(today)}. Postings before that

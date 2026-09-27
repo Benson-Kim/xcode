@@ -13,6 +13,8 @@ const sections: Record<string, string> = {
   localization: "Locale and time",
   branding: "Brand",
   securityPolicy: "Security policy",
+  logo: "Logo",
+  people: "People and access",
 };
 
 export function HistoryPage() {
