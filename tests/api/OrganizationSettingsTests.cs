@@ -100,6 +100,23 @@ public sealed class OrganizationSettingsTests : IDisposable
                     item.GetProperty("reason").GetString() == "Reconcile the prior business day");
     }
 
+    // A frozen business date can move forward up to the organization's own calendar date, so the settings say what it is.
+    [Fact]
+    public async Task SettingsShowTheCalendarDateAFrozenBusinessDateCanAdvanceTo()
+    {
+        using var client = await CreateOwnerClient();
+        var calendarDate = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+        (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = calendarDate.AddDays(-3).ToString("yyyy-MM-dd") })).EnsureSuccessStatusCode();
+
+        var settings = await client.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        Assert.Equal(calendarDate.AddDays(-3).ToString("yyyy-MM-dd"), settings.GetProperty("effectiveBusinessDate").GetString());
+        Assert.Equal(calendarDate.ToString("yyyy-MM-dd"), settings.GetProperty("calendarDate").GetString());
+
+        (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = settings.GetProperty("calendarDate").GetString() })).EnsureSuccessStatusCode();
+        var advanced = await client.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        Assert.Equal(calendarDate.ToString("yyyy-MM-dd"), advanced.GetProperty("effectiveBusinessDate").GetString());
+    }
+
     // Contract C7: organization settings keep the automatic reason; a typed one is optional but still checked.
     [Fact]
     public async Task SettingsSavedWithoutAReasonGetAnAutomaticOne()

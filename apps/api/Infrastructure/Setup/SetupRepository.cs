@@ -134,9 +134,10 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         .Set<FleetVehicle>()
         .AnyAsync(v => v.OrganizationId == organizationId && v.Registration == registration, ct);
 
+    // Only vehicles a new share may use (FleetVehicle.ActiveOn): joined by the business date, not left, company not archived.
     public async Task<IReadOnlyList<VehicleOption>> VehicleOptions(SetupActor actor, CancellationToken ct) => await VisibleVehicles(actor)
         .AsNoTracking()
-        .Where(v => (v.LeftOn == null || v.LeftOn > actor.Today) &&
+        .Where(v => v.JoinedOn <= actor.Today && (v.LeftOn == null || v.LeftOn > actor.Today) &&
             db.Set<PsvCompany>().Any(c => c.Id == v.CompanyId && (c.ArchivedOn == null || c.ArchivedOn > actor.Today)))
         .OrderBy(v => v.Registration)
         .Select(v => new VehicleOption(v.Id, v.CompanyId, db.Set<PsvCompany>().Where(c => c.Id == v.CompanyId).Select(c => c.Name).First(), v.Registration, true))
@@ -201,9 +202,12 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 var active = vehicle is null || vehicle.LeftOn is null || vehicle.LeftOn > actor.Today;
                 return new AllocationDto(a.VehicleId, a.Amount, vehicle?.Registration, active);
             }).ToList();
+            // The total is what was saved for the shares listed (the viewer's share when partial), retired vehicles included,
+            // so it always balances against them; ActiveAmount is the part that still posts.
             return new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
-                allocations.Where(a => a.Active).Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
-                allocations, v.Allocations.Count != v.AllocationCount, v.ExpenseItemId, v.ExpenseItemName, v.Bucket, v.Note, v.Month);
+                allocations.Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
+                allocations, v.Allocations.Count != v.AllocationCount, v.ExpenseItemId, v.ExpenseItemName, v.Bucket, v.Note, v.Month,
+                allocations.Where(a => a.Active).Sum(a => a.Amount));
         }).ToList(), page, pageSize, total);
     }
 

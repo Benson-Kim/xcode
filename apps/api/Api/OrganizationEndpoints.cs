@@ -23,13 +23,16 @@ public static class OrganizationEndpoints
                var organization = await db.Organizations.AsNoTracking().SingleAsync(ct);
                var localization = await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct)
                     ?? new OrganizationLocalization { OrganizationId = context.OrganizationId };
+               var calendarDate = OrganizationCalendarDate(localization.TimeZone, clock.UtcNow);
                return Results.Ok(new
                {
                     organization,
                     localization,
                     branding = await db.Brandings.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationBranding { OrganizationId = context.OrganizationId },
                     securityPolicy = await db.SecurityPolicies.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationSecurityPolicy { OrganizationId = context.OrganizationId },
-                    effectiveBusinessDate = organization.BusinessDate ?? OrganizationCalendarDate(localization.TimeZone, clock.UtcNow),
+                    effectiveBusinessDate = organization.BusinessDate ?? calendarDate,
+                    // Today in the organization's time zone, whatever the business date is set to: the latest date it may take.
+                    calendarDate,
                     effective = await organizations.Settings(context.ActorId, ct)
                });
           }).WithName("GetOrganizationSettings");
@@ -61,8 +64,9 @@ public static class OrganizationEndpoints
                     case "businessDate":
                          before = JsonSerializer.Serialize(organization.BusinessDate, SettingsJson);
                          var requestedBusinessDate = ParseBusinessDate(input.Value);
+                         // The same zone, and the same fallback, as the calendar date shown in the settings and used for setup.
                          organization.ChangeBusinessDate(requestedBusinessDate, OrganizationCalendarDate(
-                              (await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct))?.TimeZone ?? "UTC", clock.UtcNow));
+                              (await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationLocalization()).TimeZone, clock.UtcNow));
                          after = JsonSerializer.Serialize(organization.BusinessDate, SettingsJson);
                          break;
                     default: throw new KeyNotFoundException();
@@ -111,7 +115,7 @@ public static class OrganizationEndpoints
           {
                await EnsureMember(organizations, context.ActorId, ct);
                var organization = await db.Organizations.AsNoTracking().SingleAsync(ct);
-               var localization = await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationLocalization { TimeZone = "UTC" };
+               var localization = await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationLocalization();
                var effective = await organizations.Settings(context.ActorId, ct);
                var logo = await db.Logos.AsNoTracking().SingleOrDefaultAsync(ct);
                var branding = effective.Branding;

@@ -28,11 +28,12 @@ public sealed record SaveRecurring(string? Name, RecurringKind Kind, CostCategor
 public sealed record StopRecurring(bool Confirmed, string Reason);
 // Partial: the item also posts to vehicles outside the viewer's scope. Amount and Allocations then cover only the
 // viewer's share, and only someone who can see every vehicle on it may change it.
+// Amount is always the sum of Allocations, retired vehicles included; ActiveAmount is the part that still posts.
 // ExpenseItemName is the item's current name; Name is the name saved on this version.
 public sealed record RecurringDto(Guid Id, Guid VersionId, int Revision, string Name, RecurringKind Kind, CostCategory? Category,
     decimal Amount, RecurrenceFrequency Frequency, int? Day, bool LastDay, DateOnly Start, DateOnly? End, DateOnly? StoppedFrom,
     IReadOnlyList<AllocationDto> Allocations, bool Partial = false, Guid? ExpenseItemId = null, string? ExpenseItemName = null,
-    ExpenseBucket? Bucket = null, string? Note = null, int? Month = null);
+    ExpenseBucket? Bucket = null, string? Note = null, int? Month = null, decimal ActiveAmount = 0);
 public sealed record AllocationDto(Guid VehicleId, decimal Amount, string? Registration, bool Active = true);
 // What a recurring-item editor needs to pick vehicles, without the vehicle-management view.
 public sealed record VehicleOption(Guid Id, Guid CompanyId, string CompanyName, string Registration, bool Active = true);
