@@ -12,14 +12,14 @@ public sealed class ExpenseCatalogUseCases(ISetupExecution execution, ISetupRepo
 
     public Task<Page<ExpenseCategoryDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read("", async actor =>
     {
-        await RequireAny(actor, CategoryReaders, ct);
+        await SetupPermissions.RequireAny(organizations, actor, CategoryReaders, ct);
         SetupPagination.Validate(page, pageSize);
         return await repository.ExpenseCategories(actor.Today, page, pageSize, ct);
     }, ct);
 
     public Task<IReadOnlyList<ExpenseItemOption>> Options(CancellationToken ct) => execution.Read("", async actor =>
     {
-        await RequireAny(actor, OptionReaders, ct);
+        await SetupPermissions.RequireAny(organizations, actor, OptionReaders, ct);
         return await repository.ExpenseItemOptions(actor.Today, ct);
     }, ct);
 
@@ -92,15 +92,6 @@ public sealed class ExpenseCatalogUseCases(ISetupExecution execution, ISetupRepo
     {
         if (await repository.ExpenseItemNameExists(actor.OrganizationId, categoryId, name.ToUpperInvariant(), except, ct))
             throw new ArgumentException("That item already exists in this category.");
-    }
-
-    // Reading the catalog takes any one of several permissions, so it is checked here rather than by the pipeline,
-    // which already refused anyone who is not an active member.
-    private async Task RequireAny(SetupActor actor, string[] permissions, CancellationToken ct)
-    {
-        var granted = await organizations.Permissions(actor.UserId, ct);
-        if (!permissions.Any(granted.Contains))
-            throw new UnauthorizedAccessException();
     }
 
     private static object Snapshot(ExpenseCategory category) => new

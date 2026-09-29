@@ -104,6 +104,8 @@ it("adds, edits and removes entries with invest.manage", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Add investment" }));
   const dialog = within(screen.getByRole("dialog", { name: "Add investment" }));
   expect(dialog.getByLabelText("Date")).toHaveValue(businessDate);
+  // The API refuses an entry dated after the business date.
+  expect(dialog.getByLabelText("Date")).toHaveAttribute("max", businessDate);
   fireEvent.click(dialog.getByRole("button", { name: "Add" }));
   expect(dialog.getByRole("alert")).toHaveTextContent("Say what it was.");
   fireEvent.change(dialog.getByLabelText("What it was"), { target: { value: "Speed governor" } });
@@ -114,6 +116,7 @@ it("adds, edits and removes entries with invest.manage", async () => {
   );
 
   fireEvent.click(screen.getByRole("button", { name: "Edit Deposit on the unit" }));
+  expect(screen.getByLabelText("Date")).toHaveAttribute("max", businessDate);
   fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1300000" } });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(fetchMock)[1]).toEqual(["/api/setup/investment/entry-1", "PUT", { date: "2025-05-05", description: "Deposit on the unit", amount: 1300000 }]));

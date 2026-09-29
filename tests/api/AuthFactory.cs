@@ -63,6 +63,29 @@ public sealed class DatabaseProbe : IDbCommandInterceptor, IDbTransactionInterce
         interleaveTimes = times;
     }
 
+    private string? betweenAttempts;
+    private int startsSinceArmed;
+
+    // Runs sql, committed on its own, just before the second transaction opened from now on: another writer's change
+    // landing after a unit of work's first attempt rolled back and before it tries again.
+    public void BetweenAttempts(string sql)
+    {
+        betweenAttempts = sql;
+        startsSinceArmed = 0;
+    }
+
+    public ValueTask<InterceptionResult<DbTransaction>> TransactionStartingAsync(DbConnection connection, TransactionStartingEventData eventData, InterceptionResult<DbTransaction> result, CancellationToken cancellationToken = default)
+    {
+        if (betweenAttempts is { } sql && ++startsSinceArmed == 2)
+        {
+            betweenAttempts = null;
+            using var change = connection.CreateCommand();
+            change.CommandText = sql;
+            change.ExecuteNonQuery();
+        }
+        return ValueTask.FromResult(result);
+    }
+
     private void Executing(DbCommand command)
     {
         Interlocked.Increment(ref commands);

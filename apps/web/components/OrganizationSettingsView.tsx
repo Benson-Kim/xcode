@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { apiRequest } from "../lib/data";
 import { useResource } from "../lib/data";
 import { useAppearance } from "../lib/appearance";
+import { formatDateOnly } from "./recurringPresentation";
 import {
   Banner,
   BrandIcon,
@@ -30,6 +31,8 @@ import {
 type Settings = {
   organization: { name: string; slug: string; businessDate?: string | null };
   effectiveBusinessDate?: string;
+  // Today in the organization's time zone: the latest date the business date may be set to.
+  calendarDate?: string;
   localization: {
     locale: string;
     timeZone: string;
@@ -265,12 +268,18 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <Field
             id="business-date"
             label="Business date"
-            hint={organization.businessDate ? `Override active. The server date is ${organization.businessDate}.` : `Following the server date: ${initial.effectiveBusinessDate || "the organization clock"}.`}
+            hint={
+              initial.organization.businessDate
+                ? `Held at ${formatDateOnly(initial.organization.businessDate)}.${initial.calendarDate ? ` The organization's calendar date is ${formatDateOnly(initial.calendarDate)}.` : ""}`
+                : initial.calendarDate
+                  ? `Following the organization's calendar date, ${formatDateOnly(initial.calendarDate)}.`
+                  : "Following the organization's calendar date."
+            }
           >
             <TextInput
               type="date"
               value={organization.businessDate || initial.effectiveBusinessDate || ""}
-              max={initial.effectiveBusinessDate || undefined}
+              max={initial.calendarDate}
               onChange={(event) =>
                 setSettings({
                   ...settings,

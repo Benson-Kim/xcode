@@ -79,6 +79,29 @@ public sealed class InvestmentTests : IDisposable
     }
 
     [Fact]
+    public async Task AnInvestmentViewerFindsTheirVehiclesButCannotChangeThem()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var (north, mine, theirs) = await Fleet(owner);
+        await Id(await owner.PostAsJsonAsync($"/setup/vehicles/{mine}/investment", new { date = "2025-03-01", description = "Deposit", amount = 1000m }));
+
+        await Scope(RevenueClerk, allCompanies: false, "invest.view", north);
+        using var viewer = await app.SignIn(RevenueClerk);
+        var listed = await viewer.GetFromJsonAsync<Page<VehicleDto>>("/setup/vehicles");
+        Assert.Equal([mine], listed!.Items.Select(x => x.Id));
+        Assert.Equal(1000m, (await viewer.GetFromJsonAsync<InvestmentDto>($"/setup/vehicles/{mine}/investment"))!.TotalInvested);
+
+        var vehicle = new { companyId = north, registration = "KDA 482M", joinedOn = "2026-01-01", weeklyTarget = 9000m };
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PostAsJsonAsync("/setup/vehicles", vehicle with { registration = "KDC 222C" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PutAsJsonAsync($"/setup/vehicles/{mine}", vehicle)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PostAsJsonAsync($"/setup/vehicles/{mine}/retire", new { leftOn = "2026-02-01" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PostAsJsonAsync($"/setup/vehicles/{mine}/restore", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync("/setup/vehicles/company-options")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PostAsJsonAsync($"/setup/vehicles/{mine}/investment", new { date = "2025-03-01", description = "More", amount = 1m })).StatusCode);
+    }
+
+    [Fact]
     public async Task AScopedPersonSeesAndChangesOnlyTheirVehiclesInvestment()
     {
         await app.SeedDemo();

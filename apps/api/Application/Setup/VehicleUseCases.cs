@@ -3,12 +3,16 @@ using Auth.Domain.Setup;
 
 namespace Auth.Application.Setup;
 
-public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository repository)
+public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository repository, IOrganizationRepository organizations)
 {
-    public Task<Page<VehicleDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read("vehicles.manage", actor =>
+    // Someone who may only see investment still has to find the vehicle it belongs to; every change stays vehicles.manage.
+    private static readonly string[] Listers = ["vehicles.manage", "invest.view"];
+
+    public Task<Page<VehicleDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read("", async actor =>
     {
+        await SetupPermissions.RequireAny(organizations, actor, Listers, ct);
         SetupPagination.Validate(page, pageSize);
-        return repository.Vehicles(actor, page, pageSize, ct);
+        return await repository.Vehicles(actor, page, pageSize, ct);
     }, ct);
 
     public Task<IReadOnlyList<CompanyOption>> CompanyOptions(CancellationToken ct) =>

@@ -16,10 +16,13 @@ public sealed class AuthTests : IDisposable
     private readonly HttpClient client;
     private const string Address = "person@example.com";
     public AuthTests() => client = app.CreateClient();
+    private VerificationMailer Mailer => app.Services.GetRequiredService<VerificationMailer>();
     private AuthRequest Request(string phoneNumber = "+254712345678", string pin = "5826", string device = "phone", string code = "", string refresh = "") => new(PhoneNumber: phoneNumber, Pin: pin, DeviceId: device, Code: code, RefreshToken: refresh);
     private async Task<(HttpStatusCode Status, AuthResponse Body)> Post(string path, AuthRequest? request = null)
     {
         var response = await client.PostAsJsonAsync("/auth/" + path, request ?? Request());
+        // Setup and reset codes go out after the reply; wait for them so the test sees what the person received.
+        await Mailer.Idle();
         var body = await response.Content.ReadFromJsonAsync<AuthResponse>();
         Assert.NotNull(body);
         return (response.StatusCode, body);
@@ -27,6 +30,110 @@ public sealed class AuthTests : IDisposable
     private async Task Pause(string path = "sign-in")
     {
         for (var i = 0; i < 5; i++) Assert.Equal(HttpStatusCode.Unauthorized, (await Post(path, Request(pin: "9998"))).Status);
+    }
+    // Everything a caller can see of a response, to compare two byte for byte.
+    private async Task<string> Seen(string path, AuthRequest request)
+    {
+        using var response = await client.PostAsJsonAsync("/auth/" + path, request);
+        await Mailer.Idle();
+        var headers = string.Join("; ", response.Headers.Concat(response.Content.Headers)
+            .Where(x => x.Key is not ("Date" or "Content-Length")).OrderBy(x => x.Key).Select(x => $"{x.Key}={string.Join(",", x.Value)}"));
+        return $"{(int)response.StatusCode} {headers} {await response.Content.ReadAsStringAsync()}";
+    }
+    private const string Unknown = "+254700000000";
+    // Out-of-range values an earlier version could store (a lockout after one try, a day-long pause), written past the
+    // database's own checks.
+    private Task StoreOutOfRangePolicy() => app.WithDb(db => db.Database.ExecuteSqlRawAsync(
+        "PRAGMA ignore_check_constraints = 1; " +
+        "UPDATE \"SecurityPolicies\" SET \"LockoutThreshold\" = 1, \"LockoutMinutes\" = 1440, \"AccessTokenMinutes\" = 120, \"RefreshTokenDays\" = 365; " +
+        "PRAGMA ignore_check_constraints = 0;"));
+
+    [Fact]
+    public async Task APauseLooksLikeAnUnknownNumberExceptOnATrustedDevice()
+    {
+        await app.Seed();
+        await Pause();
+
+        // On a device this account has not trusted, a paused account answers exactly like a number with no account,
+        // whatever PIN is tried, on sign-in and unlock alike.
+        foreach (var path in new[] { "sign-in", "unlock" })
+            foreach (var pin in new[] { "5826", "9998" })
+                Assert.Equal(await Seen(path, Request(phoneNumber: Unknown, pin: pin, device: "stranger")), await Seen(path, Request(pin: pin, device: "stranger")));
+        await app.WithDb(async db => Assert.Equal(5, (await db.Users.SingleAsync()).FailedAttempts));
+
+        // The phone the person already trusts keeps showing the timer (Phase 1 phones depend on it).
+        var trusted = await Post("sign-in");
+        Assert.Equal((HttpStatusCode)423, trusted.Status);
+        Assert.Equal("paused", trusted.Body.Status);
+        Assert.Equal(900, trusted.Body.RetryAfterSeconds);
+        Assert.Equal((HttpStatusCode)423, (await Post("unlock")).Status);
+    }
+
+    [Fact]
+    public async Task ANumberThatIsNotAPhoneNumberReachesNoAccount()
+    {
+        // Accounts made before phone sign-in have no number yet. Input that is not a phone number normalizes to
+        // nothing, and must not reach them.
+        await app.WithDb(async db =>
+        {
+            await db.Database.EnsureCreatedAsync();
+            await AuthFactory.AddOrganization(db);
+            db.Users.Add(new User { Email = "legacy.one@example.com" });
+            await db.SaveChangesAsync();
+        });
+        Assert.Equal(await Seen("setup-pin/request", Request(phoneNumber: Unknown)), await Seen("setup-pin/request", Request(phoneNumber: "not a number")));
+        Assert.Equal(0, app.Email.Count);
+
+        // With two such accounts the lookup used to fail with a 500.
+        await app.WithDb(async db => { db.Users.Add(new User { Email = "legacy.two@example.com" }); await db.SaveChangesAsync(); });
+        foreach (var path in new[] { "sign-in", "setup-pin/request", "setup-pin/verify", "setup-pin/complete", "verify-device" })
+            Assert.Equal(await Seen(path, Request(phoneNumber: Unknown, pin: "6942")), await Seen(path, Request(phoneNumber: "not a number", pin: "6942")));
+        Assert.Equal(0, app.Email.Count);
+    }
+
+    [Fact]
+    public async Task ACodeRequestDoesNotWaitForTheMailServer()
+    {
+        // Only a real account's request sends an email, so waiting for the mail server would tell callers which
+        // numbers have accounts. The reply goes first; the code follows.
+        await app.Seed();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        app.Email.BeforeSend = _ => release.Task;
+        try
+        {
+            var request = client.PostAsJsonAsync("/auth/pin-reset/request", Request());
+            Assert.Same(request, await Task.WhenAny(request, Task.Delay(TimeSpan.FromSeconds(20))));
+            Assert.Equal(HttpStatusCode.Accepted, (await request).StatusCode);
+            Assert.Equal(0, app.Email.Count);
+        }
+        finally { release.TrySetResult(); }
+        for (var wait = 0; app.Email.Count == 0 && wait < 200; wait++) await Task.Delay(50);
+        Assert.Equal(1, app.Email.Count);
+        Assert.Equal(HttpStatusCode.OK, (await Post("pin-reset/complete", Request(pin: "6942", code: app.Email.Codes[Address]))).Status);
+    }
+
+    [Fact]
+    public async Task AStoredPolicyOutsideTheBoundsIsEnforcedWithinThem()
+    {
+        await app.Seed();
+        await StoreOutOfRangePolicy();
+
+        // Access tokens last at most 15 minutes and refresh tokens at most 90 days.
+        var signedIn = await Post("sign-in");
+        var jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(signedIn.Body.AccessToken);
+        Assert.Equal(TimeSpan.FromMinutes(15), jwt.ValidTo - jwt.ValidFrom);
+        await app.WithDb(async db => Assert.Equal(app.Clock.UtcNow.AddDays(90), (await db.RefreshTokens.SingleAsync()).ExpiresAt));
+
+        // One wrong PIN no longer pauses the account: it takes at least three.
+        await Post("sign-in", Request(pin: "9998"));
+        await app.WithDb(async db => Assert.Null((await db.Users.SingleAsync()).PausedUntil));
+        await Post("sign-in", Request(pin: "9998"));
+        await Post("sign-in", Request(pin: "9998"));
+
+        // And the pause lasts at most an hour, not a day.
+        var paused = await Post("sign-in");
+        Assert.Equal((HttpStatusCode)423, paused.Status);
+        Assert.Equal(3600, paused.Body.RetryAfterSeconds);
     }
     [Fact]
     public async Task AUTH01_TrustedSignInIssuesTokens_And_OPEN05_ResetsFailures()
@@ -405,7 +512,7 @@ public sealed class AuthTests : IDisposable
         Assert.Equal(HttpStatusCode.Accepted, failed.Status);
         Assert.Equal(new AuthResponse("check_email"), failed.Body);
         await app.WithDb(async db => Assert.True((await db.VerificationCodes.SingleAsync()).Consumed));
-        var logged = Assert.Single(app.Logs.Errors, x => x.Category == typeof(AuthService).FullName);
+        var logged = Assert.Single(app.Logs.Errors, x => x.Category == typeof(VerificationMailer).FullName);
         Assert.IsType<Guid>(logged.Values["UserId"]);
         Assert.False(string.IsNullOrEmpty(logged.Values["CorrelationId"]?.ToString()));
 
@@ -425,7 +532,7 @@ public sealed class AuthTests : IDisposable
         Assert.Equal(HttpStatusCode.ServiceUnavailable, failed.Status);
         Assert.Equal(new AuthResponse("service_unavailable"), failed.Body);
         await app.WithDb(async db => Assert.True((await db.VerificationCodes.SingleAsync()).Consumed));
-        var logged = Assert.Single(app.Logs.Errors, x => x.Category == typeof(AuthService).FullName);
+        var logged = Assert.Single(app.Logs.Errors, x => x.Category == typeof(VerificationMailer).FullName);
         Assert.False(string.IsNullOrEmpty(logged.Values["CorrelationId"]?.ToString()));
 
         // The one-minute resend cooldown ignores codes that never went out, so a retry right away sends a new one.

@@ -293,6 +293,20 @@ public sealed class AccessAndSetupTests : IDisposable
     }
 
     [Fact]
+    public async Task AnOlderOutOfRangePolicyDoesNotBreakEveryonesScreens()
+    {
+        await app.SeedDemo();
+        // Saved by an earlier version whose bounds were wider (one try, a day-long pause), past the database's checks.
+        await app.WithDb(db => db.Database.ExecuteSqlRawAsync(
+            "PRAGMA ignore_check_constraints = 1; UPDATE \"SecurityPolicies\" SET \"LockoutThreshold\" = 1, \"LockoutMinutes\" = 1440; PRAGMA ignore_check_constraints = 0;"));
+
+        using var clerk = await app.SignIn(RevenueClerk);
+        Assert.Equal(HttpStatusCode.OK, (await clerk.GetAsync("/setup/appearance")).StatusCode);
+        using var owner = await app.SignIn(Owner);
+        Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync("/setup/organization/settings")).StatusCode);
+    }
+
+    [Fact]
     public async Task APlainRefusalGivesNoDetail()
     {
         await app.SeedDemo();

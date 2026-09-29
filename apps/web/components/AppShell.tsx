@@ -60,7 +60,11 @@ const topLevel: NavItem[] = [
 ];
 const setupGroup: NavItem[] = [
   { id: "companies", label: "PSV companies", permission: "companies.manage" },
-  { id: "vehicles", label: "Vehicles", permission: "vehicles.manage" },
+  {
+    id: "vehicles",
+    label: "Vehicles",
+    permission: ["vehicles.manage", "invest.view"],
+  },
   {
     id: "expenses",
     label: "Expense categories",

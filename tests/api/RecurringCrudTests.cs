@@ -105,6 +105,48 @@ public sealed class RecurringCrudTests : IDisposable
         Assert.Equal(today, stoppedItem.StoppedFrom);
     }
 
+    // The saved total always equals the shares listed with it, so the editor opens balanced; what still posts is apart.
+    [Fact]
+    public async Task RetiredSharesStayInTheTotalAndActiveAmountSaysWhatStillPosts()
+    {
+        using var client = await CreateOwnerClient();
+        var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+        var company = (await (await client.PostAsJsonAsync("/setup/companies", new SaveCompany("Retire Fleet"))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        async Task<Guid> Vehicle(string registration) => (await (await client.PostAsJsonAsync("/setup/vehicles",
+            new SaveVehicle(company, registration, today, 20000m))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        var (first, second) = (await Vehicle("KQA 321M"), await Vehicle("KQA 322M"));
+        (await client.PostAsJsonAsync("/setup/recurring", new SaveRecurring(null, RecurringKind.Cost, null, 1000m, RecurrenceFrequency.Weekly, 1, false,
+            today, null, [new VehicleShare(first, 700m), new VehicleShare(second, 300m)], ExpenseItemId: await ExpenseItemTestData.Id(client, "Parking"))))
+            .EnsureSuccessStatusCode();
+        async Task<RecurringDto> Item() => Assert.Single((await client.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items);
+        Task Retire(Guid vehicle) => client.PostAsJsonAsync($"/setup/vehicles/{vehicle}/retire", new VehicleLifecycleRequest(today)).ContinueWith(t => t.Result.EnsureSuccessStatusCode());
+
+        Assert.Equal((1000m, 1000m), ((await Item()).Amount, (await Item()).ActiveAmount));
+        await Retire(second);
+        var partlyRetired = await Item();
+        Assert.Equal((1000m, 700m, 1000m), (partlyRetired.Amount, partlyRetired.ActiveAmount, partlyRetired.Allocations.Sum(a => a.Amount)));
+        await Retire(first);
+        var allRetired = await Item();
+        Assert.Equal((1000m, 0m), (allRetired.Amount, allRetired.ActiveAmount));
+    }
+
+    // The vehicle picker offers only vehicles a new share may use, even when the business date is set before one joined.
+    [Fact]
+    public async Task ThePickerOffersOnlyVehiclesANewShareCanUse()
+    {
+        using var client = await CreateOwnerClient();
+        var company = (await (await client.PostAsJsonAsync("/setup/companies", new SaveCompany("Picker Fleet"))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        var early = (await (await client.PostAsJsonAsync("/setup/vehicles", new SaveVehicle(company, "KQA 331M", new DateOnly(2026, 1, 1), 20000m))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        var late = (await (await client.PostAsJsonAsync("/setup/vehicles", new SaveVehicle(company, "KQA 332M", new DateOnly(2026, 3, 10), 20000m))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = "2026-03-05" })).EnsureSuccessStatusCode();
+
+        var options = await client.GetFromJsonAsync<List<VehicleOption>>("/setup/recurring/vehicle-options");
+        Assert.Equal([early], options!.Select(x => x.Id));
+        using var refused = await client.PostAsJsonAsync("/setup/recurring", new SaveRecurring(null, RecurringKind.Cost, null, 100m, RecurrenceFrequency.Weekly, 1, false,
+            new DateOnly(2026, 3, 5), null, [new VehicleShare(late, 100m)], ExpenseItemId: await ExpenseItemTestData.Id(client, "Parking")));
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+    }
+
     private async Task<HttpClient> CreateOwnerClient()
     {
         await app.WithDb(async db =>

@@ -166,3 +166,31 @@ it("lets any member load and save their own preferences", async () => {
     expect.anything(),
   );
 });
+
+it("lets a frozen business date move forward to the organization's calendar date", async () => {
+  // The business date is held at 15 Mar; the organization's own calendar is at 30 Sep.
+  const frozen = {
+    ...settings,
+    organization: { ...settings.organization, businessDate: "2026-03-15" },
+    effectiveBusinessDate: "2026-03-15",
+    calendarDate: "2026-09-30",
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: string, init?: RequestInit) =>
+      new Response(JSON.stringify(init?.method === "PUT" ? { ok: true } : frozen), { status: 200 }),
+    ),
+  );
+  render(<OrganizationSettingsView />);
+
+  const picker = await screen.findByLabelText("Business date", { selector: "input" });
+  expect(picker).toHaveValue("2026-03-15");
+  expect(picker).toHaveAttribute("max", "2026-09-30");
+  expect(screen.getByText("Held at 15 Mar 2026. The organization's calendar date is 30 Sep 2026.")).toBeInTheDocument();
+
+  fireEvent.change(picker, { target: { value: "2026-03-16" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save business date" }));
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith("/api/setup/organization/settings/businessDate", expect.objectContaining({ body: JSON.stringify({ value: "2026-03-16" }) })),
+  );
+});

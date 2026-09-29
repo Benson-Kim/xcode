@@ -55,10 +55,13 @@ export function VehiclesPage({
 }) {
   const { can } = useSession();
   const { appearance } = useAppearance();
+  // invest.view alone lists the vehicles read-only, to reach each one's Investment tab.
+  const canManage = can("vehicles.manage");
   const vehicles = useStreamedList<Vehicle>("setup/vehicles");
-  // Vehicle managers may not manage companies; ask the server for active company options in that case.
-  const companyList = useStreamedList<Company>(can("companies.manage") ? "setup/companies" : null);
-  const companyOptions = useResource<CompanyChoice[]>(can("companies.manage") ? null : "setup/vehicles/company-options");
+  // Vehicle managers may not manage companies; ask the server for active company options in that case. A read-only
+  // list takes its companies from the vehicles themselves.
+  const companyList = useStreamedList<Company>(canManage && can("companies.manage") ? "setup/companies" : null);
+  const companyOptions = useResource<CompanyChoice[]>(canManage && !can("companies.manage") ? "setup/vehicles/company-options" : null);
   // The organization's business date, never the computer clock; undefined until the appearance has loaded.
   const today = appearance?.businessDate;
   const [filter, setFilter] = useState("all");
@@ -105,7 +108,7 @@ export function VehiclesPage({
         </SelectInput>
         {!vehicles.loading && <Hint>{plural(visible.length, "vehicle", "vehicles")}</Hint>}
         <Spacer />
-        <Button onClick={() => setEditing("new")}>Add vehicle</Button>
+        {canManage && <Button onClick={() => setEditing("new")}>Add vehicle</Button>}
       </Toolbar>
       <DataTable
         columns={[
@@ -203,13 +206,18 @@ function VehicleEditor({
   const lifecycleDate = lifecycleInput ?? today ?? "";
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<VehicleTab>("details");
+  // Each tab needs its own permission: the details and the report need vehicles.manage.
   const tabs: { value: VehicleTab; label: string }[] = [
-    { value: "details", label: "Details" },
-    { value: "report", label: "Report" },
+    ...(can("vehicles.manage")
+      ? [
+          { value: "details" as const, label: "Details" },
+          { value: "report" as const, label: "Report" },
+        ]
+      : []),
     ...(can("commitments.view") ? [{ value: "scheduled" as const, label: "Scheduled items" }] : []),
     ...(can("invest.view") ? [{ value: "investment" as const, label: "Investment" }] : []),
   ];
-  const shownTab = tabs.some((option) => option.value === tab) ? tab : "details";
+  const shownTab = tabs.some((option) => option.value === tab) ? tab : (tabs[0]?.value ?? "details");
   const weekly = Number(form.weeklyTarget) || 0;
   const companyName = companies.find((company) => company.id === form.companyId)?.name ?? vehicle?.companyName;
   const retired = Boolean(vehicle && vehicle.active === false);
@@ -555,7 +563,7 @@ function VehicleRecurringCard({
                 left={onOpen ? <RowButton onClick={() => onOpen(item.id)}>{item.name}</RowButton> : item.name}
                 leftSub={`${item.note ? `${item.note}. ` : ""}${recurringFrequency(item)}${stopped ? allocation.active === false ? ". Left the fleet" : ". Stopped" : ""}`}
                 right={kes(share)}
-                rightSub={item.allocations.length > 1 ? `of ${kes(item.amount)}` : "each time"}
+                rightSub={item.allocations.length > 1 ? `of ${kes(item.activeAmount ?? item.amount)}` : "each time"}
               />
             );
           })}

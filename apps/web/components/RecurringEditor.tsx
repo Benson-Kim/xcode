@@ -147,7 +147,11 @@ export function RecurringEditor({
   const [expenseItemId, setExpenseItemId] = useState(item?.expenseItemId ?? "");
   const [name, setName] = useState(item?.kind === 2 ? item.name : "");
   const [note, setNote] = useState(item?.note ?? "");
-  const [amount, setAmount] = useState(item?.amount ? String(item.amount) : "");
+  // The saved total is the sum of every share, including those of vehicles that have left the fleet, so an existing
+  // item always opens balanced.
+  const [amount, setAmount] = useState(
+    item ? formatShare(item.allocations.reduce((sum, allocation) => sum + allocation.amount, 0)) : "",
+  );
   const [frequency, setFrequency] = useState(item?.frequency || 3);
   const [weekday, setWeekday] = useState(
     String(item?.frequency === 2 ? (item.day ?? 6) : 6),
@@ -241,11 +245,30 @@ export function RecurringEditor({
       ? legacyCategoryName
       : undefined;
 
+  // A vehicle that left the fleet keeps its share, read-only: it stays in the total but no longer posts.
+  const inFleet = (vehicleId: string) =>
+    vehicles.find((vehicle) => vehicle.id === vehicleId)?.active !== false;
+  const retiredShares = (vehicleIds: string[]) =>
+    Object.fromEntries(
+      vehicleIds
+        .filter((vehicleId) => !inFleet(vehicleId))
+        .map((vehicleId) => [vehicleId, shares[vehicleId] ?? "0"]),
+    );
+  // Splits what is left after the retired shares across the vehicles still in the fleet.
+  function splitAcrossFleet(amountTotal: number, vehicleIds: string[]) {
+    const kept = retiredShares(vehicleIds);
+    const keptTotal = Object.values(kept).reduce((sum, share) => sum + (Number(share) || 0), 0);
+    return {
+      ...kept,
+      ...splitAmountEvenly(Math.max(0, amountTotal - keptTotal), vehicleIds.filter(inFleet)),
+    };
+  }
+
   function updateAmount(value: string) {
     setAmount(value);
     setSplitNotice("");
     if (!manualAllocations)
-      setShares(splitAmountEvenly(Number(value) || 0, selected));
+      setShares(splitAcrossFleet(Number(value) || 0, selected));
   }
 
   function updateKind(value: number) {
@@ -262,7 +285,19 @@ export function RecurringEditor({
       : selected.filter((id) => id !== vehicleId);
     setSelected(next);
     setSplitNotice("");
-    if (!manualAllocations) setShares(splitAmountEvenly(total, next));
+    if (!checked && vehicle?.active === false) {
+      // Removing a retired share also takes it off the amount, so the form stays balanced.
+      const share = Number(shares[vehicleId]) || 0;
+      setAmount(formatShare(Math.max(0, total - share)));
+      setShares((current) => {
+        const nextShares = { ...current };
+        delete nextShares[vehicleId];
+        return nextShares;
+      });
+      setSplitNotice(`Took ${vehicle.registration}'s ${kes(share)} share off the amount.`);
+      return;
+    }
+    if (!manualAllocations) setShares(splitAcrossFleet(total, next));
     else
       setShares((current) => {
         const nextShares = { ...current };
@@ -284,15 +319,27 @@ export function RecurringEditor({
     setSelected(next);
     setSplitNotice("");
     setManualAllocations(false);
-    setShares(splitAmountEvenly(total, next));
+    setShares(splitAcrossFleet(total, next));
   }
 
+  const vehicleName = (vehicleId: string) =>
+    vehicles.find((vehicle) => vehicle.id === vehicleId)?.registration ?? "A vehicle";
+  const postingIds = selected.filter(inFleet);
+  const retiredIds = selected.filter((vehicleId) => !inFleet(vehicleId));
+  // What posts on each due date: the shares of the vehicles still in the fleet.
+  const postingTotal = postingIds.reduce(
+    (sum, vehicleId) => sum + (Number(shares[vehicleId]) || 0),
+    0,
+  );
+
   function splitEqually() {
-    if (!total || !selected.length) return;
+    if (!total || !postingIds.length) return;
+    const shared = splitAcrossFleet(total, selected);
     setManualAllocations(false);
-    setShares(splitAmountEvenly(total, selected));
+    setShares(shared);
+    const split = postingIds.reduce((sum, vehicleId) => sum + (Number(shared[vehicleId]) || 0), 0);
     setSplitNotice(
-      `Split ${kes(total)} equally across ${plural(selected.length, "vehicle", "vehicles")}.`,
+      `Split ${kes(split)} equally across ${plural(postingIds.length, "vehicle", "vehicles")}.`,
     );
   }
 
@@ -312,7 +359,7 @@ export function RecurringEditor({
     end: noEnd ? null : end || null,
   };
   const previewDates =
-    today && total > 0 && selected.length && periodIsValid
+    today && postingTotal > 0 && postingIds.length && periodIsValid
       ? recurringNextPostings(schedule, today, 5)
       : [];
   const title = kind === 1 ? picked?.name || item?.name || "" : name.trim();
@@ -726,7 +773,7 @@ export function RecurringEditor({
                 Clear
               </Chip>
               <Chip
-                disabled={!total || !selected.length}
+                disabled={!total || !postingIds.length}
                 onClick={splitEqually}
               >
                 Split equally
@@ -740,6 +787,14 @@ export function RecurringEditor({
               Enter the amount and select vehicles to enable Split equally.
             </Hint>
           ) : null}
+          {retiredIds.length > 0 && (
+            <Hint>
+              {retiredIds.length === 1
+                ? `${vehicleName(retiredIds[0])} left the fleet. Its share stays in the total but no longer posts.`
+                : `${retiredIds.map(vehicleName).join(", ")} left the fleet. Their shares stay in the total but no longer post.`}
+              {!disabled && " Untick a vehicle to take its share off the amount."}
+            </Hint>
+          )}
           {vehiclesLoading && (
             <div role="status" aria-busy="true">
               <span className="sr-only">Loading vehicles</span>
@@ -815,13 +870,13 @@ export function RecurringEditor({
               <ol className="m-0 list-decimal pl-5">
                 {previewDates.map((date) => (
                   <li key={date} className="py-0.5 tabular-nums">
-                    {formatDateOnly(date)}: {kes(total)} across{" "}
-                    {plural(selected.length, "vehicle", "vehicles")}
+                    {formatDateOnly(date)}: {kes(postingTotal)} across{" "}
+                    {plural(postingIds.length, "vehicle", "vehicles")}
                   </li>
                 ))}
               </ol>
               <Hint>
-                About {kes(recurringMonthlyEstimate(total, frequency))} a month.{" "}
+                About {kes(recurringMonthlyEstimate(postingTotal, frequency))} a month.{" "}
                 {kind === 2
                   ? "Shown as savings in each vehicle report."
                   : countedAs

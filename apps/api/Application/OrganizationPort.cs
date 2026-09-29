@@ -15,6 +15,9 @@ public interface IOrganizationRepository
      Task<OrganizationMembership?> Membership(Guid userId, CancellationToken ct);
      Task<IReadOnlySet<string>> Permissions(Guid userId, CancellationToken ct);
      Task<EffectiveSettings> Settings(Guid userId, CancellationToken ct);
+     // Drops everything resolved so far in this request. The unit of work calls it before a retry, so a person whose
+     // access changed in the meantime is checked against what the database holds now.
+     void ForgetResolved();
 }
 
 public interface IUnitOfWork
