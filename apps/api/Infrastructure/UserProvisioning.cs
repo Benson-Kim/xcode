@@ -97,7 +97,8 @@ public static class UserProvisioning
         return organization;
     }
 
-    // Adds missing catalog roles and any missing default grants; never removes an organization's grants.
+    // Adds missing catalog roles. A role's permissions live only in PermissionCatalog, so no RolePermission rows are
+    // written; rows left by older versions are ignored (the table is kept until it is dropped).
     public static async Task<List<Role>> EnsureRoles(AuthDb db, Guid organizationId, CancellationToken ct)
     {
         var roles = await db.Roles.IgnoreQueryFilters().Where(x => x.OrganizationId == organizationId).ToListAsync(ct);
@@ -107,11 +108,6 @@ public static class UserProvisioning
                 var role = new Role { OrganizationId = organizationId, Name = roleName };
                 db.Roles.Add(role); roles.Add(role);
             }
-        foreach (var role in roles)
-        {
-            var existing = await db.RolePermissions.IgnoreQueryFilters().Where(x => x.OrganizationId == organizationId && x.RoleId == role.Id).Select(x => x.Permission).ToListAsync(ct);
-            db.RolePermissions.AddRange(PermissionCatalog.DefaultsFor(role.Name).Where(x => !existing.Contains(x)).Select(role.Grant));
-        }
         return roles;
     }
 

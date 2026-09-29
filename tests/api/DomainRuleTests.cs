@@ -57,6 +57,23 @@ public sealed class DomainRuleTests
         policy.Validate();
     }
 
+    // Addendum 1, section 2: at least three tries, and the pause is capped at one hour.
+    [Theory]
+    [InlineData(2, 15, false)]
+    [InlineData(3, 15, true)]
+    [InlineData(10, 15, true)]
+    [InlineData(11, 15, false)]
+    [InlineData(5, 0, false)]
+    [InlineData(5, 1, true)]
+    [InlineData(5, 60, true)]
+    [InlineData(5, 61, false)]
+    public void WrongPinPolicyBounds(int tries, int pauseMinutes, bool valid)
+    {
+        var policy = new OrganizationSecurityPolicy { LockoutThreshold = tries, LockoutMinutes = pauseMinutes };
+        if (valid) policy.Validate();
+        else Assert.Throws<ArgumentException>(policy.Validate);
+    }
+
     private static RecurringDefinition Daily(DateOnly start, decimal amount = 100m) =>
         new("Insurance", RecurringKind.Cost, CostCategory.FixedCommitments, amount, new RecurringSchedule(RecurrenceFrequency.Daily), start, null, [new VehicleShare(Vehicle, amount)]);
 

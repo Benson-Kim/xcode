@@ -88,7 +88,9 @@ public sealed class AccessLifecycleTests : IDisposable
 
         // Other edits to the same person are still a people manager's job.
         Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/setup/people/{elevated.Id}", Edit(elevated) with { FirstName = "Janet" })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/setup/people/{elevated.Id}", Edit(elevated, email: "jane.new@example.com"))).StatusCode);
+        // The rename moved the person's version on, so the Owner edits from a fresh read.
+        var renamed = await Find(owner, "jane.one@example.com");
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/setup/people/{elevated.Id}", Edit(renamed, email: "jane.new@example.com"))).StatusCode);
         Assert.Equal("jane.new@example.com", (await Find(owner, "jane.new@example.com")).Email);
     }
 
@@ -146,6 +148,8 @@ public sealed class AccessLifecycleTests : IDisposable
         (await owner.PutAsJsonAsync($"/setup/people/{clerk.Id}", Edit(clerk))).EnsureSuccessStatusCode();
         Assert.Equal(HttpStatusCode.OK, (await Session(tokens.AccessToken!)).StatusCode);
 
+        // That save moved the person's version on, so the next edit starts from a fresh read.
+        clerk = await Find(owner, RevenueClerk);
         (await owner.PutAsJsonAsync($"/setup/people/{clerk.Id}", Edit(clerk) with { Permissions = [.. clerk.Permissions, "reports.view"] })).EnsureSuccessStatusCode();
         Assert.Equal(HttpStatusCode.Unauthorized, (await Session(tokens.AccessToken!)).StatusCode);
 

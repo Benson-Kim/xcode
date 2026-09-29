@@ -99,6 +99,170 @@ public sealed class AccessAndSetupTests : IDisposable
     }
 
     [Fact]
+    public async Task RoleDefaultsComeOnlyFromTheCatalog()
+    {
+        await app.SeedDemo();
+        // Older databases hold RolePermissions rows that can drift from the catalog: here an extra grant for the
+        // Revenue clerk and a missing one for the Office admin. Neither may change a token or a request-time check.
+        await app.WithDb(async db =>
+        {
+            db.Provisioning = true;
+            var roles = await db.Roles.IgnoreQueryFilters().ToListAsync();
+            var clerkRole = roles.Single(x => x.Name == "Revenue clerk");
+            var adminRole = roles.Single(x => x.Name == "Office admin");
+            db.RolePermissions.RemoveRange(db.RolePermissions.IgnoreQueryFilters().Where(x => x.RoleId == adminRole.Id && x.Permission == "companies.manage"));
+            db.RolePermissions.Add(new RolePermission { OrganizationId = clerkRole.OrganizationId, RoleId = clerkRole.Id, Permission = "organization.manage" });
+            await db.SaveChangesAsync();
+        });
+
+        using var clerk = await app.SignIn(RevenueClerk);
+        var session = await clerk.GetFromJsonAsync<AuthSessionResponse>("/auth/session");
+        Assert.Equal(PermissionCatalog.DefaultsFor("Revenue clerk").Order(StringComparer.Ordinal), session!.Permissions.Order(StringComparer.Ordinal));
+        Assert.Equal(HttpStatusCode.Forbidden, (await clerk.GetAsync("/setup/organization/settings")).StatusCode);
+
+        using var admin = await app.SignIn(OfficeAdmin);
+        Assert.Contains("companies.manage", (await admin.GetFromJsonAsync<AuthSessionResponse>("/auth/session"))!.Permissions);
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync("/setup/companies")).StatusCode);
+
+        // Roles are still created, but no role grant is written any more (only the row this test added exists).
+        (await admin.GetAsync("/setup/access/roles")).EnsureSuccessStatusCode();
+        await app.WithDb(async db =>
+        {
+            Assert.Equal(4, await db.Roles.IgnoreQueryFilters().CountAsync());
+            Assert.Equal("organization.manage", Assert.Single(await db.RolePermissions.IgnoreQueryFilters().ToListAsync()).Permission);
+        });
+    }
+
+    private static async Task<string?> Detail(HttpResponseMessage response) =>
+        (await response.Content.ReadFromJsonAsync<JsonElement>()).TryGetProperty("detail", out var detail) ? detail.GetString() : null;
+
+    // Gives the Office admin single permissions straight in the database (as an access manager would).
+    private Task Override(string permission, bool granted) => app.WithDb(async db =>
+    {
+        db.Provisioning = true;
+        var admin = await db.Users.SingleAsync(x => x.Email == OfficeAdmin);
+        var organizationId = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
+        db.PermissionOverrides.Add(new PersonPermissionOverride { OrganizationId = organizationId, UserId = admin.Id, Permission = permission, Granted = granted });
+        await db.SaveChangesAsync();
+    });
+
+    [Fact]
+    public async Task OnlyAnOwnerGivesTheOwnerRole()
+    {
+        await app.SeedDemo();
+        using var admin = await app.SignIn(OfficeAdmin);
+        var ownerDefaults = await Defaults(admin, "Owner");
+        var clerk = (await admin.GetFromJsonAsync<Page<PersonDto>>("/setup/people"))!.Items.Single(x => x.Email == RevenueClerk);
+
+        using var created = await admin.PostAsJsonAsync("/setup/people", Person("jane.owner@example.com", "0711000011", ownerDefaults, role: "Owner"));
+        Assert.Equal(HttpStatusCode.Forbidden, created.StatusCode);
+        Assert.Equal("Only an Owner can give the Owner role.", await Detail(created));
+        using var promoted = await admin.PutAsJsonAsync($"/setup/people/{clerk.Id}",
+            new SavePerson(clerk.FirstName, clerk.LastName, clerk.Email, clerk.PhoneNumber, "Owner", "all", [], [], [.. ownerDefaults], null, clerk.Version));
+        Assert.Equal(HttpStatusCode.Forbidden, promoted.StatusCode);
+        Assert.Equal("Only an Owner can give the Owner role.", await Detail(promoted));
+
+        using var owner = await app.SignIn(Owner);
+        Assert.Equal(HttpStatusCode.OK, (await owner.PostAsJsonAsync("/setup/people", Person("jane.owner@example.com", "0711000011", ownerDefaults, role: "Owner"))).StatusCode);
+    }
+
+    [Fact]
+    public async Task NonOwnersGiveOnlyRolesInsideTheirOwnPermissions()
+    {
+        await app.SeedDemo();
+        using var admin = await app.SignIn(OfficeAdmin);
+        var managerDefaults = await Defaults(admin, "Fleet manager");
+        var clerk = (await admin.GetFromJsonAsync<Page<PersonDto>>("/setup/people"))!.Items.Single(x => x.Email == RevenueClerk);
+        SavePerson ClerkAsManager(long version) => new(clerk.FirstName, clerk.LastName, clerk.Email, clerk.PhoneNumber, "Fleet manager", "all", [], [],
+            [.. managerDefaults], null, version);
+
+        // The Office admin lacks "See my petty cash float" and "Record spending from my float", both Fleet manager
+        // defaults, so they can give that role neither on create nor on a role change.
+        using var created = await admin.PostAsJsonAsync("/setup/people", Person("jane.manager@example.com", "0711000012", managerDefaults, role: "Fleet manager"));
+        Assert.Equal(HttpStatusCode.Forbidden, created.StatusCode);
+        Assert.Equal("You can only grant roles whose permissions you hold.", await Detail(created));
+        using var changed = await admin.PutAsJsonAsync($"/setup/people/{clerk.Id}", ClerkAsManager(clerk.Version));
+        Assert.Equal(HttpStatusCode.Forbidden, changed.StatusCode);
+        Assert.Equal("You can only grant roles whose permissions you hold.", await Detail(changed));
+
+        // Once their effective permissions cover the role (here through single permissions), they can give it.
+        await Override("dash.float", true);
+        await Override("pettycash.spend", true);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync("/setup/people", Person("jane.manager@example.com", "0711000012", managerDefaults, role: "Fleet manager"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/setup/people/{clerk.Id}", ClerkAsManager(clerk.Version))).StatusCode);
+
+        // A permission taken away from them counts too: without "Record a no earnings reason" they cannot give Revenue clerk.
+        await Override("revenue.no_earnings", false);
+        using var clerkRole = await admin.PostAsJsonAsync("/setup/people", Person("jane.clerk@example.com", "0711000013", await Defaults(admin, "Revenue clerk")));
+        Assert.Equal(HttpStatusCode.Forbidden, clerkRole.StatusCode);
+    }
+
+    [Fact]
+    public async Task ScopedEditorsCannotEraseAssignmentsOutsideTheirScope()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var north = (await (await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("North Star", "Add North Star")))
+            .Content.ReadFromJsonAsync<IdResponse>())!;
+        var south = (await (await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("South Line", "Add South Line")))
+            .Content.ReadFromJsonAsync<IdResponse>())!;
+        var defaults = await Defaults(owner, "Revenue clerk");
+        using var created = await owner.PostAsJsonAsync("/setup/people",
+            new SavePerson("Jane", "Njeri", "jane.scope@example.com", "0711000007", "Revenue clerk", "companies",
+                [north.Id, south.Id], [], defaults.ToList(), null));
+        var id = (await created.Content.ReadFromJsonAsync<IdResponse>())!.Id;
+
+        await app.WithDb(async db =>
+        {
+            db.Provisioning = true;
+            var admin = await db.Users.SingleAsync(x => x.Email == OfficeAdmin);
+            var organizationId = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
+            db.SetupDataScopes.RemoveRange(db.SetupDataScopes.IgnoreQueryFilters().Where(x => x.UserId == admin.Id));
+            db.SetupCompanyScopes.RemoveRange(db.SetupCompanyScopes.IgnoreQueryFilters().Where(x => x.UserId == admin.Id));
+            db.SetupCompanyScopes.Add(new SetupCompanyScope
+            {
+                OrganizationId = organizationId,
+                UserId = admin.Id,
+                CompanyId = north.Id
+            });
+            await db.SaveChangesAsync();
+            db.Provisioning = false;
+        });
+
+        using var scopedAdmin = await app.SignIn(OfficeAdmin);
+        var visible = await scopedAdmin.GetFromJsonAsync<PersonDto>($"/setup/people/{id}");
+        using var response = await scopedAdmin.PutAsJsonAsync($"/setup/people/{id}",
+            new SavePerson(visible!.FirstName, visible.LastName, visible.Email, visible.PhoneNumber, visible.Role,
+                "companies", [north.Id], [], visible.Permissions.ToList(), visible.ApprovalLimit, visible.Version)
+            with { FirstName = "Janet" });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var after = await owner.GetFromJsonAsync<PersonDto>($"/setup/people/{id}");
+        Assert.Contains(north.Id, after!.CompanyIds);
+        Assert.Contains(south.Id, after.CompanyIds);
+
+        // Refusing a wider change is right, and the refusal says why (addendum 1, section 3).
+        using var widened = await scopedAdmin.PutAsJsonAsync($"/setup/people/{id}",
+            new SavePerson(after.FirstName, after.LastName, after.Email, after.PhoneNumber, after.Role, "vehicles", [], [Guid.NewGuid()],
+                after.Permissions.ToList(), after.ApprovalLimit, after.Version));
+        Assert.Equal(HttpStatusCode.Forbidden, widened.StatusCode);
+        Assert.Contains("outside your own", await Detail(widened));
+        Assert.Equal(new[] { north.Id, south.Id }.Order(), (await owner.GetFromJsonAsync<PersonDto>($"/setup/people/{id}"))!.CompanyIds.Order());
+    }
+
+    [Fact]
+    public async Task APlainRefusalGivesNoDetail()
+    {
+        await app.SeedDemo();
+        using var clerk = await app.SignIn(RevenueClerk);
+        using var refused = await clerk.GetAsync("/setup/people");
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        var problem = await refused.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Not permitted in this organization or data scope.", problem.GetProperty("title").GetString());
+        Assert.False(problem.TryGetProperty("detail", out _));
+    }
+
+    [Fact]
     public async Task CommitmentsUsersSeeRecurringItemsWithoutVehicleManagement()
     {
         await app.SeedDemo();

@@ -65,10 +65,10 @@ public static class PermissionCatalog
             new("bills.capture", "Capture office bills"),
             new("bills.approve", "Approve office bills")
         ]),
-        new("Recurring costs and savings",
+        new("Scheduled expenses and savings",
         [
-            new("commitments.view", "View recurring costs and savings"),
-            new("commitments.manage", "Set up, change and stop recurring costs and savings")
+            new("commitments.view", "View scheduled expenses and savings"),
+            new("commitments.manage", "Set up, change and stop scheduled expenses and savings")
         ]),
         new("Reports",
         [

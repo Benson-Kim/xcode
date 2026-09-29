@@ -12,7 +12,8 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     // Labels only, so every member can read them (for "Your access").
     public Task<IReadOnlyList<PermissionGroup>> Catalog(CancellationToken ct) => execution.Read("", _ => Task.FromResult(PermissionCatalog.Groups), ct);
 
-    public Task<IReadOnlyList<AccessRole>> Roles(CancellationToken ct) => execution.Read("people.view", async actor =>
+    // A write, although it only lists roles: EnsureRoles may add a catalog role the organization is missing.
+    public Task<IReadOnlyList<AccessRole>> Roles(CancellationToken ct) => execution.Write("people.view", async actor =>
     {
         var roles = await UserProvisioning.EnsureRoles(db, actor.OrganizationId, ct);
         return (IReadOnlyList<AccessRole>)roles
@@ -39,29 +40,29 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         return new ScopeOptions(companies, vehicles);
     }, ct);
 
+    // Visibility, order and paging run in the database; only the page's own related rows are loaded.
     public Task<Page<PersonDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read("people.view", async actor =>
     {
         SetupPagination.Validate(page, pageSize);
-        var people = await LoadPeople(actor, ct);
-        var rows = people
-            .OrderBy(x => x.Membership.LastName)
-            .ThenBy(x => x.Membership.FirstName)
+        var visible = Visible(actor);
+        var total = await visible.CountAsync(ct);
+        var rows = await Load(visible
+            .OrderBy(x => x.LastName)
+            .ThenBy(x => x.FirstName)
+            .ThenBy(x => x.UserId)
             .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(ToDto)
-            .ToArray();
-        return new Page<PersonDto>(rows, page, pageSize, people.Count);
+            .Take(pageSize), ct);
+        return new Page<PersonDto>(rows.Select(ToDto).ToArray(), page, pageSize, total);
     }, ct);
 
     public Task<PersonDto> Get(Guid id, CancellationToken ct) => execution.Read("people.view", async actor =>
-        ToDto((await LoadPeople(actor, ct)).SingleOrDefault(x => x.User.Id == id) ?? throw new KeyNotFoundException()), ct);
+        ToDto(await LoadPerson(actor, id, ct) ?? throw new KeyNotFoundException()), ct);
 
     public Task<Guid> Save(Guid? id, SavePerson input, CancellationToken ct) => execution.Write("people.manage", async actor =>
     {
         Validate(input);
         var role = await EnsureRole(input.Role, actor.OrganizationId, ct);
-        var people = await LoadPeople(actor, ct);
-        var target = id is null ? null : people.SingleOrDefault(x => x.User.Id == id.Value);
+        var target = id is null ? null : await LoadPerson(actor, id.Value, ct);
 
         if (id is not null && target is null)
             throw new KeyNotFoundException();
@@ -77,7 +78,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
 
         var actorIsOwner = await IsOwner(actor.UserId, ct);
         if (IsOwnerRole(role) && !actorIsOwner)
-            throw new UnauthorizedAccessException();
+            throw new UnauthorizedAccessException("Only an Owner can give the Owner role.");
         if (target is not null)
             await EnsureMayManage(actor, target, ct);
 
@@ -178,7 +179,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         input ??= new();
         if (id == actor.UserId)
             throw new ArgumentException("You cannot deactivate your own access.");
-        var target = (await LoadPeople(actor, ct)).SingleOrDefault(x => x.User.Id == id) ?? throw new KeyNotFoundException();
+        var target = await LoadPerson(actor, id, ct) ?? throw new KeyNotFoundException();
         await EnsureMayManage(actor, target, ct);
         var before = PersonSnapshot.Of(target);
 
@@ -214,7 +215,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     {
         if (id == actor.UserId)
             throw new ArgumentException("Use sign out for your own session.");
-        var target = (await LoadPeople(actor, ct)).SingleOrDefault(x => x.User.Id == id) ?? throw new KeyNotFoundException();
+        var target = await LoadPerson(actor, id, ct) ?? throw new KeyNotFoundException();
         await EnsureMayManage(actor, target, ct);
         await RevokeSessions(id, ct);
         Audit(actor, "person.sessions_revoked", id, null);
@@ -223,48 +224,59 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         return id;
     }, ct);
 
-    private async Task<List<AccessPerson>> LoadPeople(SetupActor actor, CancellationToken ct)
+    // The people the actor may see, as a query, so filtering, ordering and paging run in the database. Visible are the
+    // actor themself; everyone, for an all-companies actor; anyone whose company scope meets the actor's companies or
+    // the companies of the actor's vehicles; and anyone whose vehicle scope holds a vehicle the actor can see
+    // (CanSeeVehicle). People without a role are never listed.
+    private IQueryable<OrganizationMembership> Visible(SetupActor actor)
     {
-        var memberships = await db.Memberships.ToListAsync(ct);
-        var users = await db.Users
-            .Where(x => memberships.Select(m => m.UserId).Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, ct);
-        var personRoles = await db.PersonRoles.ToListAsync(ct);
-        var roles = await db.Roles.ToDictionaryAsync(x => x.Id, ct);
-        var overrides = await db.PermissionOverrides.ToListAsync(ct);
-        var dataScopes = await db.SetupDataScopes.ToListAsync(ct);
-        var companyScopes = await db.SetupCompanyScopes.ToListAsync(ct);
-        var vehicleScopes = await db.SetupVehicleScopes.ToListAsync(ct);
-        var vehicleCompanies = await db.Set<FleetVehicle>()
-            .AsNoTracking()
-            .Select(v => new { v.Id, v.CompanyId })
-            .ToDictionaryAsync(v => v.Id, v => v.CompanyId, ct);
-        var actorVehicleCompanies = vehicleCompanies
-            .Where(x => actor.VehicleIds.Contains(x.Key))
-            .Select(x => x.Value)
-            .ToHashSet();
-        var result = new List<AccessPerson>();
+        var people = db.Memberships.Where(m => db.PersonRoles.Any(r => r.UserId == m.UserId));
+        if (actor.AllCompanies)
+            return people;
 
+        var companyIds = actor.CompanyIds.ToList();
+        var vehicleIds = actor.VehicleIds.ToList();
+        var vehicles = db.Set<FleetVehicle>();
+        var companiesOfActorVehicles = vehicles.Where(v => vehicleIds.Contains(v.Id)).Select(v => v.CompanyId);
+        var visibleVehicles = vehicles.Where(v => vehicleIds.Contains(v.Id) || companyIds.Contains(v.CompanyId)).Select(v => v.Id);
+        return people.Where(m =>
+            m.UserId == actor.UserId ||
+            db.SetupCompanyScopes.Any(s => s.UserId == m.UserId && (companyIds.Contains(s.CompanyId) || companiesOfActorVehicles.Contains(s.CompanyId))) ||
+            db.SetupVehicleScopes.Any(s => s.UserId == m.UserId && visibleVehicles.Contains(s.VehicleId)));
+    }
+
+    private async Task<AccessPerson?> LoadPerson(SetupActor actor, Guid id, CancellationToken ct) =>
+        (await Load(Visible(actor).Where(x => x.UserId == id), ct)).SingleOrDefault();
+
+    // Loads these memberships and only their own related rows: one query per table, whatever the organization's size.
+    private async Task<List<AccessPerson>> Load(IQueryable<OrganizationMembership> query, CancellationToken ct)
+    {
+        var memberships = await query.ToListAsync(ct);
+        if (memberships.Count == 0)
+            return [];
+
+        var ids = memberships.Select(x => x.UserId).ToList();
+        var users = await db.Users.Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        var roles = (await db.PersonRoles
+                .Where(x => ids.Contains(x.UserId))
+                .Join(db.Roles, link => link.RoleId, role => role.Id, (link, role) => new { link.UserId, Role = role })
+                .ToListAsync(ct))
+            .ToLookup(x => x.UserId, x => x.Role);
+        var overrides = (await db.PermissionOverrides.Where(x => ids.Contains(x.UserId)).ToListAsync(ct)).ToLookup(x => x.UserId);
+        var dataScopes = (await db.SetupDataScopes.Where(x => ids.Contains(x.UserId)).ToListAsync(ct)).ToLookup(x => x.UserId);
+        var companyScopes = (await db.SetupCompanyScopes.Where(x => ids.Contains(x.UserId)).ToListAsync(ct)).ToLookup(x => x.UserId, x => x.CompanyId);
+        var vehicleScopes = (await db.SetupVehicleScopes.Where(x => ids.Contains(x.UserId)).ToListAsync(ct)).ToLookup(x => x.UserId, x => x.VehicleId);
+
+        var result = new List<AccessPerson>(memberships.Count);
         foreach (var membership in memberships)
         {
-            if (!users.TryGetValue(membership.UserId, out var user)) continue;
-            var roleLink = personRoles.SingleOrDefault(x => x.UserId == user.Id);
-            if (roleLink is null || !roles.TryGetValue(roleLink.RoleId, out var role)) continue;
-
-            var scope = dataScopes.SingleOrDefault(x => x.UserId == user.Id);
-            var companyIds = companyScopes.Where(x => x.UserId == user.Id).Select(x => x.CompanyId).ToList();
-            var vehicleIds = vehicleScopes.Where(x => x.UserId == user.Id).Select(x => x.VehicleId).ToList();
-            var visible =
-                user.Id == actor.UserId ||
-                actor.AllCompanies ||
-                companyIds.Any(x => actor.CompanyIds.Contains(x) || actorVehicleCompanies.Contains(x)) ||
-                vehicleIds.Any(x => vehicleCompanies.TryGetValue(x, out var companyId) && CanSeeVehicle(actor, x, companyId));
-            if (!visible) continue;
+            if (!users.TryGetValue(membership.UserId, out var user) || roles[user.Id].SingleOrDefault() is not { } role) continue;
 
             // Assigned permissions are retained for inactive people so an editor can restore them without losing configuration.
             var permissions = new EffectivePermissionResolver()
-                .Resolve(PermissionCatalog.DefaultsFor(role.Name), overrides.Where(x => x.UserId == user.Id));
-            result.Add(new AccessPerson(user, membership, role, permissions, scope, companyIds, vehicleIds));
+                .Resolve(PermissionCatalog.DefaultsFor(role.Name), overrides[user.Id]);
+            result.Add(new AccessPerson(user, membership, role, permissions, dataScopes[user.Id].SingleOrDefault(),
+                [.. companyScopes[user.Id]], [.. vehicleScopes[user.Id]]));
         }
 
         return result;
@@ -318,7 +330,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     private async Task ValidateScope(SetupActor actor, AccessPerson? target, SavePerson input, CancellationToken ct)
     {
         if (input.ScopeMode == "all" && !actor.AllCompanies)
-            throw new UnauthorizedAccessException();
+            throw new UnauthorizedAccessException("Only someone who can see every company can give access to every company.");
 
         if (input.ScopeMode == "companies")
         {
@@ -334,7 +346,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
                 .Where(x => !actor.CompanyIds.Contains(x))
                 .ToHashSet() ?? [];
             if (!actor.AllCompanies && ids.Any(x => !actor.CompanyIds.Contains(x) && !retainedOutsideScope.Contains(x)))
-                throw new UnauthorizedAccessException();
+                throw new UnauthorizedAccessException("You can only give access to companies in your own data scope.");
         }
 
         if (input.ScopeMode == "vehicles")
@@ -359,7 +371,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
                     .ToHashSet();
 
             if (!actor.AllCompanies && existing.Any(x => !CanSeeVehicle(actor, x.Id, x.CompanyId) && !retainedOutsideScope.Contains(x.Id)))
-                throw new UnauthorizedAccessException();
+                throw new UnauthorizedAccessException("You can only give access to vehicles in your own data scope.");
         }
     }
 
@@ -382,7 +394,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             return input;
 
         if (!string.Equals(ScopeModeOf(target), input.ScopeMode, StringComparison.Ordinal))
-            throw new UnauthorizedAccessException("You cannot change a data scope that includes companies or vehicles outside your own scope.");
+            throw new UnauthorizedAccessException("This person's data scope includes companies or vehicles outside your own, so you cannot change which kind of scope they have. Their companies and vehicles outside your view are kept as they are.");
 
         return input with
         {
@@ -457,24 +469,27 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         var held = await organizations.Permissions(actor.UserId, ct);
         var roleChanges = target is null || !role.Name.Equals(target.Role.Name, StringComparison.OrdinalIgnoreCase);
 
-        // A non-owner may only assign a role whose complete standard permission set they already hold.
+        // A non-owner may only assign a role whose complete standard permission set they already hold (addendum 1,
+        // section 2), on create and on a role change. Only an Owner gives Owner: see Save.
         if (!actorIsOwner && roleChanges && PermissionCatalog.DefaultsFor(role.Name).Any(x => !held.Contains(x)))
             throw new UnauthorizedAccessException("You can only grant roles whose permissions you hold.");
 
         if (after.Same(before) && approvalLimit == target?.Membership.ApprovalLimit)
             return;
 
-        if (!actorIsOwner &&
-            (!held.Contains("access.manage") ||
-             after.Granted.Except(before.Granted).Any(x => !held.Contains(x))))
-            throw new UnauthorizedAccessException();
+        if (actorIsOwner)
+            return;
+        if (!held.Contains("access.manage"))
+            throw new UnauthorizedAccessException("Changing single permissions or an approval limit needs \"Change single permissions and approval limits for a person\".");
+        if (after.Granted.Except(before.Granted).Any(x => !held.Contains(x)))
+            throw new UnauthorizedAccessException("You can only grant permissions you hold.");
     }
 
     // Only an Owner may edit, deactivate or sign out an Owner.
     private async Task EnsureMayManage(SetupActor actor, AccessPerson target, CancellationToken ct)
     {
         if (IsOwnerRole(target.Role) && !await IsOwner(actor.UserId, ct))
-            throw new UnauthorizedAccessException();
+            throw new UnauthorizedAccessException("Only an Owner can change, remove or sign out an Owner.");
     }
 
     // Sign-in codes go to the person's email, so whoever sets their email and mobile can sign in as them. That is
@@ -488,7 +503,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         var held = await organizations.Permissions(actor.UserId, ct);
         if (target.Permissions.Any(x => !held.Contains(x)) ||
             (target.Membership.ApprovalLimit is not null && !held.Contains("access.manage")))
-            throw new UnauthorizedAccessException();
+            throw new UnauthorizedAccessException("Only an Owner, or someone who holds everything this person holds, can change their email or mobile number.");
     }
 
     private static bool IsOwnerRole(Role role) => role.Name.Equals("Owner", StringComparison.OrdinalIgnoreCase);
