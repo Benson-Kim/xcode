@@ -17,7 +17,8 @@ public sealed class RevenueTests : IDisposable
     {
         await app.SeedDemo();
         var calendarDate = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
-        var businessDate = calendarDate.AddDays(-1);
+        // A pinned Thursday keeps the join date and the business date in the same Monday-first week on any run day.
+        var businessDate = RevenueTestData.PinnedThursday(app);
 
         await app.WithDb(async db =>
         {
@@ -78,7 +79,7 @@ public sealed class RevenueTests : IDisposable
 
         var correction = await client.PutAsJsonAsync(
             $"/setup/revenue/{vehicle.Id}/{joined:yyyy-MM-dd}",
-            new { amount = 1500m, reason = (string?)null, note = (string?)null });
+            new { amount = 1500m, reason = (string?)null, note = (string?)null, version = 1L });
         Assert.Equal(HttpStatusCode.OK, correction.StatusCode);
 
         var week = await client.GetFromJsonAsync<RevenueWeekResponse>("/setup/revenue");

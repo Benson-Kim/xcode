@@ -13,28 +13,39 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
     private IQueryable<FleetVehicle> VisibleVehicles(SetupActor actor) => db.Set<FleetVehicle>()
         .Where(v => actor.AllCompanies || actor.CompanyIds.Contains(v.CompanyId) || actor.VehicleIds.Contains(v.Id));
 
-    public async Task<RevenueWeekDto> Week(SetupActor actor, DateOnly? weekStart, Guid? companyId, CancellationToken ct)
+    public async Task<RevenueWeekDto> Week(SetupActor actor, DateOnly? weekStart, Guid? companyId, Guid? vehicleId, CancellationToken ct)
     {
         var firstDay = await FirstDayOfWeek(ct);
         var currentStart = StartOfWeek(actor.Today, firstDay);
-        var start = weekStart ?? currentStart;
+        // Any day names its week, so a start saved before the first day of the week changed still lines up.
+        var start = StartOfWeek(weekStart ?? actor.Today, firstDay);
         ValidateWeek(start, currentStart);
         var through = start.AddDays(6);
 
         var vehiclesQuery = VisibleVehicles(actor);
         if (companyId is not null)
             vehiclesQuery = vehiclesQuery.Where(v => v.CompanyId == companyId.Value);
+        // The fleet grid lists vehicles active on some day of the week; a vehicle's detail shows it in any week.
+        vehiclesQuery = vehicleId is null
+            ? vehiclesQuery.Where(v => v.JoinedOn <= through && (v.LeftOn == null || v.LeftOn > start))
+            : vehiclesQuery.Where(v => v.Id == vehicleId.Value);
 
         var vehicles = await vehiclesQuery
             .Include(v => v.Targets)
             .AsNoTracking()
             .OrderBy(v => v.Registration)
             .ToListAsync(ct);
+        if (vehicleId is not null && vehicles.Count == 0 && !await VisibleVehicles(actor).AnyAsync(v => v.Id == vehicleId.Value, ct))
+            throw new KeyNotFoundException();
         var ids = vehicles.Select(v => v.Id).ToArray();
+        var visibleVehicles = VisibleVehicles(actor);
         var companies = await db.Set<PsvCompany>()
             .AsNoTracking()
             .Where(c => actor.AllCompanies || actor.CompanyIds.Contains(c.Id) ||
                 db.Set<FleetVehicle>().Any(v => v.CompanyId == c.Id && actor.VehicleIds.Contains(v.Id)))
+            // An archived company stays an option for the weeks it had a vehicle running, so past weeks still show it.
+            .Where(c => c.ArchivedOn == null || c.ArchivedOn > actor.Today ||
+                visibleVehicles.Any(v => v.CompanyId == c.Id && v.JoinedOn <= through && (v.LeftOn == null || v.LeftOn > start)))
             .OrderBy(c => c.Name)
             .ThenBy(c => c.Id)
             .Select(c => new RevenueCompanyOption(c.Id, c.Name))
@@ -48,8 +59,9 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
         var companyNames = await db.Set<PsvCompany>().AsNoTracking()
             .Where(c => vehicleCompanyIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        var earliestMissing = await EarliestMissing(vehicles, actor.Today, ct);
 
-        return BuildWeek(actor, start, through, currentStart, vehicles, companyNames, recordMap, companies);
+        return BuildWeek(actor, start, through, currentStart, vehicles, companyNames, recordMap, earliestMissing, companies);
     }
 
     public async Task<RevenueDashboardDto> Dashboard(SetupActor actor, string period, CancellationToken ct)
@@ -68,6 +80,7 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
         };
 
         var vehicles = await VisibleVehicles(actor)
+            .Where(v => v.JoinedOn <= through && (v.LeftOn == null || v.LeftOn > from))
             .Include(v => v.Targets)
             .AsNoTracking()
             .ToListAsync(ct);
@@ -80,6 +93,7 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
         var missingDays = 0;
         var missingVehicles = new HashSet<Guid>();
         var capturedToday = 0;
+        var edited = 0;
         var vehiclesToday = vehicles.Count(v => v.ActiveOn(actor.Today));
 
         foreach (var vehicle in vehicles)
@@ -101,11 +115,12 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
                     vehicleMissing = true;
                 }
                 if (date == actor.Today && record is not null) capturedToday++;
+                // Counted on the same active days as every other figure here.
+                if (record?.CorrectedAfterDate == true) edited++;
             }
             if (vehicleMissing) missingVehicles.Add(vehicle.Id);
         }
 
-        var edited = records.Count(r => r.CorrectedAfterDate);
         return new(period, from, through, actor.Today, decimal.Round(revenue, 2), decimal.Round(expected, 2),
             Percent(revenue, expected), capturedToday, vehiclesToday, missingDays, missingVehicles.Count, edited);
     }
@@ -117,20 +132,58 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
         VisibleVehicles(actor).Where(v => v.Id == vehicleId).SelectMany(v => db.Set<RevenueRecord>()
             .Where(r => r.VehicleId == vehicleId && r.BusinessDate == date)).SingleOrDefaultAsync(ct);
 
-    public async Task<DateOnly?> EarliestMissing(SetupActor actor, FleetVehicle vehicle, DateOnly before, CancellationToken ct)
+    public async Task<DateOnly?> EarliestMissing(SetupActor actor, FleetVehicle vehicle, DateOnly before, CancellationToken ct) =>
+        (await EarliestMissing([vehicle], before, ct))[vehicle.Id];
+
+    // Captures are enforced in date order, so a vehicle's records normally run unbroken from its join date. One grouped
+    // query returns each vehicle's first and last recorded active day and a count (O(V) rows, not O(V*D)); only a
+    // vehicle whose count shows a hole loads its own dates.
+    private async Task<IReadOnlyDictionary<Guid, DateOnly?>> EarliestMissing(IReadOnlyList<FleetVehicle> vehicles, DateOnly before, CancellationToken ct)
     {
-        if (before <= vehicle.JoinedOn) return null;
-        var dates = await db.Set<RevenueRecord>()
-            .AsNoTracking()
-            .Where(r => r.VehicleId == vehicle.Id && r.BusinessDate >= vehicle.JoinedOn && r.BusinessDate < before)
-            .Select(r => r.BusinessDate)
-            .ToListAsync(ct);
-        var recorded = dates.ToHashSet();
-        for (var date = vehicle.JoinedOn; date < before; date = date.AddDays(1))
-            if (vehicle.ActiveOn(date) && !recorded.Contains(date))
-                return date;
-        return null;
+        var ids = vehicles.Select(v => v.Id).ToArray();
+        var spans = await ActiveRecords(ids, before)
+            .GroupBy(r => r.VehicleId)
+            .Select(g => new { VehicleId = g.Key, First = g.Min(r => r.BusinessDate), Last = g.Max(r => r.BusinessDate), Count = g.Count() })
+            .ToDictionaryAsync(x => x.VehicleId, ct);
+
+        var result = new Dictionary<Guid, DateOnly?>();
+        var holed = new List<FleetVehicle>();
+        foreach (var vehicle in vehicles)
+        {
+            // A vehicle's active days before the date are one run, from JoinedOn to LeftOn or the date.
+            var end = vehicle.LeftOn is { } left && left < before ? left : before;
+            if (end <= vehicle.JoinedOn)
+                result[vehicle.Id] = null;
+            else if (!spans.TryGetValue(vehicle.Id, out var span) || span.First > vehicle.JoinedOn)
+                result[vehicle.Id] = vehicle.JoinedOn;
+            else if (span.Count == span.Last.DayNumber - span.First.DayNumber + 1)
+                result[vehicle.Id] = span.Last.AddDays(1) < end ? span.Last.AddDays(1) : null;
+            else
+                holed.Add(vehicle);
+        }
+
+        if (holed.Count == 0) return result;
+        var dates = (await ActiveRecords(holed.Select(v => v.Id).ToArray(), before)
+                .Select(r => new { r.VehicleId, r.BusinessDate })
+                .ToListAsync(ct))
+            .ToLookup(x => x.VehicleId, x => x.BusinessDate);
+        foreach (var vehicle in holed)
+        {
+            var recorded = dates[vehicle.Id].ToHashSet();
+            var date = vehicle.JoinedOn;
+            while (recorded.Contains(date)) date = date.AddDays(1);
+            result[vehicle.Id] = date;
+        }
+        return result;
     }
+
+    // Records on each vehicle's active days (JoinedOn up to LeftOn) before a date.
+    private IQueryable<RevenueRecord> ActiveRecords(Guid[] vehicleIds, DateOnly before) => db.Set<RevenueRecord>()
+        .AsNoTracking()
+        .Where(r => vehicleIds.Contains(r.VehicleId) && r.BusinessDate < before)
+        .Join(db.Set<FleetVehicle>(), r => r.VehicleId, v => v.Id, (r, v) => new { Record = r, v.JoinedOn, v.LeftOn })
+        .Where(x => x.Record.BusinessDate >= x.JoinedOn && (x.LeftOn == null || x.Record.BusinessDate < x.LeftOn))
+        .Select(x => x.Record);
 
     public void Add(RevenueRecord record) => db.Set<RevenueRecord>().Add(record);
 
@@ -150,34 +203,25 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
     private static RevenueWeekDto BuildWeek(SetupActor actor, DateOnly start, DateOnly through, DateOnly currentStart,
         IReadOnlyList<FleetVehicle> vehicles, IReadOnlyDictionary<Guid, string> companyNames,
         IReadOnlyDictionary<(Guid VehicleId, DateOnly Date), RevenueRecord> records,
-        IReadOnlyList<RevenueCompanyOption> companies)
+        IReadOnlyDictionary<Guid, DateOnly?> earliestMissing, IReadOnlyList<RevenueCompanyOption> companies)
     {
         var rows = new List<RevenueVehicleDto>();
         decimal totalAmount = 0, totalExpected = 0;
         foreach (var vehicle in vehicles)
         {
-            var firstMissing = FirstMissing(vehicle, actor.Today, records);
+            var firstMissing = earliestMissing[vehicle.Id];
             var cells = new List<RevenueCellDto>();
             decimal amount = 0, expected = 0;
             for (var date = start; date <= through; date = date.AddDays(1))
             {
                 var record = records.GetValueOrDefault((vehicle.Id, date));
-                var active = vehicle.ActiveOn(date);
-                var status = !active ? "none" : date > actor.Today ? "future" : record is null ? "missing" : record.Amount is not null ? "amount" : "reason";
-                var dayExpected = vehicle.TargetOn(date) / 7m;
-                var counted = active && (date < actor.Today || record is not null);
-                if (counted)
+                // Future days, days outside the fleet and today before capture are not shortfalls.
+                if (vehicle.ActiveOn(date) && (date < actor.Today || record is not null))
                 {
-                    expected += dayExpected;
+                    expected += vehicle.TargetOn(date) / 7m;
                     if (record?.Amount is decimal value) amount += value;
                 }
-                var canEdit = active && date <= actor.Today &&
-                    (record is null ? actor.Permissions.Contains("revenue.capture") :
-                        date == actor.Today ? actor.Permissions.Contains("revenue.capture") || actor.Permissions.Contains("revenue.correct") :
-                        actor.Permissions.Contains("revenue.correct"));
-                cells.Add(new(date, status, decimal.Round(dayExpected, 2), record?.Amount,
-                    record?.Reason is null ? null : Label(record.Reason.Value), record?.Note, canEdit,
-                    record?.CorrectedAfterDate == true));
+                cells.Add(RevenueCellDto.For(actor, vehicle, date, record, firstMissing));
             }
             totalAmount += amount;
             totalExpected += expected;
@@ -190,28 +234,11 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
             decimal.Round(totalExpected, 2), Percent(totalAmount, totalExpected));
     }
 
-    private static DateOnly? FirstMissing(FleetVehicle vehicle, DateOnly before, IReadOnlyDictionary<(Guid VehicleId, DateOnly Date), RevenueRecord> records)
-    {
-        for (var date = vehicle.JoinedOn; date < before; date = date.AddDays(1))
-            if (vehicle.ActiveOn(date) && !records.ContainsKey((vehicle.Id, date)))
-                return date;
-        return null;
-    }
-
     private static DateOnly StartOfWeek(DateOnly date, int firstDay) =>
         date.AddDays(-((int)date.DayOfWeek - firstDay + 7) % 7);
 
     private static int? Percent(decimal amount, decimal expected) =>
         expected == 0 ? null : (int?)Math.Round(amount / expected * 100m, MidpointRounding.AwayFromZero);
-
-    private static string Label(RevenueNoEarningsReason reason) => reason switch
-    {
-        RevenueNoEarningsReason.Garage => "Garage",
-        RevenueNoEarningsReason.Arrest => "Arrest",
-        RevenueNoEarningsReason.NoCrew => "No Crew",
-        RevenueNoEarningsReason.Other => "Other",
-        _ => ""
-    };
 
     private static void ValidateWeek(DateOnly start, DateOnly currentStart)
     {

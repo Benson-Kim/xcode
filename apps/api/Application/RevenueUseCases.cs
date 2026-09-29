@@ -9,43 +9,64 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
     private static readonly string[] WritePermissions = ["revenue.capture", "revenue.correct"];
     private static readonly string[] DashboardPermissions = ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"];
 
-    public Task<RevenueWeekDto> Week(DateOnly? weekStart, Guid? companyId, CancellationToken ct) =>
-        execution.Read("revenue.view", actor => repository.Week(actor, weekStart, companyId, ct), ct);
+    public Task<RevenueWeekDto> Week(DateOnly? weekStart, Guid? companyId, Guid? vehicleId, CancellationToken ct) =>
+        execution.Read("revenue.view", actor => repository.Week(actor, weekStart, companyId, vehicleId, ct), ct);
 
     public Task<RevenueDashboardDto> Dashboard(string period, CancellationToken ct) =>
-        execution.ReadAny(DashboardPermissions, actor => repository.Dashboard(actor, period, ct), ct);
+        execution.ReadAny(DashboardPermissions, async actor => Visible(actor, await repository.Dashboard(actor, period, ct)), ct);
 
-    public Task<Guid> Save(Guid vehicleId, DateOnly date, SaveRevenue input, CancellationToken ct) =>
+    // Each card's figures reach only the people who may see that card; the rest are null.
+    private static RevenueDashboardDto Visible(SetupActor actor, RevenueDashboardDto dashboard)
+    {
+        var totals = actor.Permissions.Contains("dash.revenue") || actor.Permissions.Contains("dash.capture");
+        var gaps = actor.Permissions.Contains("dash.gaps");
+        var edits = actor.Permissions.Contains("dash.edits");
+        return dashboard with
+        {
+            Revenue = totals ? dashboard.Revenue : null,
+            Expected = totals ? dashboard.Expected : null,
+            Percent = totals ? dashboard.Percent : null,
+            CapturedToday = totals ? dashboard.CapturedToday : null,
+            VehiclesToday = totals ? dashboard.VehiclesToday : null,
+            MissingDays = gaps ? dashboard.MissingDays : null,
+            MissingVehicles = gaps ? dashboard.MissingVehicles : null,
+            EditedRecords = edits ? dashboard.EditedRecords : null
+        };
+    }
+
+    public Task<RevenueSaved> Save(Guid vehicleId, DateOnly date, SaveRevenue input, CancellationToken ct) =>
         execution.WriteAny(WritePermissions, async actor =>
         {
             var entry = input.Entry();
+            var vehicle = await repository.Vehicle(actor, vehicleId, ct) ?? throw new KeyNotFoundException();
+            var existing = await repository.Record(actor, vehicleId, date, ct);
+
+            // An identical replay changes nothing, so a phone draining its queue late (even after the day closed) always succeeds.
+            if (existing is not null && existing.Matches(entry))
+                return new RevenueSaved(existing.Id, existing.Version);
+
             if (date == default || date > actor.Today)
                 throw new ArgumentException("Revenue cannot be recorded for a future date.");
-
-            var vehicle = await repository.Vehicle(actor, vehicleId, ct) ?? throw new KeyNotFoundException();
             if (!vehicle.ActiveOn(date))
                 throw new ArgumentException("Revenue can only be recorded while the vehicle is active.");
+            // Never overwrite what the client did not see.
+            if (existing is not null && input.Version != existing.Version)
+                throw new RevenueConflictException(RevenueCellDto.For(actor, vehicle, date, existing, null));
+
             if (entry.Reason is not null && !actor.Permissions.Contains("revenue.no_earnings"))
                 throw new UnauthorizedAccessException();
-
-            var existing = await repository.Record(actor, vehicleId, date, ct);
             var canCapture = actor.Permissions.Contains("revenue.capture");
             var canCorrect = actor.Permissions.Contains("revenue.correct");
             if (existing is null && !canCapture)
                 throw new UnauthorizedAccessException();
             if (existing is not null && date < actor.Today && !canCorrect)
                 throw new UnauthorizedAccessException();
-            if (existing is not null && date == actor.Today && !canCapture && !canCorrect)
-                throw new UnauthorizedAccessException();
-
-            if (existing is not null && existing.Matches(entry))
-                return existing.Id;
 
             if (existing is null)
             {
                 var earliest = await repository.EarliestMissing(actor, vehicle, date, ct);
-                if (earliest is not null && earliest.Value != date)
-                    throw new ArgumentException($"Record {earliest.Value:yyyy-MM-dd} before this date first.");
+                if (earliest is not null)
+                    throw new RevenueEarlierDayMissingException(earliest.Value);
             }
 
             var before = existing is null ? null : Snapshot(existing);
@@ -56,15 +77,15 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
             }
             else
             {
-                existing.Replace(entry, date, clock.UtcNow, actor.UserId);
+                existing.Replace(entry, date, actor.Today, clock.UtcNow, actor.UserId);
             }
 
             var after = Snapshot(existing);
             var reason = before is null
                 ? entry.Reason is null ? "Recorded revenue" : $"Recorded no revenue: {entry.DisplayReason}"
-                : "Corrected revenue after capture";
+                : existing.BusinessDate < actor.Today ? "Corrected revenue after capture" : "Updated revenue";
             await repository.RecordChange(actor, existing.Id, before, after, reason, ct);
-            return existing.Id;
+            return new RevenueSaved(existing.Id, existing.Version);
         }, ct);
 
     private static object Snapshot(RevenueRecord record) => new

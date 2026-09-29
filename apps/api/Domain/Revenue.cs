@@ -34,7 +34,12 @@ public sealed record RevenueEntry(decimal? Amount, RevenueNoEarningsReason? Reas
             throw new ArgumentException("Only Other may have a no-earnings note.");
     }
 
-    public string DisplayReason => Reason switch
+    // A blank note is no note, so a cleared note never comes back as an empty string.
+    public string? CleanNote => string.IsNullOrWhiteSpace(Note) ? null : Note.Trim();
+
+    public string DisplayReason => Label(Reason);
+
+    public static string Label(RevenueNoEarningsReason? reason) => reason switch
     {
         RevenueNoEarningsReason.Garage => "Garage",
         RevenueNoEarningsReason.Arrest => "Arrest",
@@ -81,7 +86,7 @@ public sealed class RevenueRecord : IOrganizationEntity
         BusinessDate = businessDate;
         Amount = entry.Amount;
         Reason = entry.Reason;
-        Note = entry.Note?.Trim();
+        Note = entry.CleanNote;
         CapturedAt = capturedAt;
         CapturedBy = actorId;
         UpdatedAt = capturedAt;
@@ -91,9 +96,10 @@ public sealed class RevenueRecord : IOrganizationEntity
     public bool Matches(RevenueEntry entry) =>
         Amount == entry.Amount &&
         Reason == entry.Reason &&
-        string.Equals(Note, entry.Note?.Trim(), StringComparison.Ordinal);
+        string.Equals(Note, entry.CleanNote, StringComparison.Ordinal);
 
-    public void Replace(RevenueEntry entry, DateOnly businessDate, DateTimeOffset updatedAt, Guid actorId)
+    // Only a change once the day has closed is an edit after capture; a same-day change is a plain update.
+    public void Replace(RevenueEntry entry, DateOnly businessDate, DateOnly today, DateTimeOffset updatedAt, Guid actorId)
     {
         if (businessDate != BusinessDate)
             throw new InvalidOperationException("A revenue record's business date cannot change.");
@@ -103,10 +109,10 @@ public sealed class RevenueRecord : IOrganizationEntity
         entry.Validate();
         Amount = entry.Amount;
         Reason = entry.Reason;
-        Note = entry.Note?.Trim();
+        Note = entry.CleanNote;
         UpdatedAt = updatedAt;
         UpdatedBy = actorId;
-        CorrectedAfterDate = true;
+        if (BusinessDate < today) CorrectedAfterDate = true;
         Version++;
     }
 }
