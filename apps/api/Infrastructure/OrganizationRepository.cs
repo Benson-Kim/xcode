@@ -14,9 +14,11 @@ public sealed class OrganizationRepository(AuthDb db, EffectiveSettingsResolver 
           => db.Organizations.SingleOrDefaultAsync(ct);
      public Task<OrganizationMembership?> Membership(Guid userId, CancellationToken ct)
           => db.Memberships.SingleOrDefaultAsync(x => x.UserId == userId, ct);
-     // This repository is scoped to one request, so each person's permissions are resolved once per request however
-     // many checks ask (the use-case pipeline, then access rules such as role granting).
+     // This repository is scoped to one request, so each person's permissions are resolved once per attempt however
+     // many checks ask (the use-case pipeline, then access rules such as role granting). A retry starts afresh.
      private readonly Dictionary<Guid, IReadOnlySet<string>> resolvedPermissions = [];
+
+     public void ForgetResolved() => resolvedPermissions.Clear();
 
      // A role's standard permissions come only from PermissionCatalog; the RolePermissions table is no longer read.
      public async Task<IReadOnlySet<string>> Permissions(Guid userId, CancellationToken ct)
@@ -31,16 +33,18 @@ public sealed class OrganizationRepository(AuthDb db, EffectiveSettingsResolver 
                await db.PermissionOverrides.Where(x => x.UserId == userId).ToListAsync(ct), member is { Active: true });
      }
 
+     // The security policy is read untracked and brought into the current bounds, so a row saved under wider bounds
+     // neither fails validation for every member nor reaches their screens out of range.
      public async Task<EffectiveSettings> Settings(Guid userId, CancellationToken ct) =>
           settings.Resolve(
                await db.Localizations.SingleOrDefaultAsync(ct),
                await db.Brandings.SingleOrDefaultAsync(ct),
-               await db.SecurityPolicies.SingleOrDefaultAsync(ct),
+               SecurityPolicyBounds.Clamp(await db.SecurityPolicies.AsNoTracking().SingleOrDefaultAsync(ct)),
                await db.UserPreferences.SingleOrDefaultAsync(x => x.UserId == userId, ct)
           );
 }
 
-public sealed class UnitOfWork(AuthDb db, IOrganizationContext context, IClock clock) : IUnitOfWork
+public sealed class UnitOfWork(AuthDb db, IOrganizationContext context, IClock clock, IOrganizationRepository organizations) : IUnitOfWork
 {
      private const int ChangeLogRetries = 3;
 
@@ -48,7 +52,9 @@ public sealed class UnitOfWork(AuthDb db, IOrganizationContext context, IClock c
      // at the same moment collide on that one row: a concurrency conflict on it alone, or on SQL Server a deadlock
      // (1205) while both hold shared locks on it. Neither means the caller's data was stale, so the whole unit of work
      // runs again from scratch (fresh reads, authorization and validation, in a new transaction), up to three times.
-     // Any other conflict, such as a stale person record, still surfaces on the first attempt.
+     // Nothing resolved in an earlier attempt survives: tracked entities and the resolved permissions are dropped, and
+     // the use case reads the actor's membership, scope, settings and organization again. Any other conflict, such as
+     // a stale person record, still surfaces on the first attempt.
      public async Task<T> Execute<T>(Func<Task<T>> action, CancellationToken ct)
      {
           for (var attempt = 0; ; attempt++)
@@ -64,6 +70,7 @@ public sealed class UnitOfWork(AuthDb db, IOrganizationContext context, IClock c
                catch (Exception error) when (attempt < ChangeLogRetries && OnlyTheChangeLogCollided(error))
                {
                     db.ChangeTracker.Clear();
+                    organizations.ForgetResolved();
                     // A little jitter, so writers that collided do not simply collide again.
                     await Task.Delay(Random.Shared.Next(5, 25) * (attempt + 1), ct);
                }

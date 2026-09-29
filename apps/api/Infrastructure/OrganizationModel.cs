@@ -36,6 +36,12 @@ public sealed partial class AuthDb
           model.Entity<OrganizationLocalization>().HasKey(x => x.OrganizationId); Tenant(model.Entity<OrganizationLocalization>());
           model.Entity<OrganizationBranding>().HasKey(x => x.OrganizationId); Tenant(model.Entity<OrganizationBranding>());
           model.Entity<OrganizationSecurityPolicy>().HasKey(x => x.OrganizationId); Tenant(model.Entity<OrganizationSecurityPolicy>());
+          // The database holds every stored policy to the bounds Validate enforces on save, whatever wrote the row.
+          model.Entity<OrganizationSecurityPolicy>().ToTable(table =>
+          {
+               foreach (var bound in SecurityPolicyBounds.All)
+                    table.HasCheckConstraint($"CK_SecurityPolicies_{bound.Column}", $"[{bound.Column}] BETWEEN {bound.Min} AND {bound.Max}");
+          });
 
           var logo = model.Entity<OrganizationLogo>();
           logo.HasKey(x => x.OrganizationId); Tenant(logo);
