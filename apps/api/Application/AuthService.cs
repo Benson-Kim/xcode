@@ -5,14 +5,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Application;
 
-public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, TokenIssuer tokens, AuthOptions options, EffectivePermissionResolver permissionResolver, IHostEnvironment environment,
-    IOrganizationContext context, ILogger<AuthService> logger)
+public sealed class AuthService(AuthDb db, IClock clock, VerificationMailer mailer, TokenIssuer tokens, AuthOptions options, EffectivePermissionResolver permissionResolver, IHostEnvironment environment,
+    IOrganizationContext context)
 {
     // A code issued in this request, sent by Deliver only after the endpoint has committed it.
-    private sealed record Outgoing(VerificationCode Code, string Email, string Plain);
-    private Outgoing? outgoing;
+    private VerificationMailer.Message? outgoing;
 
-    private Task<User?> Find(string phone) => db.Users.SingleOrDefaultAsync(u => u.PhoneNumber == PhoneNumber.Normalize(phone));
+    // Input that is not a phone number normalizes to "", which is also what accounts made before phone sign-in still
+    // hold, so it must match no account at all.
+    private Task<User?> Find(string phone) => PhoneNumber.Normalize(phone) is { Length: > 0 } number
+        ? db.Users.SingleOrDefaultAsync(u => u.PhoneNumber == number)
+        : Task.FromResult<User?>(null);
     private bool Active(User? user) => user is { Status: UserStatus.Active };
     private void ClearPause(User user)
     {
@@ -45,7 +48,7 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
         var existing = await db.VerificationCodes.Where(c => c.UserId == user.Id && c.Purpose == purpose).ToListAsync(ct);
         // Account-level resend cooldown; requesting on a different device cannot bypass it. A code withdrawn because
         // it could not be sent never reached anyone, so it does not start the cooldown.
-        if (!environment.IsDevelopment() && existing.Any(c => !Withdrawn(c) && c.CreatedAt.AddMinutes(1) > clock.UtcNow)) return null;
+        if (!environment.IsDevelopment() && existing.Any(c => !VerificationMailer.Withdrawn(c) && c.CreatedAt.AddMinutes(1) > clock.UtcNow)) return null;
 
         foreach (var old in existing) old.Consumed = true;
         var code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
@@ -60,37 +63,27 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
             ExpiresAt = clock.UtcNow.AddMinutes(10)
         };
         db.VerificationCodes.Add(issued);
-        outgoing = new(issued, user.Email, code);
+        outgoing = new(issued.Id, user.Id, user.Email, code, purpose, context.CorrelationId);
         return environment.IsDevelopment() ? code : null;
     }
 
-    // Consumed, and valid for no time at all: see Deliver.
-    private static bool Withdrawn(VerificationCode code) => code.Consumed && code.ExpiresAt <= code.CreatedAt;
-
     // Sends the code issued in this request. The endpoint calls this after the code is committed and the auth gate is
-    // released, so a failed commit sends nothing and a slow mail server holds up no one else's sign-in. If sending
-    // fails, the code is withdrawn (it can never be used and does not start the resend cooldown). Only a caller who has
-    // already proven the PIN (a new-device sign-in) is told the service is unavailable; setup and reset requests keep
-    // their identical check_email reply, because anyone can make them for any number.
+    // released, so a failed commit sends nothing and a slow mail server holds up no one else's sign-in. A code that
+    // cannot be sent is withdrawn, so a retry can send a new one at once.
+    // Setup and reset requests reply before the mail server is involved: anyone can make them for any number, and only
+    // a real account sends mail, so waiting for it (or reporting its failure) would reveal which numbers have one.
+    // Only a caller who has already proven the PIN (a new-device sign-in) waits, and is told if the service is down.
     public async Task<AuthResult> Deliver(AuthResult result, CancellationToken ct)
     {
-        if (outgoing is not { } pending)
+        if (outgoing is not { } message)
             return result;
         outgoing = null;
-        try
+        if (message.Purpose != CodePurpose.NewDevice)
         {
-            await email.SendCode(pending.Email, pending.Plain, pending.Code.Purpose, ct);
+            mailer.SendLater(message);
             return result;
         }
-        catch (Exception error)
-        {
-            logger.LogError(error, "A {Purpose} code for user {UserId} could not be sent and was withdrawn (correlation {CorrelationId}).",
-                pending.Code.Purpose, pending.Code.UserId, context.CorrelationId);
-            pending.Code.Consumed = true;
-            pending.Code.ExpiresAt = pending.Code.CreatedAt;
-            await db.SaveChangesAsync(CancellationToken.None);
-            return pending.Code.Purpose == CodePurpose.NewDevice ? new(503, new("service_unavailable")) : result;
-        }
+        return await mailer.Send(message, ct) ? result : new(503, new("service_unavailable"));
     }
     // Every wrong guess counts, whether or not the check consumes the code, so each challenge allows five guesses in total.
     private async Task<VerificationCode?> Matching(User user, AuthRequest request, CodePurpose purpose)
@@ -127,12 +120,16 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
         return new(200, new("code_verified"));
     }
 
-    // The policy of the organization the person belongs to; defaults until they have a membership.
+    // The policy of the organization the person belongs to; defaults until they have a membership. A row saved under an
+    // earlier version's wider bounds is enforced within the current ones.
     private async Task<OrganizationSecurityPolicy> Policy(Guid userId)
     {
         var organizationId = await db.Memberships.IgnoreQueryFilters().Where(x => x.UserId == userId && x.Active).Select(x => (Guid?)x.OrganizationId).SingleOrDefaultAsync();
-        return organizationId is null ? new() : await db.SecurityPolicies.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.OrganizationId == organizationId) ?? new();
+        return organizationId is null ? new() : await PolicyOf(organizationId.Value);
     }
+
+    private async Task<OrganizationSecurityPolicy> PolicyOf(Guid organizationId) => SecurityPolicyBounds.Clamp(
+        await db.SecurityPolicies.IgnoreQueryFilters().AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == organizationId)) ?? new();
 
     private async Task<AuthResult> IssueTokens(User user, string deviceId)
     {
@@ -143,9 +140,7 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
         if (membership is not { Active: true })
             return AuthResult.Failure();
 
-        var policy = await db.SecurityPolicies
-            .IgnoreQueryFilters()
-            .SingleOrDefaultAsync(x => x.OrganizationId == membership.OrganizationId) ?? new();
+        var policy = await PolicyOf(membership.OrganizationId);
         var roleLink = await db.PersonRoles
             .IgnoreQueryFilters()
             .SingleOrDefaultAsync(x => x.OrganizationId == membership.OrganizationId && x.UserId == user.Id);
@@ -204,12 +199,16 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
         if (user.PausedUntil is not null && clock.UtcNow >= user.PausedUntil)
             ClearPause(user);
 
+        // The timer is shown only on a device this account already trusts (Phase 1 phones rely on it). Anywhere else a
+        // paused account answers exactly like a number with no account, or anyone could find which numbers exist.
         if (user.PausedUntil > clock.UtcNow)
-            return new(423,
-                new("paused",
-                    RetryAfterSeconds: (int)Math.Ceiling(
-                        (user.PausedUntil.Value - clock.UtcNow).TotalSeconds)
-                    ));
+            return await Trusted(user, request.DeviceId)
+                ? new(423,
+                    new("paused",
+                        RetryAfterSeconds: (int)Math.Ceiling(
+                            (user.PausedUntil.Value - clock.UtcNow).TotalSeconds)
+                        ))
+                : AuthResult.Failure();
 
         if (!correct)
         {

@@ -1,6 +1,7 @@
 using Auth.Application.Setup;
 using Auth.Domain;
 using Auth.Domain.Setup;
+using Auth.Infrastructure;
 using Xunit;
 
 namespace Auth.Tests;
@@ -55,6 +56,24 @@ public sealed class DomainRuleTests
 
         policy.LockoutMinutes = 60;
         policy.Validate();
+    }
+
+    // The bounds the database checks and sign-in clamps to are exactly the ones a save validates.
+    [Fact]
+    public void SecurityPolicyBoundsAgreeWithValidation()
+    {
+        Assert.Equal(8, SecurityPolicyBounds.All.Count);
+        foreach (var bound in SecurityPolicyBounds.All)
+        {
+            var property = typeof(OrganizationSecurityPolicy).GetProperty(bound.Column)!;
+            OrganizationSecurityPolicy With(int value) { var policy = new OrganizationSecurityPolicy(); property.SetValue(policy, value); return policy; }
+            With(bound.Min).Validate();
+            With(bound.Max).Validate();
+            Assert.Throws<ArgumentException>(With(bound.Min - 1).Validate);
+            Assert.Throws<ArgumentException>(With(bound.Max + 1).Validate);
+            Assert.Equal(bound.Min, bound.Clamp(bound.Min - 1));
+            Assert.Equal(bound.Max, bound.Clamp(int.MaxValue));
+        }
     }
 
     // Addendum 1, section 2: at least three tries, and the pause is capped at one hour.

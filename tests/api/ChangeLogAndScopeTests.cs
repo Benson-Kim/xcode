@@ -138,6 +138,26 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         Assert.Equal(4, app.Database.Transactions);
     }
 
+    // Taken from the Owner after the first attempt rolled back and before the retry: a single permission, or the membership.
+    [Theory]
+    [InlineData("INSERT INTO \"PermissionOverrides\" (\"OrganizationId\", \"UserId\", \"Permission\", \"Granted\") SELECT \"OrganizationId\", \"UserId\", 'companies.manage', 0 FROM \"Memberships\" WHERE \"UserId\" = (SELECT \"Id\" FROM \"Users\" WHERE \"Email\" = 'antony.maina@shamayah.co.ke')")]
+    [InlineData("UPDATE \"Memberships\" SET \"Active\" = 0 WHERE \"UserId\" = (SELECT \"Id\" FROM \"Users\" WHERE \"Email\" = 'antony.maina@shamayah.co.ke')")]
+    public async Task ARetryChecksAccessAgain(string revocation)
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var north = await Id(await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("North", "Add North")));
+
+        app.Database.Reset();
+        app.Database.Interleave("Organizations", BumpChangeLog);
+        app.Database.BetweenAttempts(revocation);
+        using var renamed = await owner.PutAsJsonAsync($"/setup/companies/{north}", new SaveCompany("North Star", "Rename"));
+
+        Assert.Equal(2, app.Database.Transactions);
+        Assert.Equal(HttpStatusCode.Forbidden, renamed.StatusCode);
+        await app.WithDb(async db => Assert.Equal("North", (await db.Set<PsvCompany>().IgnoreQueryFilters().SingleAsync(x => x.Id == north)).Name));
+    }
+
     [Fact]
     public async Task AStaleRecordStillConflictsAtOnce()
     {
