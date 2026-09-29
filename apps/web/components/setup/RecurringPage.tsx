@@ -145,6 +145,8 @@ export function RecurringPage({
           const next = item.stoppedFrom || !active || !today ? null : recurringNextPosting(item, today);
           const registrations = item.allocations.map((allocation) => allocation.registration).filter((registration): registration is string => Boolean(registration));
           const retiredCount = item.allocations.filter((allocation) => allocation.active === false).length;
+          // What posts now. `amount` is the saved total, which still counts vehicles that have left the fleet.
+          const posting = item.activeAmount ?? item.amount;
           // A cost counts in its item's bucket; rows saved before expense items keep their old cost type.
           const countsAs = item.kind === 2 ? "Savings" : item.bucket ? expenseBucketNames[item.bucket] : recurringCategoryNames[item.category || 4];
           return (
@@ -157,9 +159,13 @@ export function RecurringPage({
                 </CellNote>
               </Td>
               <Td label="Amount each time" numeric>
-                {kes(item.amount)}
+                {kes(posting)}
                 <CellNote>
-                  {item.partial ? "Your vehicles' share. " : ""}{retiredCount ? `${retiredCount} retired share. ` : ""}About {kes(recurringMonthlyEstimate(item.amount, item.frequency))} a month
+                  {item.partial ? "Your vehicles' share. " : ""}
+                  {posting !== item.amount
+                    ? `${kes(item.amount)} in total, with ${retiredCount === 1 ? "1 share for a vehicle" : `${retiredCount} shares for vehicles`} that left the fleet. `
+                    : ""}
+                  About {kes(recurringMonthlyEstimate(posting, item.frequency))} a month
                 </CellNote>
               </Td>
               <Td label="How often">{recurringFrequency(item)}</Td>

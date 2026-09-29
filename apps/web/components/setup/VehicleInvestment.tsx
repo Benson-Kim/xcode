@@ -35,10 +35,12 @@ type Draft = { description: string; amount: string; date: string | null };
 
 const blank: Draft = { description: "", amount: "", date: null };
 
-function problem(draft: Draft, date: string) {
+// The API takes any date up to the business date.
+function problem(draft: Draft, date: string, today?: string) {
   if (!draft.description.trim()) return "Say what it was.";
   if (!(Number(draft.amount) > 0)) return "Enter the amount in KES.";
   if (!date) return "Enter the date.";
+  if (today && date > today) return "The date cannot be after the business date.";
   return "";
 }
 
@@ -78,7 +80,7 @@ export function VehicleInvestmentTab({ vehicle, today }: { vehicle: { id: string
 
   async function add() {
     if (!adding) return;
-    const invalid = problem(adding, adding.date ?? today ?? "");
+    const invalid = problem(adding, adding.date ?? today ?? "", today);
     if (invalid) return setAddError(invalid);
     const failed = await send(`setup/vehicles/${vehicle.id}/investment`, "POST", adding);
     if (failed) return setAddError(failed);
@@ -88,7 +90,7 @@ export function VehicleInvestmentTab({ vehicle, today }: { vehicle: { id: string
 
   async function saveEdit() {
     if (!editing) return;
-    const invalid = problem(editing, editing.date ?? "");
+    const invalid = problem(editing, editing.date ?? "", today);
     if (invalid) return setError(invalid);
     const failed = await send(`setup/investment/${editing.id}`, "PUT", editing);
     setError(failed);
@@ -171,6 +173,7 @@ export function VehicleInvestmentTab({ vehicle, today }: { vehicle: { id: string
                   type="date"
                   aria-label="Date"
                   density="compact"
+                  max={today}
                   value={editing.date ?? ""}
                   onChange={(event) => setEditing({ ...editing, date: event.target.value })}
                 />
@@ -269,7 +272,7 @@ export function VehicleInvestmentTab({ vehicle, today }: { vehicle: { id: string
               <CurrencyInput value={adding.amount} onChange={(event) => setAdding({ ...adding, amount: event.target.value })} />
             </Field>
             <Field id="investment-date" label="Date">
-              <TextInput type="date" value={adding.date ?? today ?? ""} onChange={(event) => setAdding({ ...adding, date: event.target.value })} />
+              <TextInput type="date" max={today} value={adding.date ?? today ?? ""} onChange={(event) => setAdding({ ...adding, date: event.target.value })} />
             </Field>
             {addError && <Banner>{addError}</Banner>}
             <FormActions>
