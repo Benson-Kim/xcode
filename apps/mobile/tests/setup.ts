@@ -16,7 +16,19 @@ jest.mock("expo-crypto", () => ({
   // Deterministic and one-way enough for tests: the stored check must never contain the PIN.
   digestStringAsync: async (_algorithm: string, value: string) => [...value].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7).toString(16),
 }));
-jest.mock("expo-network", () => ({ useNetworkState: () => ({ isConnected: true, isInternetReachable: true }) }));
+// Tests announce a change of network with require("expo-network").__emit(state).
+jest.mock("expo-network", () => {
+  // Names inside a mock factory must start with "mock" to be allowed there.
+  const listeners = new Set<(mockState: { isConnected?: boolean; isInternetReachable?: boolean }) => void>();
+  return {
+    useNetworkState: () => ({ isConnected: true, isInternetReachable: true }),
+    addNetworkStateListener: (listener: (mockState: { isConnected?: boolean; isInternetReachable?: boolean }) => void) => {
+      listeners.add(listener);
+      return { remove: () => listeners.delete(listener) };
+    },
+    __emit: (mockState: { isConnected?: boolean; isInternetReachable?: boolean }) => listeners.forEach((listener) => listener(mockState)),
+  };
+});
 jest.mock("@expo-google-fonts/figtree", () => ({
   useFonts: () => [true, null],
   Figtree_400Regular: 1,
@@ -39,6 +51,23 @@ jest.mock("react-native-safe-area-context", () => {
     useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
   };
 });
+
+// A cold run transforms React Native's lazily loaded components during the first render. That work blocks
+// the event loop for seconds (a minute on a busy machine), so whichever test rendered first used to time out.
+// One render here, with its own allowance, pays for it before any test starts. The library is loaded here, not
+// inside the hook, because it registers its own hooks when first loaded.
+const { render } = require("@testing-library/react-native");
+beforeAll(async () => {
+  if (!expect.getState().testPath?.endsWith(".tsx")) return;
+  const React = require("react");
+  // Also the components that later screens load on first use: the revenue lists and the capture sheet.
+  const native = require("react-native");
+  for (const name of ["FlatList", "Modal", "KeyboardAvoidingView", "ScrollView", "TextInput", "Pressable", "ActivityIndicator", "Image"]) void native[name];
+  const App = require("../App").default;
+  const view = await render(React.createElement(App));
+  await view.findByLabelText("Mobile number");
+  await view.unmount();
+}, 120000);
 
 beforeEach(() => {
   require("expo-secure-store").__items.clear();

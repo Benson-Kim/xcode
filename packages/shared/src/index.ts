@@ -133,6 +133,8 @@ export interface RevenueCell {
   note: string | null;
   canEdit: boolean;
   editedAfterCapture: boolean;
+  // The record's version, for a correction to send back; null when the day has no record.
+  version?: number | null;
 }
 
 export interface RevenueVehicle {
@@ -161,23 +163,26 @@ export interface RevenueWeek {
   percent: number | null;
 }
 
+// Each figure is null for a viewer who may not see the card it belongs to.
 export interface RevenueDashboard {
   period: "today" | "week" | "month" | string;
   from: string;
   through: string;
   businessDate: string;
-  revenue: number;
-  expected: number;
+  revenue: number | null;
+  expected: number | null;
   percent: number | null;
-  capturedToday: number;
-  vehiclesToday: number;
-  missingDays: number;
-  missingVehicles: number;
-  editedRecords: number;
+  capturedToday: number | null;
+  vehiclesToday: number | null;
+  missingDays: number | null;
+  missingVehicles: number | null;
+  editedRecords: number | null;
 }
 
 export interface SaveRevenue {
   amount: number | null;
   reason: string | null;
   note: string | null;
+  // null for a new record; a correction sends the version it was read at.
+  version?: number | null;
 }

@@ -78,6 +78,8 @@ export default function App() {
             <AppShell
               person={state.person}
               offline={state.offline}
+              // Saved with the appearance, so it is the last business date the phone saw when it is offline.
+              businessDate={appearance?.businessDate}
               onLock={() => setState({ phase: "signed-out", trusted: state.person })}
               onSessionEnded={() => setState({ phase: "signed-out", trusted: state.person })}
               onSwitchUser={async () => {

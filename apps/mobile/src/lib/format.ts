@@ -25,6 +25,8 @@ export function configureFormats(next?: Partial<Formats> | null) {
   formats = { ...defaults, ...next };
 }
 
+export const currencyCode = () => formats.currency;
+
 // "KES 49,000": whole amounts stay whole; the organization's decimals are the most shown.
 export function money(amount: number) {
   const number = amount.toLocaleString(formats.locale, {

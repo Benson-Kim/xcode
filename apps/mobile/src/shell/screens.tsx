@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { apiGet, SessionEndedError } from "../lib/api";
 import { money } from "../lib/format";
-import type { RevenueDashboard } from "@xcode/shared";
 import type { StoredPerson } from "../lib/storage";
+import type { RevenueDashboard } from "../revenue/types";
 import { initials } from "../session";
 import { Banner, Button, Text, useTheme } from "../ui";
 import { VERSION } from "../auth/AuthLayout";
@@ -18,40 +18,88 @@ const PERIODS: { value: Period; label: string }[] = [
   { value: "month", label: "This month" },
 ];
 
-export function HomeScreen({ person, offline, canOpen, onOpen, onLock, onSessionEnded }: { person: StoredPerson; offline: boolean; canOpen: (tab: Tab) => boolean; onOpen: (tab: Tab) => void; onLock: () => void; onSessionEnded: () => void }) {
+// The cards backed by revenue records; the others keep their "not available yet" state until their data exists.
+const REVENUE_CARDS = ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"];
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+// What a revenue card shows, or null when the API left its figures out (null: not shown to this person).
+function revenueFigures(permission: string, dashboard: RevenueDashboard) {
+  const { capturedToday, vehiclesToday, revenue, expected, percent, missingDays, missingVehicles, editedRecords } = dashboard;
+  if (permission === "dash.capture") {
+    if (capturedToday === null || vehiclesToday === null) return null;
+    const left = Math.max(0, vehiclesToday - capturedToday);
+    return {
+      value: `${capturedToday} of ${vehiclesToday} captured`,
+      note: left ? `${plural(left, "vehicle", "vehicles")} still to capture` : "Every vehicle has a record for today.",
+    };
+  }
+  if (permission === "dash.revenue") {
+    if (revenue === null) return null;
+    return {
+      value: money(revenue),
+      note: percent === null || expected === null ? "No dated target is available." : `${percent}% of expected ${money(expected)}`,
+    };
+  }
+  if (permission === "dash.gaps") {
+    if (missingDays === null) return null;
+    return {
+      value: plural(missingDays, "day", "days"),
+      note: missingDays && missingVehicles !== null ? `${plural(missingVehicles, "vehicle", "vehicles")} with missing days` : "No missing days so far this month.",
+    };
+  }
+  if (editedRecords === null) return null;
+  return {
+    value: plural(editedRecords, "record", "records"),
+    note: editedRecords ? "Changed after the original capture." : "Nothing was changed after capture in this period.",
+  };
+}
+
+export function HomeScreen({
+  person,
+  offline,
+  businessDate,
+  canOpen,
+  onOpen,
+  onLock,
+  onSessionEnded,
+}: {
+  person: StoredPerson;
+  offline: boolean;
+  businessDate?: string;
+  canOpen: (tab: Tab) => boolean;
+  onOpen: (tab: Tab) => void;
+  onLock: () => void;
+  onSessionEnded: () => void;
+}) {
   const { colors } = useTheme();
   const has = (permission: string) => person.permissions.includes(permission);
   // People who capture or spend start on today; everyone else on the month so far.
   const [period, setPeriod] = useState<Period>(has("dash.capture") || has("dash.float") ? "today" : "month");
   const cards = DASHBOARD_CARDS.filter((card) => has(card.permission));
-  const label = periodLabel(period);
-  const [dashboard, setDashboard] = useState<RevenueDashboard | null>(null);
+  const label = periodLabel(period, businessDate);
+  // Each revenue card reads the dashboard for its period: the one picked, or its own (missing days: the month).
+  const periodOf = (card: (typeof cards)[number]) => card.period ?? period;
+  const needed = [...new Set(cards.filter((card) => REVENUE_CARDS.includes(card.permission)).map(periodOf))].sort().join(",");
+  const [dashboards, setDashboards] = useState<Partial<Record<Period, RevenueDashboard>>>({});
   const [dashboardError, setDashboardError] = useState("");
-  const dashboardPath = `setup/revenue/dashboard?period=${period}`;
   useEffect(() => {
-    const shouldLoad = person.permissions.some((permission) =>
-      ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"].includes(permission),
-    );
-    if (!shouldLoad || offline) {
-      setDashboard(null);
-      setDashboardError("");
-      return;
-    }
-    let active = true;
-    setDashboard(null);
+    setDashboards({});
     setDashboardError("");
-    apiGet<RevenueDashboard>(dashboardPath).then(
-      (value) => active && setDashboard(value),
-      (reason: Error) => {
-        if (!active) return;
-        if (reason instanceof SessionEndedError) return onSessionEnded();
-        setDashboardError(reason.message);
-      },
-    );
+    if (!needed || offline) return;
+    let active = true;
+    for (const each of needed.split(",") as Period[])
+      apiGet<RevenueDashboard>(`setup/revenue/dashboard?period=${each}`).then(
+        (value) => active && setDashboards((current) => ({ ...current, [each]: value })),
+        (reason: Error) => {
+          if (!active) return;
+          if (reason instanceof SessionEndedError) return onSessionEnded();
+          setDashboardError(reason.message);
+        },
+      );
     return () => {
       active = false;
     };
-  }, [dashboardPath, offline, onSessionEnded, person.permissions]);
+  }, [needed, offline, onSessionEnded]);
   return (
     <View style={styles.screen}>
       <WhoRow initials={initials(person)} name={`Hi ${person.firstName}`} role={person.role} action={<IconButton icon="lock" label="Lock app" onPress={onLock} />} />
@@ -64,35 +112,32 @@ export function HomeScreen({ person, offline, canOpen, onOpen, onLock, onSession
       </View>
       {cards.length ? (
         cards.map((card) => {
-          const value =
-            card.permission === "dash.capture" && dashboard
-              ? `${dashboard.capturedToday} of ${dashboard.vehiclesToday} captured`
-              : card.permission === "dash.revenue" && dashboard
-                ? money(dashboard.revenue)
-                : card.permission === "dash.gaps" && dashboard
-                  ? `${dashboard.missingDays} ${dashboard.missingDays === 1 ? "day" : "days"}`
-                  : card.permission === "dash.edits" && dashboard
-                    ? `${dashboard.editedRecords} ${dashboard.editedRecords === 1 ? "record" : "records"}`
-                    : typeof card.value === "number"
-                      ? money(card.value)
-                      : card.value;
-          const note =
-            dashboardError ||
-            (card.permission === "dash.capture" && dashboard
-              ? `${Math.max(0, dashboard.vehiclesToday - dashboard.capturedToday)} still to capture`
-              : card.permission === "dash.revenue" && dashboard
-                ? dashboard.percent === null
-                  ? "No dated target is available."
-                  : `${dashboard.percent}% of expected ${money(dashboard.expected)}`
-                : card.permission === "dash.gaps" && dashboard
-                  ? `${dashboard.missingVehicles} vehicles with missing days`
-                  : card.permission === "dash.edits" && dashboard
-                    ? "Changed after the original capture."
-                    : card.note);
+          // Revenue cards show the API's figures, never placeholder zeros while loading, offline or refused.
+          const live = REVENUE_CARDS.includes(card.permission);
+          const dashboard = dashboards[periodOf(card)];
+          const figures = live && dashboard ? revenueFigures(card.permission, dashboard) : null;
+          const sub = card.period ? `${periodLabel(card.period, businessDate)}. ${card.sub}` : (card.sub ?? label);
           return (
-            <Card key={card.permission} title={card.title} sub={card.sub ?? label}>
-              <CardValue>{value}</CardValue>
-              <CardNote>{note}</CardNote>
+            <Card key={card.permission} title={card.title} sub={sub}>
+              {!live ? (
+                <>
+                  <CardValue>{typeof card.value === "number" ? money(card.value) : card.value}</CardValue>
+                  <CardNote>{card.note}</CardNote>
+                </>
+              ) : figures ? (
+                <>
+                  <CardValue>{figures.value}</CardValue>
+                  <CardNote>{figures.note}</CardNote>
+                </>
+              ) : dashboard ? (
+                <CardNote>Not shown with your access.</CardNote>
+              ) : offline ? (
+                <CardNote>Connect to the internet to see revenue figures.</CardNote>
+              ) : dashboardError ? (
+                <CardNote>{dashboardError}</CardNote>
+              ) : (
+                <LineSkeleton lines={2} />
+              )}
               {card.action && card.tab && canOpen(card.tab) ? (
                 <CardAction primary={card.primary} onPress={() => onOpen(card.tab!)}>
                   {card.action}

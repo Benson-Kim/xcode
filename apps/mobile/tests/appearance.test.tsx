@@ -1,7 +1,7 @@
 import { screen } from "@testing-library/react-native";
 import { themeFor, type Appearance } from "../src/appearance";
 import { configureFormats, money } from "../src/lib/format";
-import { catalog, fakeApi, people, tokens } from "./fakeApi";
+import { catalog, fakeApi, people, revenueDashboard, tokens } from "./fakeApi";
 import { startApp, storedText, trustPhone, typePin } from "./helpers";
 
 const appearance: Appearance = {
@@ -41,6 +41,7 @@ it("applies saved settings at sign in and keeps them for the next unlock", async
   api.on("auth/session", [200, people.owner]);
   api.on("setup/access/catalog", [200, catalog]);
   api.on("setup/appearance", [200, appearance]);
+  api.on("setup/revenue/dashboard?period=month", [200, { ...revenueDashboard, period: "month" }]);
   await startApp();
   await screen.findByText("XCODE");
   await typePin("4826");

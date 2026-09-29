@@ -47,7 +47,8 @@ export function getDeviceId(): Promise<string> {
   return devicePromise;
 }
 
-async function read<T>(
+// Reads a stored JSON value, removing it when it is corrupt or fails the check rather than trusting it.
+export async function read<T>(
   key: string,
   valid: (value: T) => boolean,
 ): Promise<T | null> {

@@ -69,6 +69,8 @@ export const DASHBOARD_CARDS: {
   action?: string;
   tab?: Tab;
   primary?: boolean;
+  // A card that always covers this period, whichever the person picks.
+  period?: Period;
 }[] = [
   {
     permission: "dash.capture",
@@ -103,6 +105,7 @@ export const DASHBOARD_CARDS: {
     permission: "dash.gaps",
     title: "Missing revenue days",
     sub: "No record and no reason",
+    period: "month",
     value: "0 days",
     note: "No gaps are available yet.",
     action: "Open revenue",
@@ -138,19 +141,30 @@ const MONTHS = [
   "Dec",
 ];
 const day = (date: Date) =>
-  `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+  `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+
+const PERIOD_NAMES: Record<Period, string> = {
+  today: "Today",
+  week: "This week",
+  month: "This month",
+};
 
 // "Today, 27 Sep 2026", "This week, 21 to 27 Sep 2026" (weeks run Monday to Sunday), "This month, 1 to 27 Sep 2026".
-export function periodLabel(period: Period, now = new Date()) {
-  if (period === "today") return `Today, ${day(now)}`;
-  if (period === "month") return `This month, 1 to ${day(now)}`;
+// Today is the organization's business date ("yyyy-MM-dd"), never the phone's clock; until the phone has one,
+// the label leaves the date out.
+export function periodLabel(period: Period, businessDate?: string) {
+  const name = PERIOD_NAMES[period];
+  if (!businessDate || !/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return name;
+  const now = new Date(`${businessDate}T00:00:00Z`);
+  if (period === "today") return `${name}, ${day(now)}`;
+  if (period === "month") return `${name}, 1 to ${day(now)}`;
   const start = new Date(now);
-  start.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  start.setUTCDate(now.getUTCDate() - ((now.getUTCDay() + 6) % 7));
   const end = new Date(start);
-  end.setDate(start.getDate() + 6);
+  end.setUTCDate(start.getUTCDate() + 6);
   const startText =
-    start.getMonth() === end.getMonth()
-      ? `${start.getDate()}`
-      : `${start.getDate()} ${MONTHS[start.getMonth()]}`;
-  return `This week, ${startText} to ${day(end)}`;
+    start.getUTCMonth() === end.getUTCMonth()
+      ? `${start.getUTCDate()}`
+      : `${start.getUTCDate()} ${MONTHS[start.getUTCMonth()]}`;
+  return `${name}, ${startText} to ${day(end)}`;
 }

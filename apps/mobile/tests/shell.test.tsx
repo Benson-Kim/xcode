@@ -10,7 +10,7 @@ async function unlockAs(person: (typeof people)[keyof typeof people], phone: str
   api.on("setup/access/catalog", [200, catalog]);
   api.on("setup/revenue", [200, revenueWeek]);
   api.on("setup/revenue?weekStart=2026-09-28", [200, revenueWeek]);
-  api.on("setup/revenue/vehicle-1/2026-09-29", [200, { id: "record-1" }]);
+  api.on("setup/revenue/vehicle-1/2026-09-28", [200, { id: "record-1", version: 1 }]);
   api.on("setup/revenue/dashboard?period=today", [200, { ...revenueDashboard, period: "today" }]);
   api.on("setup/revenue/dashboard?period=month", [200, { ...revenueDashboard, period: "month" }]);
   api.on("setup/revenue/dashboard?period=week", [200, revenueDashboard]);
@@ -34,9 +34,9 @@ it("shows an owner the tabs, cards and setup links their permissions allow", asy
   expect(screen.queryByText("Renewals due")).toBeNull();
 
   await fireEvent.press(screen.getByText("Open revenue"));
-  await screen.findByText("Record revenue or explain why no revenue was earned.");
-  expect(screen.getByText("No earnings reason")).toBeTruthy();
-  expect(screen.getByText("Your access does not include no-earnings reasons.")).toBeTruthy();
+  // Viewing and correcting without capture: a missing day shows as missing and does not open.
+  expect(await screen.findByLabelText("KDA 482M, Missing")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "KDA 482M, Enter revenue" })).toBeNull();
   expect(screen.queryByText("What you can do here")).toBeNull();
 
   await fireEvent.press(screen.getByRole("tab", { name: "More" }));
@@ -55,14 +55,13 @@ it("starts a revenue clerk on today with capture first", async () => {
   const capture = screen.getByRole("header", { name: "Today's revenue" });
   expect(capture).toBeTruthy();
   await fireEvent.press(screen.getByText("Capture revenue"));
-  await screen.findByText("Record revenue or explain why no revenue was earned.");
-  expect(screen.getByText("Capture")).toBeTruthy();
-  await fireEvent.press(screen.getByText("Capture"));
-  expect(screen.getByText("No earnings reason")).toBeTruthy();
-  expect(screen.getByText("Garage")).toBeTruthy();
+  // The screen opens on the earliest missing day, one tap from capture.
+  await fireEvent.press(await screen.findByRole("button", { name: "KDA 482M, Enter revenue" }));
+  expect(screen.getByText("Mon 28 Sep 2026. Expected KES 1,000")).toBeTruthy();
+  expect(screen.getByRole("radio", { name: "Garage" })).toBeTruthy();
   await fireEvent.changeText(screen.getByLabelText("Revenue amount"), "1000");
-  await fireEvent.press(screen.getByRole("button", { name: "Save revenue" }));
-  await waitFor(() => expect(api.sent("setup/revenue/vehicle-1/2026-09-29")).toHaveLength(1));
+  await fireEvent.press(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(api.sent("setup/revenue/vehicle-1/2026-09-28")).toEqual([{ amount: 1000, reason: null, note: null, version: null }]));
 
   await fireEvent.press(screen.getByRole("tab", { name: "More" }));
   await screen.findByText("Wanjiru Kamau");

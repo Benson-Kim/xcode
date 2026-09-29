@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { Icon, Text, useTheme } from "../ui";
+import { Icon, Text, useTheme, type IconName } from "../ui";
 
 export function ScreenTitle({ children }: { children: string }) {
   return (
@@ -41,14 +41,16 @@ export function WhoRow({ initials, name, role, action }: { initials: string; nam
   );
 }
 
-export function IconButton({ icon, label, onPress }: { icon: "lock"; label: string; onPress: () => void }) {
+export function IconButton({ icon, label, onPress, disabled }: { icon: IconName; label: string; onPress: () => void; disabled?: boolean }) {
   const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(disabled) }}
+      disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [styles.iconButton, { borderColor: colors.keyLine, backgroundColor: pressed ? colors.blueWash : colors.white }]}
+      style={({ pressed }) => [styles.iconButton, { borderColor: colors.keyLine, backgroundColor: pressed ? colors.blueWash : colors.white }, disabled && { opacity: 0.35 }]}
     >
       <Icon name={icon} size={22} color={colors.navy} />
     </Pressable>
