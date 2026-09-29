@@ -163,17 +163,23 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 Allocations = v.Allocations.Where(a => visibleIds.Contains(a.VehicleId)).Select(a => new
                 {
                     a.VehicleId,
-                    a.Amount,
-                    Registration = db.Set<FleetVehicle>().Where(vehicle => vehicle.Id == a.VehicleId).Select(vehicle => vehicle.Registration).FirstOrDefault(),
-                    Active = db.Set<FleetVehicle>().Where(vehicle => vehicle.Id == a.VehicleId)
-                        .Select(vehicle => vehicle.LeftOn == null || vehicle.LeftOn > actor.Today).FirstOrDefault()
+                    a.Amount
                 }).ToList(),
                 AllocationCount = v.Allocations.Count()
             }).ToListAsync(ct);
         rows = [.. rows.OrderBy(v => ids.IndexOf(v.ItemId))];
+        var allocationVehicleIds = rows.SelectMany(v => v.Allocations).Select(a => a.VehicleId).Distinct().ToList();
+        var allocationVehicles = await db.Set<FleetVehicle>().AsNoTracking()
+            .Where(v => allocationVehicleIds.Contains(v.Id))
+            .ToDictionaryAsync(v => v.Id, v => new { v.Registration, v.LeftOn }, ct);
         return new(rows.Select(v =>
         {
-            var allocations = v.Allocations.Select(a => new AllocationDto(a.VehicleId, a.Amount, a.Registration, a.Active)).ToList();
+            var allocations = v.Allocations.Select(a =>
+            {
+                var vehicle = allocationVehicles.GetValueOrDefault(a.VehicleId);
+                var active = vehicle is null || vehicle.LeftOn is null || vehicle.LeftOn > actor.Today;
+                return new AllocationDto(a.VehicleId, a.Amount, vehicle?.Registration, active);
+            }).ToList());
             return new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
                 allocations.Where(a => a.Active).Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
                 allocations, v.Allocations.Count != v.AllocationCount);
