@@ -44,6 +44,11 @@ export function kes(amount: number) {
   return `${formats.currency} ${number}`;
 }
 
+// A result that can go below zero, as the design writes it: "KES 1,200 loss" rather than a minus sign.
+export function money(amount: number) {
+  return amount < 0 ? `${kes(-amount)} loss` : kes(amount);
+}
+
 export function plural(count: number, one: string, many: string) {
   return `${count} ${count === 1 ? one : many}`;
 }

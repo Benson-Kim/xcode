@@ -17,7 +17,8 @@ export type ExpenseCategory = { id: string; name: string; bucket: ExpenseBucket;
 export type ExpenseItemOption = { id: string; name: string; categoryId: string; categoryName: string; bucket: ExpenseBucket };
 
 export type InvestmentEntry = { id: string; date: string; description: string; amount: number; recordedBy: string; recordedAt: string };
-// What went into a vehicle. `returned` and `percentPaidOff` stay null until they can be worked out from revenue.
+// What went into a vehicle (contract C5). `returned` is its net contribution since it joined, which can be below zero;
+// `percentPaidOff` is that against `totalInvested`, and null when nothing went in.
 export type VehicleInvestment = {
   vehicleId: string;
   totalInvested: number;

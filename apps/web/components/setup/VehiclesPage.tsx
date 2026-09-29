@@ -5,7 +5,8 @@ import { useAppearance } from "../../lib/appearance";
 import { apiRequest } from "../../lib/data";
 import { useResource, useStreamedList } from "../../lib/data";
 import { useSession } from "../../lib/session-context";
-import { kes, plural } from "../../lib/format";
+import { kes, money, plural } from "../../lib/format";
+import type { ExpenseBucket } from "../../lib/types";
 import { formatDateOnly, formatDateRange, recurringFrequency } from "../recurringPresentation";
 import {
   Banner,
@@ -41,7 +42,7 @@ import {
   Tr,
   useToast,
 } from "../ui";
-import { recurringCategoryNames, type Company, type RecurringItem, type Vehicle, type VehicleReport } from "./shared";
+import { expenseBucketNames, postingBucket, type Company, type RecurringItem, type Vehicle, type VehicleReport } from "./shared";
 import { VehicleInvestmentTab } from "./VehicleInvestment";
 
 type CompanyChoice = { id: string; name: string; active?: boolean };
@@ -456,25 +457,23 @@ function VehicleEditor({
   );
 }
 
-const categories = [1, 2, 3, 4];
-
+// The vehicle report (contract C6), with the design's figures in the design's order. Postings are listed per item,
+// each under its bucket or as savings.
 function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
   const [period, setPeriod] = useState<"week" | "month">("month");
   const report = useResource<VehicleReport>(`setup/vehicles/${vehicle.id}/report?period=${period}`);
-  const postings = report.data?.postings ?? [];
-  const byCategory = (category: number) =>
-    postings.filter((posting) => posting.kind === 1 && posting.category === category).reduce((sum, posting) => sum + posting.amount, 0);
-  const grouped = [...postings.reduce((items, posting) => {
-    const item = items.get(posting.itemId) ?? { name: posting.name, kind: posting.kind, category: posting.category, total: 0, dates: [] as string[] };
+  const data = report.data;
+  const grouped = [...(data?.postings ?? []).reduce((items, posting) => {
+    const item = items.get(posting.itemId) ?? { name: posting.name, kind: posting.kind, bucket: postingBucket(posting), total: 0, dates: [] as string[] };
     item.total += posting.amount;
     item.dates.push(posting.date);
     return items.set(posting.itemId, item);
-  }, new Map<string, { name: string; kind: number; category?: number | null; total: number; dates: string[] }>()).values()];
+  }, new Map<string, { name: string; kind: number; bucket: ExpenseBucket; total: number; dates: string[] }>()).values()];
   return (
     <Card>
       <CardHeader
-        title="Vehicle report"
-        description={`${period === "week" ? "This week" : "This month"}${report.data ? `, ${formatDateRange(report.data.from, report.data.through)}` : ""}. Scheduled items post on their own dates.`}
+        title={`${period === "week" ? "This week" : "This month"}${data ? `, ${formatDateRange(data.from, data.through)}` : ""}`}
+        description="Money in and money out, counted on the day it moved. Fuel and crew pay are not tracked."
       />
       <SegmentedControl
         label="Report period"
@@ -487,19 +486,24 @@ function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
       />
       {report.error ? (
         <Hint>{report.error}</Hint>
-      ) : report.loading || !report.data ? (
+      ) : report.loading || !data ? (
         <div role="status" aria-busy="true" className="flex flex-col gap-2.5">
           <span className="sr-only">Loading the vehicle report</span>
-          <StatGridSkeleton count={5} />
+          <StatGridSkeleton count={9} />
           <ListSkeleton rows={2} />
         </div>
       ) : (
         <>
           <StatGrid>
-            {categories.map((category) => (
-              <Stat key={category} label={recurringCategoryNames[category]} value={kes(byCategory(category))} />
-            ))}
-            <Stat label="Savings set aside" value={kes(report.data.savings)} />
+            <Stat label="Money in" value={kes(data.moneyIn)} />
+            <Stat label="Target" value={kes(data.target)} />
+            <Stat label="Repairs and maintenance" value={kes(data.repairs)} />
+            <Stat label="Recurring charges" value={kes(data.charges)} />
+            <Stat label="Loan repayments" value={kes(data.loans)} />
+            <Stat label="Money out" value={kes(data.moneyOut)} />
+            <Stat label="Net contribution" value={money(data.net)} tone={data.net < 0 ? "bad" : undefined} />
+            <Stat label="Savings set aside" value={kes(data.savings)} />
+            <Stat label="After savings" value={money(data.afterSavings)} tone={data.afterSavings < 0 ? "bad" : undefined} />
           </StatGrid>
           <SubHeading>Postings in this period</SubHeading>
           {grouped.length ? (
@@ -508,7 +512,7 @@ function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
                 <CardListItem
                   key={item.name + item.dates[0]}
                   left={item.name}
-                  leftSub={`${item.kind === 2 ? "Savings" : recurringCategoryNames[item.category ?? 4]}. ${
+                  leftSub={`${item.kind === 2 ? "Savings" : expenseBucketNames[item.bucket]}. ${
                     item.dates.length <= 3
                       ? item.dates.map(formatDateOnly).join(", ")
                       : `${item.dates.length} postings, ${formatDateOnly(item.dates[0])} to ${formatDateOnly(item.dates[item.dates.length - 1])}`

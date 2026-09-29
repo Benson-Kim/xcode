@@ -56,14 +56,47 @@ export type RecurringItem = {
   month?: number | null;
 };
 
-export type Posting = { itemId: string; versionId: string; date: string; name: string; kind: number; category?: number | null; amount: number };
-export type VehicleReport = { vehicleId: string; from: string; through: string; costs: number; savings: number; postings: Posting[] };
+// A scheduled item's share falling due on a day. Every cost carries its bucket; savings have none.
+export type Posting = {
+  itemId: string;
+  versionId: string;
+  date: string;
+  name: string;
+  kind: number;
+  category?: number | null;
+  amount: number;
+  bucket?: ExpenseBucket | null;
+};
+// GET setup/vehicles/{id}/report (contract C6). moneyOut is the three buckets and never includes investment;
+// net = moneyIn - moneyOut and afterSavings = net - savings. costs repeats moneyOut for older screens.
+export type VehicleReport = {
+  vehicleId: string;
+  from: string;
+  through: string;
+  moneyIn: number;
+  target: number;
+  repairs: number;
+  charges: number;
+  loans: number;
+  moneyOut: number;
+  net: number;
+  savings: number;
+  afterSavings: number;
+  costs: number;
+  postings: Posting[];
+};
 
 export const expenseBucketNames: Record<ExpenseBucket, string> = {
   1: "Repairs and maintenance",
   2: "Recurring charges",
   3: "Loan repayments",
 };
+
+// The bucket a cost posting counts under. The API sends one for every cost; a Phase 1 row without one follows its old
+// category (assumption A2): repairs and upkeep count as repairs and maintenance, the other three as recurring charges.
+export function postingBucket(posting: Pick<Posting, "bucket" | "category">): ExpenseBucket {
+  return posting.bucket ?? (posting.category === 2 ? 1 : 2);
+}
 
 // The cost types used before expense items. Rows saved with them stay readable.
 export const recurringCategoryNames: Record<number, string> = {
