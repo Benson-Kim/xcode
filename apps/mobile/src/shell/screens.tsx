@@ -34,9 +34,11 @@ export function HomeScreen({ person, offline, canOpen, onOpen, onLock, onSession
     );
     if (!shouldLoad || offline) {
       setDashboard(null);
+      setDashboardError("");
       return;
     }
     let active = true;
+    setDashboard(null);
     setDashboardError("");
     apiGet<RevenueDashboard>(dashboardPath).then(
       (value) => active && setDashboard(value),
