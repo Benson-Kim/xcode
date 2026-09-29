@@ -11,18 +11,23 @@ export function CompaniesPage() {
   const toast = useToast();
   const [name, setName] = useState("");
   const [addError, setAddError] = useState("");
-  const [renaming, setRenaming] = useState<{ id: string; name: string; error: string } | null>(null);
+  const [addReason, setAddReason] = useState("");
+  const [actionReason, setActionReason] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [renaming, setRenaming] = useState<{ id: string; name: string; reason: string; error: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const rows = companies.items;
 
   async function add() {
     const trimmed = name.trim();
     if (!trimmed) return setAddError("Enter the company name.");
+    if (!addReason.trim()) return setAddError("Give a reason for adding the company.");
     if (rows.some((company) => company.name.toLowerCase() === trimmed.toLowerCase())) return setAddError("This company already exists.");
     setBusy(true);
     try {
-      await apiRequest("setup/companies", { method: "POST", body: JSON.stringify({ name: trimmed, reason: `Added PSV company ${trimmed}` }) });
+      await apiRequest("setup/companies", { method: "POST", body: JSON.stringify({ name: trimmed, reason: addReason.trim() }) });
       setName("");
+      setAddReason("");
       setAddError("");
       toast(`${trimmed} added.`);
       companies.reload();
@@ -37,12 +42,13 @@ export function CompaniesPage() {
     if (!renaming) return;
     const trimmed = renaming.name.trim();
     if (!trimmed) return setRenaming({ ...renaming, error: "Enter the new name." });
+    if (!renaming.reason.trim()) return setRenaming({ ...renaming, error: "Give a reason for renaming the company." });
     if (rows.some((other) => other.id !== company.id && other.name.toLowerCase() === trimmed.toLowerCase()))
       return setRenaming({ ...renaming, error: "Another company already has this name." });
     if (trimmed === company.name) return setRenaming(null);
     setBusy(true);
     try {
-      await apiRequest(`setup/companies/${company.id}`, { method: "PUT", body: JSON.stringify({ name: trimmed, reason: `Renamed ${company.name} to ${trimmed}` }) });
+      await apiRequest(`setup/companies/${company.id}`, { method: "PUT", body: JSON.stringify({ name: trimmed, reason: renaming.reason.trim() }) });
       setRenaming(null);
       toast(`Company renamed to ${trimmed}.`);
       companies.reload();
@@ -54,13 +60,19 @@ export function CompaniesPage() {
   }
 
   async function setArchived(company: Company, archived: boolean) {
+    if (!actionReason.trim()) {
+      setActionError(`Give a reason for ${archived ? "archiving" : "restoring"} the company.`);
+      return;
+    }
     setBusy(true);
     try {
       await apiRequest(`setup/companies/${company.id}/${archived ? "archive" : "restore"}`, {
         method: "POST",
-        body: JSON.stringify({ reason: archived ? `Archived ${company.name}` : `Restored ${company.name}` }),
+        body: JSON.stringify({ reason: actionReason.trim() }),
       });
       toast(archived ? `${company.name} archived.` : `${company.name} restored.`);
+      setActionReason("");
+      setActionError("");
       companies.reload();
     } catch (value) {
       setAddError((value as Error).message);
@@ -86,6 +98,12 @@ export function CompaniesPage() {
               if (event.key === "Enter") void add();
             }}
           />
+        </Field>
+        <Field id="new-company-reason" label="Reason for adding" className="min-w-55 flex-1">
+          <TextInput value={addReason} onChange={(event) => setAddReason(event.target.value)} />
+        </Field>
+        <Field id="company-action-reason" label="Reason for archive/restore" error={actionError} className="min-w-55 flex-1">
+          <TextInput value={actionReason} onChange={(event) => { setActionReason(event.target.value); setActionError(""); }} />
         </Field>
         <Button className="mt-6.5" disabled={busy} onClick={() => void add()}>
           Add company
@@ -115,6 +133,9 @@ export function CompaniesPage() {
                       }}
                     />
                   </Field>
+                  <Field id={`rename-reason-${company.id}`} label="Reason for renaming" className="min-w-50 flex-1">
+                    <TextInput value={renaming.reason} onChange={(event) => setRenaming({ ...renaming, reason: event.target.value, error: "" })} />
+                  </Field>
                   <Button className="mt-6.5" disabled={busy} onClick={() => void saveRename(company)}>
                     Save
                   </Button>
@@ -133,7 +154,7 @@ export function CompaniesPage() {
               <Td label="Vehicles" numeric>{company.vehicleCount}</Td>
               <Td>
                 {company.active !== false && (
-                  <RowButton onClick={() => setRenaming({ id: company.id, name: company.name, error: "" })} aria-label={`Rename ${company.name}`}>
+                  <RowButton onClick={() => setRenaming({ id: company.id, name: company.name, reason: "", error: "" })} aria-label={`Rename ${company.name}`}>
                     Rename
                   </RowButton>
                 )}

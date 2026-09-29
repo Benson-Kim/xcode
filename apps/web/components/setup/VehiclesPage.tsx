@@ -159,7 +159,7 @@ function normaliseRegistration(value: string) {
   return REGISTRATION.test(compact) ? `${compact.slice(0, 3)} ${compact.slice(3)}` : null;
 }
 
-type Errors = Partial<Record<"registration" | "companyId" | "weeklyTarget" | "joinedOn", string>>;
+type Errors = Partial<Record<"registration" | "companyId" | "weeklyTarget" | "joinedOn" | "reason", string>>;
 
 function VehicleEditor({
   vehicle,
@@ -188,6 +188,7 @@ function VehicleEditor({
     weeklyTarget: vehicle ? String(vehicle.weeklyTarget) : "",
     joinedOn: vehicle?.joinedOn ?? today,
   });
+  const [reason, setReason] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [saveError, setSaveError] = useState("");
   const [lifecycleDate, setLifecycleDate] = useState(vehicle?.leftOn ?? today);
@@ -245,6 +246,7 @@ function VehicleEditor({
     if (weekly <= 0) next.weeklyTarget = "Enter the weekly target in KES.";
     if (!form.joinedOn) next.joinedOn = "Enter the date it joined the fleet.";
     else if (form.joinedOn > today) next.joinedOn = "The join date cannot be after the business date.";
+    if (!reason.trim()) next.reason = "Give a reason for this change.";
     setErrors(next);
     setSaveError("");
     if (Object.keys(next).length || !registration) return;
@@ -265,7 +267,7 @@ function VehicleEditor({
           companyId: form.companyId,
           weeklyTarget: weekly,
           joinedOn: form.joinedOn,
-          reason: isNew ? `Added vehicle ${registration}` : `Updated vehicle ${registration}`,
+          reason: reason.trim(),
         }),
       });
       toast(isNew ? `${registration} added.` : `Changes saved for ${registration}.`);
@@ -336,6 +338,9 @@ function VehicleEditor({
               <TextInput disabled={retired} type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} />
             </Field>
           </Grid2>
+          <Field id="vehicle-reason" label="Reason" error={errors.reason} hint="This is kept in the change log.">
+            <TextInput value={reason} disabled={retired} onChange={(event) => setReason(event.target.value)} />
+          </Field>
           {history.length > 1 && (
             <div>
               <p className="m-0 text-sm font-semibold">Target history</p>

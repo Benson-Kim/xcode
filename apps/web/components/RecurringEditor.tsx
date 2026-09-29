@@ -57,7 +57,7 @@ type Props = {
 };
 
 type Errors = Partial<
-  Record<"name" | "amount" | "start" | "end" | "allocations", string>
+  Record<"name" | "amount" | "start" | "end" | "allocations" | "reason", string>
 >;
 
 const presets = [
@@ -137,6 +137,8 @@ export function RecurringEditor({
   const [start, setStart] = useState(item?.start || today);
   const [end, setEnd] = useState(item?.end || "");
   const [noEnd, setNoEnd] = useState(!item?.end);
+  const [reason, setReason] = useState("");
+  const [stopReason, setStopReason] = useState("");
   const initialSelection =
     item?.allocations.map((allocation) => allocation.vehicleId) ||
     (preselectVehicle ? [preselectVehicle] : []);
@@ -262,6 +264,7 @@ export function RecurringEditor({
     if (!selected.length) next.allocations = "Tick at least one vehicle.";
     else if (difference !== 0)
       next.allocations = `The split must add up to ${kes(total)}. It is ${kes(allocationTotal)}.`;
+    if (!reason.trim()) next.reason = "Give a reason for this change.";
     setErrors(next);
     setSaveError("");
     if (Object.keys(next).length) return;
@@ -286,9 +289,7 @@ export function RecurringEditor({
             start,
             end: noEnd ? null : end,
             allocations,
-            reason: isNew
-              ? `Added recurring item ${name.trim()}`
-              : `Updated recurring item ${name.trim()}`,
+            reason: reason.trim(),
           }),
         },
       );
@@ -308,13 +309,17 @@ export function RecurringEditor({
   async function stop() {
     if (!item || disabled) return;
     if (!confirmStop) return setConfirmStop(true);
+    if (!stopReason.trim()) {
+      setSaveError("Give a reason for stopping this item.");
+      return;
+    }
     setBusy(true);
     try {
       await apiRequest(`setup/recurring/${item.id}/stop`, {
         method: "POST",
         body: JSON.stringify({
           confirmed: true,
-          reason: "Stopped recurring item",
+          reason: stopReason.trim(),
         }),
       });
       toast(`${item.name} stopped.`);
@@ -436,6 +441,9 @@ export function RecurringEditor({
               />
             </Field>
           </Grid2>
+          <Field id="recurring-reason" label="Reason" error={errors.reason} hint="This is kept in the change log.">
+            <TextInput value={reason} disabled={disabled} onChange={(event) => setReason(event.target.value)} />
+          </Field>
         </Card>
 
         <Card density="form">
@@ -700,9 +708,20 @@ export function RecurringEditor({
           </Button>
           <Spacer />
           {item && canEdit && !stopped && (
-            <Button tone="danger" disabled={busy} onClick={() => void stop()}>
-              {confirmStop ? "Tap again to stop from today" : "Stop from today"}
-            </Button>
+            <>
+              {confirmStop && (
+                <TextInput
+                  aria-label="Reason for stopping"
+                  placeholder="Why is it stopping?"
+                  value={stopReason}
+                  disabled={busy}
+                  onChange={(event) => setStopReason(event.target.value)}
+                />
+              )}
+              <Button tone="danger" disabled={busy} onClick={() => void stop()}>
+                {confirmStop ? "Tap again to stop from today" : "Stop from today"}
+              </Button>
+            </>
           )}
         </FormActions>
       </FormLayout>

@@ -94,13 +94,22 @@ it("saves organization sections through their endpoint contracts", async () => {
   fireEvent.change(screen.getByLabelText("Slug"), {
     target: { value: "new-fleet" },
   });
+  fireEvent.change(screen.getByLabelText("Reason for Organization details"), {
+    target: { value: "Update organization details" },
+  });
   fireEvent.click(
     screen.getByRole("button", { name: "Save organization details" }),
   );
   fireEvent.change(screen.getByLabelText("Locale"), {
     target: { value: "fr-FR" },
   });
+  fireEvent.change(screen.getByLabelText("Reason for Locale and time"), {
+    target: { value: "Update locale" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Save locale" }));
+  fireEvent.change(screen.getByLabelText("Reason for Security policy"), {
+    target: { value: "Update security" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Save security" }));
 
   await waitFor(() =>

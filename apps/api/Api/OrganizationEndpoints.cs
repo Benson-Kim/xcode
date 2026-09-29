@@ -77,6 +77,7 @@ public static class OrganizationEndpoints
           group.MapPut("/organization/logo", async (SaveLogo input, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
                await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
+               var reason = SetupPagination.Reason(input.Reason);
                var organization = await db.Organizations.SingleAsync(ct);
                var uploaded = OrganizationLogo.FromDataUrl(context.OrganizationId, input.DataUrl, clock.UtcNow);
                var existing = await db.Logos.SingleOrDefaultAsync(ct);
@@ -85,20 +86,21 @@ public static class OrganizationEndpoints
                     db.Logos.Add(uploaded);
                else
                     (existing.ContentType, existing.Data, existing.UpdatedAt) = (uploaded.ContentType, uploaded.Data, uploaded.UpdatedAt);
-               RecordChange(db, context, organization, clock, "logo", before, DescribeLogo(uploaded), "Updated logo");
+               RecordChange(db, context, organization, clock, "logo", before, DescribeLogo(uploaded), reason);
                await db.SaveChangesAsync(ct);
                return Results.Ok(new { logo = uploaded.ToDataUrl() });
           }).WithName("UpdateOrganizationLogo");
 
-          group.MapDelete("/organization/logo", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
+          group.MapDelete("/organization/logo", async (string? reason, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
                await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
+               var changeReason = SetupPagination.Reason(reason);
                var existing = await db.Logos.SingleOrDefaultAsync(ct);
                if (existing is null)
                     return Results.Ok(new { logo = (string?)null });
                var organization = await db.Organizations.SingleAsync(ct);
                db.Logos.Remove(existing);
-               RecordChange(db, context, organization, clock, "logo", DescribeLogo(existing), "null", "Removed logo");
+               RecordChange(db, context, organization, clock, "logo", DescribeLogo(existing), "null", changeReason);
                await db.SaveChangesAsync(ct);
                return Results.Ok(new { logo = (string?)null });
           }).WithName("DeleteOrganizationLogo");
@@ -243,6 +245,6 @@ public static class OrganizationEndpoints
 
      public sealed record SaveOrganizationSettings(JsonElement Value, string Reason);
      public sealed record OrganizationDetails(string? Name, string? Slug);
-     public sealed record SaveLogo(string? DataUrl);
+     public sealed record SaveLogo(string? DataUrl, string? Reason);
      public sealed record SaveUserPreferences(string? Locale, string? TimeZone, bool? Hour12, string? ThemeMode, bool ReducedMotion, double FontScale);
 }

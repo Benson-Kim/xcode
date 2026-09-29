@@ -71,6 +71,7 @@ it("creates a recurring item with a balanced vehicle share", async () => {
   fireEvent.change(screen.getByLabelText("Amount each time"), { target: { value: "1200" } });
   fireEvent.click(screen.getByRole("radio", { name: "Every day" }));
   fireEvent.click(screen.getByLabelText("KDA 482M"));
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Add daily collection" } });
   expect(screen.getByText("Balanced")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
@@ -99,6 +100,7 @@ it("updates a recurring item using its edited allocations and schedule", async (
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Insurance" } });
   fireEvent.change(screen.getByLabelText("Amount each time"), { target: { value: "1350" } });
   fireEvent.change(screen.getByLabelText("Share for KDA 482M"), { target: { value: "1350" } });
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Revise insurance" } });
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -124,6 +126,7 @@ it("requires a second click before stopping a recurring item", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Stop from today" }));
   expect(screen.getByRole("button", { name: "Tap again to stop from today" })).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Reason for stopping"), { target: { value: "Stop item" } });
   fireEvent.click(screen.getByRole("button", { name: "Tap again to stop from today" }));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -132,7 +135,7 @@ it("requires a second click before stopping a recurring item", async () => {
   ));
   expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({
     confirmed: true,
-    reason: "Stopped recurring item",
+    reason: "Stop item",
   });
   expect(onSaved).toHaveBeenCalledOnce();
 });
