@@ -28,6 +28,10 @@ public sealed partial class AuthDb
           member.Property(x => x.Version).IsConcurrencyToken();
           member.Property(x => x.ApprovalLimit).HasPrecision(14, 2);
           member.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+          // Sign-in and token issue expect one active membership per person; the database now guarantees it. The plain
+          // UserId index stays for the foreign key, so the filtered one does not replace it.
+          member.HasIndex(x => x.UserId);
+          member.HasIndex(x => x.UserId, "IX_Memberships_UserId_Active").IsUnique().HasFilter("[Active] = 1");
 
           model.Entity<OrganizationLocalization>().HasKey(x => x.OrganizationId); Tenant(model.Entity<OrganizationLocalization>());
           model.Entity<OrganizationBranding>().HasKey(x => x.OrganizationId); Tenant(model.Entity<OrganizationBranding>());
@@ -56,6 +60,8 @@ public sealed partial class AuthDb
           personRole.HasKey(x => new { x.OrganizationId, x.UserId, x.RoleId }); Tenant(personRole);
           personRole.HasOne<Role>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.RoleId }).OnDelete(DeleteBehavior.Restrict);
           personRole.HasOne<OrganizationMembership>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.UserId }).OnDelete(DeleteBehavior.Restrict);
+          // One role per person in an organization, as the people screens, tokens and permission checks assume.
+          personRole.HasIndex(x => new { x.OrganizationId, x.UserId }).IsUnique();
 
           var permission = model.Entity<PersonPermissionOverride>();
           permission.HasKey(x => new { x.OrganizationId, x.UserId, x.Permission }); Tenant(permission);

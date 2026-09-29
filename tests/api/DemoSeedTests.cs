@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using Auth.Application;
+using Auth.Application.Setup;
+using Auth.Domain.Setup;
 using Auth.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -32,6 +34,26 @@ public sealed class DemoSeedTests : IDisposable
             Assert.Equal(DemoSeed.Logins.Length, await db.Users.CountAsync());
             Assert.True(PinHasher.Verify("9731", (await db.Users.AsNoTracking().SingleAsync(u => u.Id == owner.Id)).PinHash!));
         });
+    }
+
+    [Fact]
+    public async Task TheDesignsExpenseCatalogIsSeededOnceAndLocalChangesSurviveReseeding()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn("antony.maina@shamayah.co.ke");
+        var options = await owner.GetFromJsonAsync<List<ExpenseItemOption>>("/setup/expense-items/options");
+        Assert.Equal(13, options!.Count);
+        Assert.Contains(options, x => x is { Name: "Tyres", CategoryName: "Garage and repairs", Bucket: ExpenseBucket.RepairsAndMaintenance });
+        Assert.Contains(options, x => x is { Name: "Insurance", CategoryName: "Charges", Bucket: ExpenseBucket.RecurringCharges });
+        Assert.Contains(options, x => x is { Name: "Loan repayment", CategoryName: "Loans", Bucket: ExpenseBucket.LoanRepayments });
+
+        var loans = options.Single(x => x.CategoryName == "Loans").CategoryId;
+        (await owner.PutAsJsonAsync($"/setup/expense-categories/{loans}", new { name = "Bank loans", bucket = 3 })).EnsureSuccessStatusCode();
+        await app.WithDb(db => DemoSeed.Run(db));
+
+        var categories = await owner.GetFromJsonAsync<Page<ExpenseCategoryDto>>("/setup/expense-categories");
+        Assert.Equal(["Bank loans", "Charges", "Garage and repairs"], categories!.Items.Select(x => x.Name));
+        Assert.Equal(13, categories.Items.Sum(x => x.Items.Count));
     }
 
     public void Dispose() => app.Dispose();

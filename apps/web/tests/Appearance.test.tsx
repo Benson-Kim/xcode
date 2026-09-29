@@ -66,24 +66,24 @@ it("shows saved brand changes straight away by refreshing the app's appearance",
   const fetcher = renderSettings(refresh);
   fireEvent.change(await screen.findByLabelText("Display name"), { target: { value: "North Star" } });
   fireEvent.change(screen.getByLabelText("Primary colour"), { target: { value: "#0B5CAD" } });
-  fireEvent.change(screen.getByLabelText("Reason for Brand"), { target: { value: "Refresh brand" } });
   fireEvent.click(screen.getByRole("button", { name: "Save brand" }));
 
   await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
   const put = fetcher.mock.calls.find(([input]) => input.endsWith("/branding"))!;
   expect(JSON.parse(String(put[1]!.body)).value).toMatchObject({ displayName: "North Star", primary: "#0B5CAD" });
+  expect(JSON.parse(String(put[1]!.body))).not.toHaveProperty("reason");
 });
 
 it("uploads a logo from the settings page and shows it at once", async () => {
   const refresh = vi.fn();
   const fetcher = renderSettings(refresh);
   const input = (await screen.findByText("Upload logo")).querySelector("input")!;
-  fireEvent.change(screen.getByLabelText("Reason for Brand"), { target: { value: "Replace logo" } });
   fireEvent.change(input, { target: { files: [new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "logo.png", { type: "image/png" })] } });
 
   await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
   const put = fetcher.mock.calls.find(([path]) => path.endsWith("/organization/logo"))!;
   expect(put[1]!.method).toBe("PUT");
+  expect(Object.keys(JSON.parse(String(put[1]!.body)))).toEqual(["dataUrl"]);
   expect(JSON.parse(String(put[1]!.body)).dataUrl).toMatch(/^data:image\/png;base64,/);
   expect(await screen.findByRole("status")).toHaveTextContent("Logo updated.");
 

@@ -5,15 +5,11 @@ public sealed class Role : IOrganizationEntity
      public Guid OrganizationId { get; set; }
      public Guid Id { get; set; } = Guid.NewGuid();
      public string Name { get; set; } = "";
-     public RolePermission Grant(string permission) => new()
-     {
-          OrganizationId = OrganizationId,
-          RoleId = Id,
-          Permission = permission
-     };
 }
 
 
+// Legacy: role defaults now come only from PermissionCatalog. Nothing reads or writes this table; it is kept until
+// a later migration drops it.
 public sealed class RolePermission : IOrganizationEntity
 {
      public Guid OrganizationId { get; set; }
@@ -116,7 +112,8 @@ public sealed class EffectivePermissionResolver
 
           var all = overrides.ToArray();
           var denied = all.Where(x => !x.Granted).Select(x => x.Permission).ToHashSet(StringComparer.Ordinal);
-          var result = PermissionDependencies.Expand(rolePermissions.Concat(all.Where(x => x.Granted).Select(x => x.Permission)));
+          var result = PermissionDependencies.Expand(rolePermissions.Concat(all.Where(x => x.Granted).Select(x => x.Permission)))
+               .ToHashSet(StringComparer.Ordinal);
 
           // A denied permission also removes every permission that depends on it.
           result.ExceptWith(denied);

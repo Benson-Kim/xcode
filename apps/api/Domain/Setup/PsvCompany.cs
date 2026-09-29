@@ -55,11 +55,11 @@ public sealed class PsvCompany : IOrganizationEntity
 
 public static class SetupValue
 {
-     public static string Name(string? value)
+     public static string Name(string? value, int maxLength = 160)
      {
           value = value?.Trim();
-          if (string.IsNullOrWhiteSpace(value) || value.Length > 160)
-               throw new ArgumentException("Name must contain 1-160 characters.");
+          if (string.IsNullOrWhiteSpace(value) || value.Length > maxLength)
+               throw new ArgumentException($"Name must contain 1-{maxLength} characters.");
 
           return value;
      }

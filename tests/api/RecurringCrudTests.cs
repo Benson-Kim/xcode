@@ -36,8 +36,10 @@ public sealed class RecurringCrudTests : IDisposable
         var vehicle = await createVehicle.Content.ReadFromJsonAsync<IdResponse>();
         Assert.NotNull(vehicle);
 
+        // A cost picks an expense item: the name typed and the old category are ignored.
+        var parking = await ExpenseItemTestData.Id(client, "Parking");
         var create = new SaveRecurring(
-            "Fuel reserve",
+            "Typed name",
             RecurringKind.Cost,
             CostCategory.RunningCosts,
             1200m,
@@ -47,7 +49,9 @@ public sealed class RecurringCrudTests : IDisposable
             today.AddDays(1),
             null,
             [new VehicleShare(vehicle.Id, 1200m)],
-            "Create recurring CRUD test item");
+            "Create recurring CRUD test item",
+            parking,
+            "  Stage fees  ");
         using var createItem = await client.PostAsJsonAsync("/setup/recurring", create);
         Assert.Equal(HttpStatusCode.OK, createItem.StatusCode);
         var created = await createItem.Content.ReadFromJsonAsync<IdResponse>();
@@ -56,7 +60,12 @@ public sealed class RecurringCrudTests : IDisposable
         var afterCreate = await client.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring");
         var createdItem = Assert.Single(afterCreate!.Items);
         Assert.Equal(created.Id, createdItem.Id);
-        Assert.Equal("Fuel reserve", createdItem.Name);
+        Assert.Equal("Parking", createdItem.Name);
+        Assert.Null(createdItem.Category);
+        Assert.Equal(parking, createdItem.ExpenseItemId);
+        Assert.Equal("Parking", createdItem.ExpenseItemName);
+        Assert.Equal(ExpenseBucket.RecurringCharges, createdItem.Bucket);
+        Assert.Equal("Stage fees", createdItem.Note);
         Assert.Equal(1200m, createdItem.Amount);
         Assert.Equal(RecurrenceFrequency.Weekly, createdItem.Frequency);
         Assert.Equal(6, createdItem.Day);
@@ -80,6 +89,8 @@ public sealed class RecurringCrudTests : IDisposable
         var updatedItem = Assert.Single(afterUpdate!.Items);
         Assert.Equal(created.Id, updatedItem.Id);
         Assert.Equal("Fuel reserve revised", updatedItem.Name);
+        Assert.Null(updatedItem.ExpenseItemId);
+        Assert.Null(updatedItem.Bucket);
         Assert.Equal(1450m, updatedItem.Amount);
         Assert.Equal(RecurrenceFrequency.Monthly, updatedItem.Frequency);
         Assert.True(updatedItem.LastDay);

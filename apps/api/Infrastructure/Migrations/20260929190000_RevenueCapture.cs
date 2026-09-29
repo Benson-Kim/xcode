@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -50,11 +50,6 @@ namespace Auth.Api.Infrastructure.Migrations
                 name: "IX_RevenueRecords_OrganizationId_BusinessDate",
                 table: "RevenueRecords",
                 columns: new[] { "OrganizationId", "BusinessDate" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_RevenueRecords_OrganizationId_VehicleId",
-                table: "RevenueRecords",
-                columns: new[] { "OrganizationId", "VehicleId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_RevenueRecords_OrganizationId_VehicleId_BusinessDate",

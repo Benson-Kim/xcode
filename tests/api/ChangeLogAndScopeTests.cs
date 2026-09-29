@@ -73,8 +73,9 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         var mine = await Id(await owner.PostAsJsonAsync("/setup/vehicles", new SaveVehicle(north, "KDA 482M", new DateOnly(2026, 1, 1), 15000m, "Add")));
         var theirs = await Id(await owner.PostAsJsonAsync("/setup/vehicles", new SaveVehicle(south, "KDB 111A", new DateOnly(2026, 1, 1), 15000m, "Add")));
         var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
-        SaveRecurring Cost(string name, params VehicleShare[] shares) => new(name, RecurringKind.Cost, CostCategory.FixedCommitments,
-            shares.Sum(x => x.Amount), RecurrenceFrequency.Monthly, 1, false, today, null, [.. shares], "Add " + name);
+        var items = new Dictionary<string, Guid> { ["Office rent"] = await ExpenseItemTestData.Id(owner, "Office rent"), ["Insurance"] = await ExpenseItemTestData.Id(owner, "Insurance") };
+        SaveRecurring Cost(string name, params VehicleShare[] shares) => new(name, RecurringKind.Cost, null,
+            shares.Sum(x => x.Amount), RecurrenceFrequency.Monthly, 1, false, today, null, [.. shares], "Add " + name, items[name]);
         await Id(await owner.PostAsJsonAsync("/setup/recurring", Cost("Office rent", new VehicleShare(mine, 500m), new VehicleShare(theirs, 500m))));
         await Id(await owner.PostAsJsonAsync("/setup/recurring", Cost("Insurance", new VehicleShare(mine, 900m))));
 
@@ -104,6 +105,54 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         var next = (await owner.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring?page=2&pageSize=1"))!;
         Assert.Equal(["Insurance", "Office rent"], [Assert.Single(all.Items).Name, Assert.Single(next.Items).Name]);
         Assert.False(next.Items[0].Partial);
+    }
+
+    // What another writer's change-log entry does to the organization row it shares with every write.
+    private const string BumpChangeLog = "UPDATE \"Organizations\" SET \"SettingsVersion\" = \"SettingsVersion\" + 1";
+
+    [Fact]
+    public async Task WritesToDifferentRecordsRetryWhenOnlyTheChangeLogCollides()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var north = await Id(await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("North", "Add North")));
+        var south = await Id(await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("South", "Add South")));
+
+        // Each rename's change-log entry collides with another writer's entry for a different record: the unit of
+        // work runs again from scratch, in a new transaction, and succeeds.
+        foreach (var (id, name) in new[] { (north, "North Star"), (south, "South Line") })
+        {
+            app.Database.Reset();
+            app.Database.Interleave("Organizations", BumpChangeLog);
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/setup/companies/{id}", new SaveCompany(name, "Rename"))).StatusCode);
+            Assert.Equal(2, app.Database.Transactions);
+        }
+        var companies = (await owner.GetFromJsonAsync<Page<CompanyDto>>("/setup/companies"))!.Items;
+        Assert.Equal(["North Star", "South Line"], companies.Select(x => x.Name).Order());
+        Assert.Equal(2, (await History(owner)).Count(x => x.Reason == "Rename"));
+
+        // A collision that keeps happening gives up after three retries.
+        app.Database.Reset();
+        app.Database.Interleave("Organizations", BumpChangeLog, times: 4);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await owner.PutAsJsonAsync($"/setup/companies/{north}", new SaveCompany("North Again", "Rename"))).StatusCode);
+        Assert.Equal(4, app.Database.Transactions);
+    }
+
+    [Fact]
+    public async Task AStaleRecordStillConflictsAtOnce()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var clerk = (await owner.GetFromJsonAsync<Page<PersonDto>>("/setup/people"))!.Items.Single(x => x.Email == RevenueClerk);
+
+        // Someone else saves this person between this save's read and its write: a real conflict, so no retry.
+        app.Database.Reset();
+        app.Database.Interleave("Memberships", "UPDATE \"Memberships\" SET \"Version\" = \"Version\" + 1");
+        using var stale = await owner.PutAsJsonAsync($"/setup/people/{clerk.Id}", new SavePerson(clerk.FirstName, "Renamed", clerk.Email,
+            clerk.PhoneNumber, clerk.Role, "all", [], [], [.. clerk.Permissions], clerk.ApprovalLimit, clerk.Version));
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal(1, app.Database.Transactions);
     }
 
     [Fact]

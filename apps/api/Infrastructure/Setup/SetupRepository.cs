@@ -2,6 +2,7 @@ using Auth.Domain;
 using System.Text.Json;
 using Auth.Application;
 using Auth.Application.Setup;
+using Auth.Domain;
 using Auth.Domain.Setup;
 using Microsoft.EntityFrameworkCore;
 
@@ -117,6 +118,18 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         .Include(v => v.Targets)
         .SingleOrDefaultAsync(v => v.Id == id, ct);
 
+    public async Task<IReadOnlyDictionary<Guid, FleetVehicle>> VehiclesById(SetupActor actor, IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        var wanted = ids.Distinct().ToArray();
+        return await VisibleVehicles(actor).AsNoTracking().Where(v => wanted.Contains(v.Id)).ToDictionaryAsync(v => v.Id, ct);
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, PsvCompany>> CompaniesById(SetupActor actor, IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        var wanted = ids.Distinct().ToArray();
+        return await VisibleCompanies(actor).AsNoTracking().Where(c => wanted.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
+    }
+
     public Task<bool> RegistrationExists(Guid organizationId, string registration, CancellationToken ct)
         => db
         .Set<FleetVehicle>()
@@ -132,6 +145,9 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
 
     public async Task<int> FirstDayOfWeek(CancellationToken ct) =>
         await db.Localizations.AsNoTracking().Select(x => (int?)x.FirstDayOfWeek).SingleOrDefaultAsync(ct) ?? 1;
+
+    public async Task<string> Currency(CancellationToken ct) =>
+        await db.Localizations.AsNoTracking().Select(x => x.Currency).SingleOrDefaultAsync(ct) ?? new OrganizationLocalization().Currency;
 
     public async Task<Page<RecurringDto>> Recurring(SetupActor actor, int page, int pageSize, CancellationToken ct)
     {
@@ -160,6 +176,11 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 v.LastDay,
                 v.Start,
                 v.End,
+                v.ExpenseItemId,
+                ExpenseItemName = db.Set<ExpenseItem>().Where(e => e.Id == v.ExpenseItemId).Select(e => e.Name).FirstOrDefault(),
+                v.Bucket,
+                v.Note,
+                v.Month,
                 StoppedFrom = db.Set<RecurringItem>().Where(i => i.Id == v.ItemId).Select(i => i.StoppedFrom).First(),
                 Allocations = v.Allocations.Where(a => visibleIds.Contains(a.VehicleId)).Select(a => new
                 {
@@ -180,10 +201,10 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 var vehicle = allocationVehicles.GetValueOrDefault(a.VehicleId);
                 var active = vehicle is null || vehicle.LeftOn is null || vehicle.LeftOn > actor.Today;
                 return new AllocationDto(a.VehicleId, a.Amount, vehicle?.Registration, active);
-            }).ToList());
+            }).ToList();
             return new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
                 allocations.Where(a => a.Active).Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
-                allocations, v.Allocations.Count != v.AllocationCount);
+                allocations, v.Allocations.Count != v.AllocationCount, v.ExpenseItemId, v.ExpenseItemName, v.Bucket, v.Note, v.Month);
         }).ToList(), page, pageSize, total);
     }
 
@@ -208,7 +229,7 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             {
                 var version = item.DueOn(day);
                 var share = version?.Allocations.SingleOrDefault(a => a.VehicleId == vehicleId);
-                if (version is not null && share is not null) postings.Add(new(item.Id, version.Id, day, version.Name, version.Kind, version.Category, share.Amount));
+                if (version is not null && share is not null) postings.Add(new(item.Id, version.Id, day, version.Name, version.Kind, version.Category, share.Amount, version.Bucket));
             }
         }
         return new(vehicleId, from, through, postings.Where(p => p.Kind == RecurringKind.Cost).Sum(p => p.Amount),
@@ -221,9 +242,11 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         var companies = VisibleCompanies(actor).Select(c => c.Id);
         var completeItems = db.Set<RecurringItem>().Where(i => !i.Versions.Any(v => v.Allocations.Any(a => !vehicles.Contains(a.VehicleId)))).Select(i => i.Id);
         var revenueRecords = db.Set<RevenueRecord>().Where(r => vehicles.Contains(r.VehicleId)).Select(r => r.Id);
+        // The expense catalog is organization-wide; investment changes are logged against their vehicle.
         var query = db.Set<OrganizationSettingsVersion>().AsNoTracking().Where(v => actor.AllCompanies ||
             (v.Section == "companies" && companies.Contains(v.EntityId)) || (v.Section == "vehicles" && vehicles.Contains(v.EntityId)) ||
-            (v.Section == "recurring" && completeItems.Contains(v.EntityId)) ||
+            (v.Section == "recurring" && completeItems.Contains(v.EntityId)) || v.Section == "expenses" ||
+            (v.Section == "investment" && vehicles.Contains(v.EntityId)) ||
             (v.Section == "revenue" && revenueRecords.Contains(v.EntityId)));
         var entries = await query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize).Take(pageSize)
             .Select(v => new HistoryEntry(v.Version, v.Section, v.EntityId, v.Reason, v.OccurredAt, v.ActorId,
@@ -239,7 +262,69 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
 
     public void Add(RecurringItem item) => db.Set<RecurringItem>().Add(item);
 
-    public async Task RecordChange(SetupActor actor, string section, Guid entityId, object? before, object after, string reason, CancellationToken ct)
+    public async Task<Page<ExpenseCategoryDto>> ExpenseCategories(DateOnly today, int page, int pageSize, CancellationToken ct)
+    {
+        var query = db.Set<ExpenseCategory>().AsNoTracking();
+        var total = await query.CountAsync(ct);
+        var categories = await query.OrderBy(c => c.Name).ThenBy(c => c.Id).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        var ids = categories.Select(c => c.Id).ToList();
+        // One query for the page's items, grouped in memory: O(page + its items), not a query per category.
+        var items = (await db.Set<ExpenseItem>().AsNoTracking().Where(i => ids.Contains(i.CategoryId))
+            .OrderBy(i => i.Name).ThenBy(i => i.Id).ToListAsync(ct)).ToLookup(i => i.CategoryId);
+        return new(categories.Select(c => new ExpenseCategoryDto(c.Id, c.Name, c.Bucket, c.ActiveOn(today), c.StoppedOn,
+            items[c.Id].Select(i => new ExpenseItemDto(i.Id, i.CategoryId, i.Name, i.ActiveOn(today), i.StoppedOn)).ToList())).ToList(),
+            page, pageSize, total);
+    }
+
+    // Items in use in categories in use: one query, O(items).
+    private IQueryable<ExpenseItemOption> ActiveExpenseItems(DateOnly today, Guid? id = null) =>
+        from item in db.Set<ExpenseItem>().AsNoTracking()
+        join category in db.Set<ExpenseCategory>().AsNoTracking() on item.CategoryId equals category.Id
+        where (item.StoppedOn == null || item.StoppedOn > today) && (category.StoppedOn == null || category.StoppedOn > today)
+            && (id == null || item.Id == id)
+        orderby category.Name, item.Name, item.Id
+        select new ExpenseItemOption(item.Id, item.Name, category.Id, category.Name, category.Bucket);
+
+    public async Task<IReadOnlyList<ExpenseItemOption>> ExpenseItemOptions(DateOnly today, CancellationToken ct) =>
+        await ActiveExpenseItems(today).ToListAsync(ct);
+
+    public Task<ExpenseItemOption?> ActiveExpenseItem(Guid id, DateOnly today, CancellationToken ct) =>
+        ActiveExpenseItems(today, id).SingleOrDefaultAsync(ct);
+
+    public Task<ExpenseCategory?> ExpenseCategory(Guid id, CancellationToken ct) =>
+        db.Set<ExpenseCategory>().SingleOrDefaultAsync(c => c.Id == id, ct);
+
+    public Task<ExpenseItem?> ExpenseItem(Guid id, CancellationToken ct) =>
+        db.Set<ExpenseItem>().SingleOrDefaultAsync(i => i.Id == id, ct);
+
+    public Task<bool> ExpenseCategoryNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct) =>
+        db.Set<ExpenseCategory>().AnyAsync(c => c.OrganizationId == organizationId && c.NormalizedName == normalizedName && c.Id != except, ct);
+
+    public Task<bool> ExpenseItemNameExists(Guid organizationId, Guid categoryId, string normalizedName, Guid? except, CancellationToken ct) =>
+        db.Set<ExpenseItem>().AnyAsync(i => i.OrganizationId == organizationId && i.CategoryId == categoryId && i.NormalizedName == normalizedName && i.Id != except, ct);
+
+    public async Task<InvestmentDto> Investment(Guid vehicleId, CancellationToken ct)
+    {
+        var entries = await db.Set<VehicleInvestment>().AsNoTracking().Where(x => x.VehicleId == vehicleId)
+            .Select(x => new InvestmentEntryDto(x.Id, x.Date, x.Description, x.Amount,
+                db.Memberships.Where(m => m.UserId == x.RecordedBy).Select(m => m.FirstName + " " + m.LastName).FirstOrDefault() ?? "", x.RecordedAt))
+            .ToListAsync(ct);
+        // Sorted and summed here: SQLite, used in tests, cannot order by instants or sum decimals.
+        return new(vehicleId, entries.Sum(x => x.Amount), null, null, [.. entries.OrderBy(x => x.Date).ThenBy(x => x.RecordedAt)]);
+    }
+
+    public Task<VehicleInvestment?> InvestmentEntry(Guid id, CancellationToken ct) =>
+        db.Set<VehicleInvestment>().SingleOrDefaultAsync(x => x.Id == id, ct);
+
+    public void Add(ExpenseCategory category) => db.Set<ExpenseCategory>().Add(category);
+
+    public void Add(ExpenseItem item) => db.Set<ExpenseItem>().Add(item);
+
+    public void Add(VehicleInvestment entry) => db.Set<VehicleInvestment>().Add(entry);
+
+    public void Remove(VehicleInvestment entry) => db.Set<VehicleInvestment>().Remove(entry);
+
+    public async Task RecordChange(SetupActor actor, string section, Guid entityId, object? before, object? after, string reason, CancellationToken ct)
     {
         var organization = await organizations.Get(ct) ?? throw new UnauthorizedAccessException();
         organization.SettingsChanged();

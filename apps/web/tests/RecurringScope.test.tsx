@@ -28,6 +28,7 @@ it("opens an item shared with vehicles outside your scope read-only", async () =
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/recurring/vehicle-options")) return new Response(JSON.stringify([vehicle]), { status: 200 });
+      if (url.includes("/expense-items/options")) return new Response(JSON.stringify([]), { status: 200 });
       return new Response(JSON.stringify({ items: [shared], pageNumber: 1, pageSize: 25, total: 1 }), { status: 200 });
     }),
   );

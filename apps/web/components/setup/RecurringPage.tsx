@@ -4,12 +4,14 @@ import { useState } from "react";
 import { useAppearance } from "../../lib/appearance";
 import { useResource, useStreamedList } from "../../lib/data";
 import { kes, plural } from "../../lib/format";
-import { Banner, Button, CellNote, DataTable, FormSkeleton, PageHeader, RowButton, SegmentedControl, Spacer, StatusBadge, Td, Toolbar, Tr } from "../ui";
-import { recurringCategoryNames, type RecurringItem, type VehicleOption } from "./shared";
-import { formatDateOnly, recurringFrequency, recurringMonthlyEstimate, recurringNextPosting, todayDateOnly } from "../recurringPresentation";
+import type { ExpenseItemOption } from "../../lib/types";
+import { Banner, Button, CellNote, DataTable, FormSkeleton, PageHeader, RowButton, SegmentedControl, SelectInput, Spacer, StatusBadge, Td, Toolbar, Tr } from "../ui";
+import { expenseBucketNames, recurringCategoryNames, type RecurringItem, type VehicleOption } from "./shared";
+import { formatDateOnly, recurringFrequency, recurringMonthlyEstimate, recurringNextPosting } from "../recurringPresentation";
 import { RecurringEditor } from "../RecurringEditor";
 
 type Filter = "all" | "cost" | "savings";
+type Status = "all" | "running" | "stopped";
 
 export function RecurringPage({
   canManage,
@@ -22,10 +24,14 @@ export function RecurringPage({
 }) {
   const { appearance } = useAppearance();
   const recurring = useStreamedList<RecurringItem>("setup/recurring");
-  // Viewing needs only commitments access: shares carry their registration. The vehicle picker is for editors.
-  const options = useResource<VehicleOption[]>(canManage ? "setup/recurring/vehicle-options" : null);
   const [filter, setFilter] = useState<Filter>("all");
+  const [companyFilter, setCompanyFilter] = useState("all");
+  const [status, setStatus] = useState<Status>("all");
   const [editing, setEditing] = useState<string | null>(newForVehicle ? "new" : (openItem ?? null));
+  // Viewing needs only commitments access: shares carry their registration and costs their item's name. The vehicle
+  // picker is for editors; the expense item picker loads once an editor opens.
+  const options = useResource<VehicleOption[]>(canManage ? "setup/recurring/vehicle-options" : null);
+  const expenseItems = useResource<ExpenseItemOption[]>(canManage && editing ? "setup/expense-items/options" : null);
   const items = recurring.items;
 
   if (editing) {
@@ -36,11 +42,11 @@ export function RecurringPage({
       const stillLoading = recurring.loading || recurring.pendingRows > 0;
       return (
         <section>
-          <PageHeader title="Recurring cost or saving" />
+          <PageHeader title="Scheduled expense or saving" />
           {recurring.error || !stillLoading ? (
             <Banner className="mt-5">{recurring.error || "This item is no longer in your list."}</Banner>
           ) : (
-            <FormSkeleton cards={3} label="Loading the recurring item" />
+            <FormSkeleton cards={3} label="Loading the scheduled item" />
           )}
         </section>
       );
@@ -50,6 +56,8 @@ export function RecurringPage({
         item={item}
         vehiclesLoading={canManage && options.loading}
         vehicles={editorVehicles(options.data ?? [], item)}
+        expenseItems={expenseItems.data}
+        loadError={options.error || expenseItems.error}
         preselectVehicle={editing === "new" ? newForVehicle : undefined}
         canEdit={canManage && !item?.partial}
         onCancel={() => setEditing(null)}
@@ -61,15 +69,24 @@ export function RecurringPage({
     );
   }
 
-  const today = appearance?.businessDate ?? todayDateOnly();
+  // Due dates count from the organization's business date, never the computer clock. Until the appearance has
+  // loaded, next postings wait for it.
+  const today = appearance?.businessDate;
   const hasActiveVehicle = (item: RecurringItem) => item.allocations.some((allocation) => allocation.active !== false);
-  const finished = (item: RecurringItem) => (!hasActiveVehicle(item) || item.stoppedFrom || (item.end && item.end < today) ? 1 : 0);
+  const finished = (item: RecurringItem) => (!hasActiveVehicle(item) || item.stoppedFrom || (today && item.end && item.end < today) ? 1 : 0);
+  // Companies come from the vehicle options, which only editors load: allocations carry no company.
+  const companyOf = new Map((options.data ?? []).map((vehicle) => [vehicle.id, vehicle.companyId]));
+  const companies = [...new Map((options.data ?? []).map((vehicle) => [vehicle.companyId, vehicle.companyName])).entries()].sort((left, right) =>
+    left[1].localeCompare(right[1]),
+  );
   const visible = items
     .filter((item) => filter === "all" || (filter === "cost" ? item.kind === 1 : item.kind === 2))
+    .filter((item) => companyFilter === "all" || item.allocations.some((allocation) => companyOf.get(allocation.vehicleId) === companyFilter))
+    .filter((item) => status === "all" || (status === "stopped") === Boolean(finished(item)))
     .sort((left, right) => finished(left) - finished(right) || left.name.localeCompare(right.name));
   return (
     <section>
-      <PageHeader title="Recurring costs and savings" description="Set once. Each posts to its vehicles on its own dates and shows in their reports." />
+      <PageHeader title="Scheduled expenses and savings" description="Set once. Each posts to its vehicles on its own dates and shows in their reports." />
       {(recurring.error || options.error) && <Banner className="mt-5">{recurring.error || options.error}</Banner>}
       <Toolbar>
         <SegmentedControl
@@ -82,8 +99,31 @@ export function RecurringPage({
           value={filter}
           onChange={setFilter}
         />
+        {companies.length > 1 && (
+          <>
+            <label htmlFor="recurring-company" className="text-[13px] text-grey">
+              Company
+            </label>
+            <SelectInput id="recurring-company" density="compact" inline value={companyFilter} onChange={(event) => setCompanyFilter(event.target.value)}>
+              <option value="all">All companies</option>
+              {companies.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </SelectInput>
+          </>
+        )}
+        <label htmlFor="recurring-status" className="text-[13px] text-grey">
+          Show
+        </label>
+        <SelectInput id="recurring-status" density="compact" inline value={status} onChange={(event) => setStatus(event.target.value as Status)}>
+          <option value="all">All</option>
+          <option value="running">Running</option>
+          <option value="stopped">Stopped</option>
+        </SelectInput>
         <Spacer />
-        {canManage && <Button onClick={() => setEditing("new")}>Add recurring cost or saving</Button>}
+        {canManage && <Button onClick={() => setEditing("new")}>Add scheduled expense or saving</Button>}
       </Toolbar>
       <DataTable
         columns={[
@@ -96,20 +136,25 @@ export function RecurringPage({
         ]}
         loading={recurring.loading}
         pendingRows={recurring.pendingRows}
-        loadingLabel="Loading recurring costs and savings"
+        loadingLabel="Loading scheduled expenses and savings"
         isEmpty={!visible.length}
         emptyMessage="Nothing here yet."
       >
         {visible.map((item) => {
           const active = hasActiveVehicle(item);
-          const next = item.stoppedFrom || !active ? null : recurringNextPosting(item, today);
+          const next = item.stoppedFrom || !active || !today ? null : recurringNextPosting(item, today);
           const registrations = item.allocations.map((allocation) => allocation.registration).filter((registration): registration is string => Boolean(registration));
           const retiredCount = item.allocations.filter((allocation) => allocation.active === false).length;
+          // A cost counts in its item's bucket; rows saved before expense items keep their old cost type.
+          const countsAs = item.kind === 2 ? "Savings" : item.bucket ? expenseBucketNames[item.bucket] : recurringCategoryNames[item.category || 4];
           return (
             <Tr key={item.id}>
               <Td label="Item">
                 <RowButton onClick={() => setEditing(item.id)}>{item.name}</RowButton>
-                <CellNote>{item.kind === 2 ? "Savings" : recurringCategoryNames[item.category || 4]}</CellNote>
+                <CellNote>
+                  {item.note ? `${item.note}. ` : ""}
+                  {countsAs}
+                </CellNote>
               </Td>
               <Td label="Amount each time" numeric>
                 {kes(item.amount)}
@@ -131,7 +176,17 @@ export function RecurringPage({
                 {item.end ? ` to ${formatDateOnly(item.end)}` : <CellNote>No end date</CellNote>}
               </Td>
               <Td label="Next posting">
-                {item.stoppedFrom ? <StatusBadge tone="off">Stopped</StatusBadge> : !active ? <StatusBadge tone="off">No active vehicles</StatusBadge> : next ? formatDateOnly(next) : <StatusBadge tone="off">Finished</StatusBadge>}
+                {item.stoppedFrom ? (
+                  <StatusBadge tone="off">Stopped</StatusBadge>
+                ) : !active ? (
+                  <StatusBadge tone="off">No active vehicles</StatusBadge>
+                ) : !today ? (
+                  "—"
+                ) : next ? (
+                  formatDateOnly(next)
+                ) : (
+                  <StatusBadge tone="off">Finished</StatusBadge>
+                )}
               </Td>
             </Tr>
           );

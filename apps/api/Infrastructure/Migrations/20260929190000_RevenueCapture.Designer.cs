@@ -501,8 +501,6 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasIndex("OrganizationId", "BusinessDate");
 
-                    b.HasIndex("OrganizationId", "VehicleId");
-
                     b.HasIndex("OrganizationId", "VehicleId", "BusinessDate")
                         .IsUnique();
 

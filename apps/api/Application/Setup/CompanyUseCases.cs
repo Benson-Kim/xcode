@@ -13,7 +13,7 @@ public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository 
 
     public Task<Guid> Save(Guid? id, SaveCompany input, CancellationToken ct) => execution.Write("companies.manage", async actor =>
     {
-        var reason = SetupPagination.Reason(input.Reason);
+        var reason = SetupPagination.OptionalReason(input.Reason);
         var name = SetupValue.Name(input.Name);
         var company = id is null ? new PsvCompany(actor.OrganizationId, name)
             : await repository.Company(actor, id.Value, ct) ?? throw new KeyNotFoundException();
@@ -25,11 +25,13 @@ public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository 
         if (await repository.CompanyNameExists(actor.OrganizationId, name.ToUpperInvariant(), id, ct))
             throw new ArgumentException("Another company already has this name.");
         var before = id is null ? null : Snapshot(company);
+        var previous = company.Name;
         if (id is not null && !company.Rename(name))
             return company.Id;
         if (id is null)
             repository.Add(company);
 
+        reason ??= SetupPagination.Automatic(id is null ? $"Added company {company.Name}" : $"Renamed company {previous} to {company.Name}");
         await repository.RecordChange(
             actor, "companies", company.Id, before, Snapshot(company), reason, ct);
         return company.Id;
@@ -38,7 +40,7 @@ public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository 
     public Task<Guid> SetArchived(Guid id, bool archived, CompanyLifecycleRequest input, CancellationToken ct)
         => execution.Write("companies.manage", async actor =>
         {
-            var reason = SetupPagination.Reason(input.Reason);
+            var reason = SetupPagination.OptionalReason(input.Reason);
             var company = await repository.Company(actor, id, ct) ?? throw new KeyNotFoundException();
             var before = Snapshot(company);
             bool changed;
@@ -55,7 +57,8 @@ public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository 
                 changed = company.Restore();
             }
             if (changed)
-                await repository.RecordChange(actor, "companies", company.Id, before, Snapshot(company), reason, ct);
+                await repository.RecordChange(actor, "companies", company.Id, before, Snapshot(company),
+                    reason ?? SetupPagination.Automatic($"{(archived ? "Archived" : "Restored")} company {company.Name}"), ct);
             return company.Id;
         }, ct);
 

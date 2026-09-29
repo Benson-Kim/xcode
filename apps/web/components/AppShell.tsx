@@ -8,6 +8,7 @@ import { PreferencesView } from "./PreferencesView";
 import { Brand } from "./Brand";
 import {
   CompaniesPage,
+  ExpenseCategoriesPage,
   HistoryPage,
   RecurringPage,
   VehiclesPage,
@@ -50,9 +51,9 @@ import {
 import type { PermissionGroup, View } from "../lib/types";
 import type { RevenueDashboard } from "@xcode/shared";
 
-type NavItem = { id: View; label: string; permission?: string };
+type NavItem = { id: View; label: string; permission?: string | string[] };
 
-// Every menu entry names the one permission that shows it
+// Every menu entry names the permission that shows it, or the permissions any one of which shows it
 const topLevel: NavItem[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "revenue", label: "Revenue", permission: "revenue.view" },
@@ -61,8 +62,13 @@ const setupGroup: NavItem[] = [
   { id: "companies", label: "PSV companies", permission: "companies.manage" },
   { id: "vehicles", label: "Vehicles", permission: "vehicles.manage" },
   {
+    id: "expenses",
+    label: "Expense categories",
+    permission: ["expenses.setup", "expenses.view", "commitments.view"],
+  },
+  {
     id: "recurring",
-    label: "Recurring costs and savings",
+    label: "Scheduled expenses and savings",
     permission: "commitments.view",
   },
   { id: "people", label: "People and access", permission: "people.view" },
@@ -145,7 +151,8 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
     [session],
   );
   const { can } = sessionState;
-  const allowed = (item: NavItem) => !item.permission || can(item.permission);
+  const allowed = (item: NavItem) =>
+    !item.permission || [item.permission].flat().some(can);
   const displayName = session
     ? `${session.firstName} ${session.lastName}`.trim()
     : "";
@@ -359,6 +366,8 @@ function Page({
         }
       />
     );
+  if (view === "expenses")
+    return <ExpenseCategoriesPage canManage={can("expenses.setup")} />;
   if (view === "recurring")
     return <RecurringPage canManage={can("commitments.manage")} {...params} />;
   if (view === "people")

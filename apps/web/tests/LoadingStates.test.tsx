@@ -1,7 +1,7 @@
 import { act, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { CompaniesPage, HistoryPage, RecurringPage, VehiclesPage } from "../components/setup";
+import { CompaniesPage, ExpenseCategoriesPage, HistoryPage, RecurringPage, VehiclesPage } from "../components/setup";
 import { PeopleAccessView } from "../components/PeopleAccessView";
 import { OrganizationSettingsView } from "../components/OrganizationSettingsView";
 import { PreferencesView } from "../components/PreferencesView";
@@ -27,7 +27,8 @@ beforeEach(() => {
 const lists: [string, ReactNode, string, string][] = [
   ["PSV companies", <CompaniesPage key="companies" />, "Loading companies", "No PSV companies yet. Add the first one above."],
   ["vehicles", <VehiclesPage key="vehicles" />, "Loading vehicles", "No vehicles yet. Add the first one above."],
-  ["recurring items", <RecurringPage key="recurring" canManage />, "Loading recurring costs and savings", "Nothing here yet."],
+  ["expense items", <ExpenseCategoriesPage key="expenses" canManage />, "Loading expense items", "No items here yet."],
+  ["scheduled items", <RecurringPage key="recurring" canManage />, "Loading scheduled expenses and savings", "Nothing here yet."],
   ["the change log", <HistoryPage key="history" />, "Loading the change log", "No setup changes yet."],
   ["people", <PeopleAccessView key="people" />, "Loading people", "Nobody in your scope yet."],
 ];

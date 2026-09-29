@@ -1,3 +1,4 @@
+using System.Globalization;
 using Auth.Domain.Setup;
 
 namespace Auth.Application.Setup;
@@ -15,7 +16,7 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
 
     public Task<Guid> Save(Guid? id, SaveVehicle input, CancellationToken ct) => execution.Write("vehicles.manage", async actor =>
     {
-        var reason = SetupPagination.Reason(input.Reason);
+        var reason = SetupPagination.OptionalReason(input.Reason);
         var registration = new VehicleRegistration(input.Registration);
         SetupValue.Money(input.WeeklyTarget);
         if (input.JoinedOn == default || input.JoinedOn > actor.Today)
@@ -32,32 +33,52 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
         if (id is null && await repository.RegistrationExists(actor.OrganizationId, registration.Value, ct))
             throw new ArgumentException("This registration already exists.");
         var before = id is null ? null : Snapshot(vehicle);
+        var (previousCompany, previousJoin, targetCount) = (vehicle.CompanyId, vehicle.JoinedOn, vehicle.Targets.Count);
         if (id is not null && !vehicle.Update(company.Id, input.JoinedOn, input.WeeklyTarget, actor.Today)) return vehicle.Id;
         if (id is null) repository.Add(vehicle);
+        if (reason is null)
+        {
+            var currency = await repository.Currency(ct);
+            string Target(decimal amount, DateOnly from) => $"{currency} {Amount(amount)} from {Date(from)}";
+            // The target an edit sets takes effect today, or on the join date if that is later (see FleetVehicle.Update).
+            var effective = actor.Today < vehicle.JoinedOn ? vehicle.JoinedOn : actor.Today;
+            var newTarget = vehicle.Targets.Skip(targetCount).LastOrDefault(t => t.EffectiveFrom == effective && t.WeeklyAmount == input.WeeklyTarget);
+            reason = id is null
+                ? $"Added vehicle {vehicle.Registration} to {company.Name} with a weekly target of {Target(input.WeeklyTarget, vehicle.JoinedOn)}"
+                : string.Join("; ", new[]
+                {
+                    previousCompany != vehicle.CompanyId ? $"moved {vehicle.Registration} to {company.Name}" : null,
+                    previousJoin != vehicle.JoinedOn ? $"changed when {vehicle.Registration} joined the fleet to {Date(vehicle.JoinedOn)}" : null,
+                    newTarget is not null ? $"changed the weekly target of {vehicle.Registration} to {Target(newTarget.WeeklyAmount, newTarget.EffectiveFrom)}" : null
+                }.OfType<string>().DefaultIfEmpty($"changed vehicle {vehicle.Registration}"));
+            reason = SetupPagination.Automatic(char.ToUpperInvariant(reason[0]) + reason[1..]);
+        }
         await repository.RecordChange(actor, "vehicles", vehicle.Id, before, Snapshot(vehicle), reason, ct);
         return vehicle.Id;
     }, ct);
 
     public Task<Guid> Retire(Guid id, VehicleLifecycleRequest input, CancellationToken ct) => execution.Write("vehicles.manage", async actor =>
     {
-        var reason = SetupPagination.Reason(input.Reason);
+        var reason = SetupPagination.OptionalReason(input.Reason);
         var vehicle = await repository.Vehicle(actor, id, ct) ?? throw new KeyNotFoundException();
         var before = Snapshot(vehicle);
         if (vehicle.Retire(input.LeftOn, actor.Today))
-            await repository.RecordChange(actor, "vehicles", vehicle.Id, before, Snapshot(vehicle), reason, ct);
+            await repository.RecordChange(actor, "vehicles", vehicle.Id, before, Snapshot(vehicle),
+                reason ?? $"Vehicle {vehicle.Registration} left the fleet on {Date(input.LeftOn)}", ct);
         return vehicle.Id;
     }, ct);
 
     public Task<Guid> Restore(Guid id, VehicleRestoreRequest input, CancellationToken ct) => execution.Write("vehicles.manage", async actor =>
     {
-        var reason = SetupPagination.Reason(input.Reason);
+        var reason = SetupPagination.OptionalReason(input.Reason);
         var vehicle = await repository.Vehicle(actor, id, ct) ?? throw new KeyNotFoundException();
         var company = await repository.Company(actor, vehicle.CompanyId, ct) ?? throw new KeyNotFoundException();
         if (!company.ActiveOn(actor.Today))
             throw new ArgumentException("Restore the vehicle's archived company first.");
         var before = Snapshot(vehicle);
         if (vehicle.Restore())
-            await repository.RecordChange(actor, "vehicles", vehicle.Id, before, Snapshot(vehicle), reason, ct);
+            await repository.RecordChange(actor, "vehicles", vehicle.Id, before, Snapshot(vehicle),
+                reason ?? $"Vehicle {vehicle.Registration} returned to the fleet", ct);
         return vehicle.Id;
     }, ct);
 
@@ -71,6 +92,11 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
         _ = await repository.Vehicle(actor, id, ct) ?? throw new KeyNotFoundException();
         return await repository.Report(actor, id, from, through, ct);
     }, ct);
+
+    private static string Date(DateOnly date) => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private static string Amount(decimal amount) =>
+        amount.ToString(decimal.Truncate(amount) == amount ? "#,##0" : "#,##0.00", CultureInfo.InvariantCulture);
 
     private static object Snapshot(FleetVehicle vehicle) => new
     {

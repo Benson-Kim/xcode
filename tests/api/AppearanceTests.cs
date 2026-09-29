@@ -36,6 +36,21 @@ public sealed class AppearanceTests : IDisposable
         Assert.False(appearance.GetProperty("reducedMotion").GetBoolean());
     }
 
+    // The phone enforces the organization's wrong-PIN policy offline, so every member can read it.
+    [Fact]
+    public async Task EveryMemberSeesTheWrongPinPolicy()
+    {
+        await app.SeedDemo();
+        using var clerk = await app.SignIn(RevenueClerk);
+        var defaults = await clerk.GetFromJsonAsync<JsonElement>("/setup/appearance");
+        Assert.Equal((5, 15), (defaults.GetProperty("lockoutThreshold").GetInt32(), defaults.GetProperty("lockoutMinutes").GetInt32()));
+
+        using var owner = await app.SignIn(Owner);
+        (await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy", new { value = new { lockoutThreshold = 3, lockoutMinutes = 60 } })).EnsureSuccessStatusCode();
+        var changed = await clerk.GetFromJsonAsync<JsonElement>("/setup/appearance");
+        Assert.Equal((3, 60), (changed.GetProperty("lockoutThreshold").GetInt32(), changed.GetProperty("lockoutMinutes").GetInt32()));
+    }
+
     [Fact]
     public async Task LogoUploadsAreCheckedRecordedAndShownToMembers()
     {
@@ -61,10 +76,14 @@ public sealed class AppearanceTests : IDisposable
         appearance = await clerk.GetFromJsonAsync<JsonElement>("/setup/appearance");
         Assert.Equal(JsonValueKind.Null, appearance.GetProperty("branding").GetProperty("logo").ValueKind);
 
+        // Contract C7: no typed reason is asked for, but one that is given is checked and kept.
+        (await owner.PutAsJsonAsync("/setup/organization/logo", new { dataUrl = Png, reason = "New brand for 2027" })).EnsureSuccessStatusCode();
+        (await owner.DeleteAsync("/setup/organization/logo?reason=Brand%20withdrawn")).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PutAsJsonAsync("/setup/organization/logo", new { dataUrl = Png, reason = new string('r', 501) })).StatusCode);
+
         var history = await owner.GetFromJsonAsync<JsonElement>("/setup/history");
-        var reasons = history.GetProperty("items").EnumerateArray().Select(entry => entry.GetProperty("reason").GetString()).ToList();
-        Assert.Contains("Updated logo", reasons);
-        Assert.Contains("Removed logo", reasons);
+        var reasons = history.GetProperty("items").EnumerateArray().Select(entry => entry.GetProperty("reason").GetString()).Reverse().ToList();
+        Assert.Equal(["Uploaded a new logo", "Removed the logo", "New brand for 2027", "Brand withdrawn"], reasons.Skip(reasons.Count - 4));
     }
 
     public void Dispose() => app.Dispose();
