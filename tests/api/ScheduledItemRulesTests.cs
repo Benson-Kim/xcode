@@ -162,6 +162,32 @@ public sealed class ScheduledItemRulesTests : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/recurring/{legacy}/stop", new StopRecurring(true, " "))).StatusCode);
     }
 
+    // Every cost posting carries a bucket, so clients can group by bucket alone. A legacy version whose stored bucket is
+    // missing (a row written before the backfill, or restored without it) still reports under the A2 mapping.
+    [Fact]
+    public async Task LegacyCostsWithoutAStoredBucketStillReportUnderTheirAssumedBucket()
+    {
+        await Setup();
+        await app.WithDb(async db =>
+        {
+            db.Provisioning = true;
+            var organizationId = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
+            RecurringItem Legacy(string name, CostCategory category) => new(organizationId, new RecurringDefinition(name, RecurringKind.Cost, category, 100m,
+                new RecurringSchedule(RecurrenceFrequency.Weekly, (int)Today.DayOfWeek), new DateOnly(2026, 3, 1), null, [new VehicleShare(vehicle, 100m)]));
+            db.AddRange(Legacy("Tyres", CostCategory.RepairsAndUpkeep), Legacy("Fuel", CostCategory.RunningCosts));
+            await db.SaveChangesAsync();
+            await db.Database.ExecuteSqlRawAsync("UPDATE \"RecurringVersion\" SET \"Bucket\" = NULL");
+        });
+        (await Create(Saving(RecurrenceFrequency.Weekly, (int)Today.DayOfWeek))).EnsureSuccessStatusCode();
+
+        var report = await owner.GetFromJsonAsync<VehicleReport>($"/setup/vehicles/{vehicle}/report?from={Today:yyyy-MM-dd}&through={Today:yyyy-MM-dd}");
+        Assert.Equal(ExpenseBucket.RepairsAndMaintenance, report!.Postings.Single(p => p.Name == "Tyres").Bucket);
+        Assert.Equal(ExpenseBucket.RecurringCharges, report.Postings.Single(p => p.Name == "Fuel").Bucket);
+        Assert.Null(report.Postings.Single(p => p.Kind == RecurringKind.Savings).Bucket);
+        var listed = (await owner.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items;
+        Assert.Equal(ExpenseBucket.RepairsAndMaintenance, listed.Single(x => x.Name == "Tyres").Bucket);
+    }
+
     [Theory]
     [InlineData("2027-03-14", true)]
     [InlineData("2027-03-13", false)]

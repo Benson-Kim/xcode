@@ -94,9 +94,17 @@ public sealed class Organization
           BusinessDate = businessDate;
           return true;
      }
-     public void ChangeTimeZone(OrganizationLocalization localization, TimeZoneId timeZone)
+     // The time zone sets the organization's calendar date, the latest a held business date may be. Anything that moves
+     // that date must leave a held business date on or before it.
+     public void EnsureBusinessDateWithin(DateOnly organizationCalendarDate)
+     {
+          if (BusinessDate > organizationCalendarDate)
+               throw new ArgumentException("The held business date would be in the future in that time zone. Change the business date first.");
+     }
+     public void ChangeTimeZone(OrganizationLocalization localization, TimeZoneId timeZone, DateOnly calendarDateInThatZone)
      {
           if (localization.OrganizationId != Id) throw new InvalidOperationException("Organization mismatch");
+          EnsureBusinessDateWithin(calendarDateInThatZone);
           localization.TimeZone = timeZone.Value;
           SettingsChanged();
      }
