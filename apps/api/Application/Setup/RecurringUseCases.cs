@@ -19,12 +19,25 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
         var definition = input.Definition();
         definition.Validate();
         if (definition.Start == default) throw new ArgumentException("Start date is required.");
+
+        var item = id is null ? null : await repository.RecurringItem(actor, id.Value, ct) ?? throw new KeyNotFoundException();
+        var existingAllocations = item?.Versions.OrderByDescending(v => v.Revision).First().Allocations
+            .Select(a => a.VehicleId).ToHashSet() ?? [];
         foreach (var share in definition.Allocations)
-            _ = await repository.Vehicle(actor, share.VehicleId, ct) ?? throw new KeyNotFoundException();
-        var item = id is null ? new RecurringItem(actor.OrganizationId, definition)
-            : await repository.RecurringItem(actor, id.Value, ct) ?? throw new KeyNotFoundException();
-        var before = id is null ? null : Snapshot(item);
-        if (id is null) repository.Add(item);
+        {
+            var vehicle = await repository.Vehicle(actor, share.VehicleId, ct) ?? throw new KeyNotFoundException();
+            var company = await repository.Company(actor, vehicle.CompanyId, ct) ?? throw new KeyNotFoundException();
+            var retainedRetiredVehicle = existingAllocations.Contains(vehicle.Id);
+            if ((!vehicle.ActiveOn(actor.Today) || !company.ActiveOn(actor.Today)) && !retainedRetiredVehicle)
+                throw new ArgumentException("New recurring shares must use active vehicles and companies.");
+        }
+
+        var before = item is null ? null : Snapshot(item);
+        if (item is null)
+        {
+            item = new RecurringItem(actor.OrganizationId, definition);
+            repository.Add(item);
+        }
         else
         {
             // The full existing allocation must also be in scope before an editor may change it.
@@ -59,6 +72,7 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
 
     private static object Snapshot(RecurringItem item) => new
     {
+        item.Id,
         item.StoppedFrom,
         Versions = item.Versions.Select(v => new
         {

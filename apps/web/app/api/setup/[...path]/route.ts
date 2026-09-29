@@ -52,7 +52,7 @@ async function proxy(
     return NextResponse.json({ status: "invalid_request" }, { status: 404 });
   const operation = path.map(encodeURIComponent).join("/");
   if (
-    !/^(companies|vehicles|recurring|history|preferences|appearance|organization\/logo|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy)|access\/(catalog|roles|scope-options)|people)(\/[^/]+)*$/.test(
+    !/^(companies|vehicles|recurring|history|preferences|appearance|organization\/logo|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy|businessDate)|access\/(catalog|roles|scope-options)|people)(\/[^/]+)*$/.test(
       operation,
     )
   )

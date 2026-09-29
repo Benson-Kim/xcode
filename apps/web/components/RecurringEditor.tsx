@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAppearance } from "../lib/appearance";
 import { apiRequest } from "../lib/data";
 import {
   formatDateOnly,
@@ -115,6 +116,8 @@ export function RecurringEditor({
   vehiclesLoading = false,
 }: Props) {
   const toast = useToast();
+  const { appearance } = useAppearance();
+  const today = appearance?.businessDate ?? todayDateOnly();
   const isNew = !item;
   const [name, setName] = useState(item?.name || "");
   const [kind, setKind] = useState(item?.kind || 1);
@@ -131,7 +134,7 @@ export function RecurringEditor({
         : String(item.day ?? 1)
       : "1",
   );
-  const [start, setStart] = useState(item?.start || todayDateOnly());
+  const [start, setStart] = useState(item?.start || today);
   const [end, setEnd] = useState(item?.end || "");
   const [noEnd, setNoEnd] = useState(!item?.end);
   const initialSelection =
@@ -161,7 +164,6 @@ export function RecurringEditor({
   const difference =
     Math.round(total * 100) - Math.round(allocationTotal * 100);
   const isBalanced = selected.length > 0 && total > 0 && difference === 0;
-  const today = todayDateOnly();
   const stopped = Boolean(item?.stoppedFrom);
   const startLocked = Boolean(item && item.start < today);
   const disabled = !canEdit || stopped || busy;
@@ -179,6 +181,8 @@ export function RecurringEditor({
   }
 
   function updateSelection(vehicleId: string, checked: boolean) {
+    const vehicle = vehicles.find((candidate) => candidate.id === vehicleId);
+    if (checked && vehicle?.active === false) return;
     const next = checked
       ? [...new Set([...selected, vehicleId])]
       : selected.filter((id) => id !== vehicleId);
@@ -199,7 +203,7 @@ export function RecurringEditor({
       ...new Set([
         ...selected,
         ...vehicles
-          .filter((vehicle) => vehicle.companyId === companyId)
+          .filter((vehicle) => vehicle.companyId === companyId && vehicle.active !== false)
           .map((vehicle) => vehicle.id),
       ]),
     ];
@@ -501,7 +505,7 @@ export function RecurringEditor({
               hint={
                 startLocked
                   ? "Already running. Changes start today."
-                  : "A start date before today also adds the earlier postings to past reports."
+                  : "A start date before the business date also adds the earlier postings to past reports."
               }
             >
               <TextInput
@@ -602,9 +606,9 @@ export function RecurringEditor({
                         className="grid min-h-13 grid-cols-[minmax(0,1fr)_170px] items-center gap-3 border-t border-divider max-[720px]:grid-cols-[minmax(0,1fr)_140px]"
                       >
                         <Choice
-                          label={vehicle.registration}
+                          label={vehicle.active === false ? `${vehicle.registration} (left fleet)` : vehicle.registration}
                           checked={selected.includes(vehicle.id)}
-                          disabled={disabled}
+                          disabled={disabled || (vehicle.active === false && !selected.includes(vehicle.id))}
                           onChange={(event) =>
                             updateSelection(vehicle.id, event.target.checked)
                           }
@@ -614,7 +618,7 @@ export function RecurringEditor({
                             density="compact"
                             aria-label={`Share for ${vehicle.registration}`}
                             value={shares[vehicle.id] ?? "0"}
-                            disabled={disabled}
+                            disabled={disabled || vehicle.active === false}
                             onChange={(event) => {
                               setSplitNotice("");
                               setManualAllocations(true);

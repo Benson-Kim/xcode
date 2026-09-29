@@ -41,8 +41,14 @@ public sealed class SetupExecution(IOrganizationContext context, IOrganizationRe
                .AsNoTracking()
                .Select(x => x.TimeZone)
                .SingleOrDefaultAsync(ct) ?? "Africa/Nairobi";
-          var today = DateOnly
+          var calendarDate = DateOnly
                .FromDateTime(TimeZoneInfo.ConvertTime(clock.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone)).DateTime);
+          var businessDate = await db.Organizations
+               .AsNoTracking()
+               .Select(x => x.BusinessDate)
+               .SingleAsync(ct);
+          // All setup calculations use the organization's accounting date, never a browser or user-local date.
+          var today = businessDate ?? calendarDate;
 
           return new(context.OrganizationId, context.ActorId, today, scope?.AllCompanies == true, companies, vehicles, context.CorrelationId);
      }

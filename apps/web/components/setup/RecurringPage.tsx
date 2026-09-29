@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAppearance } from "../../lib/appearance";
 import { useResource, useStreamedList } from "../../lib/data";
 import { kes, plural } from "../../lib/format";
 import { Banner, Button, CellNote, DataTable, FormSkeleton, PageHeader, RowButton, SegmentedControl, Spacer, StatusBadge, Td, Toolbar, Tr } from "../ui";
@@ -19,6 +20,7 @@ export function RecurringPage({
   openItem?: string;
   newForVehicle?: string;
 }) {
+  const { appearance } = useAppearance();
   const recurring = useStreamedList<RecurringItem>("setup/recurring");
   // Viewing needs only commitments access: shares carry their registration. The vehicle picker is for editors.
   const options = useResource<VehicleOption[]>(canManage ? "setup/recurring/vehicle-options" : null);
@@ -59,8 +61,9 @@ export function RecurringPage({
     );
   }
 
-  const today = todayDateOnly();
-  const finished = (item: RecurringItem) => (item.stoppedFrom || (item.end && item.end < today) ? 1 : 0);
+  const today = appearance?.businessDate ?? todayDateOnly();
+  const hasActiveVehicle = (item: RecurringItem) => item.allocations.some((allocation) => allocation.active !== false);
+  const finished = (item: RecurringItem) => (!hasActiveVehicle(item) || item.stoppedFrom || (item.end && item.end < today) ? 1 : 0);
   const visible = items
     .filter((item) => filter === "all" || (filter === "cost" ? item.kind === 1 : item.kind === 2))
     .sort((left, right) => finished(left) - finished(right) || left.name.localeCompare(right.name));
@@ -98,8 +101,10 @@ export function RecurringPage({
         emptyMessage="Nothing here yet."
       >
         {visible.map((item) => {
-          const next = item.stoppedFrom ? null : recurringNextPosting(item, today);
+          const active = hasActiveVehicle(item);
+          const next = item.stoppedFrom || !active ? null : recurringNextPosting(item, today);
           const registrations = item.allocations.map((allocation) => allocation.registration).filter((registration): registration is string => Boolean(registration));
+          const retiredCount = item.allocations.filter((allocation) => allocation.active === false).length;
           return (
             <Tr key={item.id}>
               <Td label="Item">
@@ -109,7 +114,7 @@ export function RecurringPage({
               <Td label="Amount each time" numeric>
                 {kes(item.amount)}
                 <CellNote>
-                  {item.partial ? "Your vehicles' share. " : ""}About {kes(recurringMonthlyEstimate(item.amount, item.frequency))} a month
+                  {item.partial ? "Your vehicles' share. " : ""}{retiredCount ? `${retiredCount} retired share. ` : ""}About {kes(recurringMonthlyEstimate(item.amount, item.frequency))} a month
                 </CellNote>
               </Td>
               <Td label="How often">{recurringFrequency(item)}</Td>
@@ -118,7 +123,7 @@ export function RecurringPage({
                 <CellNote>
                   {registrations.slice(0, 2).join(", ")}
                   {item.allocations.length > 2 ? ` and ${item.allocations.length - 2} more` : ""}
-                  {item.partial ? ", plus vehicles you can't see" : ""}
+                  {retiredCount ? `, ${retiredCount} retired` : ""}{item.partial ? ", plus vehicles you can't see" : ""}
                 </CellNote>
               </Td>
               <Td label="Period">
@@ -126,7 +131,7 @@ export function RecurringPage({
                 {item.end ? ` to ${formatDateOnly(item.end)}` : <CellNote>No end date</CellNote>}
               </Td>
               <Td label="Next posting">
-                {item.stoppedFrom ? <StatusBadge tone="off">Stopped</StatusBadge> : next ? formatDateOnly(next) : <StatusBadge tone="off">Finished</StatusBadge>}
+                {item.stoppedFrom ? <StatusBadge tone="off">Stopped</StatusBadge> : !active ? <StatusBadge tone="off">No active vehicles</StatusBadge> : next ? formatDateOnly(next) : <StatusBadge tone="off">Finished</StatusBadge>}
               </Td>
             </Tr>
           );
@@ -143,6 +148,12 @@ function editorVehicles(vehicles: VehicleOption[], item?: RecurringItem): Vehicl
     ...vehicles,
     ...(item?.allocations ?? [])
       .filter((allocation) => !listed.has(allocation.vehicleId))
-      .map((allocation) => ({ id: allocation.vehicleId, companyId: "", companyName: "", registration: allocation.registration || "Vehicle" })),
+      .map((allocation) => ({
+        id: allocation.vehicleId,
+        companyId: "",
+        companyName: "",
+        registration: allocation.registration || "Vehicle",
+        active: allocation.active !== false,
+      })),
   ];
 }

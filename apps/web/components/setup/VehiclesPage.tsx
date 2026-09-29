@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAppearance } from "../../lib/appearance";
 import { apiRequest } from "../../lib/data";
 import { useResource, useStreamedList } from "../../lib/data";
 import { useSession } from "../../lib/session-context";
@@ -41,7 +42,7 @@ import {
 } from "../ui";
 import { recurringCategoryNames, type Company, type RecurringItem, type Vehicle, type VehicleReport } from "./shared";
 
-type CompanyChoice = { id: string; name: string };
+type CompanyChoice = { id: string; name: string; active?: boolean };
 
 export function VehiclesPage({
   onOpenRecurring,
@@ -51,13 +52,16 @@ export function VehiclesPage({
   onAddRecurring?: (vehicleId: string) => void;
 }) {
   const { can } = useSession();
+  const { appearance } = useAppearance();
   const vehicles = useStreamedList<Vehicle>("setup/vehicles");
-  // Vehicle managers may not manage companies; the vehicles they see name their companies too.
+  // Vehicle managers may not manage companies; ask the server for active company options in that case.
   const companyList = useStreamedList<Company>(can("companies.manage") ? "setup/companies" : null);
+  const companyOptions = useResource<CompanyChoice[]>(can("companies.manage") ? null : "setup/vehicles/company-options");
+  const today = appearance?.businessDate ?? todayDateOnly();
   const [filter, setFilter] = useState("all");
   const [editing, setEditing] = useState<Vehicle | "new" | null>(null);
   const rows = vehicles.items;
-  const companies = companyChoices(rows, companyList.items);
+  const companies = companyChoices(rows, companyList.items, companyOptions.data);
 
   if (editing)
     return (
@@ -65,6 +69,7 @@ export function VehiclesPage({
         vehicle={editing === "new" ? undefined : editing}
         defaultCompany={filter === "all" ? "" : filter}
         companies={companies}
+        today={today}
         onOpenRecurring={onOpenRecurring}
         onAddRecurring={onAddRecurring}
         onClose={() => setEditing(null)}
@@ -82,7 +87,7 @@ export function VehiclesPage({
         title="Vehicles"
         description="Registration, company, weekly target, and the recurring costs and savings that post to each vehicle."
       />
-      {vehicles.error && <Banner className="mt-5">{vehicles.error}</Banner>}
+      {(vehicles.error || companyOptions.error) && <Banner className="mt-5">{vehicles.error || companyOptions.error}</Banner>}
       <Toolbar>
         <label htmlFor="vehicle-filter" className="text-[13px] text-grey">
           Company
@@ -103,6 +108,7 @@ export function VehiclesPage({
         columns={[
           { label: "Registration" },
           { label: "Company" },
+          { label: "Status" },
           { label: "Weekly target", numeric: true },
           { label: "In the fleet from" },
           { label: "Recurring items" },
@@ -119,6 +125,9 @@ export function VehiclesPage({
               <RowButton onClick={() => setEditing(vehicle)}>{vehicle.registration}</RowButton>
             </Td>
             <Td label="Company">{vehicle.companyName}</Td>
+            <Td label="Status">
+              {vehicle.active !== false ? "Active" : `Left fleet ${vehicle.leftOn ? formatDateOnly(vehicle.leftOn) : ""}`}
+            </Td>
             <Td label="Weekly target" numeric>
               {kes(vehicle.weeklyTarget)}
               <CellNote>About {kes(Math.round(vehicle.weeklyTarget / 7))} a day</CellNote>
@@ -132,11 +141,15 @@ export function VehiclesPage({
   );
 }
 
-function companyChoices(vehicles: Vehicle[], companies?: Company[]): CompanyChoice[] {
-  const byId = new Map<string, string>();
-  for (const company of companies ?? []) byId.set(company.id, company.name);
-  for (const vehicle of vehicles) if (!byId.has(vehicle.companyId)) byId.set(vehicle.companyId, vehicle.companyName);
-  return [...byId].map(([id, name]) => ({ id, name })).sort((left, right) => left.name.localeCompare(right.name));
+function companyChoices(vehicles: Vehicle[], companies?: Company[], options?: CompanyChoice[]): CompanyChoice[] {
+  const byId = new Map<string, CompanyChoice>();
+  for (const company of companies ?? []) byId.set(company.id, { id: company.id, name: company.name, active: company.active });
+  for (const company of options ?? []) byId.set(company.id, company);
+  for (const vehicle of vehicles) {
+    if (!byId.has(vehicle.companyId))
+      byId.set(vehicle.companyId, { id: vehicle.companyId, name: vehicle.companyName, active: true });
+  }
+  return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 const REGISTRATION = /^K[A-Z]{2}[0-9]{3}[A-Z]$/;
@@ -152,6 +165,7 @@ function VehicleEditor({
   vehicle,
   defaultCompany,
   companies,
+  today,
   onOpenRecurring,
   onAddRecurring,
   onClose,
@@ -160,6 +174,7 @@ function VehicleEditor({
   vehicle?: Vehicle;
   defaultCompany: string;
   companies: CompanyChoice[];
+  today: string;
   onOpenRecurring?: (itemId: string) => void;
   onAddRecurring?: (vehicleId: string) => void;
   onClose: () => void;
@@ -171,13 +186,55 @@ function VehicleEditor({
     registration: vehicle?.registration ?? "",
     companyId: vehicle?.companyId ?? defaultCompany,
     weeklyTarget: vehicle ? String(vehicle.weeklyTarget) : "",
-    joinedOn: vehicle?.joinedOn ?? todayDateOnly(),
+    joinedOn: vehicle?.joinedOn ?? today,
   });
   const [errors, setErrors] = useState<Errors>({});
   const [saveError, setSaveError] = useState("");
+  const [lifecycleDate, setLifecycleDate] = useState(vehicle?.leftOn ?? today);
+  const [lifecycleReason, setLifecycleReason] = useState("");
   const [busy, setBusy] = useState(false);
   const weekly = Number(form.weeklyTarget) || 0;
   const companyName = companies.find((company) => company.id === form.companyId)?.name ?? vehicle?.companyName;
+  const retired = Boolean(vehicle && vehicle.active === false);
+
+  async function retireVehicle() {
+    if (!vehicle || retired) return;
+    if (!lifecycleDate) return setSaveError("Choose the date it leaves the fleet.");
+    if (!lifecycleReason.trim()) return setSaveError("Give a reason for retiring the vehicle.");
+    setBusy(true);
+    setSaveError("");
+    try {
+      await apiRequest(`setup/vehicles/${vehicle.id}/retire`, {
+        method: "POST",
+        body: JSON.stringify({ leftOn: lifecycleDate, reason: lifecycleReason.trim() }),
+      });
+      toast(`${vehicle.registration} left the fleet.`);
+      onSaved({ ...vehicle, leftOn: lifecycleDate, active: false, weeklyTarget: 0, recurringItems: 0 });
+    } catch (value) {
+      setSaveError((value as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreVehicle() {
+    if (!vehicle || !retired) return;
+    if (!lifecycleReason.trim()) return setSaveError("Give a reason for restoring the vehicle.");
+    setBusy(true);
+    setSaveError("");
+    try {
+      await apiRequest(`setup/vehicles/${vehicle.id}/restore`, {
+        method: "POST",
+        body: JSON.stringify({ reason: lifecycleReason.trim() }),
+      });
+      toast(`${vehicle.registration} returned to the active fleet.`);
+      onSaved({ ...vehicle, leftOn: null, active: true });
+    } catch (value) {
+      setSaveError((value as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function save() {
     const registration = isNew ? normaliseRegistration(form.registration) : vehicle.registration;
@@ -187,9 +244,14 @@ function VehicleEditor({
     if (!form.companyId) next.companyId = "Choose the PSV company.";
     if (weekly <= 0) next.weeklyTarget = "Enter the weekly target in KES.";
     if (!form.joinedOn) next.joinedOn = "Enter the date it joined the fleet.";
+    else if (form.joinedOn > today) next.joinedOn = "The join date cannot be after the business date.";
     setErrors(next);
     setSaveError("");
     if (Object.keys(next).length || !registration) return;
+    if (retired) {
+      setSaveError("Restore this vehicle before editing its details.");
+      return;
+    }
     if (!isNew && vehicle.companyId === form.companyId && vehicle.weeklyTarget === weekly && vehicle.joinedOn === form.joinedOn) {
       toast("No changes to save.");
       return;
@@ -228,7 +290,7 @@ function VehicleEditor({
     <section>
       <PageHeader
         title={isNew ? "Add vehicle" : vehicle.registration}
-        description={isNew ? "It shows on reports and the dashboard straight away." : companyName}
+        description={isNew ? "It shows on reports and the dashboard straight away." : `${companyName}${retired ? " · Left the fleet" : ""}`}
       />
       <FormLayout>
         <ErrorSummary count={Object.keys(errors).length} />
@@ -244,20 +306,22 @@ function VehicleEditor({
             >
               <TextInput
                 value={form.registration}
-                disabled={!isNew}
+                disabled={!isNew || retired}
                 placeholder="KDA 482M"
                 autoCapitalize="characters"
                 onChange={(event) => setForm({ ...form, registration: event.target.value.toUpperCase() })}
               />
             </Field>
             <Field id="vehicle-company" label="PSV company" error={errors.companyId}>
-              <SelectInput value={form.companyId} onChange={(event) => setForm({ ...form, companyId: event.target.value })}>
+              <SelectInput value={form.companyId} disabled={retired} onChange={(event) => setForm({ ...form, companyId: event.target.value })}>
                 <option value="">Choose a company</option>
-                {companies.map((company) => (
-                  <option key={company.id} value={company.id}>
-                    {company.name}
-                  </option>
-                ))}
+                {companies
+                  .filter((company) => company.active !== false || company.id === vehicle?.companyId)
+                  .map((company) => (
+                    <option key={company.id} value={company.id}>
+                      {company.name}{company.active === false ? " (archived)" : ""}
+                    </option>
+                  ))}
               </SelectInput>
             </Field>
             <Field
@@ -266,10 +330,10 @@ function VehicleEditor({
               error={errors.weeklyTarget}
               hint={`${weekly ? `About ${kes(Math.round(weekly / 7))} a day.` : "Revenue you expect in a Monday to Sunday week."}${isNew ? "" : " A change applies from today. Past days keep their old target."}`}
             >
-              <CurrencyInput min="1" step="1" value={form.weeklyTarget} onChange={(event) => setForm({ ...form, weeklyTarget: event.target.value })} />
+              <CurrencyInput disabled={retired} min="1" step="1" value={form.weeklyTarget} onChange={(event) => setForm({ ...form, weeklyTarget: event.target.value })} />
             </Field>
             <Field id="vehicle-joined" label="In the fleet from" error={errors.joinedOn} hint="Missing revenue days are only counted from this date.">
-              <TextInput type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} />
+              <TextInput disabled={retired} type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} />
             </Field>
           </Grid2>
           {history.length > 1 && (
@@ -287,8 +351,46 @@ function VehicleEditor({
             </div>
           )}
         </Card>
+        {vehicle && (
+          <Card density="form">
+            <CardHeader
+              title="Fleet lifecycle"
+              description="Leaving the fleet stops targets, recurring shares, and future report postings from that date."
+            />
+            {retired ? (
+              <>
+                <Hint>Left the fleet on {vehicle.leftOn ? formatDateOnly(vehicle.leftOn) : "an earlier date"}.</Hint>
+                <Field id="vehicle-restore-reason" label="Reason">
+                  <TextInput value={lifecycleReason} placeholder="Why is it returning?" onChange={(event) => setLifecycleReason(event.target.value)} />
+                </Field>
+                <Button
+                  disabled={busy}
+                  onClick={() => void restoreVehicle()}
+                >
+                  Restore to active fleet
+                </Button>
+              </>
+            ) : (
+              <Grid2>
+                <Field id="vehicle-left-on" label="Leaves the fleet" hint="No target or recurring posting is active on this date.">
+                  <TextInput type="date" min={vehicle.joinedOn} max={today} value={lifecycleDate} onChange={(event) => setLifecycleDate(event.target.value)} />
+                </Field>
+                <Field id="vehicle-lifecycle-reason" label="Reason">
+                  <TextInput value={lifecycleReason} placeholder="Why is it leaving?" onChange={(event) => setLifecycleReason(event.target.value)} />
+                </Field>
+                <Button
+                  tone="outline"
+                  disabled={busy}
+                  onClick={() => void retireVehicle()}
+                >
+                  Retire vehicle
+                </Button>
+              </Grid2>
+            )}
+          </Card>
+        )}
         <FormActions>
-          <Button disabled={busy} onClick={() => void save()}>
+          <Button disabled={busy || retired} onClick={() => void save()}>
             {isNew ? "Add vehicle" : "Save changes"}
           </Button>
           <Button tone="outline" onClick={onClose}>
@@ -382,9 +484,10 @@ function VehicleRecurringCard({
   onAdd?: (vehicleId: string) => void;
 }) {
   const { can } = useSession();
+  const { appearance } = useAppearance();
   const recurring = useStreamedList<RecurringItem>(can("commitments.view") ? "setup/recurring" : null);
   if (!can("commitments.view")) return null;
-  const today = todayDateOnly();
+  const today = appearance?.businessDate ?? todayDateOnly();
   const items = recurring.items.filter((item) => item.allocations.some((allocation) => allocation.vehicleId === vehicle.id));
   return (
     <Card>
@@ -399,13 +502,14 @@ function VehicleRecurringCard({
       ) : items.length ? (
         <CardList>
           {items.map((item) => {
-            const share = item.allocations.find((allocation) => allocation.vehicleId === vehicle.id)!.amount;
-            const stopped = Boolean(item.stoppedFrom) || Boolean(item.end && item.end < today);
+            const allocation = item.allocations.find((candidate) => candidate.vehicleId === vehicle.id)!;
+            const share = allocation.amount;
+            const stopped = allocation.active === false || Boolean(item.stoppedFrom) || Boolean(item.end && item.end < today);
             return (
               <CardListItem
                 key={item.id}
                 left={onOpen ? <RowButton onClick={() => onOpen(item.id)}>{item.name}</RowButton> : item.name}
-                leftSub={`${recurringFrequency(item)}${stopped ? ". Stopped" : ""}`}
+                leftSub={`${recurringFrequency(item)}${stopped ? allocation.active === false ? ". Left the fleet" : ". Stopped" : ""}`}
                 right={kes(share)}
                 rightSub={item.allocations.length > 1 ? `of ${kes(item.amount)}` : "each time"}
               />

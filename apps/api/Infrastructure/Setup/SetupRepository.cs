@@ -30,12 +30,27 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             .ThenBy(c => c.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(c => new CompanyDto(c.Id, c.Name, VisibleVehicles(actor).Count(v => v.CompanyId == c.Id))).ToListAsync(ct);
+            .Select(c => new CompanyDto(c.Id, c.Name,
+                VisibleVehicles(actor).Count(v => v.CompanyId == c.Id && (v.LeftOn == null || v.LeftOn > actor.Today)),
+                c.ArchivedOn == null || c.ArchivedOn > actor.Today, c.ArchivedOn))
+            .ToListAsync(ct);
         return new(items, page, pageSize, total);
     }
 
     public Task<PsvCompany?> Company(SetupActor actor, Guid id, CancellationToken ct) =>
         VisibleCompanies(actor).SingleOrDefaultAsync(c => c.Id == id, ct);
+
+    public async Task<IReadOnlyList<CompanyOption>> CompanyOptions(SetupActor actor, CancellationToken ct) =>
+        await VisibleCompanies(actor)
+            .AsNoTracking()
+            .Where(c => c.ArchivedOn == null || c.ArchivedOn > actor.Today)
+            .OrderBy(c => c.Name)
+            .ThenBy(c => c.Id)
+            .Select(c => new CompanyOption(c.Id, c.Name))
+            .ToListAsync(ct);
+
+    public Task<bool> HasActiveVehicles(Guid companyId, DateOnly today, CancellationToken ct) =>
+        db.Set<FleetVehicle>().AnyAsync(v => v.CompanyId == companyId && (v.LeftOn == null || v.LeftOn > today), ct);
 
     public Task<bool> CompanyNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct)
         => db
@@ -57,11 +72,14 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 CompanyName = db.Set<PsvCompany>().Where(c => c.Id == v.CompanyId).Select(c => c.Name).First(),
                 v.Registration,
                 v.JoinedOn,
+                v.LeftOn,
                 Targets = v.Targets.OrderBy(t => t.Revision).Select(t => new TargetDto(t.EffectiveFrom, t.WeeklyAmount, t.Revision)).ToList()
             })
             .ToListAsync(ct);
-        // Items still posting to each vehicle: the current version allocates to it and has not ended or stopped.
+
         var vehicleIds = rows.Select(v => v.Id).ToList();
+        var activeVehicleIds = rows.Where(v => v.LeftOn is null || v.LeftOn > actor.Today).Select(v => v.Id).ToHashSet();
+        // Items still posting to each active vehicle: the current version allocates to it and has not ended or stopped.
         var current = await db.Set<RecurringVersion>().AsNoTracking()
             .Where(v => !db.Set<RecurringVersion>().Any(other => other.ItemId == v.ItemId && other.Revision > v.Revision)
                 && v.Allocations.Any(a => vehicleIds.Contains(a.VehicleId)))
@@ -75,19 +93,23 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             .ToListAsync(ct);
         var recurringItems = current
             .Where(v => (v.End == null || v.End >= actor.Today) && (v.StoppedFrom == null || v.StoppedFrom > actor.Today))
-            .SelectMany(v => v.Vehicles.Select(vehicleId => (v.ItemId, VehicleId: vehicleId)))
+            .SelectMany(v => v.Vehicles.Where(activeVehicleIds.Contains).Select(vehicleId => (v.ItemId, VehicleId: vehicleId)))
             .GroupBy(x => x.VehicleId)
             .ToDictionary(g => g.Key, g => g.Select(x => x.ItemId).Distinct().Count());
-        return new(rows.Select(v => new VehicleDto(v.Id, v.CompanyId, v.CompanyName, v.Registration, v.JoinedOn,
 
-        v.Targets
-            .Where(t => t.EffectiveFrom <= (actor.Today < v.JoinedOn ? v.JoinedOn : actor.Today))
-            .OrderByDescending(t => t.EffectiveFrom)
-            .ThenByDescending(t => t.Revision)
-            .Select(t => t.WeeklyAmount)
-            .FirstOrDefault(), v.Targets, recurringItems.GetValueOrDefault(v.Id)))
-            .ToList(), page, pageSize, total);
-
+        return new(rows.Select(v =>
+        {
+            var active = v.LeftOn is null || v.LeftOn > actor.Today;
+            var currentTarget = active
+                ? v.Targets.Where(t => t.EffectiveFrom <= (actor.Today < v.JoinedOn ? v.JoinedOn : actor.Today))
+                    .OrderByDescending(t => t.EffectiveFrom)
+                    .ThenByDescending(t => t.Revision)
+                    .Select(t => t.WeeklyAmount)
+                    .FirstOrDefault()
+                : 0m;
+            return new VehicleDto(v.Id, v.CompanyId, v.CompanyName, v.Registration, v.JoinedOn, v.LeftOn, active,
+                currentTarget, v.Targets, recurringItems.GetValueOrDefault(v.Id));
+        }).ToList(), page, pageSize, total);
     }
 
     public Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct) => VisibleVehicles(actor)
@@ -101,8 +123,10 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
 
     public async Task<IReadOnlyList<VehicleOption>> VehicleOptions(SetupActor actor, CancellationToken ct) => await VisibleVehicles(actor)
         .AsNoTracking()
+        .Where(v => (v.LeftOn == null || v.LeftOn > actor.Today) &&
+            db.Set<PsvCompany>().Any(c => c.Id == v.CompanyId && (c.ArchivedOn == null || c.ArchivedOn > actor.Today)))
         .OrderBy(v => v.Registration)
-        .Select(v => new VehicleOption(v.Id, v.CompanyId, db.Set<PsvCompany>().Where(c => c.Id == v.CompanyId).Select(c => c.Name).First(), v.Registration))
+        .Select(v => new VehicleOption(v.Id, v.CompanyId, db.Set<PsvCompany>().Where(c => c.Id == v.CompanyId).Select(c => c.Name).First(), v.Registration, true))
         .ToListAsync(ct);
 
     public async Task<int> FirstDayOfWeek(CancellationToken ct) =>
@@ -118,7 +142,7 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             .ThenBy(i => i.Id)
             .Skip((page - 1) * pageSize).Take(pageSize).Select(i => i.Id).ToListAsync(ct);
         var visibleIds = VisibleVehicles(actor).Select(v => v.Id);
-        // Project only the editor's allocation shares; never expose another scope's vehicles or amounts.
+        // Project the editor's shares, including retired vehicles so their history remains inspectable.
         var rows = await db.Set<RecurringVersion>().AsNoTracking().Where(v => ids.Contains(v.ItemId) && !db
             .Set<RecurringVersion>()
             .Any(other => other.ItemId == v.ItemId && other.Revision > v.Revision))
@@ -136,18 +160,24 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 v.Start,
                 v.End,
                 StoppedFrom = db.Set<RecurringItem>().Where(i => i.Id == v.ItemId).Select(i => i.StoppedFrom).First(),
-                Allocations = v.Allocations.Where(a => visibleIds.Contains(a.VehicleId)).Select(a => new VehicleShare(a.VehicleId, a.Amount)).ToList(),
+                Allocations = v.Allocations.Where(a => visibleIds.Contains(a.VehicleId)).Select(a => new
+                {
+                    a.VehicleId,
+                    a.Amount,
+                    Registration = db.Set<FleetVehicle>().Where(vehicle => vehicle.Id == a.VehicleId).Select(vehicle => vehicle.Registration).FirstOrDefault(),
+                    Active = db.Set<FleetVehicle>().Where(vehicle => vehicle.Id == a.VehicleId)
+                        .Select(vehicle => vehicle.LeftOn == null || vehicle.LeftOn > actor.Today).FirstOrDefault()
+                }).ToList(),
                 AllocationCount = v.Allocations.Count()
             }).ToListAsync(ct);
         rows = [.. rows.OrderBy(v => ids.IndexOf(v.ItemId))];
-        // Registrations travel with the shares so viewing commitments never needs the vehicle-management list.
-        var vehicleIds = rows.SelectMany(v => v.Allocations).Select(a => a.VehicleId).Distinct().ToList();
-        var registrations = await db.Set<FleetVehicle>().AsNoTracking().Where(v => vehicleIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, v => v.Registration, ct);
-        return new(rows.Select(v => new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
-
-        v.Allocations.Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
-        v.Allocations.Select(a => new AllocationDto(a.VehicleId, a.Amount, registrations.GetValueOrDefault(a.VehicleId))).ToList(),
-        v.Allocations.Count != v.AllocationCount)).ToList(), page, pageSize, total);
+        return new(rows.Select(v =>
+        {
+            var allocations = v.Allocations.Select(a => new AllocationDto(a.VehicleId, a.Amount, a.Registration, a.Active)).ToList();
+            return new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
+                allocations.Where(a => a.Active).Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
+                allocations, v.Allocations.Count != v.AllocationCount);
+        }).ToList(), page, pageSize, total);
     }
 
     public Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct)
@@ -160,12 +190,13 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         var items = await db.Set<RecurringItem>().AsNoTracking()
             .Where(i => i.Versions.Any(v => v.Allocations.Any(a => a.VehicleId == vehicleId)))
             .Include(i => i.Versions).ThenInclude(v => v.Allocations).ToListAsync(ct);
-        var joined = await VisibleVehicles(actor).Where(v => v.Id == vehicleId).Select(v => v.JoinedOn).SingleAsync(ct);
+        var vehicle = await VisibleVehicles(actor).Where(v => v.Id == vehicleId)
+            .Select(v => new { v.JoinedOn, v.LeftOn }).SingleAsync(ct);
         var postings = new List<PostingDto>();
 
         for (var day = from; day <= through; day = day.AddDays(1))
         {
-            if (day < joined) continue;
+            if (day < vehicle.JoinedOn || vehicle.LeftOn is not null && day >= vehicle.LeftOn) continue;
             foreach (var item in items)
             {
                 var version = item.DueOn(day);
@@ -187,7 +218,8 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             (v.Section == "recurring" && completeItems.Contains(v.EntityId)));
         var entries = await query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize).Take(pageSize)
             .Select(v => new HistoryEntry(v.Version, v.Section, v.EntityId, v.Reason, v.OccurredAt, v.ActorId,
-                db.Memberships.Where(m => m.UserId == v.ActorId).Select(m => m.FirstName + " " + m.LastName).FirstOrDefault() ?? ""))
+                db.Memberships.Where(m => m.UserId == v.ActorId).Select(m => m.FirstName + " " + m.LastName).FirstOrDefault() ?? "",
+                v.Before, v.After))
             .ToListAsync(ct);
         return new(entries, page, pageSize, await query.CountAsync(ct));
     }

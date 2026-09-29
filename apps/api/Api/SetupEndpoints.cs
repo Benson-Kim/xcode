@@ -63,12 +63,22 @@ public static class SetupEndpoints
             .WithName("CreateSetupCompany");
         group.MapPut("/companies/{id:guid}", async (Guid id, SaveCompany input, CompanyUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Save(id, input, ct) }))
             .WithName("RenameSetupCompany");
+        group.MapPost("/companies/{id:guid}/archive", async (Guid id, CompanyLifecycleRequest input, CompanyUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SetArchived(id, true, input, ct) }))
+            .WithName("ArchiveSetupCompany");
+        group.MapPost("/companies/{id:guid}/restore", async (Guid id, CompanyLifecycleRequest input, CompanyUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SetArchived(id, false, input, ct) }))
+            .WithName("RestoreSetupCompany");
         group.MapGet("/vehicles", (VehicleUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
             .Produces<Page<VehicleDto>>().WithName("ListSetupVehicles");
         group.MapPost("/vehicles", async (SaveVehicle input, VehicleUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Save(null, input, ct) }))
             .WithName("CreateSetupVehicle");
         group.MapPut("/vehicles/{id:guid}", async (Guid id, SaveVehicle input, VehicleUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Save(id, input, ct) }))
             .WithName("UpdateSetupVehicle");
+        group.MapGet("/vehicles/company-options", (VehicleUseCases useCases, CancellationToken ct) => useCases.CompanyOptions(ct))
+            .Produces<IReadOnlyList<CompanyOption>>().WithName("ListVehicleCompanyOptions");
+        group.MapPost("/vehicles/{id:guid}/retire", async (Guid id, VehicleLifecycleRequest input, VehicleUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Retire(id, input, ct) }))
+            .WithName("RetireSetupVehicle");
+        group.MapPost("/vehicles/{id:guid}/restore", async (Guid id, VehicleRestoreRequest input, VehicleUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Restore(id, input, ct) }))
+            .WithName("RestoreSetupVehicle");
         group.MapGet("/vehicles/{id:guid}/report", (Guid id, VehicleUseCases useCases, CancellationToken ct, DateOnly? from = null, DateOnly? through = null, string? period = null) => useCases.Report(id, from, through, period, ct))
             .Produces<VehicleReport>().WithName("GetSetupVehicleReport");
         group.MapGet("/recurring", (RecurringUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))

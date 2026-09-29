@@ -16,16 +16,19 @@ public static class OrganizationEndpoints
      public static void MapOrganization(this WebApplication app)
      {
           var group = app.MapGroup("/setup").RequireAuthorization().WithTags("Organization").WithSetupErrors();
-          group.MapGet("/organization/settings", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, CancellationToken ct) =>
+          group.MapGet("/organization/settings", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
                await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
                var organization = await db.Organizations.AsNoTracking().SingleAsync(ct);
+               var localization = await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct)
+                    ?? new OrganizationLocalization { OrganizationId = context.OrganizationId };
                return Results.Ok(new
                {
                     organization,
-                    localization = await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationLocalization { OrganizationId = context.OrganizationId },
+                    localization,
                     branding = await db.Brandings.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationBranding { OrganizationId = context.OrganizationId },
                     securityPolicy = await db.SecurityPolicies.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationSecurityPolicy { OrganizationId = context.OrganizationId },
+                    effectiveBusinessDate = organization.BusinessDate ?? OrganizationCalendarDate(localization.TimeZone, clock.UtcNow),
                     effective = await organizations.Settings(context.ActorId, ct)
                });
           }).WithName("GetOrganizationSettings");
@@ -54,6 +57,13 @@ public static class OrganizationEndpoints
                     case "localization": (before, after) = await Save(db.Localizations, input.Value.Deserialize<OrganizationLocalization>(SettingsJson) ?? throw new ArgumentException("Invalid localization settings."), context.OrganizationId, ct); break;
                     case "branding": (before, after) = await Save(db.Brandings, input.Value.Deserialize<OrganizationBranding>(SettingsJson) ?? throw new ArgumentException("Invalid branding settings."), context.OrganizationId, ct); break;
                     case "securityPolicy": (before, after) = await Save(db.SecurityPolicies, input.Value.Deserialize<OrganizationSecurityPolicy>(SettingsJson) ?? throw new ArgumentException("Invalid security policy."), context.OrganizationId, ct); break;
+                    case "businessDate":
+                         before = JsonSerializer.Serialize(organization.BusinessDate, SettingsJson);
+                         var requestedBusinessDate = ParseBusinessDate(input.Value);
+                         organization.ChangeBusinessDate(requestedBusinessDate, OrganizationCalendarDate(
+                              (await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct))?.TimeZone ?? "UTC", clock.UtcNow));
+                         after = JsonSerializer.Serialize(organization.BusinessDate, SettingsJson);
+                         break;
                     default: throw new KeyNotFoundException();
                }
                // Saving what is already stored changes nothing, so it adds no version or change-log entry.
@@ -94,10 +104,11 @@ public static class OrganizationEndpoints
           }).WithName("DeleteOrganizationLogo");
 
           // What every member's screens need to look and format as the organization and the person chose.
-          group.MapGet("/appearance", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, CancellationToken ct) =>
+          group.MapGet("/appearance", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
                await EnsureMember(organizations, context.ActorId, ct);
                var organization = await db.Organizations.AsNoTracking().SingleAsync(ct);
+               var localization = await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationLocalization { TimeZone = "UTC" };
                var effective = await organizations.Settings(context.ActorId, ct);
                var logo = await db.Logos.AsNoTracking().SingleOrDefaultAsync(ct);
                var branding = effective.Branding;
@@ -105,6 +116,7 @@ public static class OrganizationEndpoints
                {
                     organizationName = organization.Name,
                     settingsVersion = organization.SettingsVersion,
+                    businessDate = organization.BusinessDate ?? OrganizationCalendarDate(localization.TimeZone, clock.UtcNow),
                     branding = new { branding.DisplayName, branding.LogoAlt, branding.Primary, branding.Secondary, branding.Accent, logo = logo?.ToDataUrl() },
                     formats = effective.Formats,
                     effective.ThemeMode,
@@ -170,6 +182,30 @@ public static class OrganizationEndpoints
                CorrelationId = context.CorrelationId,
                OccuredAt = clock.UtcNow,
           });
+     }
+
+     private static DateOnly OrganizationCalendarDate(string timeZone, DateTimeOffset utcNow)
+     {
+          try
+          {
+               return DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(utcNow, TimeZoneInfo.FindSystemTimeZoneById(timeZone)).DateTime);
+          }
+          catch (TimeZoneNotFoundException)
+          {
+               throw new ArgumentException("The organization time zone is not available.");
+          }
+          catch (InvalidTimeZoneException)
+          {
+               throw new ArgumentException("The organization time zone is invalid.");
+          }
+     }
+
+     private static DateOnly? ParseBusinessDate(JsonElement value)
+     {
+          if (value.ValueKind == JsonValueKind.Null) return null;
+          if (value.ValueKind != JsonValueKind.String || !DateOnly.TryParse(value.GetString(), out var parsed) || parsed == default)
+               throw new ArgumentException("Business date must be a valid calendar date or null.");
+          return parsed;
      }
 
      // The history keeps the logo's shape, not the image itself.

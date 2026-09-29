@@ -1,4 +1,4 @@
-export type Company = { id: string; name: string; vehicleCount: number };
+export type Company = { id: string; name: string; vehicleCount: number; active?: boolean; archivedOn?: string | null };
 
 export type Vehicle = {
   id: string;
@@ -6,13 +6,15 @@ export type Vehicle = {
   companyName: string;
   registration: string;
   joinedOn: string;
+  leftOn?: string | null;
+  active?: boolean;
   weeklyTarget: number;
   targets?: { effectiveFrom: string; weeklyAmount: number; revision: number }[];
   recurringItems?: number;
 };
 
 // What the recurring editor needs to pick vehicles (GET recurring/vehicle-options).
-export type VehicleOption = Pick<Vehicle, "id" | "companyId" | "companyName" | "registration">;
+export type VehicleOption = Pick<Vehicle, "id" | "companyId" | "companyName" | "registration"> & { active?: boolean };
 
 export type HistoryRow = {
   version: number;
@@ -22,6 +24,8 @@ export type HistoryRow = {
   occurredAt: string;
   actorId: string;
   actorName: string;
+  before?: string | null;
+  after?: string | null;
 };
 
 export type RecurringItem = {
@@ -36,7 +40,7 @@ export type RecurringItem = {
   start: string;
   end?: string | null;
   stoppedFrom?: string | null;
-  allocations: { vehicleId: string; amount: number; registration?: string | null }[];
+  allocations: { vehicleId: string; amount: number; registration?: string | null; active?: boolean }[];
   // Also posts to vehicles outside the viewer's scope: amount and allocations are only their share, and it is read-only.
   partial?: boolean;
 };

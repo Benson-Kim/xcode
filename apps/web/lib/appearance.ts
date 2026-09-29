@@ -6,6 +6,7 @@ import type { Formats } from "./format";
 export type Appearance = {
   organizationName: string;
   settingsVersion: number;
+  businessDate?: string;
   branding: {
     displayName: string;
     logoAlt: string;

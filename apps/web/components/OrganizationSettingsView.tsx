@@ -28,7 +28,8 @@ import {
 } from "./ui";
 
 type Settings = {
-  organization: { name: string; slug: string };
+  organization: { name: string; slug: string; businessDate?: string | null };
+  effectiveBusinessDate?: string;
   localization: {
     locale: string;
     timeZone: string;
@@ -104,7 +105,7 @@ export function OrganizationSettingsView() {
           title="Organization settings"
           description="Defaults for everyone in the organization."
         />
-        <FormSkeleton cards={4} label="Loading organization settings" />
+        <FormSkeleton cards={5} label="Loading organization settings" />
       </section>
     );
   return <SettingsForm initial={loaded.data} />;
@@ -129,7 +130,9 @@ function SettingsForm({ initial }: { initial: Settings }) {
   const [logoBusy, setLogoBusy] = useState(false);
   const [settings, setSettings] = useState(initial);
   const [errors, setErrors] = useState<Partial<Record<Section, string>>>({});
+  const [businessDateError, setBusinessDateError] = useState("");
   const [busy, setBusy] = useState<Section | null>(null);
+  const [businessDateBusy, setBusinessDateBusy] = useState(false);
   const update = <T extends Section>(section: T, value: Partial<Settings[T]>) =>
     setSettings({ ...settings, [section]: { ...settings[section], ...value } });
 
@@ -166,6 +169,27 @@ function SettingsForm({ initial }: { initial: Settings }) {
       setErrors({ ...errors, [section]: (reason as Error).message });
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function saveBusinessDate() {
+    const value = settings.organization.businessDate || null;
+    setBusinessDateBusy(true);
+    try {
+      await apiRequest("setup/organization/settings/businessDate", {
+        method: "PUT",
+        body: JSON.stringify({
+          value,
+          reason: value ? "Updated organization business date" : "Reset organization business date",
+        }),
+      });
+      setBusinessDateError("");
+      toast(value ? "Business date saved." : "Business date now follows the organization time zone.");
+      refresh();
+    } catch (reason) {
+      setBusinessDateError((reason as Error).message);
+    } finally {
+      setBusinessDateBusy(false);
     }
   }
 
@@ -238,6 +262,50 @@ function SettingsForm({ initial }: { initial: Settings }) {
               />
             </Field>
           </Grid2>
+        </SettingsCard>
+
+        <SettingsCard
+          title="Business date"
+          description="The accounting date used by reports, targets, recurring postings, and setup changes. Leave it blank to follow the organization's time zone."
+          error={businessDateError}
+          action="Save business date"
+          busy={businessDateBusy}
+          onSave={() => void saveBusinessDate()}
+        >
+          <Field
+            id="business-date"
+            label="Business date"
+            hint={organization.businessDate ? `Override active. The server date is ${organization.businessDate}.` : `Following the server date: ${initial.effectiveBusinessDate || "the organization clock"}.`}
+          >
+            <TextInput
+              type="date"
+              value={organization.businessDate || initial.effectiveBusinessDate || ""}
+              max={initial.effectiveBusinessDate || undefined}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  organization: {
+                    ...organization,
+                    businessDate: event.target.value || null,
+                  },
+                })
+              }
+            />
+          </Field>
+          {organization.businessDate && (
+            <Button
+              tone="outline"
+              disabled={businessDateBusy}
+              onClick={() =>
+                setSettings({
+                  ...settings,
+                  organization: { ...organization, businessDate: null },
+                })
+              }
+            >
+              Follow organization time zone
+            </Button>
+          )}
         </SettingsCard>
 
         <SettingsCard
@@ -501,11 +569,11 @@ function SettingsForm({ initial }: { initial: Settings }) {
             <Field
               id="lockout-attempts"
               label="Wrong PINs before a pause"
-              hint="1 to 10."
+              hint="3 to 10."
             >
               <TextInput
                 type="number"
-                min="1"
+                min="3"
                 max="10"
                 value={securityPolicy.lockoutThreshold}
                 onChange={(event) =>
@@ -519,7 +587,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
               <TextInput
                 type="number"
                 min="1"
-                max="1440"
+                max="60"
                 value={securityPolicy.lockoutMinutes}
                 onChange={(event) =>
                   update("securityPolicy", {

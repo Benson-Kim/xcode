@@ -1,4 +1,3 @@
-
 namespace Auth.Domain.Setup;
 
 public sealed class PsvCompany : IOrganizationEntity
@@ -13,6 +12,10 @@ public sealed class PsvCompany : IOrganizationEntity
      public Guid OrganizationId { get; private set; }
      public string Name { get; private set; } = "";
      public string NormalizedName { get; private set; } = "";
+     public DateOnly? ArchivedOn { get; private set; }
+
+     public bool ActiveOn(DateOnly date) => ArchivedOn is null || ArchivedOn > date;
+
      public PsvCompany(Guid organizationId, string name)
      {
           if (organizationId == Guid.Empty)
@@ -20,12 +23,32 @@ public sealed class PsvCompany : IOrganizationEntity
           OrganizationId = organizationId;
           Rename(name);
      }
+
      public bool Rename(string name)
      {
           var value = SetupValue.Name(name);
           if (value == Name) return false;
           Name = value;
           NormalizedName = value.ToUpperInvariant();
+          return true;
+     }
+
+     public bool Archive(DateOnly date)
+     {
+          if (date == default) throw new ArgumentException("Archive date is required.");
+          if (ArchivedOn is not null)
+          {
+               if (ArchivedOn != date) throw new ArgumentException("The company is already archived.");
+               return false;
+          }
+          ArchivedOn = date;
+          return true;
+     }
+
+     public bool Restore()
+     {
+          if (ArchivedOn is null) return false;
+          ArchivedOn = null;
           return true;
      }
 }

@@ -6,6 +6,8 @@ public interface ISetupRepository
 {
     Task<Page<CompanyDto>> Companies(SetupActor actor, int page, int pageSize, CancellationToken ct);
     Task<PsvCompany?> Company(SetupActor actor, Guid id, CancellationToken ct);
+    Task<IReadOnlyList<CompanyOption>> CompanyOptions(SetupActor actor, CancellationToken ct);
+    Task<bool> HasActiveVehicles(Guid companyId, DateOnly today, CancellationToken ct);
     Task<bool> CompanyNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct);
     Task<Page<VehicleDto>> Vehicles(SetupActor actor, int page, int pageSize, CancellationToken ct);
     Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct);

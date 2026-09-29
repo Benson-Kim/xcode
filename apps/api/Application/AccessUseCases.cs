@@ -26,13 +26,16 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     {
         var companies = await db.Set<PsvCompany>()
             .AsNoTracking()
-            .Where(c => actor.AllCompanies || actor.CompanyIds.Contains(c.Id))
+            .Where(c => (actor.AllCompanies || actor.CompanyIds.Contains(c.Id)) &&
+                (c.ArchivedOn == null || c.ArchivedOn > actor.Today))
             .OrderBy(c => c.Name)
             .Select(c => new ScopeCompanyOption(c.Id, c.Name))
             .ToListAsync(ct);
         var vehicles = await db.Set<FleetVehicle>()
             .AsNoTracking()
-            .Where(v => actor.AllCompanies || actor.VehicleIds.Contains(v.Id) || actor.CompanyIds.Contains(v.CompanyId))
+            .Where(v => (actor.AllCompanies || actor.VehicleIds.Contains(v.Id) || actor.CompanyIds.Contains(v.CompanyId)) &&
+                (v.LeftOn == null || v.LeftOn > actor.Today) &&
+                db.Set<PsvCompany>().Any(c => c.Id == v.CompanyId && (c.ArchivedOn == null || c.ArchivedOn > actor.Today)))
             .OrderBy(v => v.Registration)
             .Select(v => new ScopeVehicleOption(v.Id, v.Registration, v.CompanyId))
             .ToListAsync(ct);

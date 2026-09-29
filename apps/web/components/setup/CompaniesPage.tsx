@@ -53,10 +53,26 @@ export function CompaniesPage() {
     }
   }
 
+  async function setArchived(company: Company, archived: boolean) {
+    setBusy(true);
+    try {
+      await apiRequest(`setup/companies/${company.id}/${archived ? "archive" : "restore"}`, {
+        method: "POST",
+        body: JSON.stringify({ reason: archived ? `Archived ${company.name}` : `Restored ${company.name}` }),
+      });
+      toast(archived ? `${company.name} archived.` : `${company.name} restored.`);
+      companies.reload();
+    } catch (value) {
+      setAddError((value as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section>
-      <PageHeader title="PSV companies" description="Every vehicle belongs to one company." />
-      {companies.error && <Banner className="mt-5">{companies.error}</Banner>}
+      <PageHeader title="PSV companies" description="Every vehicle belongs to one company. Archive a company after its vehicles have left the fleet." />
+      {(companies.error || addError) && <Banner className="mt-5">{companies.error || addError}</Banner>}
       <Toolbar align="start">
         <Field id="new-company" label="New PSV company" error={addError} className="min-w-55 flex-1">
           <TextInput
@@ -76,7 +92,7 @@ export function CompaniesPage() {
         </Button>
       </Toolbar>
       <DataTable
-        columns={[{ label: "Company" }, { label: "Vehicles", numeric: true }, { label: "Actions", hidden: true }]}
+        columns={[{ label: "Company" }, { label: "Status" }, { label: "Vehicles", numeric: true }, { label: "Actions", hidden: true }]}
         loading={companies.loading}
         pendingRows={companies.pendingRows}
         loadingLabel="Loading companies"
@@ -86,7 +102,7 @@ export function CompaniesPage() {
         {rows.map((company) =>
           renaming?.id === company.id ? (
             <Tr key={company.id}>
-              <Td colSpan={3}>
+              <Td colSpan={4}>
                 <div className="flex flex-wrap items-start gap-3">
                   <Field id={`rename-${company.id}`} label="New name" error={renaming.error} className="min-w-50 flex-1">
                     <TextInput
@@ -113,13 +129,21 @@ export function CompaniesPage() {
               <Td label="Company">
                 <strong>{company.name}</strong>
               </Td>
-              <Td label="Vehicles" numeric>
-                {company.vehicleCount}
-              </Td>
+              <Td label="Status">{company.active === false ? "Archived" : "Active"}</Td>
+              <Td label="Vehicles" numeric>{company.vehicleCount}</Td>
               <Td>
-                <RowButton onClick={() => setRenaming({ id: company.id, name: company.name, error: "" })} aria-label={`Rename ${company.name}`}>
-                  Rename
-                </RowButton>
+                {company.active !== false && (
+                  <RowButton onClick={() => setRenaming({ id: company.id, name: company.name, error: "" })} aria-label={`Rename ${company.name}`}>
+                    Rename
+                  </RowButton>
+                )}
+                <Button
+                  tone="outline"
+                  disabled={busy}
+                  onClick={() => void setArchived(company, company.active !== false)}
+                >
+                  {company.active !== false ? "Archive" : "Restore"}
+                </Button>
               </Td>
             </Tr>
           ),

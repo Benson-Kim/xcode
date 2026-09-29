@@ -81,8 +81,19 @@ public sealed class Organization
      public Guid Id { get; set; } = Guid.NewGuid();
      public string Slug { get; set; } = "";
      public string Name { get; set; } = "";
+     // Null follows the organization time zone. A value is an explicit, audited accounting date.
+     public DateOnly? BusinessDate { get; private set; }
      public long SettingsVersion { get; private set; } = 1;
      public void SettingsChanged() => SettingsVersion++;
+     public DateOnly ResolveBusinessDate(DateOnly organizationCalendarDate) => BusinessDate ?? organizationCalendarDate;
+     public bool ChangeBusinessDate(DateOnly? businessDate, DateOnly organizationCalendarDate)
+     {
+          if (businessDate is { } date && (date == default || date > organizationCalendarDate))
+               throw new ArgumentException("The business date cannot be in the future.");
+          if (BusinessDate == businessDate) return false;
+          BusinessDate = businessDate;
+          return true;
+     }
      public void ChangeTimeZone(OrganizationLocalization localization, TimeZoneId timeZone)
      {
           if (localization.OrganizationId != Id) throw new InvalidOperationException("Organization mismatch");

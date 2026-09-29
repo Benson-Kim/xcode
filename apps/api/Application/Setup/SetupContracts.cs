@@ -3,14 +3,19 @@ using Auth.Domain.Setup;
 namespace Auth.Application.Setup;
 
 public sealed record Page<T>(IReadOnlyList<T> Items, int PageNumber, int PageSize, int Total);
-public sealed record CompanyDto(Guid Id, string Name, int VehicleCount);
+public sealed record CompanyDto(Guid Id, string Name, int VehicleCount, bool Active, DateOnly? ArchivedOn);
+public sealed record CompanyOption(Guid Id, string Name);
 public sealed record TargetDto(DateOnly EffectiveFrom, decimal WeeklyAmount, int Revision);
 public sealed record VehicleDto(Guid Id, Guid CompanyId, string CompanyName, string Registration, DateOnly JoinedOn,
-    decimal WeeklyTarget, IReadOnlyList<TargetDto> Targets, int RecurringItems);
+    DateOnly? LeftOn, bool Active, decimal WeeklyTarget, IReadOnlyList<TargetDto> Targets, int RecurringItems);
 // One change-log line: who changed which setup record, and the reason they gave.
-public sealed record HistoryEntry(long Version, string Section, Guid EntityId, string Reason, DateTimeOffset OccurredAt, Guid ActorId, string ActorName);
+public sealed record HistoryEntry(long Version, string Section, Guid EntityId, string Reason, DateTimeOffset OccurredAt, Guid ActorId, string ActorName,
+    string? Before = null, string? After = null);
 public sealed record SaveCompany(string Name, string Reason);
+public sealed record CompanyLifecycleRequest(string Reason);
 public sealed record SaveVehicle(Guid CompanyId, string Registration, DateOnly JoinedOn, decimal WeeklyTarget, string Reason);
+public sealed record VehicleLifecycleRequest(DateOnly LeftOn, string Reason);
+public sealed record VehicleRestoreRequest(string Reason);
 public sealed record SaveRecurring(string Name, RecurringKind Kind, CostCategory? Category, decimal Amount,
     RecurrenceFrequency Frequency, int? Day, bool LastDay, DateOnly Start, DateOnly? End, List<VehicleShare> Allocations, string Reason)
 {
@@ -22,9 +27,9 @@ public sealed record StopRecurring(bool Confirmed, string Reason);
 public sealed record RecurringDto(Guid Id, Guid VersionId, int Revision, string Name, RecurringKind Kind, CostCategory? Category,
     decimal Amount, RecurrenceFrequency Frequency, int? Day, bool LastDay, DateOnly Start, DateOnly? End, DateOnly? StoppedFrom,
     IReadOnlyList<AllocationDto> Allocations, bool Partial = false);
-public sealed record AllocationDto(Guid VehicleId, decimal Amount, string? Registration);
+public sealed record AllocationDto(Guid VehicleId, decimal Amount, string? Registration, bool Active = true);
 // What a recurring-item editor needs to pick vehicles, without the vehicle-management view.
-public sealed record VehicleOption(Guid Id, Guid CompanyId, string CompanyName, string Registration);
+public sealed record VehicleOption(Guid Id, Guid CompanyId, string CompanyName, string Registration, bool Active = true);
 public sealed record PostingDto(Guid ItemId, Guid VersionId, DateOnly Date, string Name, RecurringKind Kind, CostCategory? Category, decimal Amount);
 public sealed record VehicleReport(Guid VehicleId, DateOnly From, DateOnly Through, decimal Costs, decimal Savings, IReadOnlyList<PostingDto> Postings);
 
