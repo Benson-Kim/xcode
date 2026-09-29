@@ -99,6 +99,48 @@ public sealed class AccessAndSetupTests : IDisposable
     }
 
     [Fact]
+    public async Task RetiringVehiclesStopsPostingAndAllowsCompanyArchiving()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var (companyId, vehicleId) = await AddVehicle(owner);
+        var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+
+        using var recurring = await owner.PostAsJsonAsync("/setup/recurring",
+            new SaveRecurring("Retirement test", RecurringKind.Cost, CostCategory.FixedCommitments, 900m,
+                RecurrenceFrequency.Daily, null, false, today, null,
+                [new VehicleShare(vehicleId, 900m)], "Add retirement test"));
+        Assert.Equal(HttpStatusCode.OK, recurring.StatusCode);
+
+        using var retire = await owner.PostAsJsonAsync($"/setup/vehicles/{vehicleId}/retire",
+            new { leftOn = today.ToString("yyyy-MM-dd"), reason = "Vehicle left the fleet" });
+        Assert.Equal(HttpStatusCode.OK, retire.StatusCode);
+
+        var vehicles = await owner.GetFromJsonAsync<Page<VehicleDto>>("/setup/vehicles");
+        var vehicle = Assert.Single(vehicles!.Items, item => item.Id == vehicleId);
+        Assert.False(vehicle.Active);
+        Assert.Equal(today, vehicle.LeftOn);
+        Assert.Equal(0m, vehicle.WeeklyTarget);
+        Assert.Equal(0, vehicle.RecurringItems);
+
+        var options = await owner.GetFromJsonAsync<List<VehicleOption>>("/setup/recurring/vehicle-options");
+        Assert.DoesNotContain(options!, item => item.Id == vehicleId);
+
+        using var archive = await owner.PostAsJsonAsync($"/setup/companies/{companyId}/archive",
+            new { reason = "All vehicles left the fleet" });
+        Assert.Equal(HttpStatusCode.OK, archive.StatusCode);
+        var companies = await owner.GetFromJsonAsync<Page<CompanyDto>>("/setup/companies");
+        Assert.False(Assert.Single(companies!.Items, item => item.Id == companyId).Active);
+
+        using var restoreCompany = await owner.PostAsJsonAsync($"/setup/companies/{companyId}/restore",
+            new { reason = "Company returned to service" });
+        Assert.Equal(HttpStatusCode.OK, restoreCompany.StatusCode);
+        using var restoreVehicle = await owner.PostAsJsonAsync($"/setup/vehicles/{vehicleId}/restore",
+            new { reason = "Vehicle returned to service" });
+        Assert.Equal(HttpStatusCode.OK, restoreVehicle.StatusCode);
+    }
+
+    [Fact]
     public async Task CommitmentsUsersSeeRecurringItemsWithoutVehicleManagement()
     {
         await app.SeedDemo();

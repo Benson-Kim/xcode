@@ -66,6 +66,40 @@ public sealed class OrganizationSettingsTests : IDisposable
         Assert.Equal("long", root.GetProperty("localization").GetProperty("datePattern").GetString());
     }
 
+    [Fact]
+    public async Task BusinessDateUsesTheServerDateForSetupAndIsAudited()
+    {
+        using var client = await CreateOwnerClient();
+        var calendarDate = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+        var businessDate = calendarDate.AddDays(-1);
+
+        using var update = await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new
+        {
+            value = businessDate.ToString("yyyy-MM-dd"),
+            reason = "Reconcile the prior business day"
+        });
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+
+        using var settings = JsonDocument.Parse(await (await client.GetAsync("/setup/organization/settings")).Content.ReadAsStringAsync());
+        Assert.Equal(businessDate.ToString("yyyy-MM-dd"), settings.RootElement.GetProperty("organization").GetProperty("businessDate").GetString());
+        Assert.Equal(businessDate.ToString("yyyy-MM-dd"), settings.RootElement.GetProperty("effectiveBusinessDate").GetString());
+
+        using var appearance = JsonDocument.Parse(await (await client.GetAsync("/setup/appearance")).Content.ReadAsStringAsync());
+        Assert.Equal(businessDate.ToString("yyyy-MM-dd"), appearance.RootElement.GetProperty("businessDate").GetString());
+
+        using var future = await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new
+        {
+            value = calendarDate.AddDays(1).ToString("yyyy-MM-dd"),
+            reason = "Invalid future date"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, future.StatusCode);
+
+        using var history = JsonDocument.Parse(await (await client.GetAsync("/setup/history")).Content.ReadAsStringAsync());
+        Assert.Contains(history.RootElement.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("section").GetString() == "businessDate" &&
+                    item.GetProperty("reason").GetString() == "Reconcile the prior business day");
+    }
+
     private async Task<HttpClient> CreateOwnerClient()
     {
         await app.WithDb(async db =>
