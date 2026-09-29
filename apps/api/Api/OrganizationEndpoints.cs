@@ -125,6 +125,9 @@ public static class OrganizationEndpoints
                     effective.ThemeMode,
                     effective.ReducedMotion,
                     effective.FontScale,
+                    // Appended for the phone, which enforces the wrong-PIN policy offline; older clients ignore them.
+                    effective.SecurityPolicy.LockoutThreshold,
+                    effective.SecurityPolicy.LockoutMinutes,
                });
           }).WithName("GetAppearance");
 
