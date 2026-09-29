@@ -42,8 +42,9 @@ import {
 import { kes, plural } from "../lib/format";
 import type { ExpenseBucket, ExpenseItemOption } from "../lib/types";
 import {
+  costBucket,
   expenseBucketNames,
-  recurringCategoryNames,
+  legacyCostTypeNames,
   type RecurringItem,
   type VehicleOption,
 } from "./setup/shared";
@@ -208,7 +209,9 @@ export function RecurringEditor({
 
   // Items saved before expense items keep their old cost type and daily schedule until someone changes them.
   const legacyCategory = Boolean(item?.kind === 1 && !item.expenseItemId);
-  const legacyCategoryName = recurringCategoryNames[item?.category || 4];
+  const legacyCategoryName = legacyCostTypeNames[item?.category || 4];
+  // Until an expense item is chosen, an old row keeps counting in its old type's bucket.
+  const legacyBucket = item && legacyCategory ? costBucket(item) : null;
   const legacyDaily = item?.frequency === 1;
   const itemChoices: ItemChoice[] = (expenseItems ?? []).map((option) => ({
     ...option,
@@ -241,8 +244,8 @@ export function RecurringEditor({
   ];
   const countedAs = picked?.bucket
     ? expenseBucketNames[picked.bucket]
-    : legacyCategory && !expenseItemId
-      ? legacyCategoryName
+    : legacyBucket && !expenseItemId
+      ? expenseBucketNames[legacyBucket]
       : undefined;
 
   // A vehicle that left the fleet keeps its share, read-only: it stays in the total but no longer posts.

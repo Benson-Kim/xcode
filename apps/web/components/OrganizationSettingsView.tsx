@@ -259,7 +259,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
 
         <SettingsCard
           title="Business date"
-          description="The accounting date used by reports, targets, recurring postings, and setup changes. Leave it blank to follow the organization's time zone."
+          description="The accounting date used by reports, targets, scheduled postings, and setup changes. Leave it blank to follow the organization's time zone."
           error={businessDateError}
           action="Save business date"
           busy={businessDateBusy}

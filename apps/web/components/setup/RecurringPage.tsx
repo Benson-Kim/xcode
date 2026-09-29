@@ -6,7 +6,7 @@ import { useResource, useStreamedList } from "../../lib/data";
 import { kes, plural } from "../../lib/format";
 import type { ExpenseItemOption } from "../../lib/types";
 import { Banner, Button, CellNote, DataTable, FormSkeleton, PageHeader, RowButton, SegmentedControl, SelectInput, Spacer, StatusBadge, Td, Toolbar, Tr } from "../ui";
-import { expenseBucketNames, recurringCategoryNames, type RecurringItem, type VehicleOption } from "./shared";
+import { costBucket, expenseBucketNames, type RecurringItem, type VehicleOption } from "./shared";
 import { formatDateOnly, recurringFrequency, recurringMonthlyEstimate, recurringNextPosting } from "../recurringPresentation";
 import { RecurringEditor } from "../RecurringEditor";
 
@@ -147,8 +147,9 @@ export function RecurringPage({
           const retiredCount = item.allocations.filter((allocation) => allocation.active === false).length;
           // What posts now. `amount` is the saved total, which still counts vehicles that have left the fleet.
           const posting = item.activeAmount ?? item.amount;
-          // A cost counts in its item's bucket; rows saved before expense items keep their old cost type.
-          const countsAs = item.kind === 2 ? "Savings" : item.bucket ? expenseBucketNames[item.bucket] : recurringCategoryNames[item.category || 4];
+          // A cost counts in its item's bucket; a row saved before expense items counts in its old type's bucket.
+          const bucket = costBucket(item);
+          const countsAs = bucket ? expenseBucketNames[bucket] : "Savings";
           return (
             <Tr key={item.id}>
               <Td label="Item">

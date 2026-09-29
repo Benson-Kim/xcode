@@ -41,7 +41,8 @@ import {
   Tr,
   useToast,
 } from "../ui";
-import { recurringCategoryNames, type Company, type RecurringItem, type Vehicle, type VehicleReport } from "./shared";
+import type { ExpenseBucket } from "../../lib/types";
+import { costBucket, expenseBucketNames, type Company, type RecurringItem, type Vehicle, type VehicleReport } from "./shared";
 import { VehicleInvestmentTab } from "./VehicleInvestment";
 
 type CompanyChoice = { id: string; name: string; active?: boolean };
@@ -456,20 +457,21 @@ function VehicleEditor({
   );
 }
 
-const categories = [1, 2, 3, 4];
+const buckets = [1, 2, 3] as const;
 
 function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
   const [period, setPeriod] = useState<"week" | "month">("month");
   const report = useResource<VehicleReport>(`setup/vehicles/${vehicle.id}/report?period=${period}`);
   const postings = report.data?.postings ?? [];
-  const byCategory = (category: number) =>
-    postings.filter((posting) => posting.kind === 1 && posting.category === category).reduce((sum, posting) => sum + posting.amount, 0);
+  // Money out counts in three buckets; savings are set aside, not money out.
+  const byBucket = (bucket: ExpenseBucket) =>
+    postings.filter((posting) => costBucket(posting) === bucket).reduce((sum, posting) => sum + posting.amount, 0);
   const grouped = [...postings.reduce((items, posting) => {
-    const item = items.get(posting.itemId) ?? { name: posting.name, kind: posting.kind, category: posting.category, total: 0, dates: [] as string[] };
+    const item = items.get(posting.itemId) ?? { id: posting.itemId, name: posting.name, bucket: costBucket(posting), total: 0, dates: [] as string[] };
     item.total += posting.amount;
     item.dates.push(posting.date);
     return items.set(posting.itemId, item);
-  }, new Map<string, { name: string; kind: number; category?: number | null; total: number; dates: string[] }>()).values()];
+  }, new Map<string, { id: string; name: string; bucket: ExpenseBucket | null; total: number; dates: string[] }>()).values()];
   return (
     <Card>
       <CardHeader
@@ -496,8 +498,8 @@ function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
       ) : (
         <>
           <StatGrid>
-            {categories.map((category) => (
-              <Stat key={category} label={recurringCategoryNames[category]} value={kes(byCategory(category))} />
+            {buckets.map((bucket) => (
+              <Stat key={bucket} label={expenseBucketNames[bucket]} value={kes(byBucket(bucket))} />
             ))}
             <Stat label="Savings set aside" value={kes(report.data.savings)} />
           </StatGrid>
@@ -506,9 +508,9 @@ function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
             <CardList>
               {grouped.map((item) => (
                 <CardListItem
-                  key={item.name + item.dates[0]}
+                  key={item.id}
                   left={item.name}
-                  leftSub={`${item.kind === 2 ? "Savings" : recurringCategoryNames[item.category ?? 4]}. ${
+                  leftSub={`${item.bucket ? expenseBucketNames[item.bucket] : "Savings"}. ${
                     item.dates.length <= 3
                       ? item.dates.map(formatDateOnly).join(", ")
                       : `${item.dates.length} postings, ${formatDateOnly(item.dates[0])} to ${formatDateOnly(item.dates[item.dates.length - 1])}`

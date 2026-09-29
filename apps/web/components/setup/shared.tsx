@@ -56,7 +56,17 @@ export type RecurringItem = {
   month?: number | null;
 };
 
-export type Posting = { itemId: string; versionId: string; date: string; name: string; kind: number; category?: number | null; amount: number };
+// One due date of a scheduled item on a vehicle. A cost carries its bucket; `category` is only set on old rows.
+export type Posting = {
+  itemId: string;
+  versionId: string;
+  date: string;
+  name: string;
+  kind: number;
+  category?: number | null;
+  amount: number;
+  bucket?: ExpenseBucket | null;
+};
 export type VehicleReport = { vehicleId: string; from: string; through: string; costs: number; savings: number; postings: Posting[] };
 
 export const expenseBucketNames: Record<ExpenseBucket, string> = {
@@ -65,8 +75,15 @@ export const expenseBucketNames: Record<ExpenseBucket, string> = {
   3: "Loan repayments",
 };
 
-// The cost types used before expense items. Rows saved with them stay readable.
-export const recurringCategoryNames: Record<number, string> = {
+// The bucket a cost counts in. A row saved before expense items has only its old cost type, mapped as in A2:
+// Repairs and upkeep counts as Repairs and maintenance, every other type as Recurring charges. Savings have none.
+export function costBucket(row: { kind: number; bucket?: ExpenseBucket | null; category?: number | null }): ExpenseBucket | null {
+  if (row.kind !== 1) return null;
+  return row.bucket ?? (row.category === 2 ? 1 : 2);
+}
+
+// The cost types used before expense items, only to tell someone what an old row was set up with.
+export const legacyCostTypeNames: Record<number, string> = {
   1: "Running costs",
   2: "Repairs and upkeep",
   3: "Crew costs",
