@@ -215,6 +215,11 @@ C6 and C5's `returned` and `percentPaidOff`.
   - WP-WR (web revenue) launched on the revenue worktree.
   - Next: when WP-S finishes, commit settings, merge access into settings (resolve the snapshot and SetupEndpoints conflicts), run the checks, push, and open the PR. Then merge settings into revenue.
 
+- **Settings committed and pushed:** 6d8c2bd, c8aa1dd, 3471615, 9b22352, then merge 9707033 (access into settings) and 71e15c1 (lockout fields in appearance). **PR #5**. API tests: 143 passed, 2 failed (SQL Server only). The local `settings` ref is NOT moved, because the main folder holds the user's work. Use `origin/settings`.
+- **Codex round 1 on PR #4:** three P1s (the permission memo surviving a retry, stored lockout values outside the bounds, pause enumeration). Sent to WP-A round 2, codebase-wide. PR #5's Codex review was still running.
+- WP-S follow-up: the N+1 in recurring save and stop (settings worktree).
+- Pending: WP-WR (revenue web). Then commit revenue (WP-R, WP-M, WP-WR), merge settings into revenue, WP-X (report v2 and investment returned), the mobile lockout follow-up, verification, and the screenshot pass.
+
 ### Decisions for the user (collected)
 - D1. Legacy cost category → bucket mapping (A2).
 - D2. `EditedRecords` counts records for days in the period, while the design counts edits made in the period. Counting edits needs the business date of each edit, which isn't stored.
