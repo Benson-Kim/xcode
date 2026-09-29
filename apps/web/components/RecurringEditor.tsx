@@ -148,7 +148,7 @@ export function RecurringEditor({
   const [expenseItemId, setExpenseItemId] = useState(item?.expenseItemId ?? "");
   const [name, setName] = useState(item?.kind === 2 ? item.name : "");
   const [note, setNote] = useState(item?.note ?? "");
-  // The saved total is the sum of every share, including those of vehicles that have left the fleet, so an existing
+  // The saved total is the sum of every share, including those of vehicles not in the fleet today, so an existing
   // item always opens balanced.
   const [amount, setAmount] = useState(
     item ? formatShare(item.allocations.reduce((sum, allocation) => sum + allocation.amount, 0)) : "",
@@ -248,18 +248,19 @@ export function RecurringEditor({
       ? expenseBucketNames[legacyBucket]
       : undefined;
 
-  // A vehicle that left the fleet keeps its share, read-only: it stays in the total but no longer posts.
+  // A vehicle not in the fleet today (left, or not joined yet) keeps its share, read-only: it stays in the total but
+  // does not post.
   const inFleet = (vehicleId: string) =>
     vehicles.find((vehicle) => vehicle.id === vehicleId)?.active !== false;
-  const retiredShares = (vehicleIds: string[]) =>
+  const outOfFleetShares = (vehicleIds: string[]) =>
     Object.fromEntries(
       vehicleIds
         .filter((vehicleId) => !inFleet(vehicleId))
         .map((vehicleId) => [vehicleId, shares[vehicleId] ?? "0"]),
     );
-  // Splits what is left after the retired shares across the vehicles still in the fleet.
+  // Splits what is left after the shares of vehicles not in the fleet across the vehicles that are.
   function splitAcrossFleet(amountTotal: number, vehicleIds: string[]) {
-    const kept = retiredShares(vehicleIds);
+    const kept = outOfFleetShares(vehicleIds);
     const keptTotal = Object.values(kept).reduce((sum, share) => sum + (Number(share) || 0), 0);
     return {
       ...kept,
@@ -289,7 +290,7 @@ export function RecurringEditor({
     setSelected(next);
     setSplitNotice("");
     if (!checked && vehicle?.active === false) {
-      // Removing a retired share also takes it off the amount, so the form stays balanced.
+      // Removing the share of a vehicle not in the fleet also takes it off the amount, so the form stays balanced.
       const share = Number(shares[vehicleId]) || 0;
       setAmount(formatShare(Math.max(0, total - share)));
       setShares((current) => {
@@ -328,7 +329,7 @@ export function RecurringEditor({
   const vehicleName = (vehicleId: string) =>
     vehicles.find((vehicle) => vehicle.id === vehicleId)?.registration ?? "A vehicle";
   const postingIds = selected.filter(inFleet);
-  const retiredIds = selected.filter((vehicleId) => !inFleet(vehicleId));
+  const outOfFleetIds = selected.filter((vehicleId) => !inFleet(vehicleId));
   // What posts on each due date: the shares of the vehicles still in the fleet.
   const postingTotal = postingIds.reduce(
     (sum, vehicleId) => sum + (Number(shares[vehicleId]) || 0),
@@ -790,11 +791,11 @@ export function RecurringEditor({
               Enter the amount and select vehicles to enable Split equally.
             </Hint>
           ) : null}
-          {retiredIds.length > 0 && (
+          {outOfFleetIds.length > 0 && (
             <Hint>
-              {retiredIds.length === 1
-                ? `${vehicleName(retiredIds[0])} left the fleet. Its share stays in the total but no longer posts.`
-                : `${retiredIds.map(vehicleName).join(", ")} left the fleet. Their shares stay in the total but no longer post.`}
+              {outOfFleetIds.length === 1
+                ? `${vehicleName(outOfFleetIds[0])} is not in the fleet today, so its share stays in the total but does not post.`
+                : `${outOfFleetIds.map(vehicleName).join(", ")} are not in the fleet today, so their shares stay in the total but do not post.`}
               {!disabled && " Untick a vehicle to take its share off the amount."}
             </Hint>
           )}
@@ -817,7 +818,7 @@ export function RecurringEditor({
                         className="grid min-h-13 grid-cols-[minmax(0,1fr)_170px] items-center gap-3 border-t border-divider max-[720px]:grid-cols-[minmax(0,1fr)_140px]"
                       >
                         <Choice
-                          label={vehicle.active === false ? `${vehicle.registration} (left fleet)` : vehicle.registration}
+                          label={vehicle.active === false ? `${vehicle.registration} (not in the fleet today)` : vehicle.registration}
                           checked={selected.includes(vehicle.id)}
                           disabled={disabled || (vehicle.active === false && !selected.includes(vehicle.id))}
                           onChange={(event) =>

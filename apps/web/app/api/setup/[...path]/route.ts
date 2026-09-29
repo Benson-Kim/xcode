@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { readLimitedBody } from "../../body";
 
 const allowedMethods = new Set(["GET", "POST", "PUT", "DELETE"]);
 
@@ -66,7 +67,9 @@ async function proxy(
       { status: 401 },
     );
 
-  const body = method === "GET" || method === "DELETE" ? undefined : await request.text();
+  const body = method === "GET" || method === "DELETE" ? undefined : await readLimitedBody(request);
+  if (body === null)
+    return NextResponse.json({ status: "payload_too_large" }, { status: 413 });
   try {
     const response = await fetch(
       `${process.env.API_URL || "http://localhost:5000"}/setup/${operation}${request.nextUrl.search}`,

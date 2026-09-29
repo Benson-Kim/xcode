@@ -25,6 +25,7 @@ import {
   Grid2,
   Hint,
   ListSkeleton,
+  Note,
   PageHeader,
   RowButton,
   SegmentedControl,
@@ -66,14 +67,21 @@ export function VehiclesPage({
   // The organization's business date, never the computer clock; undefined until the appearance has loaded.
   const today = appearance?.businessDate;
   const [filter, setFilter] = useState("all");
-  const [editing, setEditing] = useState<Vehicle | "new" | null>(null);
+  // The vehicle being edited (a null id adds one). After a save it shows the vehicle as saved until the reloaded list
+  // arrives, then the server's copy, so what the server works out (active, targets, counts) is never a local guess.
+  const [editing, setEditing] = useState<{ id: string | null; saved?: Vehicle; rows?: Vehicle[] } | null>(null);
   const rows = vehicles.items;
   const companies = companyChoices(rows, companyList.items, companyOptions.data);
+  const editedVehicle = editing?.id
+    ? editing.saved && editing.rows === rows
+      ? editing.saved
+      : (rows.find((vehicle) => vehicle.id === editing.id) ?? editing.saved)
+    : undefined;
 
   if (editing)
     return (
       <VehicleEditor
-        vehicle={editing === "new" ? undefined : editing}
+        vehicle={editedVehicle}
         defaultCompany={filter === "all" ? "" : filter}
         companies={companies}
         today={today}
@@ -82,7 +90,7 @@ export function VehiclesPage({
         onClose={() => setEditing(null)}
         onSaved={(saved) => {
           vehicles.reload();
-          setEditing(saved);
+          setEditing({ id: saved.id, saved, rows });
         }}
       />
     );
@@ -109,7 +117,7 @@ export function VehiclesPage({
         </SelectInput>
         {!vehicles.loading && <Hint>{plural(visible.length, "vehicle", "vehicles")}</Hint>}
         <Spacer />
-        {canManage && <Button onClick={() => setEditing("new")}>Add vehicle</Button>}
+        {canManage && <Button onClick={() => setEditing({ id: null })}>Add vehicle</Button>}
       </Toolbar>
       <DataTable
         columns={[
@@ -129,12 +137,10 @@ export function VehiclesPage({
         {visible.map((vehicle) => (
           <Tr key={vehicle.id}>
             <Td label="Registration">
-              <RowButton onClick={() => setEditing(vehicle)}>{vehicle.registration}</RowButton>
+              <RowButton onClick={() => setEditing({ id: vehicle.id })}>{vehicle.registration}</RowButton>
             </Td>
             <Td label="Company">{vehicle.companyName}</Td>
-            <Td label="Status">
-              {vehicle.active !== false ? "Active" : `Left fleet ${vehicle.leftOn ? formatDateOnly(vehicle.leftOn) : ""}`}
-            </Td>
+            <Td label="Status">{fleetStatus(vehicle)}</Td>
             <Td label="Weekly target" numeric>
               {kes(vehicle.weeklyTarget)}
               <CellNote>About {kes(Math.round(vehicle.weeklyTarget / 7))} a day</CellNote>
@@ -146,6 +152,14 @@ export function VehiclesPage({
       </DataTable>
     </section>
   );
+}
+
+// A leave date means the vehicle is retired. Without one, a vehicle that is not active has not joined yet: the
+// business date is before its join date.
+function fleetStatus(vehicle: Vehicle) {
+  if (vehicle.leftOn)
+    return vehicle.active === false ? `Left fleet ${formatDateOnly(vehicle.leftOn)}` : `Leaves the fleet ${formatDateOnly(vehicle.leftOn)}`;
+  return vehicle.active === false ? `Joins ${formatDateOnly(vehicle.joinedOn)}` : "Active";
 }
 
 function companyChoices(vehicles: Vehicle[], companies?: Company[], options?: CompanyChoice[]): CompanyChoice[] {
@@ -221,7 +235,9 @@ function VehicleEditor({
   const shownTab = tabs.some((option) => option.value === tab) ? tab : (tabs[0]?.value ?? "details");
   const weekly = Number(form.weeklyTarget) || 0;
   const companyName = companies.find((company) => company.id === form.companyId)?.name ?? vehicle?.companyName;
-  const retired = Boolean(vehicle && vehicle.active === false);
+  // Retired means it has a leave date; a vehicle that is not active without one joins after the business date.
+  const retired = Boolean(vehicle?.leftOn);
+  const joinsLater = Boolean(vehicle && !vehicle.leftOn && vehicle.active === false);
 
   async function retireVehicle() {
     if (!vehicle || retired) return;
@@ -234,7 +250,7 @@ function VehicleEditor({
         body: JSON.stringify({ leftOn: lifecycleDate }),
       });
       toast(`${vehicle.registration} left the fleet.`);
-      onSaved({ ...vehicle, leftOn: lifecycleDate, active: false, weeklyTarget: 0, recurringItems: 0 });
+      onSaved({ ...vehicle, leftOn: lifecycleDate, active: false });
     } catch (value) {
       setSaveError((value as Error).message);
     } finally {
@@ -320,6 +336,12 @@ function VehicleEditor({
       <FormLayout>
         <ErrorSummary count={Object.keys(errors).length} />
         {saveError && <Banner>{saveError}</Banner>}
+        {joinsLater && (
+          <Note tone="info">
+            Joins the fleet on {formatDateOnly(vehicle!.joinedOn)}, after the business date.
+            {today ? ` To save a change, set a join date on or before ${formatDateOnly(today)}.` : ""}
+          </Note>
+        )}
         <Card density="form">
           <CardHeader title="Vehicle" />
           <Grid2>
@@ -384,7 +406,9 @@ function VehicleEditor({
             />
             {retired ? (
               <>
-                <Hint>Left the fleet on {vehicle.leftOn ? formatDateOnly(vehicle.leftOn) : "an earlier date"}.</Hint>
+                <Hint>
+                  {vehicle.active === false ? "Left the fleet on" : "Leaves the fleet on"} {formatDateOnly(vehicle.leftOn!)}.
+                </Hint>
                 <FormActions>
                   <Button
                     disabled={busy}
@@ -394,6 +418,8 @@ function VehicleEditor({
                   </Button>
                 </FormActions>
               </>
+            ) : joinsLater ? (
+              <Hint>It can leave the fleet once it has joined.</Hint>
             ) : (
               <>
                 <Field id="vehicle-left-on" label="Leaves the fleet" hint="No target or scheduled posting is active on this date.">
@@ -426,7 +452,11 @@ function VehicleEditor({
     <section>
       <PageHeader
         title={isNew ? "Add vehicle" : vehicle.registration}
-        description={isNew ? "It shows on reports and the dashboard straight away." : `${companyName}${retired ? " · Left the fleet" : ""}`}
+        description={
+          isNew
+            ? "It shows on reports and the dashboard straight away."
+            : `${companyName}${retired ? " · Left the fleet" : joinsLater ? ` · Joins ${formatDateOnly(vehicle.joinedOn)}` : ""}`
+        }
       />
       {isNew ? (
         details
@@ -563,7 +593,15 @@ function VehicleRecurringCard({
               <CardListItem
                 key={item.id}
                 left={onOpen ? <RowButton onClick={() => onOpen(item.id)}>{item.name}</RowButton> : item.name}
-                leftSub={`${item.note ? `${item.note}. ` : ""}${recurringFrequency(item)}${stopped ? allocation.active === false ? ". Left the fleet" : ". Stopped" : ""}`}
+                leftSub={`${item.note ? `${item.note}. ` : ""}${recurringFrequency(item)}${
+                  !stopped
+                    ? ""
+                    : allocation.active !== false
+                      ? ". Stopped"
+                      : vehicle.leftOn
+                        ? ". Left the fleet"
+                        : `. Posts once it joins on ${formatDateOnly(vehicle.joinedOn)}`
+                }`}
                 right={kes(share)}
                 rightSub={item.allocations.length > 1 ? `of ${kes(item.activeAmount ?? item.amount)}` : "each time"}
               />

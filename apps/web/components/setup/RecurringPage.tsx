@@ -144,8 +144,8 @@ export function RecurringPage({
           const active = hasActiveVehicle(item);
           const next = item.stoppedFrom || !active || !today ? null : recurringNextPosting(item, today);
           const registrations = item.allocations.map((allocation) => allocation.registration).filter((registration): registration is string => Boolean(registration));
-          const retiredCount = item.allocations.filter((allocation) => allocation.active === false).length;
-          // What posts now. `amount` is the saved total, which still counts vehicles that have left the fleet.
+          const outOfFleetCount = item.allocations.filter((allocation) => allocation.active === false).length;
+          // What posts now. `amount` is the saved total, which still counts vehicles not in the fleet today.
           const posting = item.activeAmount ?? item.amount;
           // A cost counts in its item's bucket; a row saved before expense items counts in its old type's bucket.
           const bucket = costBucket(item);
@@ -164,7 +164,7 @@ export function RecurringPage({
                 <CellNote>
                   {item.partial ? "Your vehicles' share. " : ""}
                   {posting !== item.amount
-                    ? `${kes(item.amount)} in total, with ${retiredCount === 1 ? "1 share for a vehicle" : `${retiredCount} shares for vehicles`} that left the fleet. `
+                    ? `${kes(item.amount)} in total, with ${outOfFleetCount === 1 ? "1 share for a vehicle" : `${outOfFleetCount} shares for vehicles`} not in the fleet today. `
                     : ""}
                   About {kes(recurringMonthlyEstimate(posting, item.frequency))} a month
                 </CellNote>
@@ -175,7 +175,7 @@ export function RecurringPage({
                 <CellNote>
                   {registrations.slice(0, 2).join(", ")}
                   {item.allocations.length > 2 ? ` and ${item.allocations.length - 2} more` : ""}
-                  {retiredCount ? `, ${retiredCount} retired` : ""}{item.partial ? ", plus vehicles you can't see" : ""}
+                  {outOfFleetCount ? `, ${outOfFleetCount} not in the fleet today` : ""}{item.partial ? ", plus vehicles you can't see" : ""}
                 </CellNote>
               </Td>
               <Td label="Period">
