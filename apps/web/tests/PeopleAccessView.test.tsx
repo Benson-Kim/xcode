@@ -88,3 +88,21 @@ it("offers companies when the scope is chosen companies", async () => {
     permissions: expect.arrayContaining(["reports.view"]),
   });
 });
+
+it("says why the server refused to save a person", async () => {
+  const detail = "You can only give access to the companies you can see yourself.";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Response(JSON.stringify({ title: "Not permitted in this organization or data scope.", status: 403, detail }), { status: 403 })
+        : new Response(JSON.stringify(responses[input]), { status: 200 }),
+    ),
+  );
+  await openNewPerson(false);
+  fireEvent.click(await screen.findByLabelText("KDA 482M"));
+  fireEvent.click(screen.getByRole("button", { name: "Save person" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(detail);
+  expect(screen.queryByText("Not permitted in this organization or data scope.")).not.toBeInTheDocument();
+});

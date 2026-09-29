@@ -74,7 +74,7 @@ type Section = keyof Pick<
   "organization" | "localization" | "branding" | "securityPolicy"
 >;
 
-// Every setup write carries a reason that the editor can review and change before saving.
+// The toast after each save. Saves carry no typed reason: the server writes one for the change log.
 const saved: Record<Section, string> = {
   organization: "Organization details saved.",
   localization: "Locale and time saved.",
@@ -123,14 +123,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
   const [logoBusy, setLogoBusy] = useState(false);
   const [settings, setSettings] = useState(initial);
   const [errors, setErrors] = useState<Partial<Record<Section, string>>>({});
-  const [sectionReasons, setSectionReasons] = useState<Record<Section, string>>({
-    organization: "",
-    localization: "",
-    branding: "",
-    securityPolicy: "",
-  });
   const [businessDateError, setBusinessDateError] = useState("");
-  const [businessDateReason, setBusinessDateReason] = useState("");
   const [busy, setBusy] = useState<Section | null>(null);
   const [businessDateBusy, setBusinessDateBusy] = useState(false);
   const update = <T extends Section>(section: T, value: Partial<Settings[T]>) =>
@@ -156,16 +149,11 @@ function SettingsForm({ initial }: { initial: Settings }) {
       }
       value = { name, slug };
     }
-    const reason = sectionReasons[section].trim();
-    if (!reason) {
-      setErrors({ ...errors, [section]: "Give a reason for this change." });
-      return;
-    }
     setBusy(section);
     try {
       await apiRequest(`setup/organization/settings/${section}`, {
         method: "PUT",
-        body: JSON.stringify({ value, reason }),
+        body: JSON.stringify({ value }),
       });
       setErrors({ ...errors, [section]: undefined });
       toast(saved[section]);
@@ -179,19 +167,11 @@ function SettingsForm({ initial }: { initial: Settings }) {
 
   async function saveBusinessDate() {
     const value = settings.organization.businessDate || null;
-    const reason = businessDateReason.trim();
-    if (!reason) {
-      setBusinessDateError("Give a reason for this change.");
-      return;
-    }
     setBusinessDateBusy(true);
     try {
       await apiRequest("setup/organization/settings/businessDate", {
         method: "PUT",
-        body: JSON.stringify({
-          value,
-          reason,
-        }),
+        body: JSON.stringify({ value }),
       });
       setBusinessDateError("");
       toast(value ? "Business date saved." : "Business date now follows the organization time zone.");
@@ -214,19 +194,14 @@ function SettingsForm({ initial }: { initial: Settings }) {
         ...errors,
         branding: "The logo must be at most 256 KB.",
       });
-    const reason = sectionReasons.branding.trim();
-    if (!reason) {
-      setErrors({ ...errors, branding: "Give a reason for this change." });
-      return;
-    }
     setLogoBusy(true);
     try {
       if (file)
         await apiRequest("setup/organization/logo", {
           method: "PUT",
-          body: JSON.stringify({ dataUrl: await readAsDataUrl(file), reason }),
+          body: JSON.stringify({ dataUrl: await readAsDataUrl(file) }),
         });
-      else await apiRequest(`setup/organization/logo?reason=${encodeURIComponent(reason)}`, { method: "DELETE" });
+      else await apiRequest("setup/organization/logo", { method: "DELETE" });
       setErrors({ ...errors, branding: undefined });
       toast(file ? "Logo updated." : "Logo removed.");
       refresh();
@@ -252,8 +227,6 @@ function SettingsForm({ initial }: { initial: Settings }) {
           action="Save organization details"
           busy={busy === "organization"}
           onSave={() => void save("organization")}
-          reason={sectionReasons.organization}
-          onReasonChange={(value) => setSectionReasons({ ...sectionReasons, organization: value })}
         >
           <Grid2>
             <Field id="org-name" label="Organization name">
@@ -288,8 +261,6 @@ function SettingsForm({ initial }: { initial: Settings }) {
           action="Save business date"
           busy={businessDateBusy}
           onSave={() => void saveBusinessDate()}
-          reason={businessDateReason}
-          onReasonChange={setBusinessDateReason}
         >
           <Field
             id="business-date"
@@ -334,8 +305,6 @@ function SettingsForm({ initial }: { initial: Settings }) {
           action="Save brand"
           busy={busy === "branding"}
           onSave={() => void save("branding")}
-          reason={sectionReasons.branding}
-          onReasonChange={(value) => setSectionReasons({ ...sectionReasons, branding: value })}
         >
           <div className="flex flex-wrap items-center gap-4">
             <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-[14px] border border-card-line bg-paper">
@@ -475,8 +444,6 @@ function SettingsForm({ initial }: { initial: Settings }) {
           action="Save locale"
           busy={busy === "localization"}
           onSave={() => void save("localization")}
-          reason={sectionReasons.localization}
-          onReasonChange={(value) => setSectionReasons({ ...sectionReasons, localization: value })}
         >
           <Grid2>
             <Field id="locale" label="Locale" hint="For example en-GB.">
@@ -570,8 +537,6 @@ function SettingsForm({ initial }: { initial: Settings }) {
           action="Save security"
           busy={busy === "securityPolicy"}
           onSave={() => void save("securityPolicy")}
-          reason={sectionReasons.securityPolicy}
-          onReasonChange={(value) => setSectionReasons({ ...sectionReasons, securityPolicy: value })}
         >
           <Grid2>
             <Field
@@ -669,8 +634,6 @@ function SettingsCard({
   action,
   busy,
   onSave,
-  reason,
-  onReasonChange,
   children,
 }: {
   title: string;
@@ -679,8 +642,6 @@ function SettingsCard({
   action: string;
   busy: boolean;
   onSave: () => void;
-  reason: string;
-  onReasonChange: (value: string) => void;
   children: ReactNode;
 }) {
   return (
@@ -688,9 +649,6 @@ function SettingsCard({
       <CardHeader title={title} description={description} />
       {error && <Banner>{error}</Banner>}
       {children}
-      <Field id={`${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-reason`} label={`Reason for ${title}`} hint="This is kept in the change log.">
-        <TextInput value={reason} onChange={(event) => onReasonChange(event.target.value)} />
-      </Field>
       <FormActions>
         <Button disabled={busy} onClick={onSave}>
           {action}

@@ -9,4 +9,5 @@ export * from "./layout";
 export * from "./segmented";
 export * from "./skeleton";
 export * from "./table";
+export * from "./tabs";
 export * from "./toast";

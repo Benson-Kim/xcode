@@ -94,22 +94,13 @@ it("saves organization sections through their endpoint contracts", async () => {
   fireEvent.change(screen.getByLabelText("Slug"), {
     target: { value: "new-fleet" },
   });
-  fireEvent.change(screen.getByLabelText("Reason for Organization details"), {
-    target: { value: "Update organization details" },
-  });
   fireEvent.click(
     screen.getByRole("button", { name: "Save organization details" }),
   );
   fireEvent.change(screen.getByLabelText("Locale"), {
     target: { value: "fr-FR" },
   });
-  fireEvent.change(screen.getByLabelText("Reason for Locale and time"), {
-    target: { value: "Update locale" },
-  });
   fireEvent.click(screen.getByRole("button", { name: "Save locale" }));
-  fireEvent.change(screen.getByLabelText("Reason for Security policy"), {
-    target: { value: "Update security" },
-  });
   fireEvent.click(screen.getByRole("button", { name: "Save security" }));
 
   await waitFor(() =>
@@ -128,6 +119,27 @@ it("saves organization sections through their endpoint contracts", async () => {
       expect.objectContaining({ method: "PUT" }),
     ),
   );
+  fireEvent.change(screen.getByLabelText("Business date", { selector: "input" }), {
+    target: { value: "2026-09-20" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save business date" }));
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/setup/organization/settings/businessDate",
+      expect.objectContaining({ method: "PUT" }),
+    ),
+  );
+
+  // C7: settings are saved without a typed reason; the server writes one for the change log.
+  expect(screen.queryByLabelText(/Reason/)).not.toBeInTheDocument();
+  const bodies = vi
+    .mocked(fetch)
+    .mock.calls.filter(([, init]) => init?.method === "PUT")
+    .map(([, init]) => JSON.parse(String(init!.body)));
+  expect(bodies).toHaveLength(4);
+  for (const body of bodies) expect(body).not.toHaveProperty("reason");
+  expect(bodies[0]).toEqual({ value: { name: "New Fleet", slug: "new-fleet" } });
+  expect(bodies[3]).toEqual({ value: "2026-09-20" });
 });
 
 it("lets any member load and save their own preferences", async () => {

@@ -26,3 +26,27 @@ it("forwards allowed paths with the access token", async () => {
   expect(fetcher.mock.calls[0][0]).toMatch(/\/setup\/people\/3f2c\/deactivate$/);
   expect(fetcher.mock.calls[0][1].headers.Authorization).toBe("Bearer access-value");
 });
+
+it("forwards revenue, expense catalog and investment paths, and nothing unlisted", async () => {
+  const fetcher = vi.fn(async (url: string) => new Response(JSON.stringify({ url }), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  const allowed = [
+    ["revenue"],
+    ["revenue", "dashboard"],
+    ["revenue", "v-1", "2026-09-21"],
+    ["expense-categories"],
+    ["expense-categories", "c-1", "items"],
+    ["expense-categories", "c-1", "stop"],
+    ["expense-items", "options"],
+    ["expense-items", "i-1", "restore"],
+    ["investment", "e-1"],
+    ["vehicles", "v-1", "investment"],
+  ];
+  for (const path of allowed) expect((await get(path)).status, path.join("/")).toBe(200);
+  expect(fetcher.mock.calls.map(([url]) => String(url).replace(/^.*\/setup\//, ""))).toEqual(allowed.map((path) => path.join("/")));
+
+  fetcher.mockClear();
+  for (const path of [["expense"], ["expense-categoriesx"], ["investments"], ["revenues", "x"], ["auth", "session"]])
+    expect((await get(path)).status, path.join("/")).toBe(404);
+  expect(fetcher).not.toHaveBeenCalled();
+});
