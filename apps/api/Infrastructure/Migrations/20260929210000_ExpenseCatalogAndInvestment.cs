@@ -249,10 +249,11 @@ namespace Auth.Api.Infrastructure.Migrations
                 name: "IX_RecurringVersion_OrganizationId_ExpenseItemId",
                 table: "RecurringVersion");
 
-            migrationBuilder.DeleteData(
-                table: "RecurrenceFrequencyLookup",
-                keyColumn: "Id",
-                keyValue: 4);
+            // Yearly schedules saved since the upgrade still reference lookup row 4, and history is never deleted, so the
+            // row is removed only when nothing uses it; otherwise the rollback keeps it and still succeeds.
+            migrationBuilder.Sql(
+                "DELETE FROM [RecurrenceFrequencyLookup] WHERE [Id] = 4 " +
+                "AND NOT EXISTS (SELECT 1 FROM [RecurringVersion] WHERE [Frequency] = 4);");
 
             migrationBuilder.DropColumn(
                 name: "Bucket",
