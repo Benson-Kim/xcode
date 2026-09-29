@@ -37,6 +37,13 @@ public sealed class AccessAndSetupTests : IDisposable
 
         using var withDefaults = await admin.PostAsJsonAsync("/setup/people", Person("jane.one@example.com", "0711000001", clerkDefaults));
         Assert.Equal(HttpStatusCode.OK, withDefaults.StatusCode);
+
+        var fleetDefaults = await Defaults(admin, "Fleet manager");
+        using var ungrantableRole = await admin.PostAsJsonAsync("/setup/people", new SavePerson(
+            "Jane", "Njeri", "jane.fleet@example.com", "0711000005", "Fleet manager", "all", [], [],
+            fleetDefaults.ToList(), null));
+        Assert.Equal(HttpStatusCode.Forbidden, ungrantableRole.StatusCode);
+
         using var escalated = await admin.PostAsJsonAsync("/setup/people", Person("jane.two@example.com", "0711000002", clerkDefaults.Append("organization.manage")));
         Assert.Equal(HttpStatusCode.Forbidden, escalated.StatusCode);
         using var withLimit = await admin.PostAsJsonAsync("/setup/people", Person("jane.three@example.com", "0711000003", clerkDefaults, approvalLimit: 5000m));
@@ -55,7 +62,8 @@ public sealed class AccessAndSetupTests : IDisposable
         var clerkDefaults = await Defaults(owner, "Revenue clerk");
         using var created = await owner.PostAsJsonAsync("/setup/people", Person("jane.one@example.com", "0711000001", clerkDefaults.Append("reports.view")));
         var id = (await created.Content.ReadFromJsonAsync<IdResponse>())!.Id;
-        (await owner.PostAsync($"/setup/people/{id}/deactivate", null)).EnsureSuccessStatusCode();
+        (await owner.PostAsJsonAsync($"/setup/people/{id}/deactivate",
+            new { version = 1L, reason = "Temporary leave" })).EnsureSuccessStatusCode();
 
         var inactive = await owner.GetFromJsonAsync<PersonDto>($"/setup/people/{id}");
         Assert.False(inactive!.Active);
@@ -63,7 +71,8 @@ public sealed class AccessAndSetupTests : IDisposable
 
         // A people manager may rename them: resubmitting their assigned permissions is not an access change.
         using var admin = await app.SignIn(OfficeAdmin);
-        using var renamed = await admin.PutAsJsonAsync($"/setup/people/{id}", Person("jane.one@example.com", "0711000001", inactive.Permissions) with { FirstName = "Janet" });
+        using var renamed = await admin.PutAsJsonAsync($"/setup/people/{id}",
+            Person("jane.one@example.com", "0711000001", inactive.Permissions) with { FirstName = "Janet", Version = inactive.Version });
         Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
         var after = await owner.GetFromJsonAsync<PersonDto>($"/setup/people/{id}");
         Assert.Equal("Janet", after!.FirstName);

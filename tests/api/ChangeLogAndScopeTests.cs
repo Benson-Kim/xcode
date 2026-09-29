@@ -39,16 +39,19 @@ public sealed class ChangeLogAndScopeTests : IDisposable
             roles.Single(x => x.Name == role).Permissions.ToList(), null);
 
         var id = await Id(await owner.PostAsJsonAsync("/setup/people", Jane("Revenue clerk")));
-        (await owner.PutAsJsonAsync($"/setup/people/{id}", Jane("Revenue clerk"))).EnsureSuccessStatusCode(); // nothing changed
-        (await owner.PutAsJsonAsync($"/setup/people/{id}", Jane("Fleet manager"))).EnsureSuccessStatusCode();
+        var created = await owner.GetFromJsonAsync<PersonDto>($"/setup/people/{id}");
+        (await owner.PutAsJsonAsync($"/setup/people/{id}", Jane("Revenue clerk") with { Version = created!.Version })).EnsureSuccessStatusCode(); // nothing changed
+        var beforeRoleChange = await owner.GetFromJsonAsync<PersonDto>($"/setup/people/{id}");
+        (await owner.PutAsJsonAsync($"/setup/people/{id}", Jane("Fleet manager") with { Version = beforeRoleChange!.Version })).EnsureSuccessStatusCode();
         (await owner.PostAsync($"/setup/people/{id}/sign-out", null)).EnsureSuccessStatusCode();
-        (await owner.PostAsync($"/setup/people/{id}/deactivate", null)).EnsureSuccessStatusCode();
-        (await owner.PostAsync($"/setup/people/{id}/deactivate", null)).EnsureSuccessStatusCode(); // already removed
+        var beforeRemoval = await owner.GetFromJsonAsync<PersonDto>($"/setup/people/{id}");
+        (await owner.PostAsJsonAsync($"/setup/people/{id}/deactivate", new { version = beforeRemoval!.Version, reason = "Left the organization" })).EnsureSuccessStatusCode();
+        (await owner.PostAsJsonAsync($"/setup/people/{id}/deactivate", new { })).EnsureSuccessStatusCode(); // already removed
 
         var people = (await History(owner)).Where(x => x.Section == "people").ToList();
         Assert.All(people, x => Assert.Equal(id, x.EntityId));
         Assert.Equal(
-            ["Removed access for Jane Njeri", "Signed Jane Njeri out of every device", "Changed role for Jane Njeri", "Added Jane Njeri as Revenue clerk"],
+            ["Left the organization", "Signed Jane Njeri out of every device", "Changed role for Jane Njeri", "Added Jane Njeri as Revenue clerk"],
             people.Select(x => x.Reason));
         Assert.All(people, x => Assert.Equal("Antony Maina", x.ActorName));
 

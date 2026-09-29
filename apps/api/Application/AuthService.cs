@@ -83,7 +83,11 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
     public async Task<AuthResult> VerifyCode(AuthRequest request, CodePurpose purpose)
     {
         var user = await Find(request.PhoneNumber);
-        if (!Active(user) || await Matching(user!, request, purpose) is null) return AuthResult.Failure();
+        var correctPurpose = purpose == CodePurpose.FirstSetup
+            ? user?.PinHash is null
+            : user?.PinHash is not null;
+        if (!Active(user) || !correctPurpose || await Matching(user!, request, purpose) is null)
+            return AuthResult.Failure();
         return new(200, new("code_verified"));
     }
 
@@ -169,11 +173,11 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
             ClearPause(user);
 
         if (user.PausedUntil > clock.UtcNow)
-            return correct ? new(423,
+            return new(423,
                 new("paused",
                     RetryAfterSeconds: (int)Math.Ceiling(
                         (user.PausedUntil.Value - clock.UtcNow).TotalSeconds)
-                    )) : AuthResult.Failure();
+                    ));
 
         if (!correct)
         {
@@ -213,7 +217,8 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
     {
         var user = await Find(request.PhoneNumber);
         string? code = null;
-        if (Active(user) && (purpose != CodePurpose.FirstSetup || user!.PinHash is null))
+        if (Active(user) &&
+            (purpose == CodePurpose.FirstSetup ? user!.PinHash is null : user!.PinHash is not null))
             code = await IssueCode(user!, request.DeviceId, purpose, ct);
         // Identical body/status for unknown, removed and existing accounts: no masked email here,
         // because anyone can call this with any number. (DevelopmentCode only exists in Development.)
@@ -230,7 +235,10 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
         if (!PinRules.IsValid(request.Pin)) return AuthResult.InvalidPin(PinRules.MinimumLength);
 
         var user = await Find(request.PhoneNumber);
-        if (!Active(user) || (purpose == CodePurpose.FirstSetup && user!.PinHash is not null))
+        var correctPurpose = purpose == CodePurpose.FirstSetup
+            ? user?.PinHash is null
+            : user?.PinHash is not null;
+        if (!Active(user) || !correctPurpose)
             return AuthResult.Failure();
         // The organization's minimum is only disclosed to someone holding a valid code, so it cannot reveal which numbers are registered.
         var policy = await Policy(user!.Id);

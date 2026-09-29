@@ -18,7 +18,7 @@ public sealed class AccessLifecycleTests : IDisposable
 
     private static SavePerson Edit(PersonDto person, string? email = null, string? phoneNumber = null) =>
         new(person.FirstName, person.LastName, email ?? person.Email, phoneNumber ?? person.PhoneNumber, person.Role,
-            "all", [], [], person.Permissions.ToList(), person.ApprovalLimit);
+            "all", [], [], person.Permissions.ToList(), person.ApprovalLimit, person.Version);
 
     private static async Task<PersonDto> Find(HttpClient client, string email) =>
         (await client.GetFromJsonAsync<Page<PersonDto>>("/setup/people"))!.Items.Single(x => x.Email == email);
@@ -42,14 +42,34 @@ public sealed class AccessLifecycleTests : IDisposable
         using var admin = await app.SignIn(OfficeAdmin);
         var ownerId = (await Find(admin, Owner)).Id;
 
-        Assert.Equal(HttpStatusCode.Forbidden, (await admin.PostAsync($"/setup/people/{ownerId}/deactivate", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await admin.PostAsJsonAsync($"/setup/people/{ownerId}/deactivate", new { version = 1, reason = "Attempted removal" })).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await admin.PostAsync($"/setup/people/{ownerId}/sign-out", null)).StatusCode);
 
         // The Owner keeps access and their session; people managers still manage everyone else.
         Assert.True((await Find(owner, Owner)).Active);
-        var clerkId = (await Find(admin, RevenueClerk)).Id;
-        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/setup/people/{clerkId}/sign-out", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/setup/people/{clerkId}/deactivate", null)).StatusCode);
+        var clerk = await Find(admin, RevenueClerk);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/setup/people/{clerk.Id}/sign-out", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/setup/people/{clerk.Id}/deactivate", new { version = clerk.Version, reason = "No longer works here" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task StaleAccessFormsCannotOverwriteNewerChanges()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var id = await Create(owner, "jane.stale@example.com", "0711000006", []);
+        var original = await Find(owner, "jane.stale@example.com");
+
+        Assert.Equal(HttpStatusCode.OK,
+            (await owner.PutAsJsonAsync($"/setup/people/{id}", Edit(original) with { FirstName = "First" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await owner.PutAsJsonAsync($"/setup/people/{id}", Edit(original) with { LastName = "Stale" })).StatusCode);
+
+        var current = await Find(owner, "jane.stale@example.com");
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await owner.PostAsJsonAsync($"/setup/people/{id}/deactivate",
+                new { version = original.Version, reason = "Stale removal" })).StatusCode);
+        Assert.True(current.Active);
     }
 
     [Fact]

@@ -1,5 +1,5 @@
 import * as SecureStore from "expo-secure-store";
-import { clearSession, forgetPerson, getDeviceId, loadSession, matchesPinCheck, savePerson, savePinCheck, saveSession } from "../src/lib/storage";
+import { clearSession, forgetPerson, getDeviceId, loadPerson, loadSession, matchesPinCheck, savePerson, savePinCheck, saveSession } from "../src/lib/storage";
 
 const session = { phoneNumber: "0712345678", accessToken: "jwt", refreshToken: "refresh" };
 
@@ -17,6 +17,21 @@ it("discards malformed session state", async () => {
   await SecureStore.setItemAsync("xcode.session", "not json");
   expect(await loadSession()).toBeNull();
   expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith("xcode.session", expect.any(Object));
+});
+
+it("discards incomplete identity and token state", async () => {
+  await SecureStore.setItemAsync("xcode.session", JSON.stringify({ ...session, accessToken: "" }));
+  expect(await loadSession()).toBeNull();
+
+  await SecureStore.setItemAsync("xcode.person", JSON.stringify({
+    phoneNumber: session.phoneNumber,
+    firstName: "Wanjiru",
+    lastName: "Kamau",
+    role: "Revenue clerk",
+    permissions: [],
+    pinLength: 3,
+  }));
+  expect(await loadPerson()).toBeNull();
 });
 
 it("checks a PIN offline without storing it", async () => {

@@ -25,6 +25,38 @@ public sealed class DomainRuleTests
     public void PhoneNumbersNormalizeToTheFullKenyanPrefix(string input, string expected) =>
         Assert.Equal(expected, PhoneNumber.Normalize(input));
 
+    [Fact]
+    public void PermissionDependenciesAreTransitiveAndDenyingARequiredPermissionRemovesDependents()
+    {
+        var resolver = new EffectivePermissionResolver();
+        var permission = resolver.Resolve(["dash.capture"], Array.Empty<PersonPermissionOverride>());
+
+        Assert.Contains("dash.capture", permission);
+        Assert.Contains("revenue.capture", permission);
+        Assert.Contains("revenue.view", permission);
+
+        var denied = resolver.Resolve(["dash.capture"],
+            [new PersonPermissionOverride { Permission = "revenue.view", Granted = false }]);
+
+        Assert.DoesNotContain("dash.capture", denied);
+        Assert.DoesNotContain("revenue.capture", denied);
+        Assert.DoesNotContain("revenue.view", denied);
+    }
+
+    [Fact]
+    public void SecurityPolicyRequiresThreeAttemptsAndCapsPauseAtOneHour()
+    {
+        var policy = new OrganizationSecurityPolicy { LockoutThreshold = 2 };
+        Assert.Throws<ArgumentException>(() => policy.Validate());
+
+        policy.LockoutThreshold = 3;
+        policy.LockoutMinutes = 61;
+        Assert.Throws<ArgumentException>(() => policy.Validate());
+
+        policy.LockoutMinutes = 60;
+        policy.Validate();
+    }
+
     private static RecurringDefinition Daily(DateOnly start, decimal amount = 100m) =>
         new("Insurance", RecurringKind.Cost, CostCategory.FixedCommitments, amount, new RecurringSchedule(RecurrenceFrequency.Daily), start, null, [new VehicleShare(Vehicle, amount)]);
 

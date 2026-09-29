@@ -51,9 +51,9 @@ public static class SetupEndpoints
             .WithName("CreatePerson");
         group.MapPut("/people/{id:guid}", async (Guid id, SavePerson input, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Save(id, input, ct) }))
             .WithName("UpdatePerson");
-        group.MapPost("/people/{id:guid}/activate", async (Guid id, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SetActive(id, true, ct) }))
+        group.MapPost("/people/{id:guid}/activate", async (Guid id, PersonLifecycleRequest input, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SetActive(id, true, input, ct) }))
             .WithName("ActivatePerson");
-        group.MapPost("/people/{id:guid}/deactivate", async (Guid id, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SetActive(id, false, ct) }))
+        group.MapPost("/people/{id:guid}/deactivate", async (Guid id, PersonLifecycleRequest input, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SetActive(id, false, input, ct) }))
             .WithName("DeactivatePerson");
         group.MapPost("/people/{id:guid}/sign-out", async (Guid id, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SignOut(id, ct) }))
             .WithName("SignOutPerson");

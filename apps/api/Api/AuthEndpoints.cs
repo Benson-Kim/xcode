@@ -27,7 +27,12 @@ public static class AuthEndpoints
         group.MapPost("/refresh", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.Refresh(r), ct));
         group.MapPost("/sign-out", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, () => s.SignOut(r), ct));
         group.MapPost("/devices/{id}/revoke", (string id, ClaimsPrincipal principal, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) =>
-            Run(new(DeviceId: id), db, gate, () => s.RevokeDevice(Guid.Parse(principal.FindFirstValue("sub")!), id), ct)).RequireAuthorization();
+        {
+            var current = principal.FindFirstValue("device");
+            return string.Equals(current, id, StringComparison.Ordinal)
+                ? Run(new(DeviceId: id), db, gate, () => s.RevokeDevice(Guid.Parse(principal.FindFirstValue("sub")!), id), ct)
+                : Task.FromResult<IResult>(Results.Forbid());
+        }).RequireAuthorization();
         group.MapGet("/session", (ClaimsPrincipal principal) =>
             Results.Ok(new AuthSessionResponse(
                 Guid.Parse(principal.FindFirstValue("sub")!),

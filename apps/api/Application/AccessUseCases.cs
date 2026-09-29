@@ -32,7 +32,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             .ToListAsync(ct);
         var vehicles = await db.Set<FleetVehicle>()
             .AsNoTracking()
-            .Where(v => actor.AllCompanies || actor.VehicleIds.Contains(v.Id))
+            .Where(v => actor.AllCompanies || actor.VehicleIds.Contains(v.Id) || actor.CompanyIds.Contains(v.CompanyId))
             .OrderBy(v => v.Registration)
             .Select(v => new ScopeVehicleOption(v.Id, v.Registration, v.CompanyId))
             .ToListAsync(ct);
@@ -65,6 +65,13 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
 
         if (id is not null && target is null)
             throw new KeyNotFoundException();
+        if (target is not null && input.Version is null)
+            throw new ArgumentException("Reload this person before saving.");
+        if (target is not null && input.Version != target.Membership.Version)
+            throw new DbUpdateConcurrencyException("This person's access changed. Reload before saving.");
+
+        var payload = await PreserveHiddenScope(actor, target, input, ct);
+        await ValidateScope(actor, target, payload, ct);
         if (id == actor.UserId)
             throw new ArgumentException("You cannot change your own access here.");
 
@@ -74,25 +81,23 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         if (target is not null)
             await EnsureMayManage(actor, target, ct);
 
-        ValidateScope(actor, input);
-
-        var permissions = PermissionCatalog.WithDependencies(input.Permissions);
+        var permissions = PermissionCatalog.WithDependencies(payload.Permissions);
         if (permissions.Any(x => !PermissionCatalog.All.Contains(x, StringComparer.Ordinal)))
             throw new ArgumentException("Unknown permission.");
 
-        await AuthorizeAccessChange(actor, target, role, permissions, input.ApprovalLimit, ct);
-        var phone = PhoneNumber.Normalize(input.PhoneNumber);
-        var email = input.Email.Trim().ToLowerInvariant();
+        await AuthorizeAccessChange(actor, target, role, permissions, payload.ApprovalLimit, actorIsOwner, ct);
+        var phone = PhoneNumber.Normalize(payload.PhoneNumber);
+        var email = payload.Email.Trim().ToLowerInvariant();
         var before = target is null ? null : PersonSnapshot.Of(target);
-        var after = new PersonSnapshot(input.FirstName.Trim(), input.LastName.Trim(), email, phone, role.Name, target?.Membership.Active ?? true,
-            input.ScopeMode, input.ScopeMode == "companies" ? [.. input.CompanyIds.Distinct().Order()] : [],
-            input.ScopeMode == "vehicles" ? [.. input.VehicleIds.Distinct().Order()] : [],
-            [.. Effective(role, permissions).Order(StringComparer.Ordinal)], input.ApprovalLimit);
+        var after = new PersonSnapshot(payload.FirstName.Trim(), payload.LastName.Trim(), email, phone, role.Name, target?.Membership.Active ?? true,
+            payload.ScopeMode, payload.ScopeMode == "companies" ? [.. payload.CompanyIds.Distinct().Order()] : [],
+            payload.ScopeMode == "vehicles" ? [.. payload.VehicleIds.Distinct().Order()] : [],
+            [.. Effective(role, permissions).Order(StringComparer.Ordinal)], payload.ApprovalLimit);
         var signInDetailsChanged = target is not null &&
             (!string.Equals(target.User.Email, email, StringComparison.OrdinalIgnoreCase) || target.User.PhoneNumber != phone);
         if (signInDetailsChanged)
             await AuthorizeSignInDetailsChange(actor, target!, actorIsOwner, ct);
-        if (await db.Users.AnyAsync(x => (x.PhoneNumber == phone || x.Email == email) && x.Id != id, ct))
+        if (await db.Users.AnyAsync(x => (x.PhoneNumber == phone || x.Email == email) && x.Id != (id ?? Guid.Empty), ct))
             throw new ArgumentException("That mobile number or email already belongs to someone.");
 
         if (target is null)
@@ -103,9 +108,9 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             {
                 OrganizationId = actor.OrganizationId,
                 UserId = user.Id,
-                FirstName = input.FirstName.Trim(),
-                LastName = input.LastName.Trim(),
-                ApprovalLimit = input.ApprovalLimit
+                FirstName = payload.FirstName.Trim(),
+                LastName = payload.LastName.Trim(),
+                ApprovalLimit = payload.ApprovalLimit
             });
             db.PersonRoles.Add(new PersonRole
             {
@@ -113,9 +118,9 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
                 UserId = user.Id,
                 RoleId = role.Id
             });
-            ApplyScope(actor.OrganizationId, user.Id, input);
+            ApplyScope(actor.OrganizationId, user.Id, payload);
             ApplyOverrides(actor.OrganizationId, user.Id, role, permissions);
-            Audit(actor, "person.created", user.Id, input.Role);
+            Audit(actor, "person.created", user.Id, JsonSerializer.Serialize(after));
             await RecordHistory(actor, user.Id, null, after, $"Added {after.Name} as {role.Name}", ct);
             return user.Id;
         }
@@ -130,9 +135,9 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             target.User.SecurityVersion++;
             await RevokeSessions(target.User.Id, ct);
         }
-        target.Membership.FirstName = input.FirstName.Trim();
-        target.Membership.LastName = input.LastName.Trim();
-        target.Membership.ApprovalLimit = input.ApprovalLimit;
+        target.Membership.FirstName = payload.FirstName.Trim();
+        target.Membership.LastName = payload.LastName.Trim();
+        target.Membership.ApprovalLimit = payload.ApprovalLimit;
         target.User.Email = email;
         target.User.PhoneNumber = phone;
         db.PersonRoles
@@ -151,30 +156,42 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             UserId = target.User.Id,
             RoleId = role.Id
         });
-        ApplyScope(actor.OrganizationId, target.User.Id, input);
+        ApplyScope(actor.OrganizationId, target.User.Id, payload);
         ApplyOverrides(actor.OrganizationId, target.User.Id, role, permissions);
-        Audit(actor, "person.updated", target.User.Id, input.Role);
         var changes = before!.Changes(after);
-        // Their access token carries their name, role and permissions. Bumping the version makes it fail on the next
-        // request, and the client renews it with the new values, so the person is not signed out. Data scope is
-        // checked against the database on every request, so it needs no renewal.
-        if (changes.Intersect(["name", "role", "single permissions"]).Any())
-            target.User.SecurityVersion++;
         if (changes.Count > 0)
+        {
+            target.Membership.AccessChanged();
+            Audit(actor, "person.updated", target.User.Id, JsonSerializer.Serialize(after), JsonSerializer.Serialize(before));
+            // Their access token carries their name, role and permissions. Bumping the version makes it fail on the next
+            // request, and the client renews it with the new values, so the person is not signed out. Data scope is
+            // checked against the database on every request, so it needs no renewal.
+            if (changes.Intersect(["name", "role", "single permissions"]).Any())
+                target.User.SecurityVersion++;
             await RecordHistory(actor, target.User.Id, before, after, $"Changed {JoinWords(changes)} for {after.Name}", ct);
+        }
         return target.User.Id;
     }, ct);
 
-    public Task<Guid> SetActive(Guid id, bool active, CancellationToken ct) => execution.Write("people.manage", async actor =>
+    public Task<Guid> SetActive(Guid id, bool active, PersonLifecycleRequest? input, CancellationToken ct) => execution.Write("people.manage", async actor =>
     {
+        input ??= new();
         if (id == actor.UserId)
             throw new ArgumentException("You cannot deactivate your own access.");
         var target = (await LoadPeople(actor, ct)).SingleOrDefault(x => x.User.Id == id) ?? throw new KeyNotFoundException();
         await EnsureMayManage(actor, target, ct);
         var before = PersonSnapshot.Of(target);
-        if (before.Active != active)
-            await RecordHistory(actor, id, before, before with { Active = active },
-                active ? $"Restored access for {before.Name}" : $"Removed access for {before.Name}", ct);
+
+        // Repeating an already-completed transition is harmless and does not require a stale form version.
+        if (before.Active == active)
+            return id;
+        if (input.Version is null || input.Version != target.Membership.Version)
+            throw new DbUpdateConcurrencyException("This person's access changed. Reload before saving.");
+
+        var reason = active
+            ? $"Restored access for {before.Name}"
+            : SetupPagination.Reason(input.Reason);
+
         if (active)
         {
             target.Membership.Reactivate();
@@ -187,7 +204,9 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             target.User.SecurityVersion++;
             await RevokeSessions(id, ct);
         }
-        Audit(actor, active ? "person.activated" : "person.deactivated", id, null);
+
+        await RecordHistory(actor, id, before, before with { Active = active }, reason, ct);
+        Audit(actor, active ? "person.activated" : "person.deactivated", id, reason);
         return id;
     }, ct);
 
@@ -216,23 +235,38 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         var dataScopes = await db.SetupDataScopes.ToListAsync(ct);
         var companyScopes = await db.SetupCompanyScopes.ToListAsync(ct);
         var vehicleScopes = await db.SetupVehicleScopes.ToListAsync(ct);
+        var vehicleCompanies = await db.Set<FleetVehicle>()
+            .AsNoTracking()
+            .Select(v => new { v.Id, v.CompanyId })
+            .ToDictionaryAsync(v => v.Id, v => v.CompanyId, ct);
+        var actorVehicleCompanies = vehicleCompanies
+            .Where(x => actor.VehicleIds.Contains(x.Key))
+            .Select(x => x.Value)
+            .ToHashSet();
         var result = new List<AccessPerson>();
+
         foreach (var membership in memberships)
         {
             if (!users.TryGetValue(membership.UserId, out var user)) continue;
             var roleLink = personRoles.SingleOrDefault(x => x.UserId == user.Id);
             if (roleLink is null || !roles.TryGetValue(roleLink.RoleId, out var role)) continue;
+
             var scope = dataScopes.SingleOrDefault(x => x.UserId == user.Id);
             var companyIds = companyScopes.Where(x => x.UserId == user.Id).Select(x => x.CompanyId).ToList();
             var vehicleIds = vehicleScopes.Where(x => x.UserId == user.Id).Select(x => x.VehicleId).ToList();
-            var visible = user.Id == actor.UserId || actor.AllCompanies || scope?.AllCompanies == true && actor.AllCompanies || companyIds.Any(actor.CompanyIds.Contains) || vehicleIds.Any(actor.VehicleIds.Contains);
+            var visible =
+                user.Id == actor.UserId ||
+                actor.AllCompanies ||
+                companyIds.Any(x => actor.CompanyIds.Contains(x) || actorVehicleCompanies.Contains(x)) ||
+                vehicleIds.Any(x => vehicleCompanies.TryGetValue(x, out var companyId) && CanSeeVehicle(actor, x, companyId));
             if (!visible) continue;
-            // Assigned permissions, regardless of whether the person is active: editing an inactive person must not
-            // lose their configuration. Inactive members are refused at sign-in and on every request instead.
+
+            // Assigned permissions are retained for inactive people so an editor can restore them without losing configuration.
             var permissions = new EffectivePermissionResolver()
                 .Resolve(PermissionCatalog.DefaultsFor(role.Name), overrides.Where(x => x.UserId == user.Id));
             result.Add(new AccessPerson(user, membership, role, permissions, scope, companyIds, vehicleIds));
         }
+
         return result;
     }
 
@@ -251,34 +285,118 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         x.VehicleIds,
         x.Permissions.ToArray(),
         x.Membership.ApprovalLimit,
-        x.User.PinHash is not null
+        x.User.PinHash is not null,
+        x.Membership.Version
     );
 
     private static void Validate(SavePerson input)
     {
-        if (string.IsNullOrWhiteSpace(input.FirstName) || input.FirstName.Length > 100 || string.IsNullOrWhiteSpace(input.LastName) || input.LastName.Length > 100)
+        var firstName = input.FirstName?.Trim() ?? "";
+        var lastName = input.LastName?.Trim() ?? "";
+        var email = input.Email?.Trim() ?? "";
+        var companyIds = input.CompanyIds ?? [];
+        var vehicleIds = input.VehicleIds ?? [];
+        var permissions = input.Permissions ?? [];
+
+        if (firstName.Length is 0 or > 100 || lastName.Length is 0 or > 100)
             throw new ArgumentException("First and last name are required.");
-        if (!System.Net.Mail.MailAddress.TryCreate(input.Email, out _))
+        if (email.Length > 320 || !System.Net.Mail.MailAddress.TryCreate(email, out _))
             throw new ArgumentException("A valid email is required.");
-        if (PhoneNumber.Normalize(input.PhoneNumber) == "")
+        if (PhoneNumber.Normalize(input.PhoneNumber ?? "") == "")
             throw new ArgumentException("A valid mobile number is required.");
         if (input.ScopeMode is not ("all" or "companies" or "vehicles"))
             throw new ArgumentException("Choose a data scope.");
-        if (input.ScopeMode == "companies" && input.CompanyIds.Count == 0 || input.ScopeMode == "vehicles" && input.VehicleIds.Count == 0)
+        if ((input.ScopeMode == "companies" && companyIds.Count == 0) ||
+            (input.ScopeMode == "vehicles" && vehicleIds.Count == 0))
             throw new ArgumentException("Choose at least one item in the data scope.");
-        if (input.Permissions.Count == 0 || input.ApprovalLimit is < 0)
+        if (companyIds.Count != companyIds.Distinct().Count() || vehicleIds.Count != vehicleIds.Distinct().Count())
+            throw new ArgumentException("Data scope items must be distinct.");
+        if (permissions.Count == 0 || permissions.Count != permissions.Distinct(StringComparer.Ordinal).Count() || input.ApprovalLimit is < 0)
             throw new ArgumentException("Permissions and approval limit are invalid.");
     }
 
-    private static void ValidateScope(SetupActor actor, SavePerson input)
+    private async Task ValidateScope(SetupActor actor, AccessPerson? target, SavePerson input, CancellationToken ct)
     {
         if (input.ScopeMode == "all" && !actor.AllCompanies)
             throw new UnauthorizedAccessException();
-        if (input.ScopeMode == "companies" && input.CompanyIds.Any(x => !actor.AllCompanies && !actor.CompanyIds.Contains(x)))
-            throw new UnauthorizedAccessException();
-        if (input.ScopeMode == "vehicles" && input.VehicleIds.Any(x => !actor.AllCompanies && !actor.VehicleIds.Contains(x)))
-            throw new UnauthorizedAccessException();
+
+        if (input.ScopeMode == "companies")
+        {
+            var ids = (input.CompanyIds ?? []).ToArray();
+            var existing = await db.Set<PsvCompany>()
+                .Where(x => ids.Contains(x.Id))
+                .Select(x => x.Id)
+                .ToListAsync(ct);
+            if (existing.Count != ids.Length)
+                throw new ArgumentException("Choose companies in your organization.");
+
+            var retainedOutsideScope = target?.CompanyIds
+                .Where(x => !actor.CompanyIds.Contains(x))
+                .ToHashSet() ?? [];
+            if (!actor.AllCompanies && ids.Any(x => !actor.CompanyIds.Contains(x) && !retainedOutsideScope.Contains(x)))
+                throw new UnauthorizedAccessException();
+        }
+
+        if (input.ScopeMode == "vehicles")
+        {
+            var ids = (input.VehicleIds ?? []).ToArray();
+            var existing = await db.Set<FleetVehicle>()
+                .Where(x => ids.Contains(x.Id))
+                .Select(x => new { x.Id, x.CompanyId })
+                .ToListAsync(ct);
+            if (existing.Count != ids.Length)
+                throw new ArgumentException("Choose vehicles in your organization.");
+
+            var retainedOutsideScope = target is null
+                ? []
+                : (await db.Set<FleetVehicle>()
+                    .AsNoTracking()
+                    .Where(x => target.VehicleIds.Contains(x.Id))
+                    .Select(x => new { x.Id, x.CompanyId })
+                    .ToListAsync(ct))
+                    .Where(x => !CanSeeVehicle(actor, x.Id, x.CompanyId))
+                    .Select(x => x.Id)
+                    .ToHashSet();
+
+            if (!actor.AllCompanies && existing.Any(x => !CanSeeVehicle(actor, x.Id, x.CompanyId) && !retainedOutsideScope.Contains(x.Id)))
+                throw new UnauthorizedAccessException();
+        }
     }
+
+    private async Task<SavePerson> PreserveHiddenScope(SetupActor actor, AccessPerson? target, SavePerson input, CancellationToken ct)
+    {
+        if (target is null || actor.AllCompanies)
+            return input;
+
+        var hiddenCompanies = target.CompanyIds.Where(x => !actor.CompanyIds.Contains(x)).ToArray();
+        var hiddenVehicles = (await db.Set<FleetVehicle>()
+                .AsNoTracking()
+                .Where(x => target.VehicleIds.Contains(x.Id))
+                .Select(x => new { x.Id, x.CompanyId })
+                .ToListAsync(ct))
+            .Where(x => !CanSeeVehicle(actor, x.Id, x.CompanyId))
+            .Select(x => x.Id)
+            .ToArray();
+
+        if (hiddenCompanies.Length == 0 && hiddenVehicles.Length == 0)
+            return input;
+
+        if (!string.Equals(ScopeModeOf(target), input.ScopeMode, StringComparison.Ordinal))
+            throw new UnauthorizedAccessException("You cannot change a data scope that includes companies or vehicles outside your own scope.");
+
+        return input with
+        {
+            CompanyIds = input.ScopeMode == "companies"
+                ? (input.CompanyIds ?? []).Concat(hiddenCompanies).Distinct().ToList()
+                : input.CompanyIds ?? [],
+            VehicleIds = input.ScopeMode == "vehicles"
+                ? (input.VehicleIds ?? []).Concat(hiddenVehicles).Distinct().ToList()
+                : input.VehicleIds ?? []
+        };
+    }
+
+    private static bool CanSeeVehicle(SetupActor actor, Guid vehicleId, Guid companyId) =>
+        actor.AllCompanies || actor.VehicleIds.Contains(vehicleId) || actor.CompanyIds.Contains(companyId);
 
     private void ApplyScope(Guid organizationId, Guid userId, SavePerson input)
     {
@@ -330,16 +448,25 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     private static IReadOnlySet<string> Effective(Role role, IReadOnlyList<string> permissions) => new EffectivePermissionResolver()
         .Resolve(PermissionCatalog.DefaultsFor(role.Name), Overrides(Guid.Empty, Guid.Empty, role, permissions));
 
-    // people.manage covers who someone is, their role and their data scope. Departing from the role's defaults
-    // (single permissions, approval limit) needs access.manage, and nobody can grant a permission they lack.
-    private async Task AuthorizeAccessChange(SetupActor actor, AccessPerson? target, Role role, IReadOnlyList<string> permissions, decimal? approvalLimit, CancellationToken ct)
+    // people.manage covers role and scope only when the resulting role can be granted by the editor.
+    // Deviations from a role and approval limits require access.manage.
+    private async Task AuthorizeAccessChange(SetupActor actor, AccessPerson? target, Role role, IReadOnlyList<string> permissions, decimal? approvalLimit, bool actorIsOwner, CancellationToken ct)
     {
         var before = target is null ? Deviation.None : Deviation.From(PermissionCatalog.DefaultsFor(target.Role.Name), target.Permissions);
         var after = Deviation.From(PermissionCatalog.DefaultsFor(role.Name), Effective(role, permissions));
+        var held = await organizations.Permissions(actor.UserId, ct);
+        var roleChanges = target is null || !role.Name.Equals(target.Role.Name, StringComparison.OrdinalIgnoreCase);
+
+        // A non-owner may only assign a role whose complete standard permission set they already hold.
+        if (!actorIsOwner && roleChanges && PermissionCatalog.DefaultsFor(role.Name).Any(x => !held.Contains(x)))
+            throw new UnauthorizedAccessException("You can only grant roles whose permissions you hold.");
+
         if (after.Same(before) && approvalLimit == target?.Membership.ApprovalLimit)
             return;
-        var held = await organizations.Permissions(actor.UserId, ct);
-        if (!held.Contains("access.manage") || after.Granted.Except(before.Granted).Any(x => !held.Contains(x)))
+
+        if (!actorIsOwner &&
+            (!held.Contains("access.manage") ||
+             after.Granted.Except(before.Granted).Any(x => !held.Contains(x))))
             throw new UnauthorizedAccessException();
     }
 
@@ -357,13 +484,10 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     {
         if (actorIsOwner)
             return;
+
         var held = await organizations.Permissions(actor.UserId, ct);
-        var grantable = PermissionCatalog.RolePermissions.Keys
-            .Where(x => !x.Equals("Owner", StringComparison.OrdinalIgnoreCase))
-            .SelectMany(PermissionCatalog.DefaultsFor)
-            .Concat(held)
-            .ToHashSet(StringComparer.Ordinal);
-        if (target.Permissions.Any(x => !grantable.Contains(x)) || (target.Membership.ApprovalLimit is not null && !held.Contains("access.manage")))
+        if (target.Permissions.Any(x => !held.Contains(x)) ||
+            (target.Membership.ApprovalLimit is not null && !held.Contains("access.manage")))
             throw new UnauthorizedAccessException();
     }
 

@@ -323,6 +323,7 @@ function PersonEditor({
   const [saveError, setSaveError] = useState("");
   const [permissionNote, setPermissionNote] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removeReason, setRemoveReason] = useState("");
   const [busy, setBusy] = useState(false);
 
   const self = Boolean(person && person.id === session?.userId);
@@ -338,10 +339,7 @@ function PersonEditor({
   const label = (key: string) =>
     all.find((item) => item.key === key)?.label ?? key;
   const assignableRoles = (roles ?? []).filter(
-    (role) =>
-      role.name !== "Owner" ||
-      session?.role === "Owner" ||
-      person?.role === "Owner",
+    (role) => role.name !== "Owner" || session?.role === "Owner",
   );
   const name = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
 
@@ -413,6 +411,7 @@ function PersonEditor({
             needsLimit && form.approvalLimit
               ? Number(form.approvalLimit)
               : null,
+          version: person?.version,
         }),
       });
       toast(
@@ -436,6 +435,16 @@ function PersonEditor({
     try {
       await apiRequest(`setup/people/${person.id}/${action}`, {
         method: "POST",
+        ...(action === "sign-out"
+          ? {}
+          : {
+              body: JSON.stringify({
+                version: person.version,
+                ...(action === "deactivate"
+                  ? { reason: removeReason.trim() }
+                  : {}),
+              }),
+            }),
       });
       toast(
         action === "sign-out"
@@ -448,7 +457,7 @@ function PersonEditor({
       else onSaved();
     } catch (value) {
       setSaveError((value as Error).message);
-      setConfirmRemove(false);
+      if (action !== "deactivate") setConfirmRemove(false);
       setBusy(false);
     }
   }
@@ -801,6 +810,24 @@ function PersonEditor({
           </Card>
         )}
 
+        {confirmRemove && person?.active && editable && (
+          <Card density="form">
+            <CardHeader
+              title="Reason for removing access"
+              description="A short reason is required and is kept in the change log."
+            />
+            <Field id="remove-reason" label="Reason">
+              <TextInput
+                value={removeReason}
+                maxLength={500}
+                autoComplete="off"
+                placeholder="For example, left the organization"
+                onChange={(event) => setRemoveReason(event.target.value)}
+              />
+            </Field>
+          </Card>
+        )}
+
         <FormActions>
           {editable && (
             <Button
@@ -829,9 +856,7 @@ function PersonEditor({
                   disabled={busy}
                   onClick={() => void lifecycle("deactivate")}
                 >
-                  {confirmRemove
-                    ? "Tap again to remove access"
-                    : "Remove access"}
+                  {confirmRemove ? "Confirm removal" : "Remove access"}
                 </Button>
               ) : (
                 <Button

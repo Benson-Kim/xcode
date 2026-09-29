@@ -53,30 +53,72 @@ public sealed class AuditEvent : IOrganizationEntity
 }
 
 
+public static class PermissionDependencies
+{
+     // This is the one dependency graph used by the catalog, role defaults and request-time authorization.
+     private static readonly IReadOnlyDictionary<string, string[]> DirectDependencies = new Dictionary<string, string[]>(StringComparer.Ordinal)
+     {
+          ["dash.capture"] = ["revenue.capture"],
+          ["dash.float"] = ["pettycash.spend"],
+          ["dash.revenue"] = ["revenue.view"],
+          ["dash.net"] = ["revenue.view", "expenses.view", "commitments.view"],
+          ["dash.costs"] = ["expenses.view", "commitments.view"],
+          ["dash.gaps"] = ["revenue.view"],
+          ["dash.pettycash"] = ["pettycash.view_all"],
+          ["dash.commitments"] = ["commitments.view"],
+          ["dash.investment"] = ["invest.view"],
+          ["dash.edits"] = ["audit.view"],
+
+          ["revenue.capture"] = ["revenue.view"],
+          ["revenue.no_earnings"] = ["revenue.capture"],
+          ["revenue.correct"] = ["revenue.view"],
+
+          ["expenses.capture"] = ["expenses.view"],
+          ["expenses.correct"] = ["expenses.view"],
+          ["expenses.setup"] = ["expenses.view"],
+
+          ["pettycash.approve_item"] = ["pettycash.view_all"],
+          ["pettycash.approve_day"] = ["pettycash.approve_item"],
+          ["pettycash.issue"] = ["pettycash.view_all"],
+          ["pettycash.issue_negative"] = ["pettycash.issue"],
+
+          ["bills.capture"] = ["bills.view"],
+          ["bills.approve"] = ["bills.view"],
+
+          ["commitments.manage"] = ["commitments.view"],
+          ["reports.export"] = ["reports.view"],
+          ["invest.manage"] = ["invest.view"],
+          ["people.manage"] = ["people.view"],
+          ["access.manage"] = ["people.manage"]
+     };
+
+     public static IReadOnlyList<string> DirectFor(string permission) =>
+          DirectDependencies.TryGetValue(permission, out var dependencies) ? dependencies : Array.Empty<string>();
+
+     public static IReadOnlySet<string> Expand(IEnumerable<string> permissions)
+     {
+          var result = permissions.ToHashSet(StringComparer.Ordinal);
+          var pending = new Queue<string>(result);
+          while (pending.TryDequeue(out var key))
+               foreach (var dependency in DirectFor(key))
+                    if (result.Add(dependency))
+                         pending.Enqueue(dependency);
+          return result;
+     }
+}
+
+
 public sealed class EffectivePermissionResolver
 {
-     public static readonly IReadOnlyDictionary<string, string[]> Dependencies = new Dictionary<string, string[]>
-     {
-          ["people.view"] = [],
-          ["people.manage"] = ["people.view"],
-          ["access.manage"] = ["people.manage"],
-          ["settings.manage"] = [],
-          ["audit.view"] = []
-     };
      public IReadOnlySet<string> Resolve(IEnumerable<string> rolePermissions, IEnumerable<PersonPermissionOverride> overrides, bool active = true)
      {
-          if (!active) return new HashSet<string>();
+          if (!active) return new HashSet<string>(StringComparer.Ordinal);
 
           var all = overrides.ToArray();
           var denied = all.Where(x => !x.Granted).Select(x => x.Permission).ToHashSet(StringComparer.Ordinal);
-          var result = rolePermissions.Concat(all.Where(x => x.Granted).Select(x => x.Permission)).ToHashSet(StringComparer.Ordinal);
+          var result = PermissionDependencies.Expand(rolePermissions.Concat(all.Where(x => x.Granted).Select(x => x.Permission)));
 
-          var queue = new Queue<string>(result);
-          while (queue.TryDequeue(out var key))
-               foreach (var dependency in Dependencies.GetValueOrDefault(key) ?? [])
-                    if (result.Add(dependency))
-                         queue.Enqueue(dependency);
-
+          // A denied permission also removes every permission that depends on it.
           result.ExceptWith(denied);
 
           bool changed;
@@ -84,9 +126,10 @@ public sealed class EffectivePermissionResolver
           {
                changed = false;
                foreach (var key in result.ToArray())
-                    if ((Dependencies.GetValueOrDefault(key) ?? []).Any(x => !result.Contains(x)))
+                    if (PermissionDependencies.DirectFor(key).Any(x => !result.Contains(x)))
                          changed |= result.Remove(key);
           } while (changed);
+
           return result;
      }
 }

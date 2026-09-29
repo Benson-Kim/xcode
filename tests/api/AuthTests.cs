@@ -139,6 +139,28 @@ public sealed class AuthTests : IDisposable
         await app.WithDb(async db => Assert.Null((await db.Users.SingleAsync()).PinHash));
     }
     [Fact]
+    public async Task PinResetCannotCreateTheFirstPin()
+    {
+        await app.Seed(withPin: false);
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        Assert.Empty(app.Email.Codes);
+
+        var result = await Post("pin-reset/complete", Request(pin: "6942", code: "000000"));
+        Assert.Equal(HttpStatusCode.Unauthorized, result.Status);
+        await app.WithDb(async db => Assert.Null((await db.Users.SingleAsync()).PinHash));
+    }
+    [Fact]
+    public async Task DeviceCannotRevokeAnotherDevice()
+    {
+        await app.Seed();
+        var signedIn = await Post("sign-in");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", signedIn.Body.AccessToken);
+
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.PostAsJsonAsync("/auth/devices/another-device/revoke", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Post("refresh", Request(refresh: signedIn.Body.RefreshToken!))).Status);
+    }
+    [Fact]
     public async Task AUTH12_RemovedUserCannotSignInRefreshOrUseAccessToken()
     {
         await app.Seed();
@@ -283,6 +305,19 @@ public sealed class AuthTests : IDisposable
         Assert.Equal(6, tooShort.Body.MinimumPinLength);
         Assert.Equal(HttpStatusCode.OK, (await Post("pin-reset/complete", Request(pin: "694213", code: code))).Status);
     }
+    [Fact]
+    public async Task ReprovisioningAnExistingAccountRevokesItsOldSession()
+    {
+        await app.Seed();
+        var signedIn = await Post("sign-in");
+
+        await app.WithDb(async db =>
+            await UserProvisioning.Provision(db, new(Address, "0712345678", "Revenue clerk")));
+
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await Post("refresh", Request(refresh: signedIn.Body.RefreshToken!))).Status);
+    }
+
     [Fact]
     public async Task ProvisionedPeopleCanSetAPinAndSignIn_AndReprovisioningKeepsTheirRole()
     {
