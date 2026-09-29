@@ -39,7 +39,11 @@ public sealed record AllocationDto(Guid VehicleId, decimal Amount, string? Regis
 public sealed record VehicleOption(Guid Id, Guid CompanyId, string CompanyName, string Registration, bool Active = true);
 public sealed record PostingDto(Guid ItemId, Guid VersionId, DateOnly Date, string Name, RecurringKind Kind, CostCategory? Category, decimal Amount,
     ExpenseBucket? Bucket = null);
-public sealed record VehicleReport(Guid VehicleId, DateOnly From, DateOnly Through, decimal Costs, decimal Savings, IReadOnlyList<PostingDto> Postings);
+// Contract C6: money in against the target, money out in its three buckets, and what is left before and after savings.
+// MoneyOut is the three buckets and nothing else (investment never counts); Costs repeats it for Phase 1 clients.
+public sealed record VehicleReport(Guid VehicleId, DateOnly From, DateOnly Through, decimal MoneyIn, decimal Target,
+    decimal Repairs, decimal Charges, decimal Loans, decimal MoneyOut, decimal Net, decimal Savings, decimal AfterSavings,
+    decimal Costs, IReadOnlyList<PostingDto> Postings);
 public sealed record ExpenseItemDto(Guid Id, Guid CategoryId, string Name, bool Active, DateOnly? StoppedOn);
 public sealed record ExpenseCategoryDto(Guid Id, string Name, ExpenseBucket Bucket, bool Active, DateOnly? StoppedOn, IReadOnlyList<ExpenseItemDto> Items);
 // An item people may pick today: the item and its category are both in use.
@@ -47,7 +51,7 @@ public sealed record ExpenseItemOption(Guid Id, string Name, Guid CategoryId, st
 public sealed record SaveExpenseCategory(string? Name, ExpenseBucket Bucket);
 public sealed record SaveExpenseItem(string? Name);
 public sealed record InvestmentEntryDto(Guid Id, DateOnly Date, string Description, decimal Amount, string RecordedBy, DateTimeOffset RecordedAt);
-// Returned and PercentPaidOff stay null until the vehicle report can say what has come back.
+// Returned is the net contribution since the vehicle joined (InvestmentUseCases.Get); PercentPaidOff is null when nothing went in.
 public sealed record InvestmentDto(Guid VehicleId, decimal TotalInvested, decimal? Returned, decimal? PercentPaidOff, IReadOnlyList<InvestmentEntryDto> Entries);
 public sealed record SaveInvestment(DateOnly Date, string? Description, decimal Amount);
 

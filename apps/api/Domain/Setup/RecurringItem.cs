@@ -48,7 +48,25 @@ public sealed class RecurringItem : IOrganizationEntity
           var version = Versions.Where(v => v.EffectiveFrom <= date)
               .OrderByDescending(v => v.Revision).FirstOrDefault();
           return version is not null && date >= version.Start && (version.End is null || date <= version.End)
-              && new RecurringSchedule(version.Frequency, version.Day, version.LastDay, version.Month).IsDue(date) ? version : null;
+              && version.Schedule().IsDue(date) ? version : null;
+     }
+     // Every day from `from` through `through` on which DueOn gives a version, with that version, without asking about
+     // each day. A version is in charge from its EffectiveFrom until a higher revision takes effect, so each version's
+     // due dates are stepped within [max(from, EffectiveFrom, Start), min(through, End, next EffectiveFrom − 1, StoppedFrom − 1)].
+     // O(R log R + due dates), against O(D·R log R) for calling DueOn on each of D days. Dates come out per version.
+     public IEnumerable<(DateOnly Date, RecurringVersion Version)> DueBetween(DateOnly from, DateOnly through)
+     {
+          var end = StoppedFrom is { } stopped && stopped <= through ? stopped.DayNumber - 1 : through.DayNumber;
+          var supersededFrom = int.MaxValue;
+          foreach (var version in Versions.OrderByDescending(v => v.Revision))
+          {
+               var first = Math.Max(from.DayNumber, Math.Max(version.EffectiveFrom.DayNumber, version.Start.DayNumber));
+               var last = Math.Min(Math.Min(end, supersededFrom - 1), version.End?.DayNumber ?? int.MaxValue);
+               supersededFrom = Math.Min(supersededFrom, version.EffectiveFrom.DayNumber);
+               if (first > last) continue;
+               foreach (var date in version.Schedule().Occurrences(DateOnly.FromDayNumber(first), DateOnly.FromDayNumber(last)))
+                    yield return (date, version);
+          }
      }
 }
 
@@ -129,6 +147,11 @@ public sealed class RecurringVersion : IOrganizationEntity
      public string? Note { get; private set; }
      public int? Month { get; private set; }
      public List<RecurringAllocation> Allocations { get; private set; } = [];
+     public RecurringSchedule Schedule() => new(Frequency, Day, LastDay, Month);
+     // The bucket a cost reports under. A Phase 1 version stored without one follows its category (assumption A2), and
+     // any other cost counts as a recurring charge, so every cost lands in exactly one bucket. Savings have none.
+     public ExpenseBucket? ReportedBucket() => Kind != RecurringKind.Cost ? null
+          : Bucket ?? (Category is { } category ? ExpenseBuckets.FromLegacy(category) : ExpenseBucket.RecurringCharges);
      internal RecurringVersion(Guid org, Guid item, int revision, DateOnly effectiveFrom, RecurringDefinition definition)
      {
           definition.Validate();

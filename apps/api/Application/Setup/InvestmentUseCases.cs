@@ -8,10 +8,19 @@ public sealed class InvestmentUseCases(ISetupExecution execution, ISetupReposito
 {
     private const string Section = "investment";
 
+    // What has come back is the vehicle's net contribution (money in less money out, as its report counts them) from
+    // the day it joined through the business date; it may be negative. The percentage is of what went in.
     public Task<InvestmentDto> Get(Guid vehicleId, CancellationToken ct) => execution.Read("invest.view", async actor =>
     {
-        _ = await repository.Vehicle(actor, vehicleId, ct) ?? throw new KeyNotFoundException();
-        return await repository.Investment(vehicleId, ct);
+        var vehicle = await repository.Vehicle(actor, vehicleId, ct) ?? throw new KeyNotFoundException();
+        var investment = await repository.Investment(vehicleId, ct);
+        var returned = (await repository.Report(actor, vehicle, vehicle.JoinedOn, actor.Today, ct)).Net;
+        return investment with
+        {
+            Returned = returned,
+            PercentPaidOff = investment.TotalInvested == 0 ? null
+                : Math.Round(returned / investment.TotalInvested * 100m, MidpointRounding.AwayFromZero)
+        };
     }, ct);
 
     public Task<Guid> Add(Guid vehicleId, SaveInvestment input, CancellationToken ct) => execution.Write("invest.manage", async actor =>

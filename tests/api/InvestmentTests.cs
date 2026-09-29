@@ -42,8 +42,8 @@ public sealed class InvestmentTests : IDisposable
 
         var investment = await owner.GetFromJsonAsync<InvestmentDto>($"/setup/vehicles/{vehicle}/investment");
         Assert.Equal(1295000m, investment!.TotalInvested);
-        Assert.Null(investment.Returned);
-        Assert.Null(investment.PercentPaidOff);
+        // Nothing has come back yet: no revenue and no costs since the vehicle joined.
+        Assert.Equal((0m, 0m), (investment.Returned!.Value, investment.PercentPaidOff!.Value));
         Assert.Equal([deposit, branding], investment.Entries.Select(x => x.Id));
         Assert.Equal(("Deposit on the unit", "Antony Maina"), (investment.Entries[0].Description, investment.Entries[0].RecordedBy));
         Assert.Equal("Registration and branding", investment.Entries[1].Description);

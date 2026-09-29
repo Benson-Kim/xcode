@@ -215,29 +215,50 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
     public Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct)
         => VisibleRecurring(actor).Include(i => i.Versions).ThenInclude(v => v.Allocations).SingleOrDefaultAsync(i => i.Id == id, ct);
 
-    public async Task<VehicleReport> Report(SetupActor actor, Guid vehicleId, DateOnly from, DateOnly through, CancellationToken ct)
+    public async Task<VehicleReport> Report(SetupActor actor, FleetVehicle vehicle, DateOnly from, DateOnly through, CancellationToken ct)
     {
-        // A bounded, deterministic projection of immutable schedule versions: due dates post automatically,
-        // without hard deletes or a request-path mutation. A materialized ledger can consume this same rule.
+        // Only the vehicle's own active days count (FleetVehicle.ActiveOn): from its join date up to the day it left.
+        // Days after the business date never count.
+        var first = from < vehicle.JoinedOn ? vehicle.JoinedOn : from;
+        var last = through < actor.Today ? through : actor.Today;
+        if (vehicle.LeftOn is { } left && left <= last) last = left.AddDays(-1);
+        // A bounded, deterministic projection of immutable schedule versions: due dates post automatically, without
+        // hard deletes or a request-path mutation. Only this vehicle's shares are loaded, one row per version however
+        // many vehicles an item is shared with, and each version's due dates are stepped (RecurringItem.DueBetween).
         var items = await db.Set<RecurringItem>().AsNoTracking()
-            .Where(i => i.Versions.Any(v => v.Allocations.Any(a => a.VehicleId == vehicleId)))
-            .Include(i => i.Versions).ThenInclude(v => v.Allocations).ToListAsync(ct);
-        var vehicle = await VisibleVehicles(actor).Where(v => v.Id == vehicleId)
-            .Select(v => new { v.JoinedOn, v.LeftOn }).SingleAsync(ct);
-        var postings = new List<PostingDto>();
+            .Where(i => i.Versions.Any(v => v.Allocations.Any(a => a.VehicleId == vehicle.Id)))
+            .Include(i => i.Versions).ThenInclude(v => v.Allocations.Where(a => a.VehicleId == vehicle.Id))
+            .ToListAsync(ct);
+        // Summed here: SQLite, used in tests, cannot sum decimals.
+        var records = await db.Set<RevenueRecord>().AsNoTracking()
+            .Where(r => r.VehicleId == vehicle.Id && r.BusinessDate >= first && r.BusinessDate <= last)
+            .Select(r => new { r.BusinessDate, r.Amount })
+            .ToListAsync(ct);
 
-        for (var day = from; day <= through; day = day.AddDays(1))
-        {
-            if (day < vehicle.JoinedOn || vehicle.LeftOn is not null && day >= vehicle.LeftOn) continue;
-            foreach (var item in items)
-            {
-                var version = item.DueOn(day);
-                var share = version?.Allocations.SingleOrDefault(a => a.VehicleId == vehicleId);
-                if (version is not null && share is not null) postings.Add(new(item.Id, version.Id, day, version.Name, version.Kind, version.Category, share.Amount, version.Bucket));
-            }
-        }
-        return new(vehicleId, from, through, postings.Where(p => p.Kind == RecurringKind.Cost).Sum(p => p.Amount),
-            postings.Where(p => p.Kind == RecurringKind.Savings).Sum(p => p.Amount), postings);
+        var postings = items
+            .SelectMany(item => item.DueBetween(first, last)
+                .Select(due => (Due: due, Share: due.Version.Allocations.SingleOrDefault(a => a.VehicleId == vehicle.Id)))
+                .Where(x => x.Share is not null)
+                .Select(x => new PostingDto(item.Id, x.Due.Version.Id, x.Due.Date, x.Due.Version.Name, x.Due.Version.Kind,
+                    x.Due.Version.Category, x.Share!.Amount, x.Due.Version.ReportedBucket())))
+            .OrderBy(p => p.Date).ThenBy(p => p.Name, StringComparer.Ordinal).ThenBy(p => p.ItemId)
+            .ToList();
+
+        // The revenue module's expected figure: the dated weekly target / 7 for each active day, where today counts
+        // only once it is captured.
+        var moneyIn = records.Sum(r => r.Amount ?? 0m);
+        var captured = records.Select(r => r.BusinessDate).ToHashSet();
+        var target = 0m;
+        for (var day = first; day <= last; day = day.AddDays(1))
+            if (day < actor.Today || captured.Contains(day)) target += vehicle.TargetOn(day) / 7m;
+
+        decimal Bucket(ExpenseBucket bucket) => postings.Where(p => p.Kind == RecurringKind.Cost && p.Bucket == bucket).Sum(p => p.Amount);
+        var (repairs, charges, loans) = (Bucket(ExpenseBucket.RepairsAndMaintenance), Bucket(ExpenseBucket.RecurringCharges), Bucket(ExpenseBucket.LoanRepayments));
+        var savings = postings.Where(p => p.Kind == RecurringKind.Savings).Sum(p => p.Amount);
+        var moneyOut = repairs + charges + loans;
+        var net = moneyIn - moneyOut;
+        return new(vehicle.Id, from, through, moneyIn, decimal.Round(target, 2), repairs, charges, loans, moneyOut, net,
+            savings, net - savings, moneyOut, postings);
     }
 
     public async Task<Page<HistoryEntry>> History(SetupActor actor, int page, int pageSize, CancellationToken ct)

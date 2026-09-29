@@ -93,8 +93,9 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
             : (start ?? throw new ArgumentException("Choose a period, or a from and through date."), end ?? throw new ArgumentException("Choose a period, or a from and through date."));
         if (through < from || through.DayNumber - from.DayNumber > 366 || through > actor.Today)
             throw new ArgumentException("Report range must be at most 367 days and cannot include the future.");
-        _ = await repository.Vehicle(actor, id, ct) ?? throw new KeyNotFoundException();
-        return await repository.Report(actor, id, from, through, ct);
+        // A vehicle that left stays in every past report; one outside the actor's scope is not found.
+        var vehicle = await repository.Vehicle(actor, id, ct) ?? throw new KeyNotFoundException();
+        return await repository.Report(actor, vehicle, from, through, ct);
     }, ct);
 
     private static string Date(DateOnly date) => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
