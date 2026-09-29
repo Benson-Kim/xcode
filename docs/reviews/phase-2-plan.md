@@ -220,6 +220,15 @@ C6 and C5's `returned` and `percentPaidOff`.
 - WP-S follow-up: the N+1 in recurring save and stop (settings worktree).
 - Pending: WP-WR (revenue web). Then commit revenue (WP-R, WP-M, WP-WR), merge settings into revenue, WP-X (report v2 and investment returned), the mobile lockout follow-up, verification, and the screenshot pass.
 
+- **Round 2:**
+  - Codex fixes committed and pushed. Access a841202 (PR #4, re-review requested) holds 3 P1s plus 2 more account-existence leaks. Settings dc9ad9e (PR #5, re-review requested) holds calendarDate, activeAmount, invest.view read-only vehicles and the vehicle picker rule.
+  - Revenue: merges 80d2264 and cfed27b (settings into revenue), plus 207291e. Not pushed yet. All green: API 176 passed and 2 failed of 178 (the 2 are SQL Server), web 111/111, mobile 40/40, typecheck and eslint clean.
+  - Running: WP-X (report v2 and investment returned, API and web) and the WP-M follow-up (offline lockout policy, wording, 503 message).
+- **Verification setup:**
+  - SQL Server is at localhost,1433 (sqlcmd available). Use throwaway databases only; never the user's `XCode` database.
+  - Browsers: Playwright's Chromium is cached in `%LOCALAPPDATA%/ms-playwright` and Edge is installed. Use `npx -y playwright` in a scratch folder with `channel: "msedge"`.
+  - The design HTML files can be opened in the same browser for side-by-side screenshots.
+
 ### Decisions for the user (collected)
 - D1. Legacy cost category → bucket mapping (A2).
 - D2. `EditedRecords` counts records for days in the period, while the design counts edits made in the period. Counting edits needs the business date of each edit, which isn't stored.
