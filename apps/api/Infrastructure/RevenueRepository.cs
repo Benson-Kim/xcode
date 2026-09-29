@@ -33,9 +33,8 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
         var ids = vehicles.Select(v => v.Id).ToArray();
         var companies = await db.Set<PsvCompany>()
             .AsNoTracking()
-            .Where(c => (actor.AllCompanies || actor.CompanyIds.Contains(c.Id) ||
-                db.Set<FleetVehicle>().Any(v => v.CompanyId == c.Id && actor.VehicleIds.Contains(v.Id))) &&
-                (c.ArchivedOn == null || c.ArchivedOn > actor.Today))
+            .Where(c => actor.AllCompanies || actor.CompanyIds.Contains(c.Id) ||
+                db.Set<FleetVehicle>().Any(v => v.CompanyId == c.Id && actor.VehicleIds.Contains(v.Id)))
             .OrderBy(c => c.Name)
             .ThenBy(c => c.Id)
             .Select(c => new RevenueCompanyOption(c.Id, c.Name))
@@ -50,7 +49,7 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
             .Where(c => vehicleCompanyIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
 
-        return BuildWeek(actor, start, through, vehicles, companyNames, recordMap, companies);
+        return BuildWeek(actor, start, through, currentStart, vehicles, companyNames, recordMap, companies);
     }
 
     public async Task<RevenueDashboardDto> Dashboard(SetupActor actor, string period, CancellationToken ct)
@@ -148,7 +147,7 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
     private async Task<int> FirstDayOfWeek(CancellationToken ct) =>
         await db.Localizations.AsNoTracking().Select(x => (int?)x.FirstDayOfWeek).SingleOrDefaultAsync(ct) ?? 1;
 
-    private static RevenueWeekDto BuildWeek(SetupActor actor, DateOnly start, DateOnly through,
+    private static RevenueWeekDto BuildWeek(SetupActor actor, DateOnly start, DateOnly through, DateOnly currentStart,
         IReadOnlyList<FleetVehicle> vehicles, IReadOnlyDictionary<Guid, string> companyNames,
         IReadOnlyDictionary<(Guid VehicleId, DateOnly Date), RevenueRecord> records,
         IReadOnlyList<RevenueCompanyOption> companies)
@@ -187,7 +186,7 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
                 decimal.Round(expected, 2), Percent(amount, expected)));
         }
 
-        return new(start, through, actor.Today, companies, rows, decimal.Round(totalAmount, 2),
+        return new(start, through, currentStart, actor.Today, companies, rows, decimal.Round(totalAmount, 2),
             decimal.Round(totalExpected, 2), Percent(totalAmount, totalExpected));
     }
 

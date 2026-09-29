@@ -30,6 +30,7 @@ public sealed record RevenueVehicleDto(
 public sealed record RevenueWeekDto(
     DateOnly WeekStart,
     DateOnly WeekThrough,
+    DateOnly CurrentWeekStart,
     DateOnly BusinessDate,
     IReadOnlyList<RevenueCompanyOption> Companies,
     IReadOnlyList<RevenueVehicleDto> Vehicles,
