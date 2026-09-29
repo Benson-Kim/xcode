@@ -519,7 +519,7 @@ function VehicleRecurringCard({
       ) : (
         <Hint>None yet.</Hint>
       )}
-      {can("commitments.manage") && onAdd && (
+      {vehicle.active !== false && can("commitments.manage") && onAdd && (
         <CardAction onClick={() => onAdd(vehicle.id)}>Add recurring cost or saving for {vehicle.registration}</CardAction>
       )}
     </Card>
