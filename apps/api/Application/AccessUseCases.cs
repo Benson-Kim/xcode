@@ -35,7 +35,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         var vehicles = await db.Set<FleetVehicle>()
             .AsNoTracking()
             .Where(v => (actor.AllCompanies || actor.VehicleIds.Contains(v.Id) || actor.CompanyIds.Contains(v.CompanyId)) &&
-                (v.LeftOn == null || v.LeftOn > actor.Today) &&
+                v.JoinedOn <= actor.Today && (v.LeftOn == null || v.LeftOn > actor.Today) &&
                 db.Set<PsvCompany>().Any(c => c.Id == v.CompanyId && (c.ArchivedOn == null || c.ArchivedOn > actor.Today)))
             .OrderBy(v => v.Registration)
             .Select(v => new ScopeVehicleOption(v.Id, v.Registration, v.CompanyId))
@@ -227,26 +227,8 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         return id;
     }, ct);
 
-    // The people the actor may see, as a query, so filtering, ordering and paging run in the database. Visible are the
-    // actor themself; everyone, for an all-companies actor; anyone whose company scope meets the actor's companies or
-    // the companies of the actor's vehicles; and anyone whose vehicle scope holds a vehicle the actor can see
-    // (CanSeeVehicle). People without a role are never listed.
-    private IQueryable<OrganizationMembership> Visible(SetupActor actor)
-    {
-        var people = db.Memberships.Where(m => db.PersonRoles.Any(r => r.UserId == m.UserId));
-        if (actor.AllCompanies)
-            return people;
-
-        var companyIds = actor.CompanyIds.ToList();
-        var vehicleIds = actor.VehicleIds.ToList();
-        var vehicles = db.Set<FleetVehicle>();
-        var companiesOfActorVehicles = vehicles.Where(v => vehicleIds.Contains(v.Id)).Select(v => v.CompanyId);
-        var visibleVehicles = vehicles.Where(v => vehicleIds.Contains(v.Id) || companyIds.Contains(v.CompanyId)).Select(v => v.Id);
-        return people.Where(m =>
-            m.UserId == actor.UserId ||
-            db.SetupCompanyScopes.Any(s => s.UserId == m.UserId && (companyIds.Contains(s.CompanyId) || companiesOfActorVehicles.Contains(s.CompanyId))) ||
-            db.SetupVehicleScopes.Any(s => s.UserId == m.UserId && visibleVehicles.Contains(s.VehicleId)));
-    }
+    // The people the actor may see (see PeopleVisibility), shared with the change log.
+    private IQueryable<OrganizationMembership> Visible(SetupActor actor) => PeopleVisibility.People(db, actor);
 
     private async Task<AccessPerson?> LoadPerson(SetupActor actor, Guid id, CancellationToken ct) =>
         (await Load(Visible(actor).Where(x => x.UserId == id), ct)).SingleOrDefault();
@@ -411,7 +393,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     }
 
     private static bool CanSeeVehicle(SetupActor actor, Guid vehicleId, Guid companyId) =>
-        actor.AllCompanies || actor.VehicleIds.Contains(vehicleId) || actor.CompanyIds.Contains(companyId);
+        PeopleVisibility.CanSeeVehicle(actor, vehicleId, companyId);
 
     private void ApplyScope(Guid organizationId, Guid userId, SavePerson input)
     {

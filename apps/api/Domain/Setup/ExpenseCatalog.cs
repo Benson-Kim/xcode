@@ -15,6 +15,11 @@ public static class ExpenseBuckets
      public static ExpenseBucket FromLegacy(CostCategory category) =>
           category == CostCategory.RepairsAndUpkeep ? ExpenseBucket.RepairsAndMaintenance : ExpenseBucket.RecurringCharges;
 
+     // The bucket a version reports under: the stored one, or for a cost stored without one, its legacy category's.
+     // Savings are not money out and have none.
+     public static ExpenseBucket? Of(RecurringKind kind, CostCategory? category, ExpenseBucket? stored) =>
+          kind != RecurringKind.Cost ? null : stored ?? (category is { } legacy ? FromLegacy(legacy) : null);
+
      public static string Label(ExpenseBucket bucket) => bucket switch
      {
           ExpenseBucket.RepairsAndMaintenance => "Repairs and maintenance",

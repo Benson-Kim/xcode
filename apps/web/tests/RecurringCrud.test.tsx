@@ -83,7 +83,9 @@ it("reads recurring items with the reference summary and hides Add without manag
   expect(await screen.findByRole("button", { name: "Loan repayment" })).toBeInTheDocument();
   expect(screen.getByText("About KES 30,400 a month")).toBeInTheDocument();
   expect(screen.getByText("Every day")).toBeInTheDocument();
-  expect(screen.getByText("Fixed commitments")).toBeInTheDocument();
+  // An old cost type counts in its bucket (Fixed commitments is a recurring charge); the old name is not shown.
+  expect(screen.getByText("Recurring charges")).toBeInTheDocument();
+  expect(screen.queryByText("Fixed commitments")).not.toBeInTheDocument();
   expect(screen.getByText("1 vehicle")).toBeInTheDocument();
   expect(screen.getByText("KDA 482M")).toBeInTheDocument();
   const row = screen.getByRole("row", { name: /Loan repayment/ });
@@ -239,6 +241,7 @@ it("shows a legacy daily cost read-only and asks for an item and a new frequency
 
   expect(screen.getByText(/Set up with the old cost type Running costs and a daily schedule, which are no longer offered/)).toBeInTheDocument();
   expect(screen.getByText("Now every day, which is no longer offered.")).toBeInTheDocument();
+  expect(screen.getByText(/Counted under Recurring charges in each vehicle report/)).toBeInTheDocument();
   expect(screen.getByLabelText("Expense item")).toHaveValue("");
   expect(screen.queryByRole("radio", { name: "Every day" })).not.toBeInTheDocument();
   for (const option of ["Every week", "Every month", "Every year"]) expect(screen.getByRole("radio", { name: option })).not.toBeChecked();

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Auth.Application;
 using Auth.Application.Setup;
 using Auth.Domain;
@@ -145,6 +146,33 @@ public sealed class RecurringCrudTests : IDisposable
         using var refused = await client.PostAsJsonAsync("/setup/recurring", new SaveRecurring(null, RecurringKind.Cost, null, 100m, RecurrenceFrequency.Weekly, 1, false,
             new DateOnly(2026, 3, 5), null, [new VehicleShare(late, 100m)], ExpenseItemId: await ExpenseItemTestData.Id(client, "Parking")));
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+    }
+
+    // "Active" means FleetVehicle.ActiveOn everywhere: joined by the business date and not yet left.
+    [Fact]
+    public async Task AVehicleThatHasNotJoinedYetIsInactiveInEveryList()
+    {
+        using var client = await CreateOwnerClient();
+        var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+        var company = (await (await client.PostAsJsonAsync("/setup/companies", new SaveCompany("Join Fleet"))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        async Task<Guid> Vehicle(string registration, DateOnly joined) => (await (await client.PostAsJsonAsync("/setup/vehicles",
+            new SaveVehicle(company, registration, joined, 20000m))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        var (early, late) = (await Vehicle("KQA 341M", new DateOnly(2026, 1, 1)), await Vehicle("KQA 342M", new DateOnly(2026, 3, 10)));
+        (await client.PostAsJsonAsync("/setup/recurring", new SaveRecurring(null, RecurringKind.Cost, null, 1000m, RecurrenceFrequency.Weekly, 1, false,
+            today, null, [new VehicleShare(early, 600m), new VehicleShare(late, 400m)], ExpenseItemId: await ExpenseItemTestData.Id(client, "Parking"))))
+            .EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = "2026-03-05" })).EnsureSuccessStatusCode();
+
+        var vehicles = (await client.GetFromJsonAsync<Page<VehicleDto>>("/setup/vehicles"))!.Items;
+        var notJoined = vehicles.Single(x => x.Id == late);
+        Assert.Equal((false, 0m, 0), (notJoined.Active, notJoined.WeeklyTarget, notJoined.RecurringItems));
+        var joined = vehicles.Single(x => x.Id == early);
+        Assert.Equal((true, 20000m, 1), (joined.Active, joined.WeeklyTarget, joined.RecurringItems));
+        Assert.Equal(1, (await client.GetFromJsonAsync<Page<CompanyDto>>("/setup/companies"))!.Items.Single(x => x.Id == company).VehicleCount);
+        var scope = await client.GetFromJsonAsync<JsonElement>("/setup/access/scope-options");
+        Assert.DoesNotContain(scope.GetProperty("vehicles").EnumerateArray(), x => x.GetProperty("id").GetGuid() == late);
+        var item = Assert.Single((await client.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items);
+        Assert.Equal((1000m, 600m, false), (item.Amount, item.ActiveAmount, item.Allocations.Single(a => a.VehicleId == late).Active));
     }
 
     private async Task<HttpClient> CreateOwnerClient()

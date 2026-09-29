@@ -117,6 +117,40 @@ public sealed class OrganizationSettingsTests : IDisposable
         Assert.Equal(calendarDate.ToString("yyyy-MM-dd"), advanced.GetProperty("effectiveBusinessDate").GetString());
     }
 
+    // A time zone decides the organization's calendar date, so a held business date must still be on or before it in the
+    // zone being saved. Only UTC resolves under the tests' invariant globalization, so the zone "still on the previous
+    // date" is simulated by putting the clock back a day: the calendar date in the saved zone is then before the held one.
+    [Fact]
+    public async Task ALocalizationSaveCannotLeaveAHeldBusinessDateInTheFuture()
+    {
+        using var client = await CreateOwnerClient();
+        var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+        (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = today.ToString("yyyy-MM-dd") })).EnsureSuccessStatusCode();
+        app.Clock.Advance(TimeSpan.FromDays(-1));
+
+        using var refused = await client.PutAsJsonAsync("/setup/organization/settings/localization", new { value = new { timeZone = "UTC", currency = "USD" } });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("The held business date would be in the future in that time zone. Change the business date first.",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString());
+        var unchanged = await client.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        Assert.Equal("KES", unchanged.GetProperty("localization").GetProperty("currency").GetString());
+
+        (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = today.AddDays(-1).ToString("yyyy-MM-dd") })).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync("/setup/organization/settings/localization", new { value = new { timeZone = "UTC", currency = "USD" } })).EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public void ChangingTheTimeZoneChecksTheHeldBusinessDate()
+    {
+        var organization = new Organization();
+        var localization = new OrganizationLocalization { OrganizationId = organization.Id, TimeZone = "UTC" };
+        var today = new DateOnly(2026, 9, 30);
+        organization.ChangeBusinessDate(today, today);
+        Assert.Throws<ArgumentException>(() => organization.ChangeTimeZone(localization, new TimeZoneId("UTC"), today.AddDays(-1)));
+        organization.ChangeTimeZone(localization, new TimeZoneId("UTC"), today);
+        Assert.Equal("UTC", localization.TimeZone);
+    }
+
     // Contract C7: organization settings keep the automatic reason; a typed one is optional but still checked.
     [Fact]
     public async Task SettingsSavedWithoutAReasonGetAnAutomaticOne()

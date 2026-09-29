@@ -56,7 +56,7 @@ export type RecurringItem = {
   month?: number | null;
 };
 
-// A scheduled item's share falling due on a day. Every cost carries its bucket; savings have none.
+// One due date of a scheduled item on a vehicle. A cost carries its bucket; `category` is only set on old rows.
 export type Posting = {
   itemId: string;
   versionId: string;
@@ -92,14 +92,15 @@ export const expenseBucketNames: Record<ExpenseBucket, string> = {
   3: "Loan repayments",
 };
 
-// The bucket a cost posting counts under. The API sends one for every cost; a Phase 1 row without one follows its old
-// category (assumption A2): repairs and upkeep count as repairs and maintenance, the other three as recurring charges.
-export function postingBucket(posting: Pick<Posting, "bucket" | "category">): ExpenseBucket {
-  return posting.bucket ?? (posting.category === 2 ? 1 : 2);
+// The bucket a cost counts in. A row saved before expense items has only its old cost type, mapped as in A2:
+// Repairs and upkeep counts as Repairs and maintenance, every other type as Recurring charges. Savings have none.
+export function costBucket(row: { kind: number; bucket?: ExpenseBucket | null; category?: number | null }): ExpenseBucket | null {
+  if (row.kind !== 1) return null;
+  return row.bucket ?? (row.category === 2 ? 1 : 2);
 }
 
-// The cost types used before expense items. Rows saved with them stay readable.
-export const recurringCategoryNames: Record<number, string> = {
+// The cost types used before expense items, only to tell someone what an old row was set up with.
+export const legacyCostTypeNames: Record<number, string> = {
   1: "Running costs",
   2: "Repairs and upkeep",
   3: "Crew costs",

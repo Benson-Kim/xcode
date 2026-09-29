@@ -58,7 +58,13 @@ public static class OrganizationEndpoints
                          organization.Slug = slug;
                          after = JsonSerializer.Serialize(new OrganizationDetails(name, slug), SettingsJson);
                          break;
-                    case "localization": (before, after) = await Save(db.Localizations, input.Value, context.OrganizationId, ct); break;
+                    case "localization":
+                         (before, after) = await Save(db.Localizations, input.Value, context.OrganizationId, ct);
+                         // The zone being saved sets the calendar date, which a held business date may not pass.
+                         if (before != after)
+                              organization.EnsureBusinessDateWithin(OrganizationCalendarDate(
+                                   (await db.Localizations.FindAsync([context.OrganizationId], ct))!.TimeZone, clock.UtcNow));
+                         break;
                     case "branding": (before, after) = await Save(db.Brandings, input.Value, context.OrganizationId, ct); break;
                     case "securityPolicy": (before, after) = await Save(db.SecurityPolicies, input.Value, context.OrganizationId, ct); break;
                     case "businessDate":

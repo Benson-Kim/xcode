@@ -42,7 +42,7 @@ import {
   Tr,
   useToast,
 } from "../ui";
-import { expenseBucketNames, postingBucket, type Company, type RecurringItem, type Vehicle, type VehicleReport } from "./shared";
+import { costBucket, expenseBucketNames, type Company, type RecurringItem, type Vehicle, type VehicleReport } from "./shared";
 import { VehicleInvestmentTab } from "./VehicleInvestment";
 
 type CompanyChoice = { id: string; name: string; active?: boolean };
@@ -464,11 +464,11 @@ function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
   const report = useResource<VehicleReport>(`setup/vehicles/${vehicle.id}/report?period=${period}`);
   const data = report.data;
   const grouped = [...(data?.postings ?? []).reduce((items, posting) => {
-    const item = items.get(posting.itemId) ?? { name: posting.name, kind: posting.kind, bucket: postingBucket(posting), total: 0, dates: [] as string[] };
+    const item = items.get(posting.itemId) ?? { id: posting.itemId, name: posting.name, kind: posting.kind, bucket: costBucket(posting), total: 0, dates: [] as string[] };
     item.total += posting.amount;
     item.dates.push(posting.date);
     return items.set(posting.itemId, item);
-  }, new Map<string, { name: string; kind: number; bucket: ExpenseBucket; total: number; dates: string[] }>()).values()];
+  }, new Map<string, { id: string; name: string; kind: number; bucket: ExpenseBucket | null; total: number; dates: string[] }>()).values()];
   return (
     <Card>
       <CardHeader
@@ -510,9 +510,9 @@ function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
             <CardList>
               {grouped.map((item) => (
                 <CardListItem
-                  key={item.name + item.dates[0]}
+                  key={item.id}
                   left={item.name}
-                  leftSub={`${item.kind === 2 ? "Savings" : expenseBucketNames[item.bucket]}. ${
+                  leftSub={`${item.bucket ? expenseBucketNames[item.bucket] : "Savings"}. ${
                     item.dates.length <= 3
                       ? item.dates.map(formatDateOnly).join(", ")
                       : `${item.dates.length} postings, ${formatDateOnly(item.dates[0])} to ${formatDateOnly(item.dates[item.dates.length - 1])}`

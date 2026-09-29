@@ -41,7 +41,11 @@ public sealed class FleetVehicle : IOrganizationEntity
           Targets.Add(new(organizationId, Id, joinedOn, SetupValue.Money(weeklyTarget), 1));
      }
 
-     public bool ActiveOn(DateOnly date) => date >= JoinedOn && (LeftOn is null || date < LeftOn);
+     public bool ActiveOn(DateOnly date) => ActiveOn(JoinedOn, LeftOn, date);
+
+     // The one rule for "active": joined by the date and not yet left. Queries spell it out as
+     // JoinedOn <= date && (LeftOn == null || LeftOn > date).
+     public static bool ActiveOn(DateOnly joinedOn, DateOnly? leftOn, DateOnly date) => date >= joinedOn && (leftOn is null || date < leftOn);
 
      public bool Update(Guid companyId, DateOnly joinedOn, decimal weeklyTarget, DateOnly today)
      {

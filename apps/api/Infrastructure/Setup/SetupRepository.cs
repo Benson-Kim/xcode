@@ -1,5 +1,6 @@
 using Auth.Domain;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Auth.Application;
 using Auth.Application.Setup;
 using Auth.Domain;
@@ -33,7 +34,7 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(c => new CompanyDto(c.Id, c.Name,
-                VisibleVehicles(actor).Count(v => v.CompanyId == c.Id && (v.LeftOn == null || v.LeftOn > actor.Today)),
+                VisibleVehicles(actor).Count(v => v.CompanyId == c.Id && v.JoinedOn <= actor.Today && (v.LeftOn == null || v.LeftOn > actor.Today)),
                 c.ArchivedOn == null || c.ArchivedOn > actor.Today, c.ArchivedOn))
             .ToListAsync(ct);
         return new(items, page, pageSize, total);
@@ -51,6 +52,8 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             .Select(c => new CompanyOption(c.Id, c.Name))
             .ToListAsync(ct);
 
+    // Deliberately "not retired" rather than FleetVehicle.ActiveOn: a vehicle that has not joined yet cannot be retired
+    // (it cannot leave before it joins), so it must also keep its company from being archived.
     public Task<bool> HasActiveVehicles(Guid companyId, DateOnly today, CancellationToken ct) =>
         db.Set<FleetVehicle>().AnyAsync(v => v.CompanyId == companyId && (v.LeftOn == null || v.LeftOn > today), ct);
 
@@ -80,7 +83,7 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             .ToListAsync(ct);
 
         var vehicleIds = rows.Select(v => v.Id).ToList();
-        var activeVehicleIds = rows.Where(v => v.LeftOn is null || v.LeftOn > actor.Today).Select(v => v.Id).ToHashSet();
+        var activeVehicleIds = rows.Where(v => FleetVehicle.ActiveOn(v.JoinedOn, v.LeftOn, actor.Today)).Select(v => v.Id).ToHashSet();
         // Items still posting to each active vehicle: the current version allocates to it and has not ended or stopped.
         var current = await db.Set<RecurringVersion>().AsNoTracking()
             .Where(v => !db.Set<RecurringVersion>().Any(other => other.ItemId == v.ItemId && other.Revision > v.Revision)
@@ -101,9 +104,10 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
 
         return new(rows.Select(v =>
         {
-            var active = v.LeftOn is null || v.LeftOn > actor.Today;
+            // As FleetVehicle.TargetOn: no target before the vehicle joins or after it leaves.
+            var active = activeVehicleIds.Contains(v.Id);
             var currentTarget = active
-                ? v.Targets.Where(t => t.EffectiveFrom <= (actor.Today < v.JoinedOn ? v.JoinedOn : actor.Today))
+                ? v.Targets.Where(t => t.EffectiveFrom <= actor.Today)
                     .OrderByDescending(t => t.EffectiveFrom)
                     .ThenByDescending(t => t.Revision)
                     .Select(t => t.WeeklyAmount)
@@ -194,21 +198,21 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         var allocationVehicleIds = rows.SelectMany(v => v.Allocations).Select(a => a.VehicleId).Distinct().ToList();
         var allocationVehicles = await db.Set<FleetVehicle>().AsNoTracking()
             .Where(v => allocationVehicleIds.Contains(v.Id))
-            .ToDictionaryAsync(v => v.Id, v => new { v.Registration, v.LeftOn }, ct);
+            .ToDictionaryAsync(v => v.Id, v => new { v.Registration, v.JoinedOn, v.LeftOn }, ct);
         return new(rows.Select(v =>
         {
             var allocations = v.Allocations.Select(a =>
             {
                 var vehicle = allocationVehicles.GetValueOrDefault(a.VehicleId);
-                var active = vehicle is null || vehicle.LeftOn is null || vehicle.LeftOn > actor.Today;
+                var active = vehicle is null || FleetVehicle.ActiveOn(vehicle.JoinedOn, vehicle.LeftOn, actor.Today);
                 return new AllocationDto(a.VehicleId, a.Amount, vehicle?.Registration, active);
             }).ToList();
             // The total is what was saved for the shares listed (the viewer's share when partial), retired vehicles included,
             // so it always balances against them; ActiveAmount is the part that still posts.
             return new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
                 allocations.Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
-                allocations, v.Allocations.Count != v.AllocationCount, v.ExpenseItemId, v.ExpenseItemName, v.Bucket, v.Note, v.Month,
-                allocations.Where(a => a.Active).Sum(a => a.Amount));
+                allocations, v.Allocations.Count != v.AllocationCount, v.ExpenseItemId, v.ExpenseItemName,
+                ExpenseBuckets.Of(v.Kind, v.Category, v.Bucket), v.Note, v.Month, allocations.Where(a => a.Active).Sum(a => a.Amount));
         }).ToList(), page, pageSize, total);
     }
 
@@ -267,18 +271,47 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         var companies = VisibleCompanies(actor).Select(c => c.Id);
         var completeItems = db.Set<RecurringItem>().Where(i => !i.Versions.Any(v => v.Allocations.Any(a => !vehicles.Contains(a.VehicleId)))).Select(i => i.Id);
         var revenueRecords = db.Set<RevenueRecord>().Where(r => vehicles.Contains(r.VehicleId)).Select(r => r.Id);
+        // People changes follow the people list's own visibility rules.
+        var people = PeopleVisibility.People(db, actor).Select(m => m.UserId);
         // The expense catalog is organization-wide; investment changes are logged against their vehicle.
         var query = db.Set<OrganizationSettingsVersion>().AsNoTracking().Where(v => actor.AllCompanies ||
             (v.Section == "companies" && companies.Contains(v.EntityId)) || (v.Section == "vehicles" && vehicles.Contains(v.EntityId)) ||
             (v.Section == "recurring" && completeItems.Contains(v.EntityId)) || v.Section == "expenses" ||
-            (v.Section == "investment" && vehicles.Contains(v.EntityId)) ||
+            (v.Section == "investment" && vehicles.Contains(v.EntityId)) || (v.Section == "people" && people.Contains(v.EntityId)) ||
             (v.Section == "revenue" && revenueRecords.Contains(v.EntityId)));
         var entries = await query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize).Take(pageSize)
             .Select(v => new HistoryEntry(v.Version, v.Section, v.EntityId, v.Reason, v.OccurredAt, v.ActorId,
                 db.Memberships.Where(m => m.UserId == v.ActorId).Select(m => m.FirstName + " " + m.LastName).FirstOrDefault() ?? "",
                 v.Before, v.After))
             .ToListAsync(ct);
-        return new(entries, page, pageSize, await query.CountAsync(ct));
+        return new(actor.AllCompanies ? entries : await WithoutHiddenScope(actor, entries, ct), page, pageSize, await query.CountAsync(ct));
+    }
+
+    // A scoped viewer sees a person's scope only as far as their own reaches: the companies and vehicles outside it are
+    // left out of both snapshots, so a change log entry discloses nothing the people editor would not.
+    private async Task<List<HistoryEntry>> WithoutHiddenScope(SetupActor actor, List<HistoryEntry> entries, CancellationToken ct)
+    {
+        static JsonObject? Parse(string? json) => json is null ? null : JsonNode.Parse(json) as JsonObject;
+        static IEnumerable<Guid> Ids(JsonObject? snapshot, string field) =>
+            snapshot?[field] is JsonArray ids ? ids.Select(id => id!.GetValue<Guid>()) : [];
+        var peopleEntries = entries.Where(e => e.Section == "people").ToList();
+        if (peopleEntries.Count == 0)
+            return entries;
+        // One read for the companies of every vehicle the page's snapshots name.
+        var vehicleIds = peopleEntries.SelectMany(e => Ids(Parse(e.Before), "VehicleIds").Concat(Ids(Parse(e.After), "VehicleIds"))).Distinct().ToList();
+        var companyOf = await db.Set<FleetVehicle>().AsNoTracking().Where(v => vehicleIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, v => v.CompanyId, ct);
+
+        string? Redact(string? json)
+        {
+            if (Parse(json) is not { } snapshot)
+                return json;
+            void Keep(string field, Func<Guid, bool> visible) =>
+                snapshot[field] = new JsonArray([.. Ids(snapshot, field).Where(visible).Select(id => (JsonNode)JsonValue.Create(id))]);
+            Keep("CompanyIds", id => PeopleVisibility.CanSeeCompany(actor, id));
+            Keep("VehicleIds", id => companyOf.TryGetValue(id, out var company) && PeopleVisibility.CanSeeVehicle(actor, id, company));
+            return snapshot.ToJsonString();
+        }
+        return [.. entries.Select(e => e.Section == "people" ? e with { Before = Redact(e.Before), After = Redact(e.After) } : e)];
     }
 
     public void Add(PsvCompany company) => db.Set<PsvCompany>().Add(company);

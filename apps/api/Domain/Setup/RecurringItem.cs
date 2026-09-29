@@ -150,8 +150,9 @@ public sealed class RecurringVersion : IOrganizationEntity
      public RecurringSchedule Schedule() => new(Frequency, Day, LastDay, Month);
      // The bucket a cost reports under. A Phase 1 version stored without one follows its category (assumption A2), and
      // any other cost counts as a recurring charge, so every cost lands in exactly one bucket. Savings have none.
-     public ExpenseBucket? ReportedBucket() => Kind != RecurringKind.Cost ? null
-          : Bucket ?? (Category is { } category ? ExpenseBuckets.FromLegacy(category) : ExpenseBucket.RecurringCharges);
+     // Every cost reports under a bucket; one stored with neither a bucket nor a legacy category counts as a recurring charge.
+     public ExpenseBucket? ReportedBucket() =>
+          ExpenseBuckets.Of(Kind, Category, Bucket) ?? (Kind == RecurringKind.Cost ? ExpenseBucket.RecurringCharges : null);
      internal RecurringVersion(Guid org, Guid item, int revision, DateOnly effectiveFrom, RecurringDefinition definition)
      {
           definition.Validate();
