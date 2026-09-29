@@ -71,6 +71,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 });
 builder.Services.AddAuthorization();
 builder.Services.AddProblemDetails();
+builder.Services.AddOpenApi();
 var app = builder.Build();
 app.UseExceptionHandler();
 app.UseCors();
@@ -81,6 +82,9 @@ app.MapAuth();
 app.MapSetup();
 app.MapOrganization();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+// The API description (/openapi/v1.json) is for developers and contract tests only; production does not serve it.
+if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
+    app.MapOpenApi();
 if (!app.Environment.IsEnvironment("Testing"))
 {
     await using var scope = app.Services.CreateAsyncScope();

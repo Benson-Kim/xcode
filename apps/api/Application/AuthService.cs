@@ -5,8 +5,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Application;
 
-public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, TokenIssuer tokens, AuthOptions options, EffectivePermissionResolver permissionResolver, IHostEnvironment environment)
+public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, TokenIssuer tokens, AuthOptions options, EffectivePermissionResolver permissionResolver, IHostEnvironment environment,
+    IOrganizationContext context, ILogger<AuthService> logger)
 {
+    // A code issued in this request, sent by Deliver only after the endpoint has committed it.
+    private sealed record Outgoing(VerificationCode Code, string Email, string Plain);
+    private Outgoing? outgoing;
+
     private Task<User?> Find(string phone) => db.Users.SingleOrDefaultAsync(u => u.PhoneNumber == PhoneNumber.Normalize(phone));
     private bool Active(User? user) => user is { Status: UserStatus.Active };
     private void ClearPause(User user)
@@ -38,13 +43,14 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
     private async Task<string?> IssueCode(User user, string deviceId, CodePurpose purpose, CancellationToken ct)
     {
         var existing = await db.VerificationCodes.Where(c => c.UserId == user.Id && c.Purpose == purpose).ToListAsync(ct);
-        // Account-level resend cooldown; requesting on a different device cannot bypass it.
-        if (!environment.IsDevelopment() && existing.Any(c => c.CreatedAt.AddMinutes(1) > clock.UtcNow)) return null;
+        // Account-level resend cooldown; requesting on a different device cannot bypass it. A code withdrawn because
+        // it could not be sent never reached anyone, so it does not start the cooldown.
+        if (!environment.IsDevelopment() && existing.Any(c => !Withdrawn(c) && c.CreatedAt.AddMinutes(1) > clock.UtcNow)) return null;
 
         foreach (var old in existing) old.Consumed = true;
         var code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
 
-        db.VerificationCodes.Add(new()
+        var issued = new VerificationCode
         {
             UserId = user.Id,
             DeviceId = deviceId,
@@ -52,9 +58,39 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
             CodeHash = tokens.Hash(code),
             CreatedAt = clock.UtcNow,
             ExpiresAt = clock.UtcNow.AddMinutes(10)
-        });
-        await email.SendCode(user.Email, code, purpose, ct);
+        };
+        db.VerificationCodes.Add(issued);
+        outgoing = new(issued, user.Email, code);
         return environment.IsDevelopment() ? code : null;
+    }
+
+    // Consumed, and valid for no time at all: see Deliver.
+    private static bool Withdrawn(VerificationCode code) => code.Consumed && code.ExpiresAt <= code.CreatedAt;
+
+    // Sends the code issued in this request. The endpoint calls this after the code is committed and the auth gate is
+    // released, so a failed commit sends nothing and a slow mail server holds up no one else's sign-in. If sending
+    // fails, the code is withdrawn (it can never be used and does not start the resend cooldown). Only a caller who has
+    // already proven the PIN (a new-device sign-in) is told the service is unavailable; setup and reset requests keep
+    // their identical check_email reply, because anyone can make them for any number.
+    public async Task<AuthResult> Deliver(AuthResult result, CancellationToken ct)
+    {
+        if (outgoing is not { } pending)
+            return result;
+        outgoing = null;
+        try
+        {
+            await email.SendCode(pending.Email, pending.Plain, pending.Code.Purpose, ct);
+            return result;
+        }
+        catch (Exception error)
+        {
+            logger.LogError(error, "A {Purpose} code for user {UserId} could not be sent and was withdrawn (correlation {CorrelationId}).",
+                pending.Code.Purpose, pending.Code.UserId, context.CorrelationId);
+            pending.Code.Consumed = true;
+            pending.Code.ExpiresAt = pending.Code.CreatedAt;
+            await db.SaveChangesAsync(CancellationToken.None);
+            return pending.Code.Purpose == CodePurpose.NewDevice ? new(503, new("service_unavailable")) : result;
+        }
     }
     // Every wrong guess counts, whether or not the check consumes the code, so each challenge allows five guesses in total.
     private async Task<VerificationCode?> Matching(User user, AuthRequest request, CodePurpose purpose)
@@ -122,17 +158,13 @@ public sealed class AuthService(AuthDb db, IClock clock, IEmailSender email, Tok
         if (role is null)
             return AuthResult.Failure();
 
-        var rolePermissions = await db.RolePermissions
-            .IgnoreQueryFilters()
-            .Where(x => x.OrganizationId == membership.OrganizationId && x.RoleId == role.Id)
-            .Select(x => x.Permission)
-            .ToListAsync();
         var overrides = await db.PermissionOverrides
             .IgnoreQueryFilters()
             .Where(x => x.OrganizationId == membership.OrganizationId && x.UserId == user.Id)
             .ToListAsync();
 
-        var permissions = permissionResolver.Resolve(rolePermissions, overrides, membership.Active);
+        // The role's standard permissions come only from the catalog, as they do for request-time checks.
+        var permissions = permissionResolver.Resolve(PermissionCatalog.DefaultsFor(role.Name), overrides, membership.Active);
 
         ClearPause(user);
 

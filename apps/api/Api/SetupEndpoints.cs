@@ -27,7 +27,8 @@ public static class SetupEndpoints
         group.AddEndpointFilter(async (context, next) =>
         {
             try { return await next(context); }
-            catch (UnauthorizedAccessException) { return Results.Problem(statusCode: 403, title: "Not permitted in this organization or data scope."); }
+            // Say why when the refusal has a reason of its own; the framework's default message says nothing useful.
+            catch (UnauthorizedAccessException error) { return Results.Problem(statusCode: 403, title: "Not permitted in this organization or data scope.", detail: error.Message == new UnauthorizedAccessException().Message ? null : error.Message); }
             catch (KeyNotFoundException) { return Results.Problem(statusCode: 404, title: "Record not found in your scope."); }
             catch (ArgumentException error) { return Results.Problem(statusCode: 400, title: "Invalid setup change", detail: error.Message); }
             catch (DbUpdateConcurrencyException) { return Results.Problem(statusCode: 409, title: "Settings changed. Reload before saving."); }
