@@ -14,12 +14,26 @@ public interface ISetupRepository
     Task<bool> RegistrationExists(Guid organizationId, string registration, CancellationToken ct);
     Task<IReadOnlyList<VehicleOption>> VehicleOptions(SetupActor actor, CancellationToken ct);
     Task<int> FirstDayOfWeek(CancellationToken ct);
+    Task<string> Currency(CancellationToken ct);
     Task<Page<RecurringDto>> Recurring(SetupActor actor, int page, int pageSize, CancellationToken ct);
     Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct);
     Task<VehicleReport> Report(SetupActor actor, Guid vehicleId, DateOnly from, DateOnly through, CancellationToken ct);
     Task<Page<HistoryEntry>> History(SetupActor actor, int page, int pageSize, CancellationToken ct);
+    Task<Page<ExpenseCategoryDto>> ExpenseCategories(DateOnly today, int page, int pageSize, CancellationToken ct);
+    Task<IReadOnlyList<ExpenseItemOption>> ExpenseItemOptions(DateOnly today, CancellationToken ct);
+    Task<ExpenseItemOption?> ActiveExpenseItem(Guid id, DateOnly today, CancellationToken ct);
+    Task<ExpenseCategory?> ExpenseCategory(Guid id, CancellationToken ct);
+    Task<ExpenseItem?> ExpenseItem(Guid id, CancellationToken ct);
+    Task<bool> ExpenseCategoryNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct);
+    Task<bool> ExpenseItemNameExists(Guid organizationId, Guid categoryId, string normalizedName, Guid? except, CancellationToken ct);
+    Task<InvestmentDto> Investment(Guid vehicleId, CancellationToken ct);
+    Task<VehicleInvestment?> InvestmentEntry(Guid id, CancellationToken ct);
     void Add(PsvCompany company);
     void Add(FleetVehicle vehicle);
     void Add(RecurringItem item);
-    Task RecordChange(SetupActor actor, string section, Guid entityId, object? before, object after, string reason, CancellationToken ct);
+    void Add(ExpenseCategory category);
+    void Add(ExpenseItem item);
+    void Add(VehicleInvestment entry);
+    void Remove(VehicleInvestment entry);
+    Task RecordChange(SetupActor actor, string section, Guid entityId, object? before, object? after, string reason, CancellationToken ct);
 }

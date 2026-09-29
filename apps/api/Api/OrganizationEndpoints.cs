@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Auth.Application;
 using Auth.Application.Setup;
@@ -36,7 +37,7 @@ public static class OrganizationEndpoints
           group.MapPut("/organization/settings/{section}", async (string section, SaveOrganizationSettings input, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
                await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
-               var reason = SetupPagination.Reason(input.Reason);
+               var reason = SetupPagination.OptionalReason(input.Reason);
                var organization = await db.Organizations.SingleAsync(ct);
                string before, after;
                switch (section)
@@ -54,9 +55,9 @@ public static class OrganizationEndpoints
                          organization.Slug = slug;
                          after = JsonSerializer.Serialize(new OrganizationDetails(name, slug), SettingsJson);
                          break;
-                    case "localization": (before, after) = await Save(db.Localizations, input.Value.Deserialize<OrganizationLocalization>(SettingsJson) ?? throw new ArgumentException("Invalid localization settings."), context.OrganizationId, ct); break;
-                    case "branding": (before, after) = await Save(db.Brandings, input.Value.Deserialize<OrganizationBranding>(SettingsJson) ?? throw new ArgumentException("Invalid branding settings."), context.OrganizationId, ct); break;
-                    case "securityPolicy": (before, after) = await Save(db.SecurityPolicies, input.Value.Deserialize<OrganizationSecurityPolicy>(SettingsJson) ?? throw new ArgumentException("Invalid security policy."), context.OrganizationId, ct); break;
+                    case "localization": (before, after) = await Save(db.Localizations, input.Value, context.OrganizationId, ct); break;
+                    case "branding": (before, after) = await Save(db.Brandings, input.Value, context.OrganizationId, ct); break;
+                    case "securityPolicy": (before, after) = await Save(db.SecurityPolicies, input.Value, context.OrganizationId, ct); break;
                     case "businessDate":
                          before = JsonSerializer.Serialize(organization.BusinessDate, SettingsJson);
                          var requestedBusinessDate = ParseBusinessDate(input.Value);
@@ -69,7 +70,7 @@ public static class OrganizationEndpoints
                // Saving what is already stored changes nothing, so it adds no version or change-log entry.
                if (before == after)
                     return Results.Ok(new { section });
-               RecordChange(db, context, organization, clock, section, before, after, reason);
+               RecordChange(db, context, organization, clock, section, before, after, reason ?? SetupPagination.Automatic(AutomaticReason(section, before, after)));
                await db.SaveChangesAsync(ct);
                return Results.Ok(new { section });
           }).WithName("UpdateOrganizationSettings");
@@ -77,7 +78,7 @@ public static class OrganizationEndpoints
           group.MapPut("/organization/logo", async (SaveLogo input, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
                await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
-               var reason = SetupPagination.Reason(input.Reason);
+               var reason = SetupPagination.OptionalReason(input.Reason) ?? "Uploaded a new logo";
                var organization = await db.Organizations.SingleAsync(ct);
                var uploaded = OrganizationLogo.FromDataUrl(context.OrganizationId, input.DataUrl, clock.UtcNow);
                var existing = await db.Logos.SingleOrDefaultAsync(ct);
@@ -94,7 +95,7 @@ public static class OrganizationEndpoints
           group.MapDelete("/organization/logo", async (string? reason, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
                await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
-               var changeReason = SetupPagination.Reason(reason);
+               var changeReason = SetupPagination.OptionalReason(reason) ?? "Removed the logo";
                var existing = await db.Logos.SingleOrDefaultAsync(ct);
                if (existing is null)
                     return Results.Ok(new { logo = (string?)null });
@@ -133,14 +134,15 @@ public static class OrganizationEndpoints
                var preference = await db.UserPreferences.AsNoTracking().SingleOrDefaultAsync(x => x.UserId == context.ActorId, ct) ?? new UserPreference { OrganizationId = context.OrganizationId, UserId = context.ActorId };
                // Which overrides the organization allows, and its own values, so the form only offers what will take effect.
                var localization = await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationLocalization();
+               // A value kept from before an override was withdrawn is not offered back, so saving the form clears it.
                return Results.Ok(new
                {
                     preference.OrganizationId,
                     preference.UserId,
-                    preference.Locale,
-                    preference.TimeZone,
-                    preference.Hour12,
-                    preference.ThemeMode,
+                    Locale = localization.AllowLocaleOverride ? preference.Locale : null,
+                    TimeZone = localization.AllowTimeZoneOverride ? preference.TimeZone : null,
+                    Hour12 = localization.AllowHour12Override ? preference.Hour12 : null,
+                    ThemeMode = localization.AllowThemeOverride ? preference.ThemeMode : null,
                     preference.ReducedMotion,
                     preference.FontScale,
                     localization.AllowLocaleOverride,
@@ -163,6 +165,7 @@ public static class OrganizationEndpoints
                preference.Locale = input.Locale; preference.TimeZone = input.TimeZone; preference.Hour12 = input.Hour12;
                preference.ThemeMode = input.ThemeMode; preference.ReducedMotion = input.ReducedMotion; preference.FontScale = input.FontScale;
                preference.Validate();
+               (await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationLocalization()).EnsureAllowed(preference);
                await db.SaveChangesAsync(ct);
                return Results.Ok(preference);
           }).WithName("UpdateUserPreferences");
@@ -210,6 +213,44 @@ public static class OrganizationEndpoints
           return parsed;
      }
 
+     // What a changed setting is called in an automatic reason; anything else reads as its words ("timeZone" is "the time zone").
+     private static readonly Dictionary<string, string> SettingNames = new()
+     {
+          ["name"] = "the organization name", ["hour12"] = "the 12-hour clock", ["datePattern"] = "the date format",
+          ["firstDayOfWeek"] = "the first day of the week",
+          ["weekNumbering"] = "week numbering", ["useGroupping"] = "digit grouping", ["numberDecimals"] = "the decimal places",
+          ["allowLocaleOverride"] = "personal locales", ["allowTimeZoneOverride"] = "personal time zones",
+          ["allowHour12Override"] = "personal clock formats", ["allowThemeOverride"] = "personal themes",
+          ["logoAlt"] = "the logo text", ["logoLight"] = "the light logo", ["logoDark"] = "the dark logo",
+          ["primary"] = "the primary colour", ["secondary"] = "the secondary colour", ["accent"] = "the accent colour",
+          ["passwordComplexity"] = "password complexity", ["pinLength"] = "the PIN length",
+          ["lockoutThreshold"] = "the wrong PIN tries before a pause", ["lockoutMinutes"] = "the pause in minutes",
+          ["allowPinSignIn"] = "PIN sign-in",
+     };
+
+     // Contract C7: without a typed reason, the change log says what changed, such as "Changed the time zone to UTC".
+     private static string AutomaticReason(string section, string before, string after)
+     {
+          if (section == "businessDate")
+               return after == "null" ? "Returned the business date to the calendar" : $"Set the business date to {JsonNode.Parse(after)!.GetValue<string>()}";
+          var old = JsonNode.Parse(before) as JsonObject;
+          var changes = (JsonNode.Parse(after) as JsonObject ?? [])
+               .Where(field => field.Key != "organizationId" && !JsonNode.DeepEquals(old?[field.Key], field.Value))
+               .Select(field => $"{SettingNames.GetValueOrDefault(field.Key) ?? "the " + Regex.Replace(field.Key, "(?<=[a-z])([A-Z])", " $1").ToLowerInvariant()} to {SettingValue(field.Key, field.Value)}")
+               .ToList();
+          return changes.Count == 0 ? $"Changed the {section} settings" : "Changed " + SetupPagination.Listed(changes);
+     }
+
+     private static string SettingValue(string name, JsonNode? value) => value?.GetValueKind() switch
+     {
+          null or JsonValueKind.Null => "none",
+          JsonValueKind.True => "on",
+          JsonValueKind.False => "off",
+          JsonValueKind.Number when name == "firstDayOfWeek" => ((DayOfWeek)value.GetValue<int>()).ToString(),
+          JsonValueKind.String => value.GetValue<string>(),
+          _ => value.ToJsonString()
+     };
+
      // The history keeps the logo's shape, not the image itself.
      private static string DescribeLogo(OrganizationLogo? logo) =>
           logo is null ? "null" : JsonSerializer.Serialize(new { logo.ContentType, bytes = logo.Data.Length, logo.UpdatedAt }, SettingsJson);
@@ -225,25 +266,40 @@ public static class OrganizationEndpoints
           if (!(await organizations.Permissions(userId, ct)).Contains(permission)) throw new UnauthorizedAccessException();
      }
 
-     // Returns the section as it was and as it is now saved (defaults included for any omitted field), for the settings history.
-     private static async Task<(string Before, string After)> Save<TEntity>(DbSet<TEntity> set, TEntity value, Guid organizationId, CancellationToken ct) where TEntity : class, IOrganizationEntity
+     // The sent fields are merged onto the saved section, so a partial payload changes only what it names and never
+     // resets the rest to defaults. Returns the section as it was and as it is now saved, for the settings history.
+     private static async Task<(string Before, string After)> Save<TEntity>(DbSet<TEntity> set, JsonElement input, Guid organizationId, CancellationToken ct) where TEntity : class, IOrganizationEntity, new()
      {
+          if (input.ValueKind != JsonValueKind.Object)
+               throw new ArgumentException("Send the section's settings as an object.");
+          var current = await set.FindAsync([organizationId], ct);
+          var merged = JsonObject.Create(JsonSerializer.SerializeToElement(current ?? new TEntity(), SettingsJson), new JsonNodeOptions { PropertyNameCaseInsensitive = true })!;
+          foreach (var (name, field) in JsonObject.Create(input)!)
+               merged[name] = field?.DeepClone();
+          TEntity value;
+          try
+          {
+               value = merged.Deserialize<TEntity>(SettingsJson) ?? throw new ArgumentException("Invalid settings.");
+          }
+          catch (JsonException)
+          {
+               throw new ArgumentException("A setting has the wrong type of value.");
+          }
           value.OrganizationId = organizationId;
           if (value is OrganizationLocalization localization) localization.Validate();
           if (value is OrganizationBranding branding) branding.Validate();
           if (value is OrganizationSecurityPolicy policy) policy.Validate();
-          var existing = await set.FindAsync([organizationId], ct);
-          var before = JsonSerializer.Serialize(existing, SettingsJson);
-          if (existing is null) set.Add(value);
+          var before = JsonSerializer.Serialize(current, SettingsJson);
+          if (current is null) set.Add(value);
           else
           {
-               var entry = set.Entry(existing);
+               var entry = set.Entry(current);
                entry.CurrentValues.SetValues(value);
           }
-          return (before, JsonSerializer.Serialize(existing ?? value, SettingsJson));
+          return (before, JsonSerializer.Serialize(current ?? value, SettingsJson));
      }
 
-     public sealed record SaveOrganizationSettings(JsonElement Value, string Reason);
+     public sealed record SaveOrganizationSettings(JsonElement Value, string? Reason = null);
      public sealed record OrganizationDetails(string? Name, string? Slug);
      public sealed record SaveLogo(string? DataUrl, string? Reason);
      public sealed record SaveUserPreferences(string? Locale, string? TimeZone, bool? Hour12, string? ThemeMode, bool ReducedMotion, double FontScale);

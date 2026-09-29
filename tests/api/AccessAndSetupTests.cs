@@ -107,9 +107,9 @@ public sealed class AccessAndSetupTests : IDisposable
         var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
 
         using var recurring = await owner.PostAsJsonAsync("/setup/recurring",
-            new SaveRecurring("Retirement test", RecurringKind.Cost, CostCategory.FixedCommitments, 900m,
-                RecurrenceFrequency.Daily, null, false, today, null,
-                [new VehicleShare(vehicleId, 900m)], "Add retirement test"));
+            new SaveRecurring("Retirement test", RecurringKind.Cost, null, 900m,
+                RecurrenceFrequency.Weekly, (int)today.DayOfWeek, false, today, null,
+                [new VehicleShare(vehicleId, 900m)], "Add retirement test", await ExpenseItemTestData.Id(owner, "Parking")));
         Assert.Equal(HttpStatusCode.OK, recurring.StatusCode);
 
         using var retire = await owner.PostAsJsonAsync($"/setup/vehicles/{vehicleId}/retire",
@@ -147,8 +147,9 @@ public sealed class AccessAndSetupTests : IDisposable
         using var owner = await app.SignIn(Owner);
         var (_, vehicleId) = await AddVehicle(owner);
         var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
-        (await owner.PostAsJsonAsync("/setup/recurring", new SaveRecurring("Insurance", RecurringKind.Cost, CostCategory.FixedCommitments, 900m,
-            RecurrenceFrequency.Monthly, 1, false, today, null, [new VehicleShare(vehicleId, 900m)], "Add insurance"))).EnsureSuccessStatusCode();
+        (await owner.PostAsJsonAsync("/setup/recurring", new SaveRecurring("Insurance", RecurringKind.Cost, null, 900m,
+            RecurrenceFrequency.Monthly, 1, false, today, null, [new VehicleShare(vehicleId, 900m)], "Add insurance",
+            await ExpenseItemTestData.Id(owner, "Insurance")))).EnsureSuccessStatusCode();
 
         await app.WithDb(async db =>
         {
@@ -207,8 +208,9 @@ public sealed class AccessAndSetupTests : IDisposable
         using var owner = await app.SignIn(Owner);
         using var invalid = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy", new { value = new { lockoutThreshold = 99 }, reason = "Tighten lockout" });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        // Contract C7: a blank reason is replaced by the automatic one.
         using var noReason = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy", new { value = new { lockoutThreshold = 3 }, reason = " " });
-        Assert.Equal(HttpStatusCode.BadRequest, noReason.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, noReason.StatusCode);
     }
 
     [Fact]

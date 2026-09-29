@@ -154,6 +154,20 @@ public sealed class OrganizationLocalization : IOrganizationEntity
           if (DatePattern is not ("short" or "medium" or "long") || FirstDayOfWeek is < 0 or > 6 || WeekNumbering is not ("iso8601" or "local") || !Regex.IsMatch(Currency ?? "", "^[A-Z]{3}$") || NumberDecimals is < 0 or > 6)
                throw new ArgumentException("Invalid format settings");
      }
+
+     // The override rules hold when a preference is written, not only when it is read, so a value the
+     // organization forbids is never stored and cannot switch on later when the rule is relaxed.
+     public void EnsureAllowed(UserPreference preference)
+     {
+          if (!AllowLocaleOverride && preference.Locale is not null)
+               throw new ArgumentException("Your organization does not allow a personal locale.");
+          if (!AllowTimeZoneOverride && preference.TimeZone is not null)
+               throw new ArgumentException("Your organization does not allow a personal time zone.");
+          if (!AllowHour12Override && preference.Hour12 is not null)
+               throw new ArgumentException("Your organization does not allow a personal clock format.");
+          if (!AllowThemeOverride && preference.ThemeMode is not null)
+               throw new ArgumentException("Your organization does not allow a personal theme.");
+     }
 }
 
 

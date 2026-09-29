@@ -15,6 +15,8 @@ public static class SetupEndpoints
         services.AddScoped<CompanyUseCases>();
         services.AddScoped<VehicleUseCases>();
         services.AddScoped<RecurringUseCases>();
+        services.AddScoped<ExpenseCatalogUseCases>();
+        services.AddScoped<InvestmentUseCases>();
         services.AddScoped<AccessUseCases>();
         return services;
     }
@@ -94,5 +96,37 @@ public static class SetupEndpoints
         group.MapGet("/history", (ISetupExecution execution, ISetupRepository repository, CancellationToken ct, int page = 1, int pageSize = 25) =>
             execution.Read("audit.view", actor => { SetupPagination.Validate(page, pageSize); return repository.History(actor, page, pageSize, ct); }, ct))
             .Produces<Page<HistoryEntry>>().WithName("ListSetupHistory");
+
+        // Expense categories and items (contract C3).
+        group.MapGet("/expense-categories", (ExpenseCatalogUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
+            .Produces<Page<ExpenseCategoryDto>>().WithName("ListExpenseCategories");
+        group.MapGet("/expense-items/options", (ExpenseCatalogUseCases useCases, CancellationToken ct) => useCases.Options(ct))
+            .Produces<IReadOnlyList<ExpenseItemOption>>().WithName("ListExpenseItemOptions");
+        group.MapPost("/expense-categories", async (SaveExpenseCategory input, ExpenseCatalogUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SaveCategory(null, input, ct) }))
+            .WithName("CreateExpenseCategory");
+        group.MapPut("/expense-categories/{id:guid}", async (Guid id, SaveExpenseCategory input, ExpenseCatalogUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SaveCategory(id, input, ct) }))
+            .WithName("UpdateExpenseCategory");
+        group.MapPost("/expense-categories/{id:guid}/stop", async (Guid id, ExpenseCatalogUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SetCategoryStopped(id, true, ct) }))
+            .WithName("StopExpenseCategory");
+        group.MapPost("/expense-categories/{id:guid}/restore", async (Guid id, ExpenseCatalogUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SetCategoryStopped(id, false, ct) }))
+            .WithName("RestoreExpenseCategory");
+        group.MapPost("/expense-categories/{id:guid}/items", async (Guid id, SaveExpenseItem input, ExpenseCatalogUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.AddItem(id, input, ct) }))
+            .WithName("CreateExpenseItem");
+        group.MapPut("/expense-items/{id:guid}", async (Guid id, SaveExpenseItem input, ExpenseCatalogUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.RenameItem(id, input, ct) }))
+            .WithName("RenameExpenseItem");
+        group.MapPost("/expense-items/{id:guid}/stop", async (Guid id, ExpenseCatalogUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SetItemStopped(id, true, ct) }))
+            .WithName("StopExpenseItem");
+        group.MapPost("/expense-items/{id:guid}/restore", async (Guid id, ExpenseCatalogUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.SetItemStopped(id, false, ct) }))
+            .WithName("RestoreExpenseItem");
+
+        // Investment per vehicle (contract C5). Never counted as money out.
+        group.MapGet("/vehicles/{id:guid}/investment", (Guid id, InvestmentUseCases useCases, CancellationToken ct) => useCases.Get(id, ct))
+            .Produces<InvestmentDto>().WithName("GetVehicleInvestment");
+        group.MapPost("/vehicles/{id:guid}/investment", async (Guid id, SaveInvestment input, InvestmentUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Add(id, input, ct) }))
+            .WithName("AddVehicleInvestment");
+        group.MapPut("/investment/{id:guid}", async (Guid id, SaveInvestment input, InvestmentUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Update(id, input, ct) }))
+            .WithName("UpdateVehicleInvestment");
+        group.MapDelete("/investment/{id:guid}", async (Guid id, InvestmentUseCases useCases, CancellationToken ct) => Results.Ok(new { id = await useCases.Remove(id, ct) }))
+            .WithName("DeleteVehicleInvestment");
     }
 }

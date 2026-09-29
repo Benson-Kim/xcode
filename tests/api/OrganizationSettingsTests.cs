@@ -100,6 +100,107 @@ public sealed class OrganizationSettingsTests : IDisposable
                     item.GetProperty("reason").GetString() == "Reconcile the prior business day");
     }
 
+    // Contract C7: organization settings keep the automatic reason; a typed one is optional but still checked.
+    [Fact]
+    public async Task SettingsSavedWithoutAReasonGetAnAutomaticOne()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(DemoSeed.Logins[0].Email);
+        var yesterday = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime).AddDays(-1).ToString("yyyy-MM-dd");
+        async Task Save(string section, object value) =>
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/setup/organization/settings/{section}", new { value })).StatusCode);
+
+        await Save("organization", new { name = "North Star Fleet", slug = "demo-fleet" });
+        await Save("localization", new { currency = "USD", firstDayOfWeek = 0 });
+        await Save("securityPolicy", new { lockoutThreshold = 3, allowPinSignIn = false });
+        await Save("branding", new { displayName = "North Star" });
+        await Save("businessDate", yesterday);
+        await Save("businessDate", null!);
+        (await owner.PutAsJsonAsync("/setup/organization/logo", new { dataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" })).EnsureSuccessStatusCode();
+        (await owner.DeleteAsync("/setup/organization/logo")).EnsureSuccessStatusCode();
+        using var tooLong = await owner.PutAsJsonAsync("/setup/organization/settings/localization", new { value = new { currency = "EUR" }, reason = new string('r', 501) });
+        Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+
+        var history = await owner.GetFromJsonAsync<JsonElement>("/setup/history?pageSize=100");
+        var reasons = history.GetProperty("items").EnumerateArray().Reverse().Select(x => x.GetProperty("reason").GetString()).ToList();
+        Assert.Equal([
+            "Changed the organization name to North Star Fleet",
+            "Changed the first day of the week to Sunday and the currency to USD",
+            "Changed the wrong PIN tries before a pause to 3 and PIN sign-in to off",
+            "Changed the display name to North Star",
+            $"Set the business date to {yesterday}",
+            "Returned the business date to the calendar",
+            "Uploaded a new logo",
+            "Removed the logo"], reasons);
+    }
+
+    [Fact]
+    public async Task APartialSectionKeepsTheFieldsItOmits()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(DemoSeed.Logins[0].Email);
+        (await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
+            new { value = new { lockoutMinutes = 30 }, reason = "Longer pause" })).EnsureSuccessStatusCode();
+        (await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
+            new { value = new { lockoutThreshold = 3 }, reason = "Fewer tries" })).EnsureSuccessStatusCode();
+        // Localization omitted from this payload includes the organization's UTC time zone.
+        using var localization = await owner.PutAsJsonAsync("/setup/organization/settings/localization",
+            new { value = new { currency = "USD" }, reason = "Report in dollars" });
+        Assert.Equal(HttpStatusCode.OK, localization.StatusCode);
+
+        var settings = await owner.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        var policy = settings.GetProperty("securityPolicy");
+        Assert.Equal(3, policy.GetProperty("lockoutThreshold").GetInt32());
+        Assert.Equal(30, policy.GetProperty("lockoutMinutes").GetInt32());
+        Assert.Equal("USD", settings.GetProperty("localization").GetProperty("currency").GetString());
+        Assert.Equal("UTC", settings.GetProperty("localization").GetProperty("timeZone").GetString());
+
+        using var notAnObject = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
+            new { value = 3, reason = "Wrong shape" });
+        Assert.Equal(HttpStatusCode.BadRequest, notAnObject.StatusCode);
+        using var wrongType = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
+            new { value = new { lockoutThreshold = "three" }, reason = "Wrong type" });
+        Assert.Equal(HttpStatusCode.BadRequest, wrongType.StatusCode);
+    }
+
+    [Fact]
+    public async Task PreferenceWritesRefuseOverridesTheOrganizationDoesNotAllow()
+    {
+        await app.SeedDemo();
+        using var clerk = await app.SignIn("wanjiru.kamau@zurigenesis.co.ke");
+        object Preferences(string? locale = null, string? timeZone = null, bool? hour12 = null, string? themeMode = null) =>
+            new { locale, timeZone, hour12, themeMode, reducedMotion = true, fontScale = 1.25 };
+
+        // The organization allows no personal time zone by default.
+        using var zone = await clerk.PutAsJsonAsync("/setup/preferences", Preferences(timeZone: "UTC"));
+        Assert.Equal(HttpStatusCode.BadRequest, zone.StatusCode);
+        Assert.Contains("time zone", (await zone.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString());
+        (await clerk.PutAsJsonAsync("/setup/preferences", Preferences(locale: "fr-FR", hour12: true, themeMode: "dark"))).EnsureSuccessStatusCode();
+
+        await app.WithDb(async db =>
+        {
+            db.Provisioning = true;
+            var localization = await db.Localizations.IgnoreQueryFilters().SingleAsync();
+            (localization.AllowLocaleOverride, localization.AllowHour12Override, localization.AllowThemeOverride) = (false, false, false);
+            await db.SaveChangesAsync();
+        });
+        foreach (var forbidden in new[] { Preferences(locale: "fr-FR"), Preferences(hour12: true), Preferences(themeMode: "dark") })
+            Assert.Equal(HttpStatusCode.BadRequest, (await clerk.PutAsJsonAsync("/setup/preferences", forbidden)).StatusCode);
+
+        // Values saved while allowed are not offered back, so resaving the form clears them instead of failing.
+        var loaded = await clerk.GetFromJsonAsync<JsonElement>("/setup/preferences");
+        Assert.Equal(JsonValueKind.Null, loaded.GetProperty("locale").ValueKind);
+        Assert.Equal(JsonValueKind.Null, loaded.GetProperty("themeMode").ValueKind);
+        (await clerk.PutAsJsonAsync("/setup/preferences", Preferences())).EnsureSuccessStatusCode();
+        await app.WithDb(async db =>
+        {
+            var stored = await db.UserPreferences.IgnoreQueryFilters().SingleAsync();
+            Assert.Null(stored.Locale);
+            Assert.Null(stored.ThemeMode);
+            Assert.Equal(1.25, stored.FontScale);
+        });
+    }
+
     private async Task<HttpClient> CreateOwnerClient()
     {
         await app.WithDb(async db =>
