@@ -103,9 +103,8 @@ public sealed class RevenueComplexityTests : IDisposable
         var counter = new Counter();
         var context = new FixedOrganization(organizationId, ownerId);
         using var db = new AuthDb(new DbContextOptionsBuilder<AuthDb>().UseSqlite(connection).AddInterceptors(counter).Options, context);
-        var repository = new RevenueRepository(db,
-            new OrganizationRepository(db, app.Services.GetRequiredService<EffectiveSettingsResolver>(), app.Services.GetRequiredService<EffectivePermissionResolver>()),
-            new UnitOfWork(db, context, app.Clock), app.Clock);
+        var organizations = new OrganizationRepository(db, app.Services.GetRequiredService<EffectiveSettingsResolver>(), app.Services.GetRequiredService<EffectivePermissionResolver>());
+        var repository = new RevenueRepository(db, organizations, new UnitOfWork(db, context, app.Clock, organizations), app.Clock);
         var actor = new SetupActor(organizationId, ownerId, today, true, [], [], "complexity",
             new HashSet<string>(["revenue.view", "revenue.capture", "revenue.no_earnings", "revenue.correct"]));
         var result = await action(repository, actor);
