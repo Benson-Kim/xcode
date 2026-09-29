@@ -1,5 +1,17 @@
 import { fetchWithSession } from "../session";
 
+// A refused request. The message is what to show; the status and body let a screen handle one refusal itself
+// (for example a 409 that carries the record now saved).
+export class ApiError extends Error {
+  status: number;
+  body: Record<string, unknown>;
+  constructor(message: string, status: number, body: Record<string, unknown>) {
+    super(message);
+    this.status = status;
+    this.body = body;
+  }
+}
+
 // Calls the app's API through its Next.js proxy routes: `path` is relative to /api, for example "setup/companies".
 // An expired access token is refreshed once on the way.
 export async function apiRequest<T>(
@@ -14,8 +26,10 @@ export async function apiRequest<T>(
   // The API's detail says what to fix;
   // its title is only the category (for example "Invalid setup change").
   if (!response.ok)
-    throw new Error(
+    throw new ApiError(
       body.detail || body.title || "The request could not be completed.",
+      response.status,
+      body,
     );
   return body as T;
 }

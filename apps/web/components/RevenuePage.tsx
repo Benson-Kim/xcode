@@ -1,61 +1,118 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { RevenueCell, RevenueVehicle, RevenueWeek } from "@xcode/shared";
-import { apiRequest, useResource } from "../lib/data";
-import { formatDate, kes } from "../lib/format";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import type { RevenueCell, RevenueVehicle, RevenueWeek, SaveRevenue } from "@xcode/shared";
+import { ApiError, apiRequest, useResource } from "../lib/data";
+import { kes } from "../lib/format";
 import { useSession } from "../lib/session-context";
+import { dayOfMonth, difference, figure, longDate, rangeLabel, shiftDate, weekday } from "./revenueFormat";
 import {
   Banner,
   Button,
-  Card,
-  CardHeader,
-  CardNote,
-  CardValue,
-  Choice,
-  ChoiceField,
+  ChevronIcon,
   CurrencyInput,
   Dialog,
   Field,
+  FormActions,
+  Hint,
+  IconButton,
+  ListSkeleton,
+  LoadingRegion,
+  Note,
   PageHeader,
   SelectInput,
-  StatusBadge,
+  Skeleton,
+  Spacer,
+  Stat,
+  StatGrid,
+  TableRowsSkeleton,
+  TextInput,
   Toolbar,
+  cn,
 } from "./ui";
 
 const REASONS = ["Garage", "Arrest", "No Crew", "Other"] as const;
 type Reason = (typeof REASONS)[number];
+const isReason = (value: string | null): value is Reason => REASONS.includes(value as Reason);
 
-function dateLabel(value: string) {
-  return formatDate(new Date(`${value}T00:00:00Z`));
+// The day being captured and the day the person set out to fill (an earlier gap opens first), plus the vehicles
+// already done for that day in this run, so a grid that has not reloaded yet never sends capture back to them.
+type Capture = { vehicleId: string; date: string; target: string; info: string; done: string[] };
+
+// One vehicle's week: a capture day outside the grid's week, or a fresh look at the vehicle after a save.
+const vehicleWeekPath = (vehicleId: string, date: string) => `setup/revenue?weekStart=${date}&vehicleId=${vehicleId}`;
+
+const activeOn = (vehicle: RevenueVehicle, date: string) =>
+  vehicle.joinedOn <= date && (vehicle.leftOn === null || date < vehicle.leftOn);
+
+// Whether the vehicle still needs a record for the day. Inside the loaded week the cell says so; for another week,
+// captures run in date order, so any day on or after the vehicle's earliest gap is still missing too.
+function missingOn(vehicle: RevenueVehicle, date: string) {
+  const cell = vehicle.days.find((day) => day.date === date);
+  if (cell) return cell.status === "missing";
+  return activeOn(vehicle, date) && vehicle.earliestMissing !== null && vehicle.earliestMissing <= date;
 }
 
-function shiftDate(value: string, amount: number) {
-  const date = new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + amount);
-  return date.toISOString().slice(0, 10);
+// Where capture opens for a day: a missing day waits for the vehicle's earliest gap, so that gap opens first.
+function openAt(vehicle: RevenueVehicle, day: string, done: string[] = []): Capture {
+  const first = vehicle.earliestMissing;
+  if (first && first < day && missingOn(vehicle, day))
+    return { vehicleId: vehicle.id, date: first, target: day, info: `Fill ${longDate(first)} first.`, done };
+  return { vehicleId: vehicle.id, date: day, target: day, info: "", done };
 }
 
-function statusTone(status: RevenueCell["status"]): "ok" | "warn" | "off" | "neutral" {
-  if (status === "amount" || status === "reason") return "ok";
-  if (status === "missing") return "warn";
-  if (status === "none") return "off";
-  return "neutral";
+// The next vehicle after this one (in grid order, wrapping round) that still has no record for the day.
+function nextMissing(vehicles: RevenueVehicle[], after: string, day: string, done: string[]) {
+  const index = vehicles.findIndex((vehicle) => vehicle.id === after);
+  return [...vehicles.slice(index + 1), ...vehicles.slice(0, Math.max(index, 0))].find(
+    (vehicle) => !done.includes(vehicle.id) && missingOn(vehicle, day),
+  );
 }
 
-function statusLabel(cell: RevenueCell) {
-  if (cell.status === "amount") return kes(cell.amount ?? 0);
-  if (cell.status === "reason") return cell.reason ?? "No earnings";
-  if (cell.status === "missing") return "Missing";
-  if (cell.status === "future") return "Future";
-  return "Not active";
+// The first day a vehicle can be captured: its earliest gap, or today while today has no record.
+function firstGap(vehicle: RevenueVehicle, today: string) {
+  return vehicle.earliestMissing ?? (vehicle.days.find((day) => day.date === today)?.status === "missing" ? today : null);
 }
+
+// A later missing day stays shut on the server until the earliest gap is filled; the grid still offers it and
+// opens the gap instead.
+function opens(vehicle: RevenueVehicle, cell: RevenueCell, canCapture: boolean) {
+  return (
+    cell.canEdit ||
+    (cell.status === "missing" && canCapture && vehicle.earliestMissing !== null && vehicle.earliestMissing < cell.date)
+  );
+}
+
+function entryLabel(entry: Pick<RevenueCell, "amount" | "reason" | "note">) {
+  if (entry.amount !== null) return kes(entry.amount);
+  if (entry.reason) return entry.note ? `${entry.reason}: ${entry.note}` : entry.reason;
+  return "No record";
+}
+
+function cellState(cell: RevenueCell) {
+  const state = cell.status === "missing" ? "Missing" : entryLabel(cell);
+  return cell.editedAfterCapture ? `${state}, edited after capture` : state;
+}
+
+const HEAD = "border-b border-card-line bg-paper px-2 py-2.5 text-xs font-semibold whitespace-nowrap text-grey";
+const CELL = "border-b border-divider px-2 py-1.5 text-[15px] tabular-nums";
+// Below 720px the seven day columns give way to each vehicle's week detail, which lists the same days.
+const DAY_COLUMN = "max-[720px]:hidden";
+const PILL = "rounded-full bg-divider px-2 py-0.5 text-xs font-bold whitespace-nowrap text-navy";
+const MINI_HEAD = "border-b border-card-line px-2 py-2 text-left text-xs font-semibold text-grey";
+const MINI = "border-b border-card-line/70 px-2 py-1.5 text-sm tabular-nums";
 
 export function RevenuePage() {
-  const { session } = useSession();
+  const { can } = useSession();
+  const canView = can("revenue.view");
+  const canCapture = can("revenue.capture");
   const [weekStart, setWeekStart] = useState("");
   const [companyId, setCompanyId] = useState("");
-  const [editor, setEditor] = useState<{ vehicle: RevenueVehicle; cell: RevenueCell } | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [capture, setCapture] = useState<Capture | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+
   const query = useMemo(() => {
     const params = new URLSearchParams();
     if (weekStart) params.set("weekStart", weekStart);
@@ -63,13 +120,76 @@ export function RevenuePage() {
     const encoded = params.toString();
     return `setup/revenue${encoded ? `?${encoded}` : ""}`;
   }, [companyId, weekStart]);
-  const week = useResource<RevenueWeek>(query);
+  // One request per week and company; every cell comes from it.
+  const week = useResource<RevenueWeek>(canView ? query : null);
+  const data = week.data;
+  // The toolbar keeps the last week shown while the next one loads, so its controls (and focus) stay in place.
+  const [shown, setShown] = useState<RevenueWeek>();
+  if (data && data !== shown) setShown(data);
 
+  const today = shown?.businessDate ?? "";
+  const start = weekStart || shown?.weekStart || "";
+  const days = useMemo(() => (data ? Array.from({ length: 7 }, (_, index) => shiftDate(data.weekStart, index)) : []), [data]);
+  const dayTotals = useMemo(
+    () =>
+      days.map((_, index) =>
+        (data?.vehicles ?? []).reduce((sum, vehicle) => sum + (vehicle.days[index]?.status === "amount" ? (vehicle.days[index].amount ?? 0) : 0), 0),
+      ),
+    [data, days],
+  );
+  // The grid's primary action starts at the earliest missing vehicle and day.
+  const first =
+    data && canCapture
+      ? data.vehicles.reduce<{ vehicle: RevenueVehicle; date: string } | null>((best, vehicle) => {
+          const date = firstGap(vehicle, today);
+          return date && (!best || date < best.date) ? { vehicle, date } : best;
+        }, null)
+      : null;
+
+  const gridVehicle = capture ? data?.vehicles.find((vehicle) => vehicle.id === capture.vehicleId) : undefined;
+  const gridCell = capture ? gridVehicle?.days.find((day) => day.date === capture.date) : undefined;
+  const elsewhere = useResource<RevenueWeek>(capture && data && !gridCell ? vehicleWeekPath(capture.vehicleId, capture.date) : null);
+  const otherVehicle = elsewhere.data?.vehicles[0];
+  const otherCell = capture ? otherVehicle?.days.find((day) => day.date === capture.date) : undefined;
+  const vehicle = gridCell ? gridVehicle : otherCell ? otherVehicle : undefined;
+  const cell = gridCell ?? otherCell;
+
+  // Focus goes back to the day that opened capture, or to the grid when that day is no longer a button.
+  const dialogOpen = capture !== null;
   useEffect(() => {
-    if (week.data && !weekStart) setWeekStart(week.data.weekStart);
-  }, [week.data, weekStart]);
+    if (dialogOpen || !opener.current) return;
+    const element = opener.current;
+    opener.current = null;
+    (element.isConnected ? element : gridRef.current)?.focus();
+  }, [dialogOpen]);
 
-  const canView = Boolean(session?.permissions.includes("revenue.view"));
+  function open(next: Capture, from: HTMLElement) {
+    if (!capture) opener.current = from;
+    setCapture(next);
+  }
+
+  function toggle(id: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }
+
+  // After a save: the same vehicle again while the day it set out to fill is still open (its next gap first), then
+  // the next vehicle still missing that day, then done. The grid reloads alongside.
+  async function advance(saved: Capture) {
+    week.reload();
+    if (saved.date < saved.target) {
+      const fresh = await apiRequest<RevenueWeek>(vehicleWeekPath(saved.vehicleId, saved.target)).catch(() => undefined);
+      const same = fresh?.vehicles[0];
+      if (same && missingOn(same, saved.target)) return setCapture(openAt(same, saved.target, saved.done));
+    }
+    const done = [...saved.done, saved.vehicleId];
+    const next = canCapture && data ? nextMissing(data.vehicles, saved.vehicleId, saved.target, done) : undefined;
+    setCapture(next ? openAt(next, saved.target, done) : null);
+  }
+
   if (!canView) {
     return (
       <section>
@@ -78,270 +198,592 @@ export function RevenuePage() {
     );
   }
 
-  const data = week.data;
-  const previous = data ? shiftDate(data.weekStart, -7) : "";
-  const next = data ? shiftDate(data.weekStart, 7) : "";
-  const isCurrent = Boolean(data && data.weekStart >= data.currentWeekStart);
-
   return (
     <section>
-      <PageHeader
-        title="Revenue"
-        description="Record either the day's revenue or why no revenue was earned. Missing days stay visible until resolved."
-      />
-      <Toolbar align="start">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button tone="outline" disabled={!data || week.loading} onClick={() => setWeekStart(previous)}>
-            Previous week
-          </Button>
-          <Button tone="outline" disabled={!data || week.loading || isCurrent} onClick={() => setWeekStart(next)}>
-            Next week
-          </Button>
-        </div>
-        <div className="min-w-56">
-          <label htmlFor="revenue-company" className="sr-only">Company</label>
-          <SelectInput
-            id="revenue-company"
-            density="compact"
-            value={companyId}
-            onChange={(event) => setCompanyId(event.target.value)}
+      <PageHeader title="Revenue" />
+      <Toolbar>
+        <div className="flex items-center gap-1">
+          <IconButton aria-label="Previous week" disabled={!start} onClick={() => setWeekStart(shiftDate(start, -7))}>
+            <ChevronIcon size={20} className="rotate-90" />
+          </IconButton>
+          <strong aria-live="polite" className="min-w-44 text-center text-[15px] max-[600px]:min-w-0">
+            {start ? rangeLabel(start, shiftDate(start, 6)) : <Skeleton className="mx-auto w-36" />}
+          </strong>
+          <IconButton
+            aria-label="Next week"
+            disabled={!shown || start >= shown.currentWeekStart}
+            onClick={() => setWeekStart(shiftDate(start, 7))}
           >
+            <ChevronIcon size={20} className="-rotate-90" />
+          </IconButton>
+        </div>
+        {shown && shown.companies.length > 1 && (
+          <SelectInput aria-label="Company" density="compact" inline value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
             <option value="">All companies</option>
-            {data?.companies.map((company) => (
-              <option key={company.id} value={company.id}>{company.name}</option>
+            {shown.companies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.name}
+              </option>
             ))}
           </SelectInput>
-        </div>
-        {data && (
-          <span className="self-center text-sm text-grey">
-            {dateLabel(data.weekStart)} – {dateLabel(data.weekThrough)} · business date {dateLabel(data.businessDate)}
-          </span>
         )}
+        <Spacer />
+        {first && (
+          <Button onClick={(event) => open(openAt(first.vehicle, first.date), event.currentTarget)}>Capture revenue</Button>
+        )}
+        <div className="flex flex-col items-end leading-[1.3]">
+          <small className="text-xs text-grey">Week to date</small>
+          {data ? (
+            <>
+              <strong className="text-xl tabular-nums">{kes(data.totalAmount)}</strong>
+              <small className="text-xs text-grey">
+                {`of ${kes(data.totalExpected)} expected${data.percent === null ? "" : `, ${data.percent}%`}`}
+              </small>
+            </>
+          ) : (
+            <Skeleton className="mt-1 h-6 w-24" />
+          )}
+        </div>
       </Toolbar>
 
       {week.error && <Banner className="mt-4">{week.error}</Banner>}
 
-      <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
-        <Card>
-          <CardHeader title="Recorded" description="Amount entries in this week" />
-          <CardValue>{data ? kes(data.totalAmount) : "—"}</CardValue>
-          <CardNote>{data ? `${data.percent ?? 0}% of expected ${kes(data.totalExpected)}` : "Loading revenue"}</CardNote>
-        </Card>
-        <Card>
-          <CardHeader title="Expected" description="Dated target divided by seven" />
-          <CardValue>{data ? kes(data.totalExpected) : "—"}</CardValue>
-          <CardNote>Future and inactive days are excluded.</CardNote>
-        </Card>
-        <Card>
-          <CardHeader title="Vehicles" description="In your permitted scope" />
-          <CardValue>{data ? data.vehicles.length : "—"}</CardValue>
-          <CardNote>Click a day to capture or correct it.</CardNote>
-        </Card>
-      </div>
-
-      {week.loading && !data ? (
-        <Card className="mt-4"><CardNote>Loading revenue records…</CardNote></Card>
-      ) : !data || data.vehicles.length === 0 ? (
-        <Card className="mt-4"><CardNote>No active or historical vehicles are in this scope.</CardNote></Card>
+      {!data ? (
+        week.loading && (
+          <LoadingRegion label="Loading revenue" className="mt-4 overflow-hidden rounded-[14px] border border-card-line bg-white">
+            <table className="w-full border-collapse">
+              <tbody>
+                <TableRowsSkeleton columns={4} />
+              </tbody>
+            </table>
+          </LoadingRegion>
+        )
       ) : (
-        <div className="mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-white">
-          <table className="min-w-[1120px] w-full border-collapse">
-            <caption className="sr-only">Weekly revenue capture grid</caption>
+        <div ref={gridRef} tabIndex={-1} className="mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-white">
+          <table className="w-full border-collapse min-[721px]:min-w-225">
+            <caption className="sr-only">Revenue by vehicle and day, {rangeLabel(data.weekStart, data.weekThrough)}</caption>
             <thead>
               <tr>
-                <th scope="col" className="sticky left-0 z-10 min-w-48 border-b border-card-line bg-paper px-4 py-3 text-left text-[13px] font-semibold text-grey">Vehicle</th>
-                {data.vehicles[0].days.map((cell) => (
-                  <th key={cell.date} scope="col" className="min-w-28 border-b border-card-line bg-paper px-3 py-3 text-left text-[13px] font-semibold text-grey">
-                    {dateLabel(cell.date)}
-                    <span className="block font-normal">Expected {kes(cell.expected)}</span>
+                <th scope="col" className={cn(HEAD, "sticky left-0 z-1 min-w-35 text-left")}>
+                  Vehicle
+                </th>
+                {days.map((date) => (
+                  <th
+                    key={date}
+                    scope="col"
+                    aria-current={date === today ? "date" : undefined}
+                    className={cn(HEAD, DAY_COLUMN, "text-right", date === today && "shadow-[inset_0_-3px_0_var(--color-blue)]")}
+                  >
+                    {weekday(date)}{" "}
+                    <span className={cn("block text-base font-bold text-navy", date === today && "text-blue-dark")}>{dayOfMonth(date)}</span>
+                    {date === today && <span className="sr-only">, today</span>}
                   </th>
                 ))}
-                <th scope="col" className="min-w-36 border-b border-card-line bg-paper px-4 py-3 text-right text-[13px] font-semibold text-grey">Week total</th>
+                <th scope="col" className={cn(HEAD, "text-right")}>
+                  Week
+                </th>
+                <th scope="col" className={cn(HEAD, "text-right")}>
+                  vs expected
+                </th>
               </tr>
             </thead>
             <tbody>
-              {data.vehicles.map((vehicle) => (
-                <tr key={vehicle.id} className="border-b border-divider last:border-b-0">
-                  <td className="sticky left-0 z-10 border-r border-divider bg-white px-4 py-3 align-top">
-                    <strong className="block text-[15px]">{vehicle.registration}</strong>
-                    <span className="block text-[13px] text-grey">{vehicle.companyName}</span>
-                    {vehicle.earliestMissing && (
-                      <span className="mt-1 block text-xs text-amber-text">Fill from {dateLabel(vehicle.earliestMissing)}</span>
-                    )}
-                  </td>
-                  {vehicle.days.map((cell) => (
-                    <td key={cell.date} className="border-divider px-3 py-3 align-top">
-                      {cell.canEdit ? (
-                        <button
-                          type="button"
-                          className="min-h-12 w-full rounded-lg text-left hover:bg-hover focus:outline-3 focus:outline-offset-1 focus:outline-blue/30"
-                          aria-label={`${vehicle.registration}, ${dateLabel(cell.date)}: ${statusLabel(cell)}`}
-                          onClick={() => setEditor({ vehicle, cell })}
-                        >
-                          <CellValue cell={cell} />
-                        </button>
-                      ) : (
-                        <CellValue cell={cell} />
-                      )}
-                    </td>
-                  ))}
-                  <td className="border-divider px-4 py-3 text-right align-top tabular-nums">
-                    <strong className="block">{kes(vehicle.totalAmount)}</strong>
-                    <span className="block text-[13px] text-grey">of {kes(vehicle.totalExpected)}</span>
-                    <span className={vehicle.percent !== null && vehicle.percent < 100 ? "block text-[13px] text-red" : "block text-[13px] text-green"}>
-                      {vehicle.percent === null ? "No target" : `${vehicle.percent}%`}
-                    </span>
+              {data.vehicles.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="px-4 py-6 text-center text-grey">
+                    No vehicles.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                data.vehicles.map((item) => {
+                  const isOpen = expanded.has(item.id);
+                  return (
+                    <Fragment key={item.id}>
+                      <tr>
+                        <th scope="row" className={cn(CELL, "sticky left-0 z-1 min-w-35 bg-white text-left font-normal")}>
+                          <button
+                            type="button"
+                            aria-expanded={isOpen}
+                            aria-controls={isOpen ? `revenue-detail-${item.id}` : undefined}
+                            onClick={() => toggle(item.id)}
+                            className="inline-flex min-h-8 items-center gap-1.5 text-left font-bold text-blue hover:underline"
+                          >
+                            <ChevronIcon className={cn("shrink-0 transition-transform motion-reduce:transition-none", !isOpen && "-rotate-90")} />
+                            {item.registration}
+                          </button>
+                          <small className="block pl-5.5 text-xs text-grey">{item.companyName}</small>
+                        </th>
+                        {item.days.map((day) => (
+                          <td key={day.date} className={cn(CELL, DAY_COLUMN, "text-right", day.date === today && "bg-blue-wash")}>
+                            <DayCell
+                              vehicle={item}
+                              cell={day}
+                              today={today}
+                              canCapture={canCapture}
+                              onOpen={(from) => open(openAt(item, day.date), from)}
+                            />
+                          </td>
+                        ))}
+                        <td className={cn(CELL, "text-right")}>
+                          <strong>{figure(item.totalAmount)}</strong>
+                        </td>
+                        <td className={cn(CELL, "text-right")}>
+                          {item.percent !== null && (
+                            <span className={cn("font-bold", item.percent < 90 && "text-red")}>{item.percent}%</span>
+                          )}
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr id={`revenue-detail-${item.id}`}>
+                          <td colSpan={10} className="border-b border-divider bg-paper px-3 pt-1 pb-4">
+                            <VehicleWeek
+                              vehicle={item}
+                              today={today}
+                              canCapture={canCapture}
+                              onOpen={(date, from) => open(openAt(item, date), from)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
+              )}
             </tbody>
-            <tfoot>
-              <tr className="bg-paper font-semibold">
-                <th scope="row" className="px-4 py-3 text-left">Total</th>
-                {data.vehicles[0].days.map((cell) => (
-                  <td key={cell.date} className="px-3 py-3 tabular-nums">
-                    {kes(data.vehicles.reduce((sum, vehicle) => sum + (vehicle.days.find((item) => item.date === cell.date)?.amount ?? 0), 0))}
-                  </td>
-                ))}
-                <td className="px-4 py-3 text-right tabular-nums">{kes(data.totalAmount)}</td>
-              </tr>
-            </tfoot>
+            {data.vehicles.length > 0 && (
+              <tfoot>
+                <tr className="bg-paper font-bold">
+                  <th scope="row" className="sticky left-0 z-1 bg-paper px-2 py-2 text-left">
+                    All vehicles
+                  </th>
+                  {dayTotals.map((total, index) => (
+                    <td key={days[index]} className={cn("px-2 py-2 text-right tabular-nums", DAY_COLUMN)}>
+                      {total ? figure(total) : ""}
+                    </td>
+                  ))}
+                  <td className="px-2 py-2 text-right tabular-nums">{figure(data.totalAmount)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{data.percent === null ? "" : `${data.percent}%`}</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       )}
 
-      {editor && (
-        <RevenueEditor
-          key={`${editor.vehicle.id}-${editor.cell.date}`}
-          vehicle={editor.vehicle}
-          cell={editor.cell}
-          canChooseReason={Boolean(session?.permissions.includes("revenue.no_earnings"))}
-          onClose={() => setEditor(null)}
-          onSaved={() => {
-            setEditor(null);
-            week.reload();
-          }}
-        />
-      )}
+      <Dialog open={dialogOpen} title={gridVehicle?.registration ?? otherVehicle?.registration ?? ""} onClose={() => setCapture(null)}>
+        {capture &&
+          (vehicle && cell ? (
+            <CaptureForm
+              key={`${capture.vehicleId}:${capture.date}`}
+              vehicle={vehicle}
+              cell={cell}
+              info={capture.info}
+              canChooseReason={can("revenue.no_earnings")}
+              onCancel={() => setCapture(null)}
+              onDone={() => advance(capture)}
+              onOpenDay={(date) => setCapture({ ...capture, date, info: `Fill ${longDate(date)} first.` })}
+              reload={async () =>
+                (await apiRequest<RevenueWeek>(vehicleWeekPath(capture.vehicleId, capture.date))).vehicles[0]?.days.find(
+                  (day) => day.date === capture.date,
+                )
+              }
+            />
+          ) : elsewhere.error ? (
+            <Banner>{elsewhere.error}</Banner>
+          ) : elsewhere.data ? (
+            <Banner>This day is outside the vehicle&apos;s time in the fleet.</Banner>
+          ) : (
+            <LoadingRegion label="Loading the day">
+              <ListSkeleton rows={2} />
+            </LoadingRegion>
+          ))}
+      </Dialog>
     </section>
   );
 }
 
-function CellValue({ cell }: { cell: RevenueCell }) {
-  return (
-    <span className="flex flex-col gap-1">
-      <StatusBadge tone={statusTone(cell.status)}>{statusLabel(cell)}</StatusBadge>
-      {cell.editedAfterCapture && <small className="text-xs text-grey">Edited after capture</small>}
-    </span>
-  );
-}
-
-function RevenueEditor({
+function DayCell({
   vehicle,
   cell,
-  canChooseReason,
-  onClose,
-  onSaved,
+  today,
+  canCapture,
+  onOpen,
 }: {
   vehicle: RevenueVehicle;
   cell: RevenueCell;
-  canChooseReason: boolean;
-  onClose: () => void;
-  onSaved: () => void;
+  today: string;
+  canCapture: boolean;
+  onOpen: (from: HTMLElement) => void;
 }) {
-  const [amount, setAmount] = useState(cell.amount === null ? "" : String(cell.amount));
-  const [reason, setReason] = useState<Reason | "">((cell.reason as Reason | null) ?? "");
-  const [note, setNote] = useState(cell.note ?? "");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+  const clickable = opens(vehicle, cell, canCapture);
+  const missing = cell.status === "missing";
+  const now = cell.date === today;
+  const content =
+    cell.status === "amount" ? (
+      figure(cell.amount ?? 0)
+    ) : cell.status === "reason" ? (
+      <span className={PILL}>{cell.reason}</span>
+    ) : missing ? (
+      clickable ? "Enter" : "Missing"
+    ) : (
+      <span className="sr-only">{cell.status === "future" ? "Future day" : "Not counted"}</span>
+    );
+  const edited = cell.editedAfterCapture && <small className="text-[11px] font-normal text-grey">Edited</small>;
+  const className = cn(
+    "inline-flex min-h-9 min-w-17 flex-col items-end justify-center rounded-lg px-2 tabular-nums",
+    missing && "items-center text-[13px] font-bold",
+    missing && (now ? "text-blue-dark" : "text-red"),
+  );
+  if (!clickable)
+    return (
+      <span className={className}>
+        {content}
+        {edited}
+      </span>
+    );
+  return (
+    <button
+      type="button"
+      aria-label={`${vehicle.registration}, ${longDate(cell.date)}: ${cellState(cell)}`}
+      onClick={(event) => onOpen(event.currentTarget)}
+      className={cn(className, "hover:bg-hover", missing && "border border-dashed", missing && (now ? "border-blue" : "border-red"))}
+    >
+      {content}
+      {edited}
+    </button>
+  );
+}
 
-  async function save() {
-    setError("");
-    const text = amount.replace(/,/g, "").trim();
-    const numeric = text ? Number(text) : null;
-    if (text && (!Number.isFinite(numeric) || numeric <= 0)) {
-      setError("Enter a positive revenue amount.");
-      return;
-    }
-    if (numeric !== null && reason) {
-      setError("Choose either a revenue amount or a no-earnings reason.");
-      return;
-    }
-    if (numeric === null && !reason) {
-      setError("Enter revenue or choose why there was no revenue.");
-      return;
-    }
-    if (reason === "Other" && !note.trim()) {
-      setError("Explain what happened when choosing Other.");
-      return;
-    }
+// Expected, actual, difference and a bar for each day of one vehicle's week.
+function VehicleWeek({
+  vehicle,
+  today,
+  canCapture,
+  onOpen,
+}: {
+  vehicle: RevenueVehicle;
+  today: string;
+  canCapture: boolean;
+  onOpen: (date: string, from: HTMLElement) => void;
+}) {
+  return (
+    <table className="ml-6 w-[calc(100%-24px)] border-collapse max-[720px]:ml-0 max-[720px]:w-full">
+      <caption className="sr-only">{vehicle.registration} week detail</caption>
+      <thead>
+        <tr>
+          <th scope="col" className={MINI_HEAD}>
+            Day
+          </th>
+          <th scope="col" className={cn(MINI_HEAD, "text-right")}>
+            Expected
+          </th>
+          <th scope="col" className={cn(MINI_HEAD, "text-right")}>
+            Revenue
+          </th>
+          <th scope="col" className={cn(MINI_HEAD, "text-right")}>
+            Difference
+          </th>
+          <th scope="col" className={MINI_HEAD}>
+            <span className="sr-only">Share of expected</span>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {vehicle.days.map((cell) => {
+          const day = (
+            <th scope="row" className={cn(MINI, "text-left font-normal whitespace-nowrap")}>
+              {`${weekday(cell.date)} ${dayOfMonth(cell.date)}`}
+            </th>
+          );
+          if (cell.status === "none")
+            return (
+              <tr key={cell.date} className="text-grey">
+                {day}
+                <td colSpan={4} className={MINI}>
+                  Not counted
+                </td>
+              </tr>
+            );
+          const expected = <td className={cn(MINI, "text-right")}>{figure(cell.expected)}</td>;
+          if (cell.status === "future")
+            return (
+              <tr key={cell.date} className="text-grey">
+                {day}
+                {expected}
+                <td className={MINI} />
+                <td className={MINI} />
+                <td className={MINI} />
+              </tr>
+            );
+          const missing = cell.status === "missing";
+          const value = missing ? (
+            <span className={cn("text-[13px] font-bold", cell.date === today ? "text-blue-dark" : "text-red")}>
+              {cell.date < today ? "No record" : "Not yet"}
+            </span>
+          ) : cell.amount !== null ? (
+            figure(cell.amount)
+          ) : (
+            <span className={PILL}>{cell.reason}</span>
+          );
+          const revenue = opens(vehicle, cell, canCapture) ? (
+            <button
+              type="button"
+              aria-label={`${vehicle.registration}, ${longDate(cell.date)}: ${cellState(cell)}`}
+              onClick={(event) => onOpen(cell.date, event.currentTarget)}
+              className="min-h-8 rounded-lg px-1.5 underline decoration-dotted underline-offset-4 hover:bg-hover"
+            >
+              {value}
+            </button>
+          ) : (
+            value
+          );
+          if (missing)
+            return (
+              <tr key={cell.date}>
+                {day}
+                {expected}
+                <td className={cn(MINI, "text-right")}>{revenue}</td>
+                <td className={MINI} />
+                <td className={MINI} />
+              </tr>
+            );
+          const actual = cell.amount ?? 0;
+          const share = cell.expected ? Math.round((actual / cell.expected) * 100) : 0;
+          return (
+            <tr key={cell.date}>
+              {day}
+              {expected}
+              <td className={cn(MINI, "text-right")}>{revenue}</td>
+              <td className={cn(MINI, "text-right")}>
+                <Gap actual={actual} expected={cell.expected} />
+              </td>
+              <td className={MINI}>
+                <div data-bar aria-hidden="true" className="h-1.5 w-30 overflow-hidden rounded-full bg-card-line max-[720px]:w-12">
+                  <span className={cn("block h-full", share < 90 ? "bg-red" : "bg-blue")} style={{ width: `${Math.min(share, 100)}%` }} />
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+        <tr className="font-bold">
+          <th scope="row" className="px-2 py-1.5 text-left text-sm">
+            To date
+          </th>
+          <td className="px-2 py-1.5 text-right text-sm tabular-nums">{figure(vehicle.totalExpected)}</td>
+          <td className="px-2 py-1.5 text-right text-sm tabular-nums">{figure(vehicle.totalAmount)}</td>
+          <td className="px-2 py-1.5 text-right text-sm tabular-nums">
+            <Gap actual={vehicle.totalAmount} expected={vehicle.totalExpected} />
+          </td>
+          <td />
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+
+function Gap({ actual, expected }: { actual: number; expected: number }) {
+  return <span className={cn(actual < expected && "text-red", actual > expected && "text-green")}>{difference(actual, expected)}</span>;
+}
+
+function CaptureForm({
+  vehicle,
+  cell,
+  info,
+  canChooseReason,
+  onCancel,
+  onDone,
+  onOpenDay,
+  reload,
+}: {
+  vehicle: RevenueVehicle;
+  cell: RevenueCell;
+  info: string;
+  canChooseReason: boolean;
+  onCancel: () => void;
+  // Called once the day is settled (saved, or the saved record kept): moves capture on.
+  onDone: () => Promise<void>;
+  onOpenDay: (date: string) => void;
+  // Reads the day again, for a conflict that came without the saved record.
+  reload: () => Promise<RevenueCell | undefined>;
+}) {
+  // The record as it was when the day opened. A grid reload can bring a newer one, but saving over what the person
+  // never saw must come back as a conflict, so its version is the one sent.
+  const [opened] = useState(cell);
+  const [amount, setAmount] = useState(opened.amount === null ? "" : String(opened.amount));
+  const [reason, setReason] = useState<Reason | "">(isReason(opened.reason) ? opened.reason : "");
+  const [note, setNote] = useState(opened.note ?? "");
+  const [error, setError] = useState("");
+  const [earlier, setEarlier] = useState("");
+  const [conflict, setConflict] = useState<{ message: string; current: RevenueCell } | null>(null);
+  const [saving, setSaving] = useState(false);
+  // Blocks a second save (Enter, or a quick second click) while one is on its way, before the disabled button renders.
+  const busy = useRef(false);
+  const amountRef = useRef<HTMLInputElement>(null);
+  const noteRef = useRef<HTMLInputElement>(null);
+  const opensOnNote = useRef(opened.reason === "Other");
+
+  // After the dialog has opened (which focuses its first control), put the cursor where the entry goes.
+  useEffect(() => {
+    const timer = setTimeout(() => (opensOnNote.current ? noteRef : amountRef).current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, []);
+
+  function entry(): SaveRevenue | string {
+    const text = amount.trim();
+    const value = text ? Number(text) : 0;
+    if (!Number.isFinite(value) || value < 0) return "Enter the revenue as an amount.";
+    if (value) return { amount: value, reason: null, note: null };
+    if (!canChooseReason) return "Enter the revenue.";
+    if (!reason) return "Enter the revenue or pick a reason.";
+    if (reason === "Other" && !note.trim()) return "Say what happened.";
+    return { amount: null, reason, note: reason === "Other" ? note.trim() : null };
+  }
+
+  async function settle(work: () => Promise<void>) {
+    if (busy.current) return;
+    busy.current = true;
     setSaving(true);
     try {
-      await apiRequest(`setup/revenue/${vehicle.id}/${cell.date}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          amount: numeric,
-          reason: reason || null,
-          note: reason === "Other" ? note.trim() : null,
-        }),
-      });
-      onSaved();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The revenue record could not be saved.");
+      await work();
     } finally {
+      busy.current = false;
       setSaving(false);
     }
   }
 
+  // A correction sends the version it was read at; a first capture sends null.
+  function save(version: number | null) {
+    const next = entry();
+    if (typeof next === "string") return setError(next);
+    void settle(async () => {
+      setError("");
+      setEarlier("");
+      try {
+        await apiRequest(`setup/revenue/${vehicle.id}/${cell.date}`, { method: "PUT", body: JSON.stringify({ ...next, version }) });
+      } catch (failure) {
+        if (failure instanceof ApiError && failure.status === 409) {
+          // Without the saved record (two first captures at once), read the day again before offering the choice.
+          const current = (failure.body.current as RevenueCell | undefined) ?? (await reload().catch(() => undefined));
+          if (current) setConflict({ message: failure.message, current });
+          else setError(failure.message);
+        } else if (failure instanceof ApiError && failure.status === 400 && typeof failure.body.earliestMissing === "string") {
+          setEarlier(failure.body.earliestMissing);
+        } else {
+          setError(failure instanceof Error ? failure.message : "The revenue could not be saved.");
+        }
+        return;
+      }
+      await onDone();
+    });
+  }
+
+  function choose(item: Reason) {
+    setReason((current) => (current === item ? "" : item));
+    setAmount("");
+    setError("");
+  }
+
+  const mine = entry();
   return (
-    <Dialog open title={`${vehicle.registration} · ${dateLabel(cell.date)}`} onClose={onClose}>
-      <div className="flex flex-col gap-4">
-        <p className="m-0 text-sm text-grey">Expected for this date: {kes(cell.expected)}. Earlier missing days must be handled first.</p>
-        <Field id="revenue-amount" label="Revenue amount" hint="Leave empty when recording no earnings.">
-          <CurrencyInput
-            value={amount}
-            onChange={(event) => {
-              setAmount(event.target.value);
-              if (event.target.value) setReason("");
-            }}
-            disabled={Boolean(reason)}
-          />
-        </Field>
-        <ChoiceField label="No earnings reason" hint={!canChooseReason ? "Your access does not include no-earnings reasons." : undefined}>
-          {REASONS.map((item) => (
-            <Choice
-              key={item}
-              type="radio"
-              name="revenue-reason"
-              label={item}
-              value={item}
-              checked={reason === item}
-              disabled={!canChooseReason || Boolean(amount)}
-              onChange={() => {
-                setReason(item);
-                setAmount("");
-                if (item !== "Other") setNote("");
+    <form
+      noValidate
+      className="flex flex-col gap-3.5"
+      onSubmit={(event) => {
+        event.preventDefault();
+        save(opened.version ?? null);
+      }}
+    >
+      <p className="m-0 text-[13px] text-grey">{`${longDate(cell.date)}. Expected ${kes(cell.expected)}`}</p>
+      {info && <Note>{info}</Note>}
+      {!canChooseReason && !conflict && opened.reason && (
+        <Hint>{`Recorded as ${entryLabel(opened)}. Enter the revenue to replace it.`}</Hint>
+      )}
+      {conflict ? (
+        <>
+          <Note>{conflict.message}</Note>
+          <StatGrid className="grid-cols-2">
+            <Stat label="Saved value" value={entryLabel(conflict.current)} />
+            <Stat label="Yours" value={typeof mine === "string" ? "" : entryLabel(mine)} />
+          </StatGrid>
+          {!conflict.current.canEdit && <Hint>Your access does not include changing the saved record for this day.</Hint>}
+          <FormActions>
+            {conflict.current.canEdit && (
+              <Button disabled={saving} onClick={() => save(conflict.current.version ?? null)}>
+                {saving ? "Saving…" : "Replace with mine"}
+              </Button>
+            )}
+            <Button tone="outline" disabled={saving} onClick={() => void settle(onDone)}>
+              Keep saved
+            </Button>
+          </FormActions>
+        </>
+      ) : (
+        <>
+          <Field id="revenue-amount" label="Revenue">
+            <CurrencyInput
+              ref={amountRef}
+              value={amount}
+              className="h-14! text-2xl!"
+              onChange={(event) => {
+                setAmount(event.target.value);
+                setError("");
+                if (event.target.value) setReason("");
               }}
             />
-          ))}
-        </ChoiceField>
-        {reason === "Other" && (
-          <Field id="revenue-note" label="What happened?" hint="Up to 80 characters.">
-            <input
-              id="revenue-note"
-              className="h-12 w-full rounded-[10px] border border-line bg-white px-3 text-base focus:border-blue focus:outline-3 focus:outline-offset-1 focus:outline-blue/30"
-              maxLength={80}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-            />
           </Field>
-        )}
-        {error && <Banner>{error}</Banner>}
-        <div className="flex flex-wrap justify-end gap-3">
-          <Button tone="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save revenue"}</Button>
-        </div>
-      </div>
-    </Dialog>
+          {canChooseReason && (
+            <>
+              <p className="m-0 flex items-center gap-3 text-[13px] text-grey before:h-px before:flex-1 before:bg-card-line before:content-[''] after:h-px after:flex-1 after:bg-card-line after:content-['']">
+                or no revenue
+              </p>
+              <div role="group" aria-label="No revenue reason" className="grid grid-cols-4 gap-2 max-[600px]:grid-cols-2">
+                {REASONS.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    aria-pressed={reason === item}
+                    onClick={() => choose(item)}
+                    className="min-h-12 rounded-xl border border-line bg-white text-[15px] font-semibold aria-pressed:border-2 aria-pressed:border-blue aria-pressed:bg-blue-soft aria-pressed:text-blue-dark"
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+              {reason === "Other" && (
+                <Field id="revenue-note" label="What happened" hint="Up to 80 characters.">
+                  <TextInput
+                    ref={noteRef}
+                    autoFocus
+                    maxLength={80}
+                    value={note}
+                    onChange={(event) => {
+                      setNote(event.target.value);
+                      setError("");
+                    }}
+                  />
+                </Field>
+              )}
+            </>
+          )}
+          {earlier && (
+            <>
+              <Note>{`Record ${longDate(earlier)} first.`}</Note>
+              <Button tone="outline" className="self-start" onClick={() => onOpenDay(earlier)}>
+                {`Open ${longDate(earlier)}`}
+              </Button>
+            </>
+          )}
+          {error && <Banner>{error}</Banner>}
+          <FormActions>
+            <Button type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+            <Button tone="outline" disabled={saving} onClick={onCancel}>
+              Cancel
+            </Button>
+          </FormActions>
+        </>
+      )}
+    </form>
   );
 }

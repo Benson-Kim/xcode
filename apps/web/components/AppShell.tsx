@@ -25,11 +25,15 @@ import {
   ListSkeleton,
   MenuIcon,
   PageHeader,
+  ProgressBar,
   SegmentedControl,
+  Skeleton,
+  StatusBadge,
   SubHeading,
   ToastProvider,
   cn,
 } from "./ui";
+import { rangeLabel, shiftDate, shortDate } from "./revenueFormat";
 import { fetchWithSession } from "../lib/session";
 import {
   SessionProvider,
@@ -364,70 +368,141 @@ function Page({
   return <PreferencesView />;
 }
 
-const dashboardCards = [
-  {
-    permission: "dash.capture",
-    title: "Today's revenue",
-    sub: "Your vehicles, today",
-    value: "KES 0",
-    note: "Revenue capture data will appear here.",
-    action: "Capture revenue",
-    view: "revenue" as const,
-    primary: true,
-  },
-  {
-    permission: "dash.revenue",
-    title: "Revenue",
-    sub: "This {period}",
-    value: "KES 0",
-    note: "No revenue records are available yet.",
-  },
-  {
-    permission: "dash.net",
-    title: "Net contribution",
-    sub: "Revenue less all costs",
-    value: "KES 0",
-    note: "Cost and revenue data will appear here.",
-  },
-  {
-    permission: "dash.costs",
-    title: "Costs",
-    sub: "This {period}",
-    value: "KES 0",
-    note: "Cost totals are waiting for records.",
-  },
-  {
-    permission: "dash.gaps",
-    title: "Missing revenue days",
-    sub: "No record and no reason",
-    value: "0 days",
-    note: "No gaps are available yet.",
-    action: "Open revenue",
-    view: "revenue" as const,
-  },
-  {
-    permission: "dash.commitments",
-    title: "Renewals due",
-    sub: "Upcoming commitments",
-    value: "0",
-    note: "Renewal data will appear here.",
-  },
-  {
-    permission: "dash.edits",
-    title: "Edited after capture",
-    sub: "Records changed after they were captured",
-    value: "0",
-    note: "Change history will appear here.",
-    action: "View change log",
-    view: "history" as const,
-  },
-];
-
 const periods = [
   { value: "today", label: "Today" },
   { value: "week", label: "This week" },
   { value: "month", label: "This month" },
 ] as const;
+type Period = (typeof periods)[number]["value"];
+
+// One dashboard card. A card whose data is not connected yet says so rather than showing zeros.
+type DashboardCard = {
+  permission: string;
+  title: string;
+  sub: string;
+  value?: string;
+  bad?: boolean;
+  bar?: number;
+  note?: string;
+  busy?: boolean;
+  unavailable?: boolean;
+  action?: { label: string; view: View; primary?: boolean };
+};
+type Figures = { data?: RevenueDashboard; error: string };
+type Shown = Pick<DashboardCard, "value" | "bad" | "bar" | "note">;
+
+// "Today, 30 Sep 2026", "This week, 28 Sep to 4 Oct 2026", "This month, 1 to 30 Sep 2026", from the business date.
+function periodLabel(period: Period, data?: RevenueDashboard) {
+  const name = periods.find((item) => item.value === period)?.label ?? "";
+  if (!data) return name;
+  if (period === "today") return `${name}, ${shortDate(data.from)}`;
+  return `${name}, ${rangeLabel(data.from, period === "week" ? shiftDate(data.from, 6) : data.through)}`;
+}
+
+// A card from the revenue dashboard: placeholders while it loads, the error if it failed, and only the figures the
+// server sent, which leaves out (null) anything the viewer may not see.
+function revenueCard(card: Omit<DashboardCard, keyof Shown>, figures: Figures, show: (data: RevenueDashboard) => Shown): DashboardCard {
+  if (figures.error) return { ...card, note: figures.error };
+  if (!figures.data) return { ...card, busy: true };
+  return { ...card, ...show(figures.data) };
+}
+
+const unavailable = (permission: string, title: string, sub: string, note: string): DashboardCard => ({
+  permission,
+  title,
+  sub,
+  note,
+  unavailable: true,
+});
+
+// The cards in the design's order, each shown to the people with its permission.
+function dashboardCards(can: (permission: string) => boolean, period: Period, selected: Figures, month: Figures) {
+  const label = periodLabel(period, selected.data);
+  const today = selected.data?.businessDate ?? month.data?.businessDate;
+  const monthData = month.data;
+  const yesterday = monthData && shiftDate(monthData.businessDate, -1);
+  const cards: DashboardCard[] = [
+    revenueCard(
+      {
+        permission: "dash.capture",
+        title: "Today's revenue",
+        sub: today ? `Your vehicles, ${shortDate(today)}` : "Your vehicles, today",
+        action: { label: "Capture revenue", view: "revenue", primary: true },
+      },
+      selected,
+      ({ capturedToday: captured, vehiclesToday: vehicles }) => {
+        if (captured === null || vehicles === null) return {};
+        if (vehicles === 0) return { note: "None of your vehicles is in the fleet today." };
+        const pending = vehicles - captured;
+        return {
+          value: `${captured} of ${vehicles} captured`,
+          note: pending > 0 ? `${plural(pending, "vehicle", "vehicles")} still to capture` : "Every vehicle has a record for today.",
+        };
+      },
+    ),
+    unavailable("dash.float", "My petty cash float", "Cash in hand now", "Petty cash is not connected yet."),
+    revenueCard({ permission: "dash.revenue", title: "Revenue", sub: label }, selected, ({ revenue, expected, percent, capturedToday, vehiclesToday }) => {
+      if (revenue === null) return {};
+      const soFar =
+        period !== "month" && capturedToday !== null && vehiclesToday
+          ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.`
+          : "";
+      if (percent === null) return { value: revenue ? kes(revenue) : undefined, note: `No weekly target applies in this period${soFar}` };
+      return {
+        value: kes(revenue),
+        bar: percent,
+        note: `${percent}% of target ${kes(expected ?? 0)}, from each vehicle’s weekly target${soFar}`,
+      };
+    }),
+    unavailable("dash.net", "Net contribution", `Revenue less all costs. ${label}`, "Needs cost totals, which are not connected yet."),
+    unavailable("dash.costs", "Money out", `${label}. Fuel and crew pay are not tracked.`, "Cost totals are not connected yet."),
+    revenueCard(
+      {
+        permission: "dash.gaps",
+        title: "Missing revenue days",
+        // This month up to yesterday: today is not a gap before it is captured.
+        sub:
+          monthData && yesterday
+            ? monthData.from <= yesterday
+              ? `${rangeLabel(monthData.from, yesterday)}. No record and no reason.`
+              : "No record and no reason."
+            : "This month. No record and no reason.",
+        action: can("revenue.capture") || can("revenue.correct") ? { label: "Fill the gaps", view: "revenue" } : undefined,
+      },
+      month,
+      ({ missingDays, missingVehicles }) =>
+        missingDays === null
+          ? {}
+          : {
+              value: plural(missingDays, "day", "days"),
+              bad: missingDays > 0,
+              note: missingDays
+                ? `On ${plural(missingVehicles ?? 0, "vehicle", "vehicles")}. Always this month, whatever period you pick.`
+                : "Every vehicle has a record for every day.",
+            },
+    ),
+    unavailable("dash.pettycash", "Petty cash to approve", "All managers", "Petty cash is not connected yet."),
+    unavailable("dash.commitments", "Yearly items due", "Next 30 days", "Yearly items are not connected yet."),
+    unavailable("dash.investment", "Money invested", "Against what has come back", "What has come back is not connected yet."),
+    revenueCard(
+      {
+        permission: "dash.edits",
+        title: "Edited after capture",
+        sub: label,
+        action: can("audit.view") ? { label: "View change log", view: "history" } : undefined,
+      },
+      selected,
+      ({ editedRecords }) =>
+        editedRecords === null
+          ? {}
+          : {
+              value: plural(editedRecords, "record", "records"),
+              note: editedRecords ? undefined : "Nothing was changed after capture in this period.",
+            },
+    ),
+  ];
+  return cards.filter((card) => can(card.permission));
+}
 
 function Dashboard({
   session,
@@ -438,20 +513,19 @@ function Dashboard({
   error: string;
   onOpen: (view: View) => void;
 }) {
-  const [period, setPeriod] =
-    useState<(typeof periods)[number]["value"]>("week");
-  const dashboardPath =
-    session && session.permissions.some((permission) =>
-      ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"].includes(permission),
-    )
-      ? `setup/revenue/dashboard?period=${period}`
-      : null;
-  const revenue = useResource<RevenueDashboard>(dashboardPath);
-  const cards = dashboardCards.filter((card) =>
-    session?.permissions.includes(card.permission),
+  const { can } = useSession();
+  const [chosen, setChosen] = useState<Period | null>(null);
+  // A capturer starts on today and everyone else on the month, as in the design.
+  const period: Period = chosen ?? (can("dash.capture") || can("dash.float") ? "today" : "month");
+  const periodCards = ["dash.capture", "dash.revenue", "dash.edits"].some(can);
+  // Missing days always cover the month, so the month is asked for once and shared when it is also the period.
+  const byPeriod = useResource<RevenueDashboard>(
+    periodCards && period !== "month" ? `setup/revenue/dashboard?period=${period}` : null,
   );
-  const periodLabel =
-    period === "today" ? "today" : period === "week" ? "week" : "month";
+  const byMonth = useResource<RevenueDashboard>(
+    can("dash.gaps") || (periodCards && period === "month") ? "setup/revenue/dashboard?period=month" : null,
+  );
+  const cards = dashboardCards(can, period, period === "month" ? byMonth : byPeriod, byMonth);
   return (
     <section>
       <PageHeader
@@ -463,7 +537,7 @@ function Dashboard({
           label="Period"
           options={[...periods]}
           value={period}
-          onChange={setPeriod}
+          onChange={setChosen}
           className="max-[480px]:grid max-[480px]:grid-cols-3 max-[480px]:self-stretch"
         />
         <span className="flex items-center gap-2 text-sm">
@@ -492,50 +566,27 @@ function Dashboard({
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] items-start gap-4 max-[480px]:grid-cols-1">
           {cards.map((card) => {
-            const data = revenue.data;
-            const dashboardError =
-              revenue.error &&
-              ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"].includes(card.permission)
-                ? revenue.error
-                : "";
-            const value =
-              card.permission === "dash.capture" && data
-                ? `${data.capturedToday} of ${data.vehiclesToday} captured`
-                : card.permission === "dash.revenue" && data
-                  ? kes(data.revenue)
-                  : card.permission === "dash.gaps" && data
-                    ? plural(data.missingDays, "day", "days")
-                    : card.permission === "dash.edits" && data
-                      ? plural(data.editedRecords, "record", "records")
-                      : card.value;
-            const note =
-              dashboardError ||
-              (card.permission === "dash.capture" && data
-                ? `${Math.max(0, data.vehiclesToday - data.capturedToday)} still to capture`
-                : card.permission === "dash.revenue" && data
-                  ? data.percent === null
-                    ? "No dated target is available."
-                    : `${data.percent}% of expected ${kes(data.expected)}`
-                  : card.permission === "dash.gaps" && data
-                    ? `${plural(data.missingVehicles, "vehicle has", "vehicles have")} missing days`
-                    : card.permission === "dash.edits" && data
-                      ? "Changed after the original capture."
-                      : card.note);
+            const action = card.action;
             return (
-              <Card key={card.title} aria-labelledby={`card-${card.permission}`}>
-                <CardHeader
-                  id={`card-${card.permission}`}
-                  title={card.title}
-                  description={card.sub?.replace("{period}", periodLabel)}
-                />
-                <CardValue>{value}</CardValue>
-                <CardNote>{note}</CardNote>
-                {card.action && card.view && (
-                  <CardAction
-                    primary={card.primary}
-                    onClick={() => onOpen(card.view!)}
-                  >
-                    {card.action}
+              <Card key={card.permission} aria-labelledby={`card-${card.permission}`} aria-busy={card.busy || undefined}>
+                <CardHeader id={`card-${card.permission}`} title={card.title} description={card.sub} />
+                {card.busy ? (
+                  <>
+                    <Skeleton className="mt-2 h-8 w-3/5" />
+                    <Skeleton className="h-3 w-4/5" />
+                  </>
+                ) : card.unavailable ? (
+                  <p className="m-0">
+                    <StatusBadge>Not available yet</StatusBadge>
+                  </p>
+                ) : (
+                  card.value && <CardValue tone={card.bad ? "bad" : undefined}>{card.value}</CardValue>
+                )}
+                {card.bar !== undefined && <ProgressBar value={card.bar} />}
+                {card.note && <CardNote>{card.note}</CardNote>}
+                {action && (
+                  <CardAction primary={action.primary} onClick={() => onOpen(action.view)}>
+                    {action.label}
                   </CardAction>
                 )}
               </Card>
