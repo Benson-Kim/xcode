@@ -22,10 +22,14 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
         var latest = item?.Versions.OrderByDescending(v => v.Revision).First();
         definition.ValidateNew(actor.Today, latest?.Start);
         var existingAllocations = latest?.Allocations.Select(a => a.VehicleId).ToHashSet() ?? [];
+        // Two reads however many shares: every vehicle the new and current shares name, then the new shares' companies.
+        var vehicles = await repository.VehiclesById(actor, definition.Allocations.Select(a => a.VehicleId).Concat(existingAllocations), ct);
+        var companies = await repository.CompaniesById(actor,
+            definition.Allocations.Select(a => vehicles.GetValueOrDefault(a.VehicleId)?.CompanyId).OfType<Guid>(), ct);
         foreach (var share in definition.Allocations)
         {
-            var vehicle = await repository.Vehicle(actor, share.VehicleId, ct) ?? throw new KeyNotFoundException();
-            var company = await repository.Company(actor, vehicle.CompanyId, ct) ?? throw new KeyNotFoundException();
+            var vehicle = vehicles.GetValueOrDefault(share.VehicleId) ?? throw new KeyNotFoundException();
+            var company = companies.GetValueOrDefault(vehicle.CompanyId) ?? throw new KeyNotFoundException();
             var retainedRetiredVehicle = existingAllocations.Contains(vehicle.Id);
             if ((!vehicle.ActiveOn(actor.Today) || !company.ActiveOn(actor.Today)) && !retainedRetiredVehicle)
                 throw new ArgumentException("New recurring shares must use active vehicles and companies.");
@@ -40,8 +44,8 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
         else
         {
             // The full existing allocation must also be in scope before an editor may change it.
-            foreach (var share in latest!.Allocations)
-                _ = await repository.Vehicle(actor, share.VehicleId, ct) ?? throw new UnauthorizedAccessException();
+            if (latest!.Allocations.Any(share => !vehicles.ContainsKey(share.VehicleId)))
+                throw new UnauthorizedAccessException();
             if (Same(latest, definition)) return item.Id;
             item.Revise(definition, actor.Today);
         }
@@ -57,8 +61,11 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
         var reason = SetupPagination.Reason(input.Reason);
         if (!input.Confirmed) throw new ArgumentException("Confirm stopping this item. Past postings are retained; no posting occurs from today.");
         var item = await repository.RecurringItem(actor, id, ct) ?? throw new KeyNotFoundException();
-        foreach (var share in item.Versions.OrderByDescending(v => v.Revision).First().Allocations)
-            _ = await repository.Vehicle(actor, share.VehicleId, ct) ?? throw new UnauthorizedAccessException();
+        // Only someone who can see every vehicle on the item may stop it; one read for all of them.
+        var shares = item.Versions.OrderByDescending(v => v.Revision).First().Allocations;
+        var visible = await repository.VehiclesById(actor, shares.Select(a => a.VehicleId), ct);
+        if (shares.Any(share => !visible.ContainsKey(share.VehicleId)))
+            throw new UnauthorizedAccessException();
         var before = Snapshot(item);
         if (item.Stop(actor.Today)) await repository.RecordChange(actor, "recurring", item.Id, before, Snapshot(item), reason, ct);
         return item.Id;

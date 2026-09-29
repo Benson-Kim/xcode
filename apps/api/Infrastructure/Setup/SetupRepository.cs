@@ -117,6 +117,18 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         .Include(v => v.Targets)
         .SingleOrDefaultAsync(v => v.Id == id, ct);
 
+    public async Task<IReadOnlyDictionary<Guid, FleetVehicle>> VehiclesById(SetupActor actor, IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        var wanted = ids.Distinct().ToArray();
+        return await VisibleVehicles(actor).AsNoTracking().Where(v => wanted.Contains(v.Id)).ToDictionaryAsync(v => v.Id, ct);
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, PsvCompany>> CompaniesById(SetupActor actor, IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        var wanted = ids.Distinct().ToArray();
+        return await VisibleCompanies(actor).AsNoTracking().Where(c => wanted.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
+    }
+
     public Task<bool> RegistrationExists(Guid organizationId, string registration, CancellationToken ct)
         => db
         .Set<FleetVehicle>()

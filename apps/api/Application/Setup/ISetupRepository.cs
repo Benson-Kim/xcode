@@ -11,6 +11,9 @@ public interface ISetupRepository
     Task<bool> CompanyNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct);
     Task<Page<VehicleDto>> Vehicles(SetupActor actor, int page, int pageSize, CancellationToken ct);
     Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct);
+    // One read each for many ids: an id missing from the result is outside the actor's scope or does not exist.
+    Task<IReadOnlyDictionary<Guid, FleetVehicle>> VehiclesById(SetupActor actor, IEnumerable<Guid> ids, CancellationToken ct);
+    Task<IReadOnlyDictionary<Guid, PsvCompany>> CompaniesById(SetupActor actor, IEnumerable<Guid> ids, CancellationToken ct);
     Task<bool> RegistrationExists(Guid organizationId, string registration, CancellationToken ct);
     Task<IReadOnlyList<VehicleOption>> VehicleOptions(SetupActor actor, CancellationToken ct);
     Task<int> FirstDayOfWeek(CancellationToken ct);
