@@ -45,7 +45,7 @@ export const TABS: {
 export const SETUP_LINKS = [
   { label: "PSV companies", permission: "companies.manage" },
   { label: "Vehicles", permission: "vehicles.manage" },
-  { label: "Recurring costs and savings", permission: "commitments.view" },
+  { label: "Scheduled expenses and savings", permission: "commitments.view" },
   { label: "People and access", permission: "people.view" },
   { label: "Change log", permission: "audit.view" },
   { label: "Organization settings", permission: "organization.manage" },

@@ -3,7 +3,7 @@ import { ActivityIndicator, AppState, StyleSheet, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Figtree_400Regular, Figtree_500Medium, Figtree_600SemiBold, Figtree_700Bold, useFonts } from "@expo-google-fonts/figtree";
 import { AppShell } from "./src/shell/AppShell";
-import { fetchAppearance, forgetAppearance, loadSavedAppearance, themeFor, type Appearance } from "./src/appearance";
+import { fetchAppearance, forgetAppearance, loadSavedAppearance, pinPolicyOf, themeFor, type Appearance } from "./src/appearance";
 import { AuthFlow } from "./src/auth/AuthFlow";
 import { forgetThisPhone } from "./src/lib/api";
 import { configureFormats } from "./src/lib/format";
@@ -49,7 +49,13 @@ export default function App() {
     if (!signedIn) return;
     let active = true;
     fetchAppearance()
-      .then((next) => active && setAppearance(next))
+      .then((next) => {
+        if (!active) return;
+        setAppearance(next);
+        // The next unlock, online or not, follows the organization's wrong-PIN policy.
+        const policy = pinPolicyOf(next);
+        if (policy) setState((current) => (current.phase === "signed-in" ? { ...current, person: { ...current.person, ...policy } } : current));
+      })
       .catch(() => undefined);
     return () => {
       active = false;

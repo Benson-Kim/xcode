@@ -14,8 +14,26 @@ export interface StoredSession extends SessionTokens {
   phoneNumber: string;
 }
 
+// The organization's wrong-PIN policy: tries before a pause, and the pause. The phone enforces it offline.
+export interface PinPolicy {
+  lockoutThreshold: number;
+  lockoutMinutes: number;
+}
+
+// What a phone uses until it has loaded the organization's policy, and for records saved before it kept one.
+export const DEFAULT_PIN_POLICY: PinPolicy = { lockoutThreshold: 5, lockoutMinutes: 15 };
+
+// The bounds the API allows: at least three tries, a pause of at most an hour.
+export const validPinPolicy = (policy: Partial<PinPolicy>) =>
+  Number.isInteger(policy.lockoutThreshold) &&
+  policy.lockoutThreshold! >= 3 &&
+  policy.lockoutThreshold! <= 10 &&
+  Number.isInteger(policy.lockoutMinutes) &&
+  policy.lockoutMinutes! >= 1 &&
+  policy.lockoutMinutes! <= 60;
+
 // Who this phone is trusted for, kept so the unlock screen can greet them and the app can open offline.
-export interface StoredPerson {
+export interface StoredPerson extends PinPolicy {
   phoneNumber: string;
   firstName: string;
   lastName: string;
@@ -92,8 +110,8 @@ export async function savePerson(person: StoredPerson): Promise<void> {
   await write(keys.person, person);
 }
 
-export function loadPerson() {
-  return read<StoredPerson>(
+export async function loadPerson(): Promise<StoredPerson | null> {
+  const person = await read<StoredPerson>(
     keys.person,
     (person) =>
       typeof person.phoneNumber === "string" &&
@@ -108,12 +126,22 @@ export function loadPerson() {
       person.permissions.every((permission) => typeof permission === "string") &&
       Number.isInteger(person.pinLength) &&
       person.pinLength >= 4 &&
-      person.pinLength <= 8,
+      person.pinLength <= 8 &&
+      // Absent on records saved before the policy was kept; those read as the defaults.
+      ((person.lockoutThreshold === undefined && person.lockoutMinutes === undefined) || validPinPolicy(person)),
   );
+  return person && { ...DEFAULT_PIN_POLICY, ...person };
+}
+
+// Keeps the organization's policy (from the appearance) with the person this phone is trusted for.
+export async function savePinPolicy(policy: PinPolicy): Promise<void> {
+  const person = await loadPerson();
+  if (person && validPinPolicy(policy))
+    await savePerson({ ...person, lockoutThreshold: policy.lockoutThreshold, lockoutMinutes: policy.lockoutMinutes });
 }
 
 // The PIN itself is never stored: only a salted SHA-256 of it, so a PIN typed offline can be checked.
-// A four-digit PIN is quick to guess from its hash, so what protects it is the device-only keychain and the pause after five wrong tries, not the hash.
+// A four-digit PIN is quick to guess from its hash, so what protects it is the device-only keychain and the pause after the organization's wrong tries, not the hash.
 async function digest(salt: string, pin: string) {
   return Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,

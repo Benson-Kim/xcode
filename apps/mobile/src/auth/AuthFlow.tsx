@@ -18,6 +18,7 @@ import {
   phoneError,
 } from "../lib/phone";
 import {
+  DEFAULT_PIN_POLICY,
   loadOfflineTries,
   matchesPinCheck,
   saveOfflineTries,
@@ -30,10 +31,6 @@ import { AuthLayout, type BrandInfo } from "./AuthLayout";
 import { LinkRow, PinPad, type PadHeader } from "./PinPad";
 import { CodeStep, PausedStep, PhoneStep } from "./steps";
 
-// Wrong PINs before sign-in pauses, and for how long:
-// The phone counts so it can say how many tries are left and pause offline unlock.
-const PIN_TRIES = 5;
-const PAUSE_SECONDS = 15 * 60;
 const CODE_TRIES = 5;
 const RESEND_SECONDS = 60;
 
@@ -91,6 +88,11 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
   const pinTries = useRef<Record<string, number>>({});
 
   const trustedHere = Boolean(person && person.phoneNumber === phone);
+  // Wrong PINs before sign-in pauses, and for how long: the organization's policy as this phone last loaded it
+  // (5 and 15 minutes until it has). The phone counts so it can say how many tries are left and pause offline unlock.
+  const policy = trustedHere && person ? person : DEFAULT_PIN_POLICY;
+  const triesAllowed = policy.lockoutThreshold;
+  const pauseSeconds = policy.lockoutMinutes * 60;
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -142,8 +144,8 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
     setShake((value) => value + 1);
     const count = (pinTries.current[phone] ?? 0) + 1;
     pinTries.current[phone] = count;
-    if (count >= PIN_TRIES) return pause(Date.now() + PAUSE_SECONDS * 1000);
-    const left = PIN_TRIES - count;
+    if (count >= triesAllowed) return pause(Date.now() + pauseSeconds * 1000);
+    const left = triesAllowed - count;
     setPadError(`Wrong PIN. ${left} ${left === 1 ? "try" : "tries"} left.`);
   }
 
@@ -174,6 +176,7 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
             role: "",
             permissions: [],
             pinLength: usedPin.length,
+            ...DEFAULT_PIN_POLICY,
           };
     onSignedIn(
       await fetchPerson(phone, usedPin.length).catch(() => ({
@@ -294,7 +297,7 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
       if (error instanceof AuthError && error.response.status === "paused")
         return pause(
           Date.now() +
-            (error.response.retryAfterSeconds ?? PAUSE_SECONDS) * 1000,
+            (error.response.retryAfterSeconds ?? pauseSeconds) * 1000,
         );
       if (error instanceof AuthError && error.httpStatus === 401)
         return wrongPin();
@@ -323,13 +326,13 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
     }
     const count = tries.count + 1;
     setShake((value) => value + 1);
-    if (count >= PIN_TRIES) {
-      const until = Date.now() + PAUSE_SECONDS * 1000;
+    if (count >= triesAllowed) {
+      const until = Date.now() + pauseSeconds * 1000;
       await saveOfflineTries({ count: 0, pausedUntil: until });
       return pause(until);
     }
     await saveOfflineTries({ count, pausedUntil: 0 });
-    const left = PIN_TRIES - count;
+    const left = triesAllowed - count;
     setPadError(`Wrong PIN. ${left} ${left === 1 ? "try" : "tries"} left.`);
   }
 

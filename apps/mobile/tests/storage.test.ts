@@ -1,5 +1,5 @@
 import * as SecureStore from "expo-secure-store";
-import { clearSession, forgetPerson, getDeviceId, loadPerson, loadSession, matchesPinCheck, savePerson, savePinCheck, saveSession } from "../src/lib/storage";
+import { clearSession, forgetPerson, getDeviceId, loadPerson, loadSession, matchesPinCheck, savePerson, savePinCheck, savePinPolicy, saveSession } from "../src/lib/storage";
 
 const session = { phoneNumber: "0712345678", accessToken: "jwt", refreshToken: "refresh" };
 
@@ -45,7 +45,7 @@ it("checks a PIN offline without storing it", async () => {
 it("switch user forgets the person but keeps the installation id", async () => {
   const device = await getDeviceId();
   await saveSession(session);
-  await savePerson({ phoneNumber: session.phoneNumber, firstName: "Wanjiru", lastName: "Kamau", role: "Revenue clerk", permissions: [], pinLength: 4 });
+  await savePerson({ phoneNumber: session.phoneNumber, firstName: "Wanjiru", lastName: "Kamau", role: "Revenue clerk", permissions: [], pinLength: 4, lockoutThreshold: 5, lockoutMinutes: 15 });
   await savePinCheck("2580");
   await forgetPerson();
   expect(await loadSession()).toBeNull();
@@ -60,4 +60,18 @@ it("concurrent requests share a single persistent installation identifier", asyn
     expect(await Promise.all([fresh(), fresh()])).toEqual(["stable-test-device", "stable-test-device"]);
     expect(store.setItemAsync).toHaveBeenCalledTimes(1);
   });
+});
+
+it("keeps the organization's wrong-PIN policy with the person, and reads older records as 5 tries and 15 minutes", async () => {
+  const person = { phoneNumber: session.phoneNumber, firstName: "Wanjiru", lastName: "Kamau", role: "Revenue clerk", permissions: [], pinLength: 4 };
+  // Saved by a phone from before the policy was kept.
+  await SecureStore.setItemAsync("xcode.person", JSON.stringify(person));
+  expect(await loadPerson()).toEqual({ ...person, lockoutThreshold: 5, lockoutMinutes: 15 });
+
+  await savePinPolicy({ lockoutThreshold: 3, lockoutMinutes: 60 });
+  expect(await loadPerson()).toEqual({ ...person, lockoutThreshold: 3, lockoutMinutes: 60 });
+
+  // Outside the organization's bounds (3 to 10 tries, 1 to 60 minutes) the record is not trusted.
+  await SecureStore.setItemAsync("xcode.person", JSON.stringify({ ...person, lockoutThreshold: 2, lockoutMinutes: 15 }));
+  expect(await loadPerson()).toBeNull();
 });

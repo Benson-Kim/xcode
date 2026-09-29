@@ -22,7 +22,9 @@ export type AuthStatus =
   | "invalid_pin"
   | "invalid_request"
   | "signed_out"
-  | "device_revoked";
+  | "device_revoked"
+  // 503: the API could not finish right now, for example a new-device email could not be sent.
+  | "service_unavailable";
 
 export interface AuthRequest {
   email?: string;
@@ -82,7 +84,9 @@ export class AuthError extends Error {
           ? pinHelp(response.minimumPinLength ?? undefined)
           : httpStatus === 429
             ? "Too many requests. Please wait a minute."
-            : "Authentication could not be completed. Check your details and try again.",
+            : httpStatus === 503
+              ? "The service is not available right now. Try again shortly."
+              : "Authentication could not be completed. Check your details and try again.",
     );
   }
 }

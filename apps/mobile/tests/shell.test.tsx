@@ -75,6 +75,13 @@ it("shows the Spend tab to people who hold a petty cash permission", async () =>
   await screen.findByText("Petty cash and office bills are not available from the current API yet.");
 });
 
+it("names scheduled expenses and savings as XCODE Web does", async () => {
+  await unlockAs({ ...people.manager, permissions: ["commitments.view"] }, "0700111333");
+  await fireEvent.press(screen.getByRole("tab", { name: "More" }));
+  expect(await screen.findByLabelText("Scheduled expenses and savings, on XCODE Web")).toBeTruthy();
+  expect(screen.queryByText("Recurring costs and savings")).toBeNull();
+});
+
 it("says so when the person has nothing to see yet", async () => {
   await unlockAs({ ...people.clerk, permissions: [] }, "0712345678");
   expect(tabs()).toEqual(["Home", "More"]);

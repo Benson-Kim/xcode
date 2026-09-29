@@ -1,9 +1,20 @@
-import { act, fireEvent, screen } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { AppState } from "react-native";
 import { fakeApi, people, tokens } from "./fakeApi";
 import { startApp, storedText, trustPhone, typePin } from "./helpers";
 
 const DEVICE = "stable-test-device";
+
+const appearance = {
+  organizationName: "Demo Fleet",
+  settingsVersion: 1,
+  businessDate: "2026-09-29",
+  branding: { displayName: "XCODE", logoAlt: "", primary: "", secondary: "", accent: "", logo: null },
+  formats: { locale: "en-GB", timeZone: "Africa/Nairobi", datePattern: "medium", hour12: false, currency: "KES", useGroupping: true, numberDecimals: 2 },
+  themeMode: "system",
+  reducedMotion: false,
+  fontScale: 1,
+};
 
 it("signs in on a new phone with the PIN, then a one-time email code", async () => {
   const api = fakeApi();
@@ -114,6 +125,44 @@ it("unlocks without internet against the PIN check the phone kept", async () => 
   await typePin("4826");
   await screen.findByText("Hi Antony");
   expect(screen.getByText("No internet. You are seeing what this phone saved at your last sign in.")).toBeTruthy();
+});
+
+it("follows the organization's wrong-PIN policy offline, as the phone last loaded it", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  api.on("auth/unlock", [200, tokens(2)]);
+  api.on("auth/session", [200, people.owner]);
+  api.on("setup/access/catalog", [200, []]);
+  api.on("setup/appearance", [200, { ...appearance, lockoutThreshold: 3, lockoutMinutes: 60 }]);
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+  await typePin("4826");
+  await screen.findByText("Hi Antony");
+  await waitFor(() => expect(storedText()).toContain('"lockoutThreshold":3'));
+
+  await fireEvent.press(screen.getByRole("button", { name: "Lock app" }));
+  api.on("auth/unlock", "offline");
+  await typePin("1111");
+  await screen.findByText("Wrong PIN. 2 tries left.");
+  await typePin("1111");
+  await screen.findByText("Wrong PIN. 1 try left.");
+  await typePin("1111");
+  await screen.findByText("Sign in paused");
+  expect(screen.getByText("60:00")).toBeTruthy();
+});
+
+it("pauses offline after five wrong PINs for 15 minutes when the phone has no policy saved", async () => {
+  await trustPhone();
+  fakeApi().on("auth/unlock", "offline");
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+  for (const left of ["4 tries", "3 tries", "2 tries", "1 try"]) {
+    await typePin("1111");
+    await screen.findByText(`Wrong PIN. ${left} left.`);
+  }
+  await typePin("1111");
+  await screen.findByText("Sign in paused");
+  expect(screen.getByText("15:00")).toBeTruthy();
 });
 
 it("sets a first PIN with an email code and meets the organization's minimum length", async () => {
