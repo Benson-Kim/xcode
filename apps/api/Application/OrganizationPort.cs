@@ -35,12 +35,15 @@ public abstract class OrganizationUseCase<TRequest, TResult>(IOrganizationContex
                Validate(request);
                var member = await repository.Membership(context.ActorId, ct);
                var permissions = await repository.Permissions(context.ActorId, ct);
-               // An empty RequiredPermission means any active member of the organization.
-               if (member is not { Active: true } || (RequiredPermission.Length > 0 && !permissions.Contains(RequiredPermission)))
+               // An empty required set means any active member; otherwise any one listed permission is enough.
+               var required = RequiredPermissions;
+               if (member is not { Active: true } || (required.Count > 0 && !required.Any(permissions.Contains)))
                     throw new UnauthorizedAccessException();
                return await Execute(request, ct);
           }, ct);
      protected abstract string RequiredPermission { get; }
+     protected virtual IReadOnlyCollection<string> RequiredPermissions =>
+          string.IsNullOrEmpty(RequiredPermission) ? Array.Empty<string>() : [RequiredPermission];
      protected abstract void Validate(TRequest request);
      protected abstract Task<TResult> Execute(TRequest request, CancellationToken ct);
 }

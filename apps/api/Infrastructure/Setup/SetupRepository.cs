@@ -1,3 +1,4 @@
+using Auth.Domain;
 using System.Text.Json;
 using Auth.Application;
 using Auth.Application.Setup;
@@ -219,9 +220,11 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         var vehicles = VisibleVehicles(actor).Select(v => v.Id);
         var companies = VisibleCompanies(actor).Select(c => c.Id);
         var completeItems = db.Set<RecurringItem>().Where(i => !i.Versions.Any(v => v.Allocations.Any(a => !vehicles.Contains(a.VehicleId)))).Select(i => i.Id);
+        var revenueRecords = db.Set<RevenueRecord>().Where(r => vehicles.Contains(r.VehicleId)).Select(r => r.Id);
         var query = db.Set<OrganizationSettingsVersion>().AsNoTracking().Where(v => actor.AllCompanies ||
             (v.Section == "companies" && companies.Contains(v.EntityId)) || (v.Section == "vehicles" && vehicles.Contains(v.EntityId)) ||
-            (v.Section == "recurring" && completeItems.Contains(v.EntityId)));
+            (v.Section == "recurring" && completeItems.Contains(v.EntityId)) ||
+            (v.Section == "revenue" && revenueRecords.Contains(v.EntityId)));
         var entries = await query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize).Take(pageSize)
             .Select(v => new HistoryEntry(v.Version, v.Section, v.EntityId, v.Reason, v.OccurredAt, v.ActorId,
                 db.Memberships.Where(m => m.UserId == v.ActorId).Select(m => m.FirstName + " " + m.LastName).FirstOrDefault() ?? "",

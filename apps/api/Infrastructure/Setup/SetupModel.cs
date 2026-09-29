@@ -83,7 +83,7 @@ public sealed partial class AuthDb
           {
                if (entry.Entity is OrganizationSettingsVersion or VehicleTarget or RecurringVersion or RecurringAllocation)
                     throw new InvalidOperationException("Setup versions and allocations are append-only.");
-               if (entry.Entity is PsvCompany or FleetVehicle or RecurringItem && entry.State == EntityState.Deleted)
+               if (entry.Entity is PsvCompany or FleetVehicle or RecurringItem or RevenueRecord && entry.State == EntityState.Deleted)
                     throw new InvalidOperationException("Setup records cannot be deleted.");
                if (entry.Entity is FleetVehicle && entry.Property(nameof(FleetVehicle.Registration)).IsModified)
                     throw new InvalidOperationException("Registration cannot change.");

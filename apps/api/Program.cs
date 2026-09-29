@@ -29,6 +29,7 @@ builder.Services.AddSingleton<EffectiveSettingsResolver>();
 builder.Services.AddSingleton<EffectivePermissionResolver>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddSetup();
+builder.Services.AddRevenue();
 builder.Services.AddSingleton<SettingsSectionRegistry>();
 if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")) builder.Services.AddScoped<IEmailSender, LogEmailSender>();
 else builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
@@ -79,6 +80,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapAuth();
 app.MapSetup();
+app.MapRevenue();
 app.MapOrganization();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 if (!app.Environment.IsEnvironment("Testing"))
