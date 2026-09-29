@@ -6,6 +6,7 @@ import type { StoredPerson } from "../lib/storage";
 import { Icon, Text, useTheme } from "../ui";
 import { allowedTabs, type PermissionGroup, type Tab } from "./access";
 import { HomeScreen, ModuleScreen, MoreScreen, type Catalog } from "./screens";
+import { RevenueScreen } from "./RevenueScreen";
 
 type Props = {
   person: StoredPerson;
@@ -52,7 +53,7 @@ export function AppShell({ person, offline, onLock, onSwitchUser, onSessionEnded
     <View style={[styles.shell, { backgroundColor: colors.cream }]}>
       <ScrollView ref={scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {tab === "home" ? (
-          <HomeScreen person={person} offline={offline} canOpen={(target) => tabs.some((item) => item.id === target)} onOpen={open} onLock={onLock} />
+          <HomeScreen person={person} offline={offline} canOpen={(target) => tabs.some((item) => item.id === target)} onOpen={open} onLock={onLock} onSessionEnded={onSessionEnded} />
         ) : tab === "more" ? (
           <MoreScreen
             person={person}
@@ -64,6 +65,8 @@ export function AppShell({ person, offline, onLock, onSwitchUser, onSessionEnded
               void onSwitchUser().finally(() => setSwitching(false));
             }}
           />
+        ) : tab === "revenue" ? (
+          <RevenueScreen person={person} offline={offline} onSessionEnded={onSessionEnded} />
         ) : (
           <ModuleScreen tab={tab} person={person} catalog={catalog} />
         )}

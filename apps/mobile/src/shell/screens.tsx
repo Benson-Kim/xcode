@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
+import { apiGet, SessionEndedError } from "../lib/api";
 import { money } from "../lib/format";
+import type { RevenueDashboard } from "@xcode/shared";
 import type { StoredPerson } from "../lib/storage";
 import { initials } from "../session";
 import { Banner, Button, Text, useTheme } from "../ui";
@@ -16,13 +18,38 @@ const PERIODS: { value: Period; label: string }[] = [
   { value: "month", label: "This month" },
 ];
 
-export function HomeScreen({ person, offline, canOpen, onOpen, onLock }: { person: StoredPerson; offline: boolean; canOpen: (tab: Tab) => boolean; onOpen: (tab: Tab) => void; onLock: () => void }) {
+export function HomeScreen({ person, offline, canOpen, onOpen, onLock, onSessionEnded }: { person: StoredPerson; offline: boolean; canOpen: (tab: Tab) => boolean; onOpen: (tab: Tab) => void; onLock: () => void; onSessionEnded: () => void }) {
   const { colors } = useTheme();
   const has = (permission: string) => person.permissions.includes(permission);
   // People who capture or spend start on today; everyone else on the month so far.
   const [period, setPeriod] = useState<Period>(has("dash.capture") || has("dash.float") ? "today" : "month");
   const cards = DASHBOARD_CARDS.filter((card) => has(card.permission));
   const label = periodLabel(period);
+  const [dashboard, setDashboard] = useState<RevenueDashboard | null>(null);
+  const [dashboardError, setDashboardError] = useState("");
+  const dashboardPath = `setup/revenue/dashboard?period=${period}`;
+  useEffect(() => {
+    const shouldLoad = person.permissions.some((permission) =>
+      ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"].includes(permission),
+    );
+    if (!shouldLoad || offline) {
+      setDashboard(null);
+      return;
+    }
+    let active = true;
+    setDashboardError("");
+    apiGet<RevenueDashboard>(dashboardPath).then(
+      (value) => active && setDashboard(value),
+      (reason: Error) => {
+        if (!active) return;
+        if (reason instanceof SessionEndedError) return onSessionEnded();
+        setDashboardError(reason.message);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [dashboardPath, offline, onSessionEnded, person.permissions]);
   return (
     <View style={styles.screen}>
       <WhoRow initials={initials(person)} name={`Hi ${person.firstName}`} role={person.role} action={<IconButton icon="lock" label="Lock app" onPress={onLock} />} />
@@ -34,17 +61,44 @@ export function HomeScreen({ person, offline, canOpen, onOpen, onLock }: { perso
         </Text>
       </View>
       {cards.length ? (
-        cards.map((card) => (
-          <Card key={card.permission} title={card.title} sub={card.sub ?? label}>
-            <CardValue>{typeof card.value === "number" ? money(card.value) : card.value}</CardValue>
-            <CardNote>{card.note}</CardNote>
-            {card.action && card.tab && canOpen(card.tab) ? (
-              <CardAction primary={card.primary} onPress={() => onOpen(card.tab!)}>
-                {card.action}
-              </CardAction>
-            ) : null}
-          </Card>
-        ))
+        cards.map((card) => {
+          const value =
+            card.permission === "dash.capture" && dashboard
+              ? `${dashboard.capturedToday} of ${dashboard.vehiclesToday} captured`
+              : card.permission === "dash.revenue" && dashboard
+                ? money(dashboard.revenue)
+                : card.permission === "dash.gaps" && dashboard
+                  ? `${dashboard.missingDays} ${dashboard.missingDays === 1 ? "day" : "days"}`
+                  : card.permission === "dash.edits" && dashboard
+                    ? `${dashboard.editedRecords} ${dashboard.editedRecords === 1 ? "record" : "records"}`
+                    : typeof card.value === "number"
+                      ? money(card.value)
+                      : card.value;
+          const note =
+            dashboardError ||
+            (card.permission === "dash.capture" && dashboard
+              ? `${Math.max(0, dashboard.vehiclesToday - dashboard.capturedToday)} still to capture`
+              : card.permission === "dash.revenue" && dashboard
+                ? dashboard.percent === null
+                  ? "No dated target is available."
+                  : `${dashboard.percent}% of expected ${money(dashboard.expected)}`
+                : card.permission === "dash.gaps" && dashboard
+                  ? `${dashboard.missingVehicles} vehicles with missing days`
+                  : card.permission === "dash.edits" && dashboard
+                    ? "Changed after the original capture."
+                    : card.note);
+          return (
+            <Card key={card.permission} title={card.title} sub={card.sub ?? label}>
+              <CardValue>{value}</CardValue>
+              <CardNote>{note}</CardNote>
+              {card.action && card.tab && canOpen(card.tab) ? (
+                <CardAction primary={card.primary} onPress={() => onOpen(card.tab!)}>
+                  {card.action}
+                </CardAction>
+              ) : null}
+            </Card>
+          );
+        })
       ) : (
         <Card title="Nothing to show yet" sub="Your admin decides what you can see here." />
       )}

@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
-import { catalog, fakeApi, people, tokens } from "./fakeApi";
+import { catalog, fakeApi, people, revenueDashboard, revenueWeek, tokens } from "./fakeApi";
 import { startApp, storedText, trustPhone, typePin } from "./helpers";
 
 async function unlockAs(person: (typeof people)[keyof typeof people], phone: string) {
@@ -8,6 +8,12 @@ async function unlockAs(person: (typeof people)[keyof typeof people], phone: str
   api.on("auth/unlock", [200, tokens(2)]);
   api.on("auth/session", [200, person]);
   api.on("setup/access/catalog", [200, catalog]);
+  api.on("setup/revenue", [200, revenueWeek]);
+  api.on("setup/revenue?weekStart=2026-09-28", [200, revenueWeek]);
+  api.on("setup/revenue/vehicle-1/2026-09-29", [200, { id: "record-1" }]);
+  api.on("setup/revenue/dashboard?period=today", [200, { ...revenueDashboard, period: "today" }]);
+  api.on("setup/revenue/dashboard?period=month", [200, { ...revenueDashboard, period: "month" }]);
+  api.on("setup/revenue/dashboard?period=week", [200, revenueDashboard]);
   await startApp();
   await screen.findByText(`Welcome back, ${person.firstName}`);
   await typePin("4826");
@@ -28,11 +34,10 @@ it("shows an owner the tabs, cards and setup links their permissions allow", asy
   expect(screen.queryByText("Renewals due")).toBeNull();
 
   await fireEvent.press(screen.getByText("Open revenue"));
-  await screen.findByText("What you can do here");
-  expect(screen.getByText("View revenue records")).toBeTruthy();
-  expect(screen.getByText("Correct revenue after the day")).toBeTruthy();
-  expect(screen.queryByText("Capture revenue")).toBeNull();
-  expect(screen.getByText("Revenue records are not available from the current API yet.")).toBeTruthy();
+  await screen.findByText("Record revenue or explain why no revenue was earned.");
+  expect(screen.getByText("No earnings reason")).toBeTruthy();
+  expect(screen.getByText("Your access does not include no-earnings reasons.")).toBeTruthy();
+  expect(screen.queryByText("What you can do here")).toBeNull();
 
   await fireEvent.press(screen.getByRole("tab", { name: "More" }));
   await screen.findByText("Antony Maina");
@@ -43,16 +48,21 @@ it("shows an owner the tabs, cards and setup links their permissions allow", asy
 });
 
 it("starts a revenue clerk on today with capture first", async () => {
-  await unlockAs(people.clerk, "0712345678");
+  const api = await unlockAs(people.clerk, "0712345678");
 
   expect(tabs()).toEqual(["Home", "Revenue", "More"]);
   expect(screen.getByRole("button", { name: "Today", selected: true })).toBeTruthy();
   const capture = screen.getByRole("header", { name: "Today's revenue" });
   expect(capture).toBeTruthy();
   await fireEvent.press(screen.getByText("Capture revenue"));
-  await screen.findByText("What you can do here");
-  expect(screen.getByText("Capture revenue")).toBeTruthy();
-  expect(screen.getByText("Record a no earnings reason")).toBeTruthy();
+  await screen.findByText("Record revenue or explain why no revenue was earned.");
+  expect(screen.getByText("Capture")).toBeTruthy();
+  await fireEvent.press(screen.getByText("Capture"));
+  expect(screen.getByText("No earnings reason")).toBeTruthy();
+  expect(screen.getByText("Garage")).toBeTruthy();
+  await fireEvent.changeText(screen.getByLabelText("Revenue amount"), "1000");
+  await fireEvent.press(screen.getByRole("button", { name: "Save revenue" }));
+  await waitFor(() => expect(api.sent("setup/revenue/vehicle-1/2026-09-29")).toHaveLength(1));
 
   await fireEvent.press(screen.getByRole("tab", { name: "More" }));
   await screen.findByText("Wanjiru Kamau");

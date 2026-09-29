@@ -124,6 +124,32 @@ export async function apiGet<T>(path: string): Promise<T> {
   return body as T;
 }
 
+
+// PUT JSON from the API as the signed-in person. Mutations renew once on an expired access token.
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const session = await loadSession();
+  if (!session) throw new SessionEndedError();
+  const call = (token: string) =>
+    reach(`${apiUrl}/${path}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  let response = await call(session.accessToken);
+  if (response.status === 401)
+    response = await call((await renew()).accessToken);
+  if (response.status === 401) throw new SessionEndedError();
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok)
+    throw new Error(
+      result.detail || result.title || "The request could not be completed.",
+    );
+  return result as T;
+}
+
 // Switch user: stop trusting this phone for the person (their refresh tokens go with it), then everything kept for them on the phone is removed.
 // Offline, the phone forgets them anyway and the trust ends when the admin revokes it or it expires.
 export async function forgetThisPhone(): Promise<void> {

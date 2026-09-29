@@ -8,8 +8,7 @@ export type PermissionGroup = {
 export type Tab = "home" | "revenue" | "spend" | "more";
 
 // Each tab shows when the person holds any of its permissions.
-// Revenue and Spend list what the person may
-// do there until their screens are built;
+// The server remains the authority for every record and action.
 export const TABS: {
   id: Tab;
   label: string;
@@ -25,7 +24,6 @@ export const TABS: {
     icon: "revenue",
     any: ["revenue.view", "revenue.capture"],
     groups: ["Revenue"],
-    unavailable: "Revenue records are not available from the current API yet.",
   },
   {
     id: "spend",

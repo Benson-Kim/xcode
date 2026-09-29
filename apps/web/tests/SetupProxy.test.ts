@@ -26,3 +26,12 @@ it("forwards allowed paths with the access token", async () => {
   expect(fetcher.mock.calls[0][0]).toMatch(/\/setup\/people\/3f2c\/deactivate$/);
   expect(fetcher.mock.calls[0][1].headers.Authorization).toBe("Bearer access-value");
 });
+
+it("allows revenue reads and writes but keeps the route bounded", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  expect((await get(["revenue"])).status).toBe(200);
+  expect((await get(["revenue", "dashboard"])).status).toBe(200);
+  expect((await get(["revenue", "vehicle-1", "2026-09-28"])).status).toBe(200);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});

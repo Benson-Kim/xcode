@@ -16,6 +16,7 @@ const sections: Record<string, string> = {
   securityPolicy: "Security policy",
   logo: "Logo",
   people: "People and access",
+  revenue: "Revenue",
 };
 
 function snapshot(value?: string | null) {

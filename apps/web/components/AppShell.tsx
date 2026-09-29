@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { PeopleAccessView } from "./PeopleAccessView";
+import { RevenuePage } from "./RevenuePage";
 import { OrganizationSettingsView } from "./OrganizationSettingsView";
 import { PreferencesView } from "./PreferencesView";
 import { Brand } from "./Brand";
@@ -35,7 +36,7 @@ import {
   useSession,
   type Session,
 } from "../lib/session-context";
-import { configureFormats, initials } from "../lib/format";
+import { configureFormats, initials, kes, plural } from "../lib/format";
 import { useResource } from "../lib/data";
 import {
   AppearanceProvider,
@@ -43,6 +44,7 @@ import {
   type Appearance,
 } from "../lib/appearance";
 import type { PermissionGroup, View } from "../lib/types";
+import type { RevenueDashboard } from "@xcode/shared";
 
 type NavItem = { id: View; label: string; permission?: string };
 
@@ -342,7 +344,7 @@ function Page({
       <Dashboard session={session} error={sessionError} onOpen={onNavigate} />
     );
   if (view === "revenue")
-    return <RevenueModule onBack={() => onNavigate("dashboard")} />;
+    return <RevenuePage />;
   if (view === "companies") return <CompaniesPage />;
   if (view === "vehicles")
     return (
@@ -438,6 +440,13 @@ function Dashboard({
 }) {
   const [period, setPeriod] =
     useState<(typeof periods)[number]["value"]>("week");
+  const dashboardPath =
+    session && session.permissions.some((permission) =>
+      ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"].includes(permission),
+    )
+      ? `setup/revenue/dashboard?period=${period}`
+      : null;
+  const revenue = useResource<RevenueDashboard>(dashboardPath);
   const cards = dashboardCards.filter((card) =>
     session?.permissions.includes(card.permission),
   );
@@ -482,46 +491,58 @@ function Dashboard({
         </Card>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] items-start gap-4 max-[480px]:grid-cols-1">
-          {cards.map((card) => (
-            <Card key={card.title} aria-labelledby={`card-${card.permission}`}>
-              <CardHeader
-                id={`card-${card.permission}`}
-                title={card.title}
-                description={card.sub.replace("{period}", periodLabel)}
-              />
-              <CardValue>{card.value}</CardValue>
-              <CardNote>{card.note}</CardNote>
-              {card.action && card.view && (
-                <CardAction
-                  primary={card.primary}
-                  onClick={() => onOpen(card.view)}
-                >
-                  {card.action}
-                </CardAction>
-              )}
-            </Card>
-          ))}
+          {cards.map((card) => {
+            const data = revenue.data;
+            const dashboardError =
+              revenue.error &&
+              ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"].includes(card.permission)
+                ? revenue.error
+                : "";
+            const value =
+              card.permission === "dash.capture" && data
+                ? `${data.capturedToday} of ${data.vehiclesToday} captured`
+                : card.permission === "dash.revenue" && data
+                  ? kes(data.revenue)
+                  : card.permission === "dash.gaps" && data
+                    ? plural(data.missingDays, "day", "days")
+                    : card.permission === "dash.edits" && data
+                      ? plural(data.editedRecords, "record", "records")
+                      : card.value;
+            const note =
+              dashboardError ||
+              (card.permission === "dash.capture" && data
+                ? `${Math.max(0, data.vehiclesToday - data.capturedToday)} still to capture`
+                : card.permission === "dash.revenue" && data
+                  ? data.percent === null
+                    ? "No dated target is available."
+                    : `${data.percent}% of expected ${kes(data.expected)}`
+                  : card.permission === "dash.gaps" && data
+                    ? `${plural(data.missingVehicles, "vehicle has", "vehicles have")} missing days`
+                    : card.permission === "dash.edits" && data
+                      ? "Changed after the original capture."
+                      : card.note);
+            return (
+              <Card key={card.title} aria-labelledby={`card-${card.permission}`}>
+                <CardHeader
+                  id={`card-${card.permission}`}
+                  title={card.title}
+                  description={card.sub?.replace("{period}", periodLabel)}
+                />
+                <CardValue>{value}</CardValue>
+                <CardNote>{note}</CardNote>
+                {card.action && card.view && (
+                  <CardAction
+                    primary={card.primary}
+                    onClick={() => onOpen(card.view!)}
+                  >
+                    {card.action}
+                  </CardAction>
+                )}
+              </Card>
+            );
+          })}
         </div>
       )}
-    </section>
-  );
-}
-
-// Screens not built yet are shown as a card explaining why the person sees them (the design's module view).
-function RevenueModule({ onBack }: { onBack: () => void }) {
-  return (
-    <section>
-      <PageHeader title="Revenue" />
-      <Card className="mt-5 max-w-140">
-        <CardHeader
-          title="Revenue"
-          description="You see this because you can: View revenue records."
-        />
-        <CardNote>
-          Revenue records are not available from the current API yet.
-        </CardNote>
-        <CardAction onClick={onBack}>Back to dashboard</CardAction>
-      </Card>
     </section>
   );
 }

@@ -115,3 +115,69 @@ export function createAuthClient(
 export function pauseSeconds(until: number, now = Date.now()): number {
   return Math.max(0, Math.ceil((until - now) / 1000));
 }
+
+
+export type RevenueStatus = "none" | "future" | "missing" | "amount" | "reason";
+
+export interface RevenueCompanyOption {
+  id: string;
+  name: string;
+}
+
+export interface RevenueCell {
+  date: string;
+  status: RevenueStatus;
+  expected: number;
+  amount: number | null;
+  reason: string | null;
+  note: string | null;
+  canEdit: boolean;
+  editedAfterCapture: boolean;
+}
+
+export interface RevenueVehicle {
+  id: string;
+  companyId: string;
+  companyName: string;
+  registration: string;
+  joinedOn: string;
+  leftOn: string | null;
+  earliestMissing: string | null;
+  days: RevenueCell[];
+  totalAmount: number;
+  totalExpected: number;
+  percent: number | null;
+}
+
+export interface RevenueWeek {
+  weekStart: string;
+  weekThrough: string;
+  currentWeekStart: string;
+  businessDate: string;
+  companies: RevenueCompanyOption[];
+  vehicles: RevenueVehicle[];
+  totalAmount: number;
+  totalExpected: number;
+  percent: number | null;
+}
+
+export interface RevenueDashboard {
+  period: "today" | "week" | "month" | string;
+  from: string;
+  through: string;
+  businessDate: string;
+  revenue: number;
+  expected: number;
+  percent: number | null;
+  capturedToday: number;
+  vehiclesToday: number;
+  missingDays: number;
+  missingVehicles: number;
+  editedRecords: number;
+}
+
+export interface SaveRevenue {
+  amount: number | null;
+  reason: string | null;
+  note: string | null;
+}
