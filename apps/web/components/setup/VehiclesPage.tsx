@@ -521,16 +521,19 @@ function VehicleEditor({
 }
 
 // The vehicle report (contract C6), with the design's figures in the design's order. Postings are listed per item,
-// each under its bucket or as savings.
+// each under its bucket or as savings. A revision that renamed the item or moved it to another bucket gets its own
+// line, so no posting shows under a bucket it was not counted in.
 function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
   const [period, setPeriod] = useState<"week" | "month">("month");
   const report = useResource<VehicleReport>(`setup/vehicles/${vehicle.id}/report?period=${period}`);
   const data = report.data;
   const grouped = [...(data?.postings ?? []).reduce((items, posting) => {
-    const item = items.get(posting.itemId) ?? { id: posting.itemId, name: posting.name, kind: posting.kind, bucket: costBucket(posting), total: 0, dates: [] as string[] };
+    const bucket = costBucket(posting);
+    const key = JSON.stringify([posting.itemId, posting.name, posting.kind, bucket]);
+    const item = items.get(key) ?? { id: key, name: posting.name, kind: posting.kind, bucket, total: 0, dates: [] as string[] };
     item.total += posting.amount;
     item.dates.push(posting.date);
-    return items.set(posting.itemId, item);
+    return items.set(key, item);
   }, new Map<string, { id: string; name: string; kind: number; bucket: ExpenseBucket | null; total: number; dates: string[] }>()).values()];
   return (
     <Card>

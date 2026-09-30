@@ -115,6 +115,38 @@ public sealed class RevenueTests : IDisposable
         Assert.True(revenueHistory[0] is { Before: not null, After: not null });
     }
 
+    [Fact]
+    public async Task AHugeRecordAgainstATinyTargetShowsAtTheLargestPercentInsteadOfFailingTheWeekAndDashboard()
+    {
+        await app.SeedDemo();
+        var businessDate = RevenueTestData.PinnedThursday(app);
+        await app.WithDb(async db =>
+        {
+            db.Provisioning = true;
+            var organization = await db.Organizations.IgnoreQueryFilters().SingleAsync();
+            Assert.True(organization.ChangeBusinessDate(businessDate, DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime)));
+            await db.SaveChangesAsync();
+            db.Provisioning = false;
+        });
+        using var client = await app.SignIn(Owner);
+        var company = await (await client.PostAsJsonAsync("/setup/companies", new { name = "Overflow Fleet", reason = "Create company" })).Content.ReadFromJsonAsync<IdResponse>();
+        var created = await client.PostAsJsonAsync("/setup/vehicles",
+            new { companyId = company!.Id, registration = "KQA 999Z", joinedOn = businessDate, weeklyTarget = 1m, reason = "Create vehicle" });
+        created.EnsureSuccessStatusCode();
+        var vehicle = await created.Content.ReadFromJsonAsync<IdResponse>();
+        var saved = await client.PutAsJsonAsync($"/setup/revenue/{vehicle!.Id}/{businessDate:yyyy-MM-dd}",
+            new { amount = 10_000_000m, reason = (string?)null, note = (string?)null });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+
+        var week = await client.GetAsync("/setup/revenue");
+        Assert.Equal(HttpStatusCode.OK, week.StatusCode);
+        var row = Assert.Single((await week.Content.ReadFromJsonAsync<RevenueWeekResponse>())!.Vehicles);
+        Assert.Equal(int.MaxValue, row.Percent);
+        var dashboard = await client.GetAsync("/setup/revenue/dashboard?period=week");
+        Assert.Equal(HttpStatusCode.OK, dashboard.StatusCode);
+        Assert.Equal(int.MaxValue, (await dashboard.Content.ReadFromJsonAsync<RevenueDashboardResponse>())!.Percent);
+    }
+
     private sealed record IdResponse(Guid Id);
 
     private sealed record RevenueWeekResponse(
@@ -143,7 +175,8 @@ public sealed class RevenueTests : IDisposable
         decimal Expected,
         int? CapturedToday,
         int MissingDays,
-        int EditedRecords);
+        int EditedRecords,
+        int? Percent = null);
 
     private sealed record HistoryPage(IReadOnlyList<HistoryResponse> Items);
 

@@ -237,8 +237,10 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
     private static DateOnly StartOfWeek(DateOnly date, int firstDay) =>
         date.AddDays(-((int)date.DayOfWeek - firstDay + 7) % 7);
 
+    // A tiny target against a large record can pass what an int holds; the figure stops there rather than failing
+    // the whole week or dashboard.
     private static int? Percent(decimal amount, decimal expected) =>
-        expected == 0 ? null : (int?)Math.Round(amount / expected * 100m, MidpointRounding.AwayFromZero);
+        expected == 0 ? null : (int?)Math.Clamp(Math.Round(amount / expected * 100m, MidpointRounding.AwayFromZero), int.MinValue, int.MaxValue);
 
     private static void ValidateWeek(DateOnly start, DateOnly currentStart)
     {

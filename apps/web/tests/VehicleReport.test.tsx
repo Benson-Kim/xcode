@@ -114,3 +114,17 @@ it("shows a loss as a loss, in red, and follows the period chosen", async () => 
   fireEvent.click(screen.getByRole("button", { name: "This week" }));
   expect(fetchMock).toHaveBeenCalledWith("/api/setup/vehicles/vehicle-1/report?period=week", expect.anything());
 });
+
+it("keeps a revision that moved an item to another bucket on its own line, not under the first version's bucket", async () => {
+  serve({
+    ...march,
+    postings: [
+      { itemId: "van", versionId: "v1", date: "2026-03-05", name: "Repair", kind: 1, category: null, amount: 3000, bucket: 1 },
+      { itemId: "van", versionId: "v2", date: "2026-03-20", name: "Loan", kind: 1, category: null, amount: 8000, bucket: 3 },
+    ],
+  });
+  await openReport();
+
+  const rows = within(screen.getByRole("list")).getAllByRole("listitem").map((row) => row.textContent);
+  expect(rows).toEqual(["RepairRepairs and maintenance. 5 Mar 2026KES 3,000", "LoanLoan repayments. 20 Mar 2026KES 8,000"]);
+});
