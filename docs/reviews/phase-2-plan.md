@@ -229,6 +229,13 @@ C6 and C5's `returned` and `percentPaidOff`.
   - Browsers: Playwright's Chromium is cached in `%LOCALAPPDATA%/ms-playwright` and Edge is installed. Use `npx -y playwright` in a scratch folder with `channel: "msedge"`.
   - The design HTML files can be opened in the same browser for side-by-side screenshots.
 
+- **Round 3 (2026-09-30):**
+  - Settings 9809136 pushed (Codex round 2 fixed). Revenue b8ad1ea pushed, **PR #6**. PR #4's Codex re-review is clean (👍).
+  - PR #5 Codex round 3: 3 web P2s (not-yet-joined shown as retired; the calendar bound goes stale after a time-zone save; clearing the override shows the old date). Sent to WP-WS, together with the web verification findings: session proxy 500 → 503, a 1 MB setup body cap, HSTS in production and Permissions-Policy.
+  - **Web verification passed:** typecheck clean, 115/115, eslint clean, next build OK (with `NEXT_PRIVATE_OUTPUT_TRACE_ROOT` because node_modules is a junction). First-load JS for `/` is +8.8% (539 → 586 kB raw) and the route chunk +49%, with no code splitting. **Planned:** dynamic import per view in AppShell (revenue), with before and after first-load measured.
+  - Running: API verifier, mobile verifier, the web E2E and screenshot pass (e2e-web worktree) and the mobile E2E and screenshot pass (e2e-mobile worktree).
+  - Codex helper: `scratchpad/codex.sh <pr> [sinceISO]`.
+
 ### Decisions for the user (collected)
 - D1. Legacy cost category → bucket mapping (A2).
 - D2. `EditedRecords` counts records for days in the period, while the design counts edits made in the period. Counting edits needs the business date of each edit, which isn't stored.
@@ -242,6 +249,8 @@ C6 and C5's `returned` and `percentPaidOff`.
 - D7. How old mobile offline access may be before it is refused (Security review, High).
 - D8. Unsent phone captures are keyed by phone number and survive Switch user; they stay on the phone until that person signs in again. The alternative is a warning plus an explicit discard.
 - D9. Weeks are cached only in memory on the phone. After a cold start with no network, there is nothing to capture against. Persisting the vehicle list means caching finance data on the device (Safety SAFE-09).
+- D11. Should change-log people entries also require `people.view`? Today an all-company auditor without people.view sees email, phone and permissions.
+- D12. `PersonDto` returns a person's full company and vehicle id lists to a scoped viewer. Redact them, which needs a contract and web change?
 - D10. Align the role default lists with Web v2.8? The Office admin has 5 extra permissions, and the design's Owner includes dash.float and pettycash.spend.
 
 ### Progress
