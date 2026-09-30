@@ -14,25 +14,38 @@ public static class AuthEndpoints
 {
     public static void MapAuth(this WebApplication app)
     {
-        var group = app.MapGroup("/auth").RequireRateLimiting("auth");
-        group.MapPost("/sign-in", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.SignIn(r, ct), ct));
-        group.MapPost("/unlock", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.SignIn(r, ct), ct));
-        group.MapPost("/verify-device", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.VerifyDevice(r), ct));
-        group.MapPost("/setup-pin/request", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.RequestPin(r, CodePurpose.FirstSetup, ct), ct));
-        group.MapPost("/setup-pin/verify", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.VerifyCode(r, CodePurpose.FirstSetup), ct));
-        group.MapPost("/setup-pin/complete", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.CompletePin(r, CodePurpose.FirstSetup), ct));
-        group.MapPost("/pin-reset/request", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.RequestPin(r, CodePurpose.PinReset, ct), ct));
-        group.MapPost("/pin-reset/verify", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.VerifyCode(r, CodePurpose.PinReset), ct));
-        group.MapPost("/pin-reset/complete", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.CompletePin(r, CodePurpose.PinReset), ct));
-        group.MapPost("/refresh", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.Refresh(r), ct));
-        group.MapPost("/sign-out", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.SignOut(r), ct));
+        // The rate limiter's 429 has no body.
+        var group = app.MapGroup("/auth").RequireRateLimiting("auth")
+            .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status429TooManyRequests, typeof(void)));
+        group.MapPost("/sign-in", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.SignIn(r, ct), ct))
+            .Answers(200, 202, 400, 401, 423, 503);
+        group.MapPost("/unlock", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.SignIn(r, ct), ct))
+            .Answers(200, 202, 400, 401, 423, 503);
+        group.MapPost("/verify-device", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.VerifyDevice(r), ct))
+            .Answers(200, 400, 401);
+        group.MapPost("/setup-pin/request", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.RequestPin(r, CodePurpose.FirstSetup, ct), ct))
+            .Answers(202, 400);
+        group.MapPost("/setup-pin/verify", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.VerifyCode(r, CodePurpose.FirstSetup), ct))
+            .Answers(200, 400, 401);
+        group.MapPost("/setup-pin/complete", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.CompletePin(r, CodePurpose.FirstSetup), ct))
+            .Answers(200, 400, 401);
+        group.MapPost("/pin-reset/request", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.RequestPin(r, CodePurpose.PinReset, ct), ct))
+            .Answers(202, 400);
+        group.MapPost("/pin-reset/verify", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.VerifyCode(r, CodePurpose.PinReset), ct))
+            .Answers(200, 400, 401);
+        group.MapPost("/pin-reset/complete", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.CompletePin(r, CodePurpose.PinReset), ct))
+            .Answers(200, 400, 401);
+        group.MapPost("/refresh", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.Refresh(r), ct))
+            .Answers(200, 400, 401);
+        group.MapPost("/sign-out", (AuthRequest r, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) => Run(r, db, gate, s, () => s.SignOut(r), ct))
+            .Answers(200, 400);
         group.MapPost("/devices/{id}/revoke", (string id, ClaimsPrincipal principal, AuthService s, AuthDb db, AuthGate gate, CancellationToken ct) =>
         {
             var current = principal.FindFirstValue("device");
             return string.Equals(current, id, StringComparison.Ordinal)
                 ? Run(new(DeviceId: id), db, gate, s, () => s.RevokeDevice(Guid.Parse(principal.FindFirstValue("sub")!), id), ct)
                 : Task.FromResult<IResult>(Results.Forbid());
-        }).RequireAuthorization();
+        }).RequireAuthorization().Answers(200).Produces(StatusCodes.Status403Forbidden);
         group.MapGet("/session", (ClaimsPrincipal principal) =>
             Results.Ok(new AuthSessionResponse(
                 Guid.Parse(principal.FindFirstValue("sub")!),
@@ -40,7 +53,15 @@ public static class AuthEndpoints
                 principal.FindFirstValue("last_name") ?? "",
                 principal.FindFirstValue("role") ?? "",
                 principal.FindAll("permission").Select(x => x.Value).ToArray())))
-            .RequireAuthorization();
+            .RequireAuthorization().Produces<AuthSessionResponse>();
+    }
+
+    // Documents the AuthResponse body that each listed status carries.
+    private static RouteHandlerBuilder Answers(this RouteHandlerBuilder endpoint, params int[] statuses)
+    {
+        foreach (var status in statuses)
+            endpoint.Produces<AuthResponse>(status);
+        return endpoint;
     }
     private static async Task<IResult> Run(AuthRequest r, AuthDb db, AuthGate gate, AuthService s, Func<Task<AuthResult>> action, CancellationToken ct)
     {

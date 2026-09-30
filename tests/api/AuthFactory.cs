@@ -180,8 +180,7 @@ public sealed class AuthFactory : WebApplicationFactory<Program>
             await db.SaveChangesAsync();
         });
     }
-    // Invariant globalization (see Auth.Tests.csproj) cannot resolve IANA zones such as Africa/Nairobi on Windows,
-    // so test organizations use UTC.
+    // Test organizations use UTC, so results do not depend on the test machine's time zone data.
     public static async Task AddOrganization(AuthDb db)
     {
         db.Provisioning = true;

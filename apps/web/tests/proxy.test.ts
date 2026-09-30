@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { POST } from "../app/api/auth/[...path]/route";
+import { GET, POST } from "../app/api/auth/[...path]/route";
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => jar.has(name) ? { value: jar.get(name) } : undefined }) }));
 beforeEach(() => { jar.clear(); jar.set("device", "browser-device"); });
@@ -66,4 +66,22 @@ it("passes the organization's minimum PIN length back to the client", async () =
   const result = await POST(request(undefined, { pin: "6942", code: "123456" }, "pin-reset/complete"), { params: Promise.resolve({ path: ["pin-reset", "complete"] }) });
   expect(result.status).toBe(400);
   expect(await result.json()).toMatchObject({ status: "invalid_pin", minimumPinLength: 6 });
+});
+
+it("answers 503 with a timeout when the API is down while checking the session", async () => {
+  jar.set("access", "access-value");
+  const fetcher = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+  vi.stubGlobal("fetch", fetcher);
+  const result = await GET(new NextRequest("http://localhost:3000/api/auth/session"), { params: Promise.resolve({ path: ["session"] }) });
+  expect(result.status).toBe(503);
+  expect(await result.json()).toEqual({ status: "service_unavailable" });
+  expect(fetcher.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+});
+
+it("refuses a sign-in body over 1 MB without calling the API", async () => {
+  const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+  const result = await POST(request(undefined, { email: "x".repeat(1024 * 1024) }), { params: Promise.resolve({ path: ["sign-in"] }) });
+  expect(result.status).toBe(413);
+  expect(await result.json()).toEqual({ status: "payload_too_large" });
+  expect(fetcher).not.toHaveBeenCalled();
 });

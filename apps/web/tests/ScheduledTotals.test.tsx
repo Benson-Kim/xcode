@@ -52,7 +52,7 @@ it("lists what posts now, and says when retired shares make the saved total larg
   renderInApp(<RecurringPage canManage={false} />, {}, { businessDate });
 
   const cell = await screen.findByText("KES 1,200", { selector: "td[data-label='Amount each time']" });
-  expect(within(cell).getByText(/KES 2,000 in total, with 1 share for a vehicle that left the fleet/)).toBeInTheDocument();
+  expect(within(cell).getByText(/KES 2,000 in total, with 1 share for a vehicle not in the fleet today/)).toBeInTheDocument();
   expect(within(cell).getByText(/About KES 1,200 a month/)).toBeInTheDocument();
 });
 
@@ -63,7 +63,7 @@ it("opens balanced, with a retired vehicle's share counted and read-only", () =>
   expect(screen.getByText("Balanced")).toBeInTheDocument();
   expect(screen.getByLabelText("Share for KDG 905B")).toBeDisabled();
   expect(screen.getByLabelText("Share for KDG 905B")).toHaveValue("800");
-  expect(screen.getByText(/KDG 905B left the fleet. Its share stays in the total but no longer posts/)).toBeInTheDocument();
+  expect(screen.getByText(/KDG 905B is not in the fleet today, so its share stays in the total but does not post/)).toBeInTheDocument();
   // What will post leaves out the retired vehicle.
   expect(screen.getByText("5 Oct 2026: KES 1,200 across 2 vehicles")).toBeInTheDocument();
   expect(screen.getByText(/About KES 1,200 a month/)).toBeInTheDocument();
@@ -84,10 +84,10 @@ it("splits equally across the vehicles still in the fleet and keeps the retired 
 it("takes a removed retired share off the amount, so the form stays balanced", () => {
   renderEditor();
 
-  fireEvent.click(screen.getByLabelText("KDG 905B (left fleet)"));
+  fireEvent.click(screen.getByLabelText("KDG 905B (not in the fleet today)"));
 
   expect(screen.getByLabelText("Amount each time")).toHaveValue("1,200");
   expect(screen.getByText("Balanced")).toBeInTheDocument();
   expect(screen.getByText("Took KDG 905B's KES 800 share off the amount.")).toBeInTheDocument();
-  expect(screen.getByLabelText("KDG 905B (left fleet)")).toBeDisabled();
+  expect(screen.getByLabelText("KDG 905B (not in the fleet today)")).toBeDisabled();
 });

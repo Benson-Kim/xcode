@@ -194,3 +194,82 @@ it("lets a frozen business date move forward to the organization's calendar date
     expect(fetch).toHaveBeenCalledWith("/api/setup/organization/settings/businessDate", expect.objectContaining({ body: JSON.stringify({ value: "2026-03-16" }) })),
   );
 });
+
+// The settings are read again after every save, so values the server works out (the calendar date and the effective
+// business date) follow the change instead of staying as they were when the page opened.
+function serveSettings(versions: object[]) {
+  let reads = 0;
+  const fetchMock = vi.fn(async (_input: string, init?: RequestInit) => {
+    if (init?.method === "PUT") return new Response(JSON.stringify({ section: "saved" }), { status: 200 });
+    const body = versions[Math.min(reads, versions.length - 1)];
+    reads += 1;
+    return new Response(JSON.stringify(body), { status: 200 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+it("moves the business date's upper limit when a new time zone changes the calendar date", async () => {
+  const before = { ...settings, effectiveBusinessDate: "2026-09-30", calendarDate: "2026-09-30" };
+  const after = { ...before, localization: { ...settings.localization, timeZone: "Pacific/Kiritimati" }, effectiveBusinessDate: "2026-10-01", calendarDate: "2026-10-01" };
+  serveSettings([before, after]);
+  render(<OrganizationSettingsView />);
+
+  const picker = await screen.findByLabelText("Business date", { selector: "input" });
+  expect(picker).toHaveAttribute("max", "2026-09-30");
+  fireEvent.click(screen.getByRole("button", { name: "Save locale" }));
+
+  await waitFor(() => expect(screen.getByLabelText("Business date", { selector: "input" })).toHaveAttribute("max", "2026-10-01"));
+  expect(screen.getByLabelText("Business date", { selector: "input" })).toHaveValue("2026-10-01");
+  expect(screen.getByText("Following the organization's calendar date, 1 Oct 2026.")).toBeInTheDocument();
+});
+
+it("shows the calendar date once the held business date is dropped", async () => {
+  const held = { ...settings, organization: { ...settings.organization, businessDate: "2026-03-15" }, effectiveBusinessDate: "2026-03-15", calendarDate: "2026-09-30" };
+  const following = { ...held, organization: { ...settings.organization, businessDate: null }, effectiveBusinessDate: "2026-09-30" };
+  const fetchMock = serveSettings([held, following]);
+  render(<OrganizationSettingsView />);
+
+  expect(await screen.findByLabelText("Business date", { selector: "input" })).toHaveValue("2026-03-15");
+  fireEvent.click(screen.getByRole("button", { name: "Follow organization time zone" }));
+  expect(screen.getByLabelText("Business date", { selector: "input" })).toHaveValue("2026-09-30");
+  expect(screen.getByText("Following the organization's calendar date, 30 Sep 2026.")).toBeInTheDocument();
+  expect(screen.queryByText(/Held at/)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Save business date" }));
+  await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => !init?.method)).toHaveLength(2));
+  expect(fetchMock).toHaveBeenCalledWith("/api/setup/organization/settings/businessDate", expect.objectContaining({ body: JSON.stringify({ value: null }) }));
+  expect(screen.getByLabelText("Business date", { selector: "input" })).toHaveValue("2026-09-30");
+});
+
+it("keeps the wrong-PIN policy inside the server's bounds: 3 to 10 tries, a pause of 1 to 60 minutes", async () => {
+  render(<OrganizationSettingsView />);
+  const tries = await screen.findByLabelText("Wrong PINs before a pause");
+  const pause = screen.getByLabelText("Pause length in minutes");
+  expect(tries).toHaveAttribute("min", "3");
+  expect(tries).toHaveAttribute("max", "10");
+  expect(pause).toHaveAttribute("min", "1");
+  expect(pause).toHaveAttribute("max", "60");
+  expect(screen.getByText("1 to 60, so a pause lasts at most an hour.")).toBeInTheDocument();
+  const puts = () => vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "PUT");
+
+  for (const [field, value, message] of [
+    [tries, "2", "Wrong PINs before a pause must be a whole number from 3 to 10."],
+    [tries, "11", "Wrong PINs before a pause must be a whole number from 3 to 10."],
+    [pause, "61", "Pause length in minutes must be a whole number from 1 to 60."],
+    [pause, "0", "Pause length in minutes must be a whole number from 1 to 60."],
+  ] as const) {
+    fireEvent.change(tries, { target: { value: "5" } });
+    fireEvent.change(pause, { target: { value: "15" } });
+    fireEvent.change(field, { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Save security" }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(puts()).toHaveLength(0);
+  }
+
+  fireEvent.change(tries, { target: { value: "10" } });
+  fireEvent.change(pause, { target: { value: "60" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save security" }));
+  await waitFor(() => expect(puts()).toHaveLength(1));
+  expect(JSON.parse(String(puts()[0][1]!.body)).value).toMatchObject({ lockoutThreshold: 10, lockoutMinutes: 60 });
+});

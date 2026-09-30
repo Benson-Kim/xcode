@@ -38,7 +38,7 @@ export type RecurringItem = {
   name: string;
   kind: number;
   category?: number | null;
-  // The saved total of every share, including vehicles that have left the fleet; activeAmount is what still posts.
+  // The saved total of every share, including vehicles not in the fleet today; activeAmount is what posts now.
   amount: number;
   activeAmount?: number;
   frequency: number;

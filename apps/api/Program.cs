@@ -73,7 +73,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 });
 builder.Services.AddAuthorization();
 builder.Services.AddProblemDetails();
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(OpenApiDocumentation.Configure);
 var app = builder.Build();
 // Codes sent after their reply are still going out at shutdown; give them a moment rather than drop them.
 app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<VerificationMailer>().Idle().Wait(TimeSpan.FromSeconds(10)));

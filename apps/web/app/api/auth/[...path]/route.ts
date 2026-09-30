@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import type { AuthRequest, AuthResponse } from "@xcode/shared";
+import { readLimitedBody } from "../../body";
 
 const allowed = new Set([
   "sign-in",
@@ -24,8 +25,17 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
   if (path.join("/") !== "session") return NextResponse.json({ status: "invalid_request" }, { status: 404 });
   const access = (await cookies()).get("access")?.value;
   if (!access) return NextResponse.json({ status: "authentication_failed" }, { status: 401 });
-  const response = await fetch(`${process.env.API_URL || "http://localhost:5000"}/auth/session`, { headers: { Authorization: `Bearer ${access}` }, cache: "no-store" });
-  return new NextResponse(await response.text(), { status: response.status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  try {
+    const response = await fetch(`${process.env.API_URL || "http://localhost:5000"}/auth/session`, {
+      headers: { Authorization: `Bearer ${access}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    });
+    return new NextResponse(await response.text(), { status: response.status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  } catch {
+    // The API is down or too slow: the same answer the setup proxy gives.
+    return NextResponse.json({ status: "service_unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
 }
 
 const cookieOptions = {
@@ -77,8 +87,11 @@ export async function POST(
   const jar = await cookies();
   let body: AuthRequest;
 
+  const text = await readLimitedBody(request);
+  if (text === null)
+    return NextResponse.json({ status: "payload_too_large" }, { status: 413 });
   try {
-    body = await request.json();
+    body = JSON.parse(text);
   } catch {
     return NextResponse.json(
       { status: "invalid_request" }, { status: 400 });

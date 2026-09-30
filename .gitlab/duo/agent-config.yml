@@ -23,9 +23,10 @@
 # abort with SIGABRT (exit 134). The previous version of this file installed
 # libicu with apt-get as root; the wrapper below sets
 # DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 instead, which needs no privileges.
-# The durable fix is <InvariantGlobalization>true</InvariantGlobalization> in
-# apps/api/Auth.Api.csproj and tests/api/Auth.Tests.csproj, after which the
-# wrapper can be dropped in favour of /tmp/dotnet/dotnet directly.
+# Do not set <InvariantGlobalization>true</InvariantGlobalization> in the
+# csproj files instead: Microsoft.Data.SqlClient refuses invariant mode
+# ("Globalization Invariant Mode is not supported"), so the API and the SQL
+# Server tests need ICU. Keep invariant mode to this sandbox wrapper.
 #
 # DATABASE: Docker is not available in the flow sandbox, so SQL Server cannot
 # be started here. Automated tests use the EF Core SQLite provider; SQL Server
