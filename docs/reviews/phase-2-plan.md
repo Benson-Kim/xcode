@@ -236,6 +236,23 @@ C6 and C5's `returned` and `percentPaidOff`.
   - Running: API verifier, mobile verifier, the web E2E and screenshot pass (e2e-web worktree) and the mobile E2E and screenshot pass (e2e-mobile worktree).
   - Codex helper: `scratchpad/codex.sh <pr> [sinceISO]`.
 
+- **Round 4 (2026-09-30):**
+  - **Access** 1b52ab2: OpenAPI accuracy, body-less lifecycle calls, and the test csproj no longer forces invariant globalization. The CI comment was fixed. PR #4 re-review requested; the earlier Codex re-review was clean.
+  - **Settings** 9f955b4: Codex round 3 web fixes, the proxy 503 and 1 MB cap, HSTS and Permissions-Policy, policy bounds, the migration Down keeps a referenced yearly lookup row (verified on SQL Server), and the access merge with the named OpenAPI records extended to carry settings fields.
+  - **Revenue** (local, not pushed yet):
+    - code splitting caf93be: first load 586 → 497 KiB raw, with an error boundary and retry;
+    - PR #6 Codex fixes cd2fd24, f74fd51, 2ba00fd: per-card dashboard permissions, the stale company filter, and recovering a crashed capture from the queue;
+    - the settings merge ce6f43f;
+    - mobile E2E fixes plus the Phase 1 contract tests (committed).
+  - **Verification results:**
+    - API: 219/221 (the 2 are SQL Server environment tests). SQL Server tests pass with `SQLSERVER_TEST_CONNECTION` and invariant globalization off. Migrations up, down to develop and up again all pass. The Phase 1 phone contract holds.
+    - Web: 137/137, next build OK.
+    - Mobile: 63/63 (a flaky dashboard test was made deterministic). No native changes. **No expo-updates, so shipping to phones needs a new binary.**
+  - **In progress:**
+    - resolving the web E2E patch conflicts in 5 files (`p-e2e-web.patch`, applied with --3way);
+    - final API fixes: startup on a new database, forwarded headers so web users stop sharing one rate limit, pause shown on the causing attempt, automatic plus typed reasons, revenue history naming the vehicle, the demo fleet manager's scope.
+  - **Next:** run the full checks, commit, push revenue, PR #6 re-review, final report.
+
 ### Decisions for the user (collected)
 - D1. Legacy cost category → bucket mapping (A2).
 - D2. `EditedRecords` counts records for days in the period, while the design counts edits made in the period. Counting edits needs the business date of each edit, which isn't stored.
@@ -251,6 +268,9 @@ C6 and C5's `returned` and `percentPaidOff`.
 - D9. Weeks are cached only in memory on the phone. After a cold start with no network, there is nothing to capture against. Persisting the vehicle list means caching finance data on the device (Safety SAFE-09).
 - D11. Should change-log people entries also require `people.view`? Today an all-company auditor without people.view sees email, phone and permissions.
 - D12. `PersonDto` returns a person's full company and vehicle id lists to a scoped viewer. Redact them, which needs a contract and web change?
+- D13. Mobile delivery: add `expo-updates` (a native change, needing one binary release) to allow JS updates later?
+- D14. Web CSP: needs nonce work in Next; not added.
+- D15. "Your access" lacks the "Can see" line, and the dashboard lacks the company selector, because the session carries no data scope (needs a session contract addition).
 - D10. Align the role default lists with Web v2.8? The Office admin has 5 extra permissions, and the design's Owner includes dash.float and pettycash.spend.
 
 ### Progress
