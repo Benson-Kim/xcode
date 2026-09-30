@@ -23,6 +23,16 @@ type Screen =
   | "pin-reset"
   | "authenticated";
 
+// A refused sign-in or code says what to check. The server gives the same answer for a wrong PIN and an unknown
+// number (so nobody can find which numbers exist), and the same for a wrong and an expired code.
+function failureMessage(operation: string, error: AuthError) {
+  if (error.httpStatus !== 401 || error.response.status !== "authentication_failed") return error.message;
+  if (operation === "sign-in") return "The mobile number or PIN is not right. Check both and try again.";
+  if (operation === "verify-device" || operation.endsWith("/verify"))
+    return "That code is not right, or it has expired. Check your email, or tap Send a new code.";
+  return error.message;
+}
+
 const titles: Record<Screen, string> = {
   "sign-in": "Sign in",
   "verify-device": "Check your email",
@@ -166,7 +176,7 @@ export function AuthPanel() {
       if (error instanceof AuthError) {
         if (error.response.retryAfterSeconds)
           setPausedUntil(Date.now() + error.response.retryAfterSeconds * 1000);
-        setMessage(error.message);
+        setMessage(failureMessage(operation, error));
       } else setMessage("Could not reach the service. Please try again.");
     } finally {
       setBusy(false);
@@ -223,7 +233,13 @@ export function AuthPanel() {
     screen === "sign-in"
       ? "Use the mobile number your admin registered for you."
       : verifying
-        ? `We sent a code to ${maskedEmail || "your registered email"}. It is valid for 10 minutes.`
+        ? (
+            <>
+              {screen === "verify-device" ? "New device. " : ""}We sent a code to{" "}
+              {maskedEmail ? <strong className="text-navy">{maskedEmail}</strong> : "your registered email"}, the email
+              your admin registered. It works for 10 minutes.
+            </>
+          )
         : requested
           ? "Your code is confirmed. Choose a new PIN of 4 to 8 digits."
           : "Enter your mobile number. We will send a code to the email address your admin registered for you.";
@@ -294,7 +310,7 @@ export function AuthPanel() {
                   onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ""))}
                 />
               </AuthField>
-              <CheckRow label="Remember this device" checked={rememberDevice} onChange={(event) => setRememberDevice(event.target.checked)} />
+              <CheckRow label="Remember this device. Next time you only need your mobile number and PIN." checked={rememberDevice} onChange={(event) => setRememberDevice(event.target.checked)} />
             </>
           )}
 

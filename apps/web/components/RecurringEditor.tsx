@@ -188,6 +188,8 @@ export function RecurringEditor({
   const [saveError, setSaveError] = useState("");
   const [splitNotice, setSplitNotice] = useState("");
   const [confirmStop, setConfirmStop] = useState(false);
+  // Shown beside the reason field, not at the top of the page, so it is next to what needs fixing.
+  const [stopError, setStopError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const total = Number(amount) || 0;
@@ -436,9 +438,10 @@ export function RecurringEditor({
     if (!item || disabled) return;
     if (!confirmStop) return setConfirmStop(true);
     if (!stopReason.trim()) {
-      setSaveError("Give a reason for stopping this item.");
+      setStopError("Give a reason for stopping this item.");
       return;
     }
+    setStopError("");
     setBusy(true);
     try {
       await apiRequest(`setup/recurring/${item.id}/stop`, {
@@ -698,7 +701,7 @@ export function RecurringEditor({
               </Field>
             )}
           </Grid2>
-          <Grid2>
+          <Grid2 narrow>
             <Field
               id="recurring-start"
               label="Starts"
@@ -815,7 +818,7 @@ export function RecurringEditor({
                     .map((vehicle) => (
                       <div
                         key={vehicle.id}
-                        className="grid min-h-13 grid-cols-[minmax(0,1fr)_170px] items-center gap-3 border-t border-divider max-[720px]:grid-cols-[minmax(0,1fr)_140px]"
+                        className="grid min-h-13 grid-cols-[minmax(0,320px)_200px] items-center gap-4 border-t border-divider max-[720px]:grid-cols-[minmax(0,1fr)_140px] max-[720px]:gap-3"
                       >
                         <Choice
                           label={vehicle.active === false ? `${vehicle.registration} (not in the fleet today)` : vehicle.registration}
@@ -901,9 +904,34 @@ export function RecurringEditor({
           )}
         </Card>
 
+        {item && canEdit && !stopped && confirmStop && (
+          <Card density="form">
+            <CardHeader
+              title="Stop from today"
+              description="A short reason is required and is kept in the change log."
+            />
+            <Field id="recurring-stop-reason" label="Reason for stopping">
+              <TextInput
+                autoFocus
+                maxLength={500}
+                placeholder="For example, the loan is paid off"
+                value={stopReason}
+                disabled={busy}
+                aria-invalid={Boolean(stopError) || undefined}
+                onChange={(event) => {
+                  setStopReason(event.target.value);
+                  setStopError("");
+                }}
+              />
+            </Field>
+            {stopError && <Banner>{stopError}</Banner>}
+          </Card>
+        )}
+
         <FormActions>
           {canEdit && !stopped && (
             <Button
+              tone="ok"
               disabled={busy}
               aria-busy={busy || undefined}
               onClick={() => void save()}
@@ -911,25 +939,14 @@ export function RecurringEditor({
               {busy ? "Saving..." : isNew ? "Add" : "Save changes"}
             </Button>
           )}
-          <Button tone="outline" disabled={busy} onClick={onCancel}>
+          <Button tone="quiet" disabled={busy} onClick={onCancel}>
             {canEdit && !stopped ? "Cancel" : "Back"}
           </Button>
           <Spacer />
           {item && canEdit && !stopped && (
-            <>
-              {confirmStop && (
-                <TextInput
-                  aria-label="Reason for stopping"
-                  placeholder="Why is it stopping?"
-                  value={stopReason}
-                  disabled={busy}
-                  onChange={(event) => setStopReason(event.target.value)}
-                />
-              )}
-              <Button tone="danger" disabled={busy} onClick={() => void stop()}>
-                {confirmStop ? "Tap again to stop from today" : "Stop from today"}
-              </Button>
-            </>
+            <Button tone="warn" disabled={busy} onClick={() => void stop()}>
+              {confirmStop ? "Tap again to stop from today" : "Stop from today"}
+            </Button>
           )}
         </FormActions>
       </FormLayout>

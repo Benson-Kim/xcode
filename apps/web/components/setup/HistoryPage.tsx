@@ -43,14 +43,28 @@ function display(value: unknown) {
   return String(value);
 }
 
+// Internal identifiers ("Id", "VehicleId", "companyIds", a record's concurrency "Version", or any value that is a
+// bare GUID such as "CapturedBy") mean nothing to a reader, so the log leaves them out.
+const internal = (key: string) => /^(ids?|version)$/i.test(key) || /[a-z0-9]Ids?$/.test(key);
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Every value in a saved snapshot, keyed by its path: nested objects and lists become "Versions 2 › Amount".
+// A list of plain values (such as permissions) is one field, so a change reads as the whole list before and after
+// rather than as positions that shifted.
 function flatten(value: unknown, path: string[], labels: string[], into: Map<string, { label: string; value: string }>) {
-  const entries: [string, unknown, string][] = Array.isArray(value)
+  if (Array.isArray(value) && value.length && value.every((entry) => entry === null || typeof entry !== "object")) {
+    into.set(path.join("."), { label: labels.join(" › ") || "Value", value: value.map(display).sort().join(", ") });
+    return into;
+  }
+  const all: [string, unknown, string][] = Array.isArray(value)
     ? value.map((entry, index) => [String(index), entry, `${index + 1}`])
     : value && typeof value === "object"
       ? Object.entries(value).map(([key, entry]) => [key, entry, humanize(key)])
       : [];
+  const entries = Array.isArray(value) ? all : all.filter(([key]) => !internal(key));
+  if (all.length && !entries.length) return into;
   if (!entries.length) {
+    if (typeof value === "string" && GUID.test(value)) return into;
     const empty = Array.isArray(value) || (value && typeof value === "object");
     into.set(path.join("."), { label: labels.join(" › ") || "Value", value: empty ? "None" : display(value) });
     return into;
@@ -180,6 +194,7 @@ export function HistoryPage() {
         pendingRows={history.loadingMore ? 1 : 0}
         loadingLabel="Loading the change log"
         isEmpty={!rows.length}
+        failed={Boolean(history.error)}
         emptyMessage="No setup changes yet."
       >
         {rows.map((row) => {

@@ -4,11 +4,16 @@ import { cn } from "./cn";
 const PILL =
   "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border-2 px-5 text-[15px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
+// Colour backs up what the button does, as in the design (.btn-pill): green to save or add, amber to turn off, stop
+// or pause, red to remove or block, plain grey to cancel or go back. Blue is for the main action that is none of those.
 const TONES = {
   primary:
     "border-blue bg-blue text-white hover:enabled:border-blue-dark hover:enabled:bg-blue-dark aria-busy:bg-blue-busy",
   outline: "border-blue bg-transparent text-blue hover:enabled:bg-blue-tint",
-  danger: "border-red bg-transparent text-red hover:enabled:bg-red-bg",
+  ok: "border-green bg-green text-white hover:enabled:border-green-dark hover:enabled:bg-green-dark aria-busy:opacity-80",
+  warn: "border-amber bg-amber-bg text-amber-text hover:enabled:bg-amber-hover",
+  danger: "border-red bg-red-bg text-red-text hover:enabled:bg-red-hover",
+  quiet: "border-line bg-transparent text-grey hover:enabled:bg-hover hover:enabled:text-navy",
 } as const;
 
 // pill button .

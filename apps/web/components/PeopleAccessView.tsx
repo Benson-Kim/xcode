@@ -75,7 +75,15 @@ export function PeopleAccessView({
     can("audit.view") ? "setup/history?pageSize=3" : null,
   );
   const [editing, setEditing] = useState<Person | "new" | null>(null);
-  const rows = people.items;
+  // Filters at the top of the list, as in the design: role, and where they are with signing in.
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | SignInState>("all");
+  const rows = people.items.filter(
+    (person) =>
+      (roleFilter === "all" || person.role === roleFilter) &&
+      (statusFilter === "all" || signInState(person) === statusFilter),
+  );
+  const filtered = roleFilter !== "all" || statusFilter !== "all";
   const error = people.error || roles.error || catalog.error;
 
   if (editing) {
@@ -104,12 +112,50 @@ export function PeopleAccessView({
       />
       {error && <Banner className="mt-5">{error}</Banner>}
       <Toolbar>
+        <label htmlFor="people-role" className="text-[13px] text-grey">
+          Role
+        </label>
+        <SelectInput
+          id="people-role"
+          density="compact"
+          inline
+          value={roleFilter}
+          onChange={(event) => setRoleFilter(event.target.value)}
+        >
+          <option value="all">All roles</option>
+          {(roles.data ?? []).map((role) => (
+            <option key={role.id} value={role.name}>
+              {role.name}
+            </option>
+          ))}
+        </SelectInput>
+        <label htmlFor="people-status" className="text-[13px] text-grey">
+          Sign in
+        </label>
+        <SelectInput
+          id="people-status"
+          density="compact"
+          inline
+          value={statusFilter}
+          onChange={(event) =>
+            setStatusFilter(event.target.value as "all" | SignInState)
+          }
+        >
+          <option value="all">All</option>
+          <option value="active">Active</option>
+          <option value="waiting">Waiting for first sign in</option>
+          <option value="none">No access</option>
+        </SelectInput>
         {!people.loading && (
-          <Hint>{plural(people.total, "person", "people")}</Hint>
+          <Hint>
+            {plural(filtered ? rows.length : people.total, "person", "people")}
+          </Hint>
         )}
         <Spacer />
         {canManage && (
-          <Button onClick={() => setEditing("new")}>Add person</Button>
+          <Button tone="ok" onClick={() => setEditing("new")}>
+            Add person
+          </Button>
         )}
       </Toolbar>
       <DataTable
@@ -124,7 +170,12 @@ export function PeopleAccessView({
         pendingRows={people.pendingRows}
         loadingLabel="Loading people"
         isEmpty={!rows.length}
-        emptyMessage="Nobody in your scope yet."
+        failed={Boolean(people.error)}
+        emptyMessage={
+          filtered && people.items.length
+            ? "Nobody matches these filters."
+            : "Nobody in your scope yet."
+        }
       >
         {rows.map((person) => {
           const changes = changesFromRole(
@@ -159,9 +210,9 @@ export function PeopleAccessView({
                 ) : null}
               </Td>
               <Td label="Sign in">
-                {!person.active ? (
+                {signInState(person) === "none" ? (
                   <StatusBadge tone="off">No access</StatusBadge>
-                ) : !person.hasPin ? (
+                ) : signInState(person) === "waiting" ? (
                   <StatusBadge tone="warn">
                     Waiting for first sign in
                   </StatusBadge>
@@ -202,6 +253,13 @@ export function PeopleAccessView({
       )}
     </section>
   );
+}
+
+type SignInState = "active" | "waiting" | "none";
+
+function signInState(person: Person): SignInState {
+  if (!person.active) return "none";
+  return person.hasPin ? "active" : "waiting";
 }
 
 function roleDefaults(roles: Role[] | undefined, role: string) {
@@ -324,6 +382,7 @@ function PersonEditor({
   const [permissionNote, setPermissionNote] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removeReason, setRemoveReason] = useState("");
+  const [removeError, setRemoveError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const self = Boolean(person && person.id === session?.userId);
@@ -435,6 +494,10 @@ function PersonEditor({
     if (!person) return;
     if (action === "deactivate" && !confirmRemove)
       return setConfirmRemove(true);
+    // Said beside the reason field before asking the server, which needs one too.
+    if (action === "deactivate" && !removeReason.trim())
+      return setRemoveError("Give a reason for removing access.");
+    setRemoveError("");
     setBusy(true);
     try {
       await apiRequest(`setup/people/${person.id}/${action}`, {
@@ -587,40 +650,42 @@ function PersonEditor({
             title="Role"
             description="A starting set of permissions. You can change single permissions further down."
           />
-          <Field
-            id="person-role"
-            label="Role"
-            hint={
-              person
-                ? "Changing the role resets single permissions to the new role."
-                : undefined
-            }
-          >
-            {!roles ? (
-              <Skeleton className="h-12 rounded-[10px]" />
-            ) : (
-              <SelectInput
-                value={form.role}
-                disabled={!editable}
-                onChange={(event) => {
-                  const role = event.target.value;
-                  setPermissionNote("");
-                  setForm({
-                    ...form,
-                    role,
-                    permissions: null,
-                    scopeMode: role === "Owner" ? "all" : form.scopeMode,
-                  });
-                }}
-              >
-                {assignableRoles.map((role) => (
-                  <option key={role.id} value={role.name}>
-                    {role.name}
-                  </option>
-                ))}
-              </SelectInput>
-            )}
-          </Field>
+          <Grid2 narrow>
+            <Field
+              id="person-role"
+              label="Role"
+              hint={
+                person
+                  ? "Changing the role resets single permissions to the new role."
+                  : undefined
+              }
+            >
+              {!roles ? (
+                <Skeleton className="h-12 rounded-[10px]" />
+              ) : (
+                <SelectInput
+                  value={form.role}
+                  disabled={!editable}
+                  onChange={(event) => {
+                    const role = event.target.value;
+                    setPermissionNote("");
+                    setForm({
+                      ...form,
+                      role,
+                      permissions: null,
+                      scopeMode: role === "Owner" ? "all" : form.scopeMode,
+                    });
+                  }}
+                >
+                  {assignableRoles.map((role) => (
+                    <option key={role.id} value={role.name}>
+                      {role.name}
+                    </option>
+                  ))}
+                </SelectInput>
+              )}
+            </Field>
+          </Grid2>
         </Card>
 
         <Card density="form">
@@ -774,35 +839,38 @@ function PersonEditor({
                     of {group.items.length}
                   </small>
                 </h3>
-                {group.items.map((item) => {
-                  const ticked = permissions.includes(item.key);
-                  const inRole = defaults.includes(item.key);
-                  return (
-                    <Choice
-                      key={item.key}
-                      label={
-                        <>
-                          {item.label}
-                          {ticked && !inRole && <Tag tone="add">Added</Tag>}
-                          {!ticked && inRole && (
-                            <Tag tone="remove">Removed</Tag>
-                          )}
-                        </>
-                      }
-                      aria-label={item.label}
-                      description={
-                        item.needs.length
-                          ? `Needs: ${item.needs.map(label).join(", ")}`
-                          : undefined
-                      }
-                      checked={ticked}
-                      disabled={!permissionsEditable}
-                      onChange={(event) =>
-                        togglePermission(item, event.target.checked)
-                      }
-                    />
-                  );
-                })}
+                {/* Side by side on wide screens, as in the design's permissions panel (.pg-list). */}
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-x-6 max-[720px]:grid-cols-1">
+                  {group.items.map((item) => {
+                    const ticked = permissions.includes(item.key);
+                    const inRole = defaults.includes(item.key);
+                    return (
+                      <Choice
+                        key={item.key}
+                        label={
+                          <>
+                            {item.label}
+                            {ticked && !inRole && <Tag tone="add">Added</Tag>}
+                            {!ticked && inRole && (
+                              <Tag tone="remove">Removed</Tag>
+                            )}
+                          </>
+                        }
+                        aria-label={item.label}
+                        description={
+                          item.needs.length
+                            ? `Needs: ${item.needs.map(label).join(", ")}`
+                            : undefined
+                        }
+                        checked={ticked}
+                        disabled={!permissionsEditable}
+                        onChange={(event) =>
+                          togglePermission(item, event.target.checked)
+                        }
+                      />
+                    );
+                  })}
+                </div>
               </div>
             ))}
           {errors.permissions && <ErrorText>{errors.permissions}</ErrorText>}
@@ -814,21 +882,23 @@ function PersonEditor({
               title="Approval limit"
               description="The most they can approve in one entry."
             />
-            <Field
-              id="person-limit"
-              label="Limit per entry"
-              hint="Leave empty for no limit."
-            >
-              <CurrencyInput
-                min="0"
-                step="1"
-                value={form.approvalLimit}
-                disabled={!permissionsEditable}
-                onChange={(event) =>
-                  setForm({ ...form, approvalLimit: event.target.value })
-                }
-              />
-            </Field>
+            <Grid2 narrow>
+              <Field
+                id="person-limit"
+                label="Limit per entry"
+                hint="Leave empty for no limit."
+              >
+                <CurrencyInput
+                  min="0"
+                  step="1"
+                  value={form.approvalLimit}
+                  disabled={!permissionsEditable}
+                  onChange={(event) =>
+                    setForm({ ...form, approvalLimit: event.target.value })
+                  }
+                />
+              </Field>
+            </Grid2>
           </Card>
         )}
 
@@ -840,33 +910,40 @@ function PersonEditor({
             />
             <Field id="remove-reason" label="Reason">
               <TextInput
+                autoFocus
                 value={removeReason}
                 maxLength={500}
                 autoComplete="off"
                 placeholder="For example, left the organization"
-                onChange={(event) => setRemoveReason(event.target.value)}
+                aria-invalid={Boolean(removeError) || undefined}
+                onChange={(event) => {
+                  setRemoveReason(event.target.value);
+                  setRemoveError("");
+                }}
               />
             </Field>
+            {removeError && <Banner>{removeError}</Banner>}
           </Card>
         )}
 
         <FormActions>
           {editable && (
             <Button
+              tone="ok"
               disabled={busy || !permissionsReady}
               onClick={() => void save()}
             >
               {person ? "Save changes" : "Save person"}
             </Button>
           )}
-          <Button tone="outline" onClick={onClose}>
+          <Button tone="quiet" onClick={onClose}>
             {editable ? "Cancel" : "Back"}
           </Button>
           <Spacer />
           {editable && person && (
             <>
               <Button
-                tone="outline"
+                tone="warn"
                 disabled={busy}
                 onClick={() => void lifecycle("sign-out")}
               >
@@ -882,7 +959,7 @@ function PersonEditor({
                 </Button>
               ) : (
                 <Button
-                  tone="outline"
+                  tone="ok"
                   disabled={busy}
                   onClick={() => void lifecycle("activate")}
                 >

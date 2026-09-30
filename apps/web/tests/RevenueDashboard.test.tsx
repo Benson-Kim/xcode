@@ -110,7 +110,7 @@ it("connects the revenue cards from the business date, and keeps the others at '
   expect(await within(card("Revenue")).findByText("This week, 28 Sep to 4 Oct 2026")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "This month" }));
   expect(await within(card("Revenue")).findByText("This month, 1 to 30 Sep 2026")).toBeInTheDocument();
-  expect(within(card("Revenue")).getByText("83% of target KES 15,000, from each vehicle’s weekly target")).toBeInTheDocument();
+  expect(within(card("Revenue")).getByText("83% of target KES 15,000, from each vehicle’s weekly target.")).toBeInTheDocument();
   // The month figures were already loaded for the gaps card, so choosing the month asks for nothing more.
   expect(dashboardCalls(fetcher)).toEqual([
     "/api/setup/revenue/dashboard?period=today",
@@ -155,7 +155,17 @@ it("keeps the capture counts out of the revenue card for a viewer the server giv
   expect(await within(await screen.findByRole("article", { name: "Revenue" })).findByText("KES 12,500")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "This week" }));
   expect(await within(card("Revenue")).findByText("This week, 28 Sep to 4 Oct 2026")).toBeInTheDocument();
-  expect(within(card("Revenue")).getByText("83% of target KES 15,000, from each vehicle’s weekly target")).toBeInTheDocument();
+  expect(within(card("Revenue")).getByText("83% of target KES 15,000, from each vehicle’s weekly target.")).toBeInTheDocument();
   expect(card("Revenue")).not.toHaveTextContent(/have a record so far|null|undefined|NaN/);
   expect(screen.queryByRole("article", { name: "Today's revenue" })).not.toBeInTheDocument();
+});
+
+it("offers Fill the gaps only while there are gaps to fill", async () => {
+  serve(["dash.gaps", "revenue.view", "revenue.capture"], (period) => json(dashboard(period, { missingDays: 0, missingVehicles: 0 })));
+  render(<AppShell onSignOut={() => {}} />);
+
+  const gaps = await screen.findByRole("article", { name: "Missing revenue days" });
+  expect(await within(gaps).findByText("0 days")).toBeInTheDocument();
+  expect(within(gaps).getByText("Every vehicle has a record for every day.")).toBeInTheDocument();
+  expect(within(gaps).queryByRole("button", { name: "Fill the gaps" })).not.toBeInTheDocument();
 });

@@ -186,7 +186,7 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
             />
           </ChoiceGroup>
           <FormActions>
-            <Button disabled={busy} onClick={() => void save()}>
+            <Button tone="ok" disabled={busy} onClick={() => void save()}>
               Save preferences
             </Button>
           </FormActions>

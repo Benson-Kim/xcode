@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { apiRequest } from "../../lib/data";
 import { useStreamedList } from "../../lib/data";
-import { Banner, Button, DataTable, Field, PageHeader, RowButton, TextInput, Toolbar, Td, Tr, useToast } from "../ui";
+import { Banner, Button, DataTable, Field, FormActions, PageHeader, StatusBadge, TextInput, Toolbar, Td, Tr, useToast } from "../ui";
 import type { Company } from "./shared";
 
 export function CompaniesPage() {
@@ -88,7 +88,7 @@ export function CompaniesPage() {
             }}
           />
         </Field>
-        <Button className="mt-6.5" disabled={busy} onClick={() => void add()}>
+        <Button tone="ok" className="mt-6.5 max-[480px]:mt-0" disabled={busy} onClick={() => void add()}>
           Add company
         </Button>
       </Toolbar>
@@ -98,6 +98,7 @@ export function CompaniesPage() {
         pendingRows={companies.pendingRows}
         loadingLabel="Loading companies"
         isEmpty={!rows.length}
+        failed={Boolean(companies.error)}
         emptyMessage="No PSV companies yet. Add the first one above."
       >
         {rows.map((company) =>
@@ -116,10 +117,10 @@ export function CompaniesPage() {
                       }}
                     />
                   </Field>
-                  <Button className="mt-6.5" disabled={busy} onClick={() => void saveRename(company)}>
+                  <Button tone="ok" className="mt-6.5" disabled={busy} onClick={() => void saveRename(company)}>
                     Save
                   </Button>
-                  <Button className="mt-6.5" tone="outline" onClick={() => setRenaming(null)}>
+                  <Button className="mt-6.5" tone="quiet" onClick={() => setRenaming(null)}>
                     Cancel
                   </Button>
                 </div>
@@ -130,22 +131,32 @@ export function CompaniesPage() {
               <Td label="Company">
                 <strong>{company.name}</strong>
               </Td>
-              <Td label="Status">{company.active === false ? "Archived" : "Active"}</Td>
+              <Td label="Status">
+                <StatusBadge tone={company.active === false ? "off" : "ok"}>{company.active === false ? "Archived" : "Active"}</StatusBadge>
+              </Td>
               <Td label="Vehicles" numeric>{company.vehicleCount}</Td>
               <Td>
-                {company.active !== false && (
-                  <RowButton onClick={() => setRenaming({ id: company.id, name: company.name, error: "" })} aria-label={`Rename ${company.name}`}>
-                    Rename
-                  </RowButton>
-                )}
-                <Button
-                  tone="outline"
-                  disabled={busy}
-                  aria-label={`${company.active !== false ? "Archive" : "Restore"} ${company.name}`}
-                  onClick={() => void setArchived(company, company.active !== false)}
-                >
-                  {company.active !== false ? "Archive" : "Restore"}
-                </Button>
+                {/* Every row ends with its actions, side by side at the end of the row (.row-acts). */}
+                <FormActions className="justify-end gap-2">
+                  {company.active !== false && (
+                    <Button
+                      tone="outline"
+                      disabled={busy}
+                      onClick={() => setRenaming({ id: company.id, name: company.name, error: "" })}
+                      aria-label={`Rename ${company.name}`}
+                    >
+                      Rename
+                    </Button>
+                  )}
+                  <Button
+                    tone={company.active !== false ? "warn" : "ok"}
+                    disabled={busy}
+                    aria-label={`${company.active !== false ? "Archive" : "Restore"} ${company.name}`}
+                    onClick={() => void setArchived(company, company.active !== false)}
+                  >
+                    {company.active !== false ? "Archive" : "Restore"}
+                  </Button>
+                </FormActions>
               </Td>
             </Tr>
           ),

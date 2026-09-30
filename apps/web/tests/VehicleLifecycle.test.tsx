@@ -36,7 +36,9 @@ function serve(lists: unknown[][]) {
   return fetchMock;
 }
 
-const status = (registration: string) => within(screen.getByRole("row", { name: new RegExp(registration) })).getByText(/Active|Left|Joins/, { selector: "td" });
+const row = (registration: string) => within(screen.getByRole("row", { name: new RegExp(registration) }));
+// The badge in the vehicle's Status cell.
+const status = (registration: string) => row(registration).getByText(/Active|Left|Joins/, { selector: "td[data-label='Status'] > *" });
 
 it("tells a vehicle that has not joined yet from one that has left the fleet", async () => {
   serve([[joining, retired, running]]);
@@ -46,6 +48,10 @@ it("tells a vehicle that has not joined yet from one that has left the fleet", a
   expect(status("KDA 482M")).toHaveTextContent("Joins 3 Oct 2026");
   expect(status("KCY 117T")).toHaveTextContent("Left fleet 10 Sep 2026");
   expect(status("KDG 905B")).toHaveTextContent("Active");
+  // Leaving the fleet ends the target; a vehicle that has not joined yet keeps the one it starts on.
+  expect(row("KCY 117T").getByText("Target ended")).toBeInTheDocument();
+  expect(row("KCY 117T").queryByText(/KES/)).not.toBeInTheDocument();
+  expect(row("KDA 482M").getByText("KES 15,000")).toBeInTheDocument();
 });
 
 it("lets a vehicle that has not joined yet be edited, and shows what the server saved", async () => {

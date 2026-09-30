@@ -127,3 +127,24 @@ it("keeps the rows it has and says why when the next page fails", async () => {
   await waitFor(() => expect(changeRows()).toHaveLength(25));
   expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled();
 });
+
+it("leaves out internal ids and shows a list of plain values as one field", async () => {
+  serveHistory(1, [
+    change(1, {
+      section: "people",
+      reason: "Changed role for Grace Achieng",
+      before: JSON.stringify({ Id: "p-1", Role: "Revenue clerk", CompanyIds: ["c-1"], Permissions: ["revenue.view", "dash.capture"], Versions: [{ VehicleId: "v-1" }] }),
+      after: JSON.stringify({
+        Id: "p-1", Role: "Fleet manager", CompanyIds: ["c-2"], Permissions: ["dash.capture", "revenue.view", "revenue.correct"], Versions: [{ VehicleId: "v-2" }],
+        UpdatedBy: "10c5de87-afae-417b-98a2-ce4d4f6b8eca", Version: 2,
+      }),
+    }),
+  ]);
+  renderInApp(<HistoryPage />);
+
+  const changed = within(await screen.findByRole("table", { name: "People and access: Changed role for Grace Achieng, before and after" }));
+  expect(fields(changed)).toEqual([
+    ["Role", "Revenue clerk", "Fleet manager"],
+    ["Permissions", "dash.capture, revenue.view", "dash.capture, revenue.correct, revenue.view"],
+  ]);
+});

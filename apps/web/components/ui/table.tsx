@@ -12,6 +12,7 @@ export function DataTable({
   pendingRows = 0,
   isEmpty = false,
   emptyMessage,
+  failed = false,
   loadingLabel = "Loading",
   className,
   children,
@@ -22,6 +23,8 @@ export function DataTable({
   pendingRows?: number;
   isEmpty?: boolean;
   emptyMessage: ReactNode;
+  // The list could not be loaded (the page says why): an empty list then is not "nothing here yet".
+  failed?: boolean;
   loadingLabel?: string;
   className?: string;
   children?: ReactNode;
@@ -67,7 +70,7 @@ export function DataTable({
                 colSpan={columns.length}
                 className="px-4 py-6 text-center text-grey max-[720px]:block"
               >
-                {emptyMessage}
+                {failed ? "This list could not be loaded." : emptyMessage}
               </td>
             </tr>
           ) : (

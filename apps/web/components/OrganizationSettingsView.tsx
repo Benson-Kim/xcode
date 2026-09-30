@@ -92,12 +92,12 @@ const POLICY_BOUNDS: Record<PolicyNumber, { min: number; max: number; label: str
   passwordHistory: { min: 0, max: 24, label: "Passwords remembered" },
 };
 
+// Every number outside its bounds, field by field, rather than the server's one-line refusal. Empty when all are in.
 function policyProblem(policy: Settings["securityPolicy"]) {
-  for (const [key, { min, max, label }] of Object.entries(POLICY_BOUNDS) as [PolicyNumber, (typeof POLICY_BOUNDS)[PolicyNumber]][]) {
-    const value = policy[key];
-    if (!Number.isInteger(value) || value < min || value > max) return `${label} must be a whole number from ${min} to ${max}.`;
-  }
-  return "";
+  return (Object.entries(POLICY_BOUNDS) as [PolicyNumber, (typeof POLICY_BOUNDS)[PolicyNumber]][])
+    .filter(([key, { min, max }]) => !Number.isInteger(policy[key]) || policy[key] < min || policy[key] > max)
+    .map(([, { min, max, label }]) => `${label} must be a whole number from ${min} to ${max}.`)
+    .join(" ");
 }
 
 const bounds = (key: PolicyNumber) => ({ min: String(POLICY_BOUNDS[key].min), max: String(POLICY_BOUNDS[key].max) });
@@ -163,6 +163,25 @@ function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => 
 
   async function save(section: Section) {
     let value: object = settings[section];
+    if (section === "securityPolicy") {
+      // Said here, field by field, rather than as the server's one-line refusal. The pause is capped at one hour.
+      const policy = settings.securityPolicy;
+      const limits: [string, number, number, number][] = [
+        ["Shortest new PIN", policy.pinLength, 4, 8],
+        ["Wrong PINs before a pause", policy.lockoutThreshold, 3, 10],
+        ["Pause length", policy.lockoutMinutes, 1, 60],
+        ["Session renews every", policy.accessTokenMinutes, 1, 15],
+        ["Stay signed in for", policy.refreshTokenDays, 1, 90],
+      ];
+      const outside = limits.filter(([, current, min, max]) => !Number.isInteger(current) || current < min || current > max);
+      if (outside.length) {
+        setErrors({
+          ...errors,
+          securityPolicy: outside.map(([label, , min, max]) => `${label}: use ${min} to ${max}.`).join(" "),
+        });
+        return;
+      }
+    }
     if (section === "organization") {
       const name = settings.organization.name.trim();
       const slug = settings.organization.slug.trim();
@@ -252,6 +271,10 @@ function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => 
   }
 
   const { organization, branding, localization, securityPolicy } = settings;
+  // The business date the form will save: a held date, or null to follow the organization's calendar date. The field
+  // and its hint follow it, so dropping a held date shows the calendar date at once, before it is saved. The calendar
+  // date itself is read again after every save.
+  const held = organization.businessDate || null;
   const logo = appearance?.branding.logo;
   return (
     <section>
@@ -301,34 +324,36 @@ function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => 
           busy={businessDateBusy}
           onSave={() => void saveBusinessDate()}
         >
-          <Field
-            id="business-date"
-            label="Business date"
-            hint={
-              organization.businessDate
-                ? `Held at ${formatDateOnly(organization.businessDate)}.${initial.calendarDate ? ` The organization's calendar date is ${formatDateOnly(initial.calendarDate)}.` : ""}`
-                : initial.calendarDate
-                  ? `Following the organization's calendar date, ${formatDateOnly(initial.calendarDate)}.`
-                  : "Following the organization's calendar date."
-            }
-          >
-            <TextInput
-              type="date"
-              // Without a held date the business date is the organization's calendar date.
-              value={organization.businessDate || initial.calendarDate || initial.effectiveBusinessDate || ""}
-              max={initial.calendarDate}
-              onChange={(event) =>
-                setSettings({
-                  ...settings,
-                  organization: {
-                    ...organization,
-                    businessDate: event.target.value || null,
-                  },
-                })
+          <Grid2 narrow>
+            <Field
+              id="business-date"
+              label="Business date"
+              hint={
+                held
+                  ? `Held at ${formatDateOnly(held)}.${initial.calendarDate ? ` The organization's calendar date is ${formatDateOnly(initial.calendarDate)}.` : ""}`
+                  : initial.calendarDate
+                    ? `Following the organization's calendar date, ${formatDateOnly(initial.calendarDate)}.`
+                    : "Following the organization's calendar date."
               }
-            />
-          </Field>
-          {organization.businessDate && (
+            >
+              <TextInput
+                type="date"
+                // Without a held date the business date is the organization's calendar date.
+                value={held || initial.calendarDate || initial.effectiveBusinessDate || ""}
+                max={initial.calendarDate}
+                onChange={(event) =>
+                  setSettings({
+                    ...settings,
+                    organization: {
+                      ...organization,
+                      businessDate: event.target.value || null,
+                    },
+                  })
+                }
+              />
+            </Field>
+          </Grid2>
+          {held && (
             <Button
               tone="outline"
               disabled={businessDateBusy}
@@ -623,7 +648,11 @@ function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => 
                 }
               />
             </Field>
-            <Field id="lockout-minutes" label="Pause length in minutes" hint="1 to 60, so a pause lasts at most an hour.">
+            <Field
+              id="lockout-minutes"
+              label="Pause length in minutes"
+              hint="1 to 60, so a pause lasts at most an hour. A PIN reset by email still lifts a pause."
+            >
               <TextInput
                 type="number"
                 {...bounds("lockoutMinutes")}
@@ -697,7 +726,7 @@ function SettingsCard({
       {error && <Banner>{error}</Banner>}
       {children}
       <FormActions>
-        <Button disabled={busy} onClick={onSave}>
+        <Button tone="ok" disabled={busy} onClick={onSave}>
           {action}
         </Button>
       </FormActions>

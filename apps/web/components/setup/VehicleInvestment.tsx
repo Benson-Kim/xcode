@@ -157,6 +157,7 @@ export function VehicleInvestmentTab({
         <Spacer />
         {canManage && (
           <Button
+            tone="ok"
             onClick={() => {
               setAddError("");
               setAdding({ ...blank });
@@ -176,6 +177,7 @@ export function VehicleInvestmentTab({
         loading={investment.loading}
         loadingLabel="Loading investment entries"
         isEmpty={!entries.length}
+        failed={Boolean(investment.error)}
         emptyMessage="Nothing recorded yet."
       >
         {entries.map((entry) =>
@@ -213,11 +215,11 @@ export function VehicleInvestmentTab({
               </Td>
               <Td>
                 <FormActions className="justify-end">
-                  <Button disabled={busy} onClick={() => void saveEdit()}>
+                  <Button tone="ok" disabled={busy} onClick={() => void saveEdit()}>
                     Save
                   </Button>
                   <Button
-                    tone="outline"
+                    tone="quiet"
                     onClick={() => {
                       setEditing(null);
                       setError("");
@@ -289,10 +291,10 @@ export function VehicleInvestmentTab({
             </Field>
             {addError && <Banner>{addError}</Banner>}
             <FormActions>
-              <Button disabled={busy} onClick={() => void add()}>
+              <Button tone="ok" disabled={busy} onClick={() => void add()}>
                 Add
               </Button>
-              <Button tone="outline" onClick={() => setAdding(null)}>
+              <Button tone="quiet" onClick={() => setAdding(null)}>
                 Cancel
               </Button>
             </FormActions>

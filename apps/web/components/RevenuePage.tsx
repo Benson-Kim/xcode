@@ -129,6 +129,10 @@ export function RevenuePage() {
   // A company picked in another week that this week does not list (an archived one, say) would leave an empty grid,
   // and with one company or none no control to leave it: the filter goes once the week has loaded.
   if (data && companyId && !data.companies.some((company) => company.id === companyId)) setCompanyId("");
+  // After a save the grid reloads in place. Until the new week arrives its gaps are out of date, so Capture revenue
+  // waits for it rather than opening a day that was just saved.
+  const [stale, setStale] = useState<RevenueWeek | null>(null);
+  if (stale && (data !== stale || week.error)) setStale(null);
 
   const today = shown?.businessDate ?? "";
   const start = weekStart || shown?.weekStart || "";
@@ -182,6 +186,7 @@ export function RevenuePage() {
   // After a save: the same vehicle again while the day it set out to fill is still open (its next gap first), then
   // the next vehicle still missing that day, then done. The grid reloads alongside.
   async function advance(saved: Capture) {
+    setStale(data ?? null);
     week.reload();
     if (saved.date < saved.target) {
       const fresh = await apiRequest<RevenueWeek>(vehicleWeekPath(saved.vehicleId, saved.target)).catch(() => undefined);
@@ -233,7 +238,13 @@ export function RevenuePage() {
         )}
         <Spacer />
         {first && (
-          <Button onClick={(event) => open(openAt(first.vehicle, first.date), event.currentTarget)}>Capture revenue</Button>
+          <Button
+            disabled={Boolean(stale)}
+            aria-busy={stale ? true : undefined}
+            onClick={(event) => open(openAt(first.vehicle, first.date), event.currentTarget)}
+          >
+            Capture revenue
+          </Button>
         )}
         <div className="flex flex-col items-end leading-[1.3]">
           <small className="text-xs text-grey">Week to date</small>
@@ -263,7 +274,9 @@ export function RevenuePage() {
           </LoadingRegion>
         )
       ) : (
-        <div ref={gridRef} tabIndex={-1} className="mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-white">
+        // relative: the card is the containing block for the screen-reader-only labels (absolutely positioned) in the
+        // grid, so they scroll with it instead of widening the page at tablet widths.
+        <div ref={gridRef} tabIndex={-1} className="relative mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-white">
           <table className="w-full border-collapse min-[721px]:min-w-225">
             <caption className="sr-only">Revenue by vehicle and day, {rangeLabel(data.weekStart, data.weekThrough)}</caption>
             <thead>
@@ -712,7 +725,7 @@ function CaptureForm({
           {!conflict.current.canEdit && <Hint>Your access does not include changing the saved record for this day.</Hint>}
           <FormActions>
             {conflict.current.canEdit && (
-              <Button disabled={saving} onClick={() => save(conflict.current.version ?? null)}>
+              <Button tone="ok" disabled={saving} onClick={() => save(conflict.current.version ?? null)}>
                 {saving ? "Saving…" : "Replace with mine"}
               </Button>
             )}
@@ -779,10 +792,10 @@ function CaptureForm({
           )}
           {error && <Banner>{error}</Banner>}
           <FormActions>
-            <Button type="submit" disabled={saving}>
+            <Button tone="ok" type="submit" disabled={saving}>
               {saving ? "Saving…" : "Save"}
             </Button>
-            <Button tone="outline" disabled={saving} onClick={onCancel}>
+            <Button tone="quiet" disabled={saving} onClick={onCancel}>
               Cancel
             </Button>
           </FormActions>

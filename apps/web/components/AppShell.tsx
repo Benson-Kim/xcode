@@ -441,7 +441,8 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                       />
                     </button>
                     {setupOpen && (
-                      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+                      // Indented under the group with a rule down its left side, as in the design (.nav-group ul).
+                      <ul className="m-0 mt-0.5 ml-3.5 flex list-none flex-col gap-0.5 border-l border-card-line p-0 pl-2.5">
                         {visibleSetup.map(navButton)}
                       </ul>
                     )}
@@ -560,7 +561,8 @@ type DashboardCard = {
   action?: { label: string; view: View; primary?: boolean };
 };
 type Figures = { data?: RevenueDashboard; error: string };
-type Shown = Pick<DashboardCard, "value" | "bad" | "bar" | "note">;
+// What the figures decide: the value and its note, and whether the card's action still applies.
+type Shown = Pick<DashboardCard, "value" | "bad" | "bar" | "note" | "action">;
 
 // "Today, 30 Sep 2026", "This week, 28 Sep to 4 Oct 2026", "This month, 1 to 30 Sep 2026", from the business date.
 function periodLabel(period: Period, data?: RevenueDashboard) {
@@ -572,7 +574,7 @@ function periodLabel(period: Period, data?: RevenueDashboard) {
 
 // A card from the revenue dashboard: placeholders while it loads, the error if it failed, and only the figures the
 // server sent, which leaves out (null) anything the viewer may not see.
-function revenueCard(card: Omit<DashboardCard, keyof Shown>, figures: Figures, show: (data: RevenueDashboard) => Shown): DashboardCard {
+function revenueCard(card: Omit<DashboardCard, Exclude<keyof Shown, "action">>, figures: Figures, show: (data: RevenueDashboard) => Shown): DashboardCard {
   if (figures.error) return { ...card, note: figures.error };
   if (!figures.data) return { ...card, busy: true };
   return { ...card, ...show(figures.data) };
@@ -592,6 +594,8 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
   const today = selected.data?.businessDate ?? month.data?.businessDate;
   const monthData = month.data;
   const yesterday = monthData && shiftDate(monthData.businessDate, -1);
+  const fillGaps: DashboardCard["action"] =
+    can("revenue.capture") || can("revenue.correct") ? { label: "Fill the gaps", view: "revenue" } : undefined;
   const cards: DashboardCard[] = [
     revenueCard(
       {
@@ -618,11 +622,11 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
         period !== "month" && capturedToday !== null && vehiclesToday
           ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.`
           : "";
-      if (percent === null) return { value: revenue ? kes(revenue) : undefined, note: `No weekly target applies in this period${soFar}` };
+      if (percent === null) return { value: revenue ? kes(revenue) : undefined, note: `No weekly target applies in this period${soFar || "."}` };
       return {
         value: kes(revenue),
         bar: percent,
-        note: `${percent}% of target ${kes(expected ?? 0)}, from each vehicle’s weekly target${soFar}`,
+        note: `${percent}% of target ${kes(expected ?? 0)}, from each vehicle’s weekly target${soFar || "."}`,
       };
     }),
     unavailable("dash.net", "Net contribution", `Revenue less all costs. ${label}`, "Needs cost totals, which are not connected yet."),
@@ -638,7 +642,7 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
               ? `${rangeLabel(monthData.from, yesterday)}. No record and no reason.`
               : "No record and no reason."
             : "This month. No record and no reason.",
-        action: can("revenue.capture") || can("revenue.correct") ? { label: "Fill the gaps", view: "revenue" } : undefined,
+        action: fillGaps,
       },
       month,
       ({ missingDays, missingVehicles }) =>
@@ -647,6 +651,8 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
           : {
               value: plural(missingDays, "day", "days"),
               bad: missingDays > 0,
+              // With no gaps there is nothing to fill.
+              action: missingDays > 0 ? fillGaps : undefined,
               note: missingDays
                 ? `${missingVehicles === null ? "" : `On ${plural(missingVehicles, "vehicle", "vehicles")}. `}Always this month, whatever period you pick.`
                 : "Every vehicle has a record for every day.",
