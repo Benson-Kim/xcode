@@ -618,7 +618,7 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
         period !== "month" && capturedToday !== null && vehiclesToday
           ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.`
           : "";
-      if (percent === null) return { value: revenue ? kes(revenue) : undefined, note: `No weekly target applies in this period${soFar}` };
+      if (percent === null) return { value: kes(revenue), note: `No weekly target applies in this period${soFar}` };
       return {
         value: kes(revenue),
         bar: percent,
@@ -648,7 +648,7 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
               value: plural(missingDays, "day", "days"),
               bad: missingDays > 0,
               note: missingDays
-                ? `On ${plural(missingVehicles ?? 0, "vehicle", "vehicles")}. Always this month, whatever period you pick.`
+                ? `${missingVehicles === null ? "" : `On ${plural(missingVehicles, "vehicle", "vehicles")}. `}Always this month, whatever period you pick.`
                 : "Every vehicle has a record for every day.",
             },
     ),

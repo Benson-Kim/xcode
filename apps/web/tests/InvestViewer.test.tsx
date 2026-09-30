@@ -61,3 +61,16 @@ it("adds the scheduled items tab when commitments.view is also given", async () 
   fireEvent.click(await screen.findByRole("button", { name: "KDA 482M" }));
   expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Scheduled items", "Investment"]);
 });
+
+it("lists the vehicles without the targets and scheduled items the server leaves out", async () => {
+  // Without vehicles.manage the server sends no weekly target, target history or scheduled item count.
+  const listed = { ...vehicle, weeklyTarget: null, targets: [], recurringItems: null };
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ items: [listed], pageNumber: 1, pageSize: 25, total: 1 }), { status: 200 })));
+  renderInApp(<VehiclesPage />, { permissions: ["invest.view"] }, { businessDate: "2026-09-21" });
+
+  const table = await screen.findByRole("table");
+  expect(await within(table).findByRole("button", { name: "KDA 482M" })).toBeInTheDocument();
+  expect(within(table).queryByRole("columnheader", { name: "Weekly target" })).not.toBeInTheDocument();
+  expect(within(table).queryByRole("columnheader", { name: "Scheduled items" })).not.toBeInTheDocument();
+  expect(table).not.toHaveTextContent(/KES|a day|null|NaN/);
+});

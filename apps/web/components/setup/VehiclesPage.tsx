@@ -74,7 +74,8 @@ export function VehiclesPage({
     return (
       <VehicleEditor
         vehicle={editing === "new" ? undefined : editing}
-        defaultCompany={filter === "all" ? "" : filter}
+        // A new vehicle starts on the filtered company only while it can be chosen: never on an archived one.
+        defaultCompany={companies.some((company) => company.id === filter && company.active !== false) ? filter : ""}
         companies={companies}
         today={today}
         onOpenRecurring={onOpenRecurring}
@@ -112,13 +113,14 @@ export function VehiclesPage({
         {canManage && <Button onClick={() => setEditing("new")}>Add vehicle</Button>}
       </Toolbar>
       <DataTable
+        // Targets and scheduled items are for vehicle managers; the server leaves them out for anyone else.
         columns={[
           { label: "Registration" },
           { label: "Company" },
           { label: "Status" },
-          { label: "Weekly target", numeric: true },
+          ...(canManage ? [{ label: "Weekly target", numeric: true }] : []),
           { label: "In the fleet from" },
-          { label: "Scheduled items", numeric: true },
+          ...(canManage ? [{ label: "Scheduled items", numeric: true }] : []),
         ]}
         loading={vehicles.loading}
         pendingRows={filter === "all" ? vehicles.pendingRows : 0}
@@ -135,12 +137,18 @@ export function VehiclesPage({
             <Td label="Status">
               {vehicle.active !== false ? "Active" : `Left fleet ${vehicle.leftOn ? formatDateOnly(vehicle.leftOn) : ""}`}
             </Td>
-            <Td label="Weekly target" numeric>
-              {kes(vehicle.weeklyTarget)}
-              <CellNote>About {kes(Math.round(vehicle.weeklyTarget / 7))} a day</CellNote>
-            </Td>
+            {canManage && (
+              <Td label="Weekly target" numeric>
+                {kes(vehicle.weeklyTarget ?? 0)}
+                <CellNote>About {kes(Math.round((vehicle.weeklyTarget ?? 0) / 7))} a day</CellNote>
+              </Td>
+            )}
             <Td label="In the fleet from">{formatDateOnly(vehicle.joinedOn)}</Td>
-            <Td label="Scheduled items" numeric>{vehicle.recurringItems ?? 0}</Td>
+            {canManage && (
+              <Td label="Scheduled items" numeric>
+                {vehicle.recurringItems ?? 0}
+              </Td>
+            )}
           </Tr>
         ))}
       </DataTable>
@@ -152,9 +160,11 @@ function companyChoices(vehicles: Vehicle[], companies?: Company[], options?: Co
   const byId = new Map<string, CompanyChoice>();
   for (const company of companies ?? []) byId.set(company.id, { id: company.id, name: company.name, active: company.active });
   for (const company of options ?? []) byId.set(company.id, company);
+  // A company known only through its vehicles is one the server did not offer (archived, or not loaded yet): it
+  // filters the list but is never offered for a vehicle to join.
   for (const vehicle of vehicles) {
     if (!byId.has(vehicle.companyId))
-      byId.set(vehicle.companyId, { id: vehicle.companyId, name: vehicle.companyName, active: true });
+      byId.set(vehicle.companyId, { id: vehicle.companyId, name: vehicle.companyName, active: false });
   }
   return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -197,7 +207,7 @@ function VehicleEditor({
   const [form, setForm] = useState<{ registration: string; companyId: string; weeklyTarget: string; joinedOn: string | null }>({
     registration: vehicle?.registration ?? "",
     companyId: vehicle?.companyId ?? defaultCompany,
-    weeklyTarget: vehicle ? String(vehicle.weeklyTarget) : "",
+    weeklyTarget: vehicle?.weeklyTarget != null ? String(vehicle.weeklyTarget) : "",
     joinedOn: vehicle?.joinedOn ?? null,
   });
   const joinedOn = form.joinedOn ?? today ?? "";

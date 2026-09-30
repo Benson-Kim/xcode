@@ -107,6 +107,9 @@ export function OrganizationSettingsView() {
   return <SettingsForm initial={loaded.data} />;
 }
 
+// Day numbers as the API stores them: 0 is Sunday.
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
 const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const LOGO_MAX_BYTES = 256 * 1024;
 
@@ -507,6 +510,12 @@ function SettingsForm({ initial }: { initial: Settings }) {
                 <option value="1">Monday</option>
                 <option value="0">Sunday</option>
                 <option value="6">Saturday</option>
+                {/* The API takes any day; one set elsewhere is shown as it is rather than as Monday. */}
+                {![0, 1, 6].includes(localization.firstDayOfWeek) && (
+                  <option value={localization.firstDayOfWeek}>
+                    {WEEKDAYS[localization.firstDayOfWeek] ?? localization.firstDayOfWeek}
+                  </option>
+                )}
               </SelectInput>
             </Field>
           </Grid2>

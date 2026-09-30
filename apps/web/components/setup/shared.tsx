@@ -10,9 +10,10 @@ export type Vehicle = {
   joinedOn: string;
   leftOn?: string | null;
   active?: boolean;
-  weeklyTarget: number;
+  // null, with no targets and no count, for someone who lists vehicles only to reach their investment.
+  weeklyTarget: number | null;
   targets?: { effectiveFrom: string; weeklyAmount: number; revision: number }[];
-  recurringItems?: number;
+  recurringItems?: number | null;
 };
 
 // What the scheduled-item editor needs to pick vehicles (GET recurring/vehicle-options).

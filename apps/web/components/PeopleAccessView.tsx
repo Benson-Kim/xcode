@@ -338,8 +338,12 @@ function PersonEditor({
   const permissionsReady = Boolean(roles && groups);
   const label = (key: string) =>
     all.find((item) => item.key === key)?.label ?? key;
+  // Only an Owner may give the Owner role, but an owner's own role is still listed, so the locked picker shows it.
   const assignableRoles = (roles ?? []).filter(
-    (role) => role.name !== "Owner" || session?.role === "Owner",
+    (role) =>
+      role.name !== "Owner" ||
+      session?.role === "Owner" ||
+      role.name === person?.role,
   );
   const name = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
 
@@ -475,6 +479,16 @@ function PersonEditor({
     (vehicle) =>
       !options.companies.some((company) => company.id === vehicle.companyId),
   );
+  // What the person's scope holds that is not offered here (archived, out of the fleet, or outside the editor's own
+  // scope). It cannot be ticked, so it is named instead, and saving keeps it.
+  const keptCompanies = form.companyIds.filter(
+    (id) => !options.companies.some((company) => company.id === id),
+  ).length;
+  const keptVehicles = form.vehicleIds.filter(
+    (id) => !options.vehicles.some((vehicle) => vehicle.id === id),
+  ).length;
+  const kept = (count: number, one: string, many: string, why: string) =>
+    `Also ${plural(count, `${one} that is`, `${many} that are`)} not listed here: ${why}, or outside what you can see. ${count === 1 ? "It is" : "They are"} kept as ${count === 1 ? "it is" : "they are"}.`;
 
   return (
     <section>
@@ -654,6 +668,9 @@ function PersonEditor({
                   There are no companies in your own scope to choose from.
                 </Hint>
               )}
+              {keptCompanies > 0 && (
+                <Hint>{kept(keptCompanies, "company", "companies", "archived")}</Hint>
+              )}
             </ChoiceGroup>
           ) : form.scopeMode === "vehicles" && scopeOptions ? (
             <div role="group" aria-label="Vehicles they can see">
@@ -687,6 +704,11 @@ function PersonEditor({
               {!scopeOptions.vehicles.length && (
                 <Hint>
                   There are no vehicles in your own scope to choose from.
+                </Hint>
+              )}
+              {keptVehicles > 0 && (
+                <Hint>
+                  {kept(keptVehicles, "vehicle", "vehicles", "out of the fleet")}
                 </Hint>
               )}
             </div>

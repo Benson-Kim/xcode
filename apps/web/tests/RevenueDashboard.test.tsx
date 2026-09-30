@@ -146,3 +146,16 @@ it("shows placeholders, not zeros, while the revenue figures load", async () => 
   expect(revenue).toHaveAttribute("aria-busy", "true");
   expect(screen.getByRole("main")).not.toHaveTextContent(/KES 0\b|\b0 days\b/);
 });
+
+it("keeps the capture counts out of the revenue card for a viewer the server gives only revenue totals", async () => {
+  // A fleet manager: dash.revenue without dash.capture, so the server leaves today's capture counts out.
+  serve(["dash.revenue", "revenue.view"], (period) => json(dashboard(period, { capturedToday: null, vehiclesToday: null, missingDays: null, missingVehicles: null, editedRecords: null })));
+  render(<AppShell onSignOut={() => {}} />);
+
+  expect(await within(await screen.findByRole("article", { name: "Revenue" })).findByText("KES 12,500")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "This week" }));
+  expect(await within(card("Revenue")).findByText("This week, 28 Sep to 4 Oct 2026")).toBeInTheDocument();
+  expect(within(card("Revenue")).getByText("83% of target KES 15,000, from each vehicle’s weekly target")).toBeInTheDocument();
+  expect(card("Revenue")).not.toHaveTextContent(/have a record so far|null|undefined|NaN/);
+  expect(screen.queryByRole("article", { name: "Today's revenue" })).not.toBeInTheDocument();
+});

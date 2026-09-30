@@ -133,6 +133,66 @@ it("renders the week grid from one request, with totals, today and a company fil
   await waitFor(() => expect(gets(fetcher, "weekStart=2026-09-21")).toHaveLength(1));
 });
 
+// This week lists North Star only; last week also lists Old Fleet, archived since, which had a vehicle running then.
+function serveCompanies() {
+  return serve((path) => {
+    if (!path.startsWith("/api/setup/revenue")) return undefined;
+    const query = new URL(path, "http://xcode.test").searchParams;
+    const start = query.get("weekStart") ?? DATES[0];
+    const company = query.get("companyId");
+    const past = start < DATES[0];
+    const companies = past ? [{ id: "company-3", name: "Old Fleet" }, { id: "company-1", name: "North Star" }] : [{ id: "company-1", name: "North Star" }];
+    const vehicles = [
+      vehicle("vehicle-1", "KDA 482M"),
+      ...(past ? [vehicle("vehicle-3", "KAA 100A", {}, { companyId: "company-3", companyName: "Old Fleet" })] : []),
+    ];
+    const through = past ? "2026-09-27" : DATES[6];
+    return json(week(vehicles.filter((item) => !company || item.companyId === company), { weekStart: start, weekThrough: through, companies }));
+  });
+}
+
+it("drops a company filter the next week does not list, instead of leaving an empty grid with no way back", async () => {
+  const fetcher = serveCompanies();
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+
+  await screen.findByRole("row", { name: /KDA 482M/ });
+  // One company this week: nothing to choose.
+  expect(screen.queryByRole("combobox", { name: "Company" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Previous week" }));
+  fireEvent.change(await screen.findByRole("combobox", { name: "Company" }), { target: { value: "company-3" } });
+  await screen.findByRole("row", { name: /KAA 100A/ });
+  expect(screen.queryByRole("row", { name: /KDA 482M/ })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Next week" }));
+  await waitFor(() => expect(gets(fetcher, "weekStart=2026-09-28&companyId=company-3")).toHaveLength(1));
+  // Old Fleet is not an option this week, so the grid goes back to every company.
+  expect(await screen.findByRole("row", { name: /KDA 482M/ })).toBeInTheDocument();
+  expect(gets(fetcher, "weekStart=2026-09-28&companyId=company-3")).toHaveLength(1);
+  expect(gets(fetcher, "/api/setup/revenue?weekStart=2026-09-28").filter((path) => !path.includes("companyId"))).toHaveLength(1);
+  expect(screen.queryByText("No vehicles.")).not.toBeInTheDocument();
+  expect(screen.queryByRole("combobox", { name: "Company" })).not.toBeInTheDocument();
+});
+
+it("keeps the company control, with All companies, for as long as a filter is set", async () => {
+  const fetcher = serveCompanies();
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+
+  await screen.findByRole("row", { name: /KDA 482M/ });
+  fireEvent.click(screen.getByRole("button", { name: "Previous week" }));
+  fireEvent.change(await screen.findByRole("combobox", { name: "Company" }), { target: { value: "company-1" } });
+  await waitFor(() => expect(screen.queryByRole("row", { name: /KAA 100A/ })).not.toBeInTheDocument());
+
+  // North Star is this week's only company, and the filter on it stays visible and can be cleared.
+  fireEvent.click(screen.getByRole("button", { name: "Next week" }));
+  await screen.findByRole("table", { name: "Revenue by vehicle and day, 28 Sep to 4 Oct 2026" });
+  const company = screen.getByRole("combobox", { name: "Company" });
+  expect(company).toHaveValue("company-1");
+  expect(within(company).getByRole("option", { name: "All companies" })).toBeInTheDocument();
+  fireEvent.change(company, { target: { value: "" } });
+  await waitFor(() => expect(gets(fetcher, "/api/setup/revenue?weekStart=2026-09-28").filter((path) => !path.includes("companyId"))).toHaveLength(1));
+  await waitFor(() => expect(screen.queryByRole("combobox", { name: "Company" })).not.toBeInTheDocument());
+});
+
 it("shows a vehicle's week detail with expected, actual, difference and a bar for each recorded day", async () => {
   serveWeek(() =>
     week([

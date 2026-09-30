@@ -126,6 +126,9 @@ export function RevenuePage() {
   // The toolbar keeps the last week shown while the next one loads, so its controls (and focus) stay in place.
   const [shown, setShown] = useState<RevenueWeek>();
   if (data && data !== shown) setShown(data);
+  // A company picked in another week that this week does not list (an archived one, say) would leave an empty grid,
+  // and with one company or none no control to leave it: the filter goes once the week has loaded.
+  if (data && companyId && !data.companies.some((company) => company.id === companyId)) setCompanyId("");
 
   const today = shown?.businessDate ?? "";
   const start = weekStart || shown?.weekStart || "";
@@ -217,7 +220,8 @@ export function RevenuePage() {
             <ChevronIcon size={20} className="-rotate-90" />
           </IconButton>
         </div>
-        {shown && shown.companies.length > 1 && (
+        {/* While a filter is set, All companies stays one choice away even when this week lists a single company. */}
+        {shown && (shown.companies.length > 1 || companyId) && (
           <SelectInput aria-label="Company" density="compact" inline value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
             <option value="">All companies</option>
             {shown.companies.map((company) => (
