@@ -72,6 +72,34 @@ public sealed class AccessLifecycleTests : IDisposable
         Assert.True(current.Active);
     }
 
+    // Phase 1's web posted activate and deactivate with no body and no content type. A tab still open from then must
+    // get a problem it can show (reload), not a bare 400 or 415.
+    [Fact]
+    public async Task BodylessLifecycleCallsFromOlderClientsGetAReloadProblem()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var id = await Create(owner, "jane.bodyless@example.com", "0711000007", []);
+        async Task AssertReloadProblem(string action, HttpContent? content)
+        {
+            using var response = await owner.PostAsync($"/setup/people/{id}/{action}", content);
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+            var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+            Assert.Contains("Reload before saving", problem!.Title);
+        }
+
+        await AssertReloadProblem("deactivate", null);
+        await AssertReloadProblem("deactivate", new ByteArrayContent([]));
+        Assert.True((await Find(owner, "jane.bodyless@example.com")).Active);
+
+        var person = await Find(owner, "jane.bodyless@example.com");
+        (await owner.PostAsJsonAsync($"/setup/people/{id}/deactivate", new { version = person.Version, reason = "Left the organization" })).EnsureSuccessStatusCode();
+        await AssertReloadProblem("activate", null);
+        await AssertReloadProblem("activate", new ByteArrayContent([]));
+        Assert.False((await Find(owner, "jane.bodyless@example.com")).Active);
+    }
+
     [Fact]
     public async Task SignInDetailsOfSomeoneHoldingMoreThanTheEditorCanGrantNeedAnOwner()
     {
