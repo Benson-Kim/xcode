@@ -1,19 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { PeopleAccessView } from "./PeopleAccessView";
-import { RevenuePage } from "./RevenuePage";
-import { OrganizationSettingsView } from "./OrganizationSettingsView";
-import { PreferencesView } from "./PreferencesView";
+import {
+  Component,
+  Suspense,
+  lazy,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { Brand } from "./Brand";
 import {
-  CompaniesPage,
-  ExpenseCategoriesPage,
-  HistoryPage,
-  RecurringPage,
-  VehiclesPage,
-} from "./setup";
-import {
+  Banner,
+  Button,
   Card,
   CardAction,
   CardGridSkeleton,
@@ -22,8 +22,10 @@ import {
   CardValue,
   ChevronIcon,
   Dialog,
+  FormActions,
   IconButton,
   ListSkeleton,
+  LoadingRegion,
   MenuIcon,
   PageHeader,
   ProgressBar,
@@ -50,6 +52,158 @@ import {
 } from "../lib/appearance";
 import type { PermissionGroup, View } from "../lib/types";
 import type { RevenueDashboard } from "@xcode/shared";
+
+// React keeps a failed lazy import for good, so each screen that failed to load leaves a fresh import here. Trying
+// again, or opening another page, swaps them in; never a render, which would retry in a loop while offline.
+const failedScreens = new Set<() => void>();
+function retryFailedScreens() {
+  failedScreens.forEach((retry) => retry());
+  failedScreens.clear();
+}
+
+// Each screen but the dashboard loads the first time it is opened, so the first load holds only the shell and the
+// dashboard. React.lazy rather than next/dynamic: in the app router next/dynamic is this same lazy and Suspense pair,
+// and plain lazy runs the same way under the tests.
+function lazyScreen<P extends object>(load: () => Promise<ComponentType<P>>) {
+  const attempt = (): ComponentType<P> =>
+    lazy(() =>
+      load().then(
+        (screen) => ({ default: screen }),
+        (reason: unknown) => {
+          failedScreens.add(() => (Loaded = attempt()));
+          throw reason;
+        },
+      ),
+    );
+  let Loaded = attempt();
+  return function Screen(props: P) {
+    return <Loaded {...props} />;
+  };
+}
+
+const RevenuePage = lazyScreen(() =>
+  import("./RevenuePage").then((module) => module.RevenuePage),
+);
+const PeopleAccessView = lazyScreen(() =>
+  import("./PeopleAccessView").then((module) => module.PeopleAccessView),
+);
+const OrganizationSettingsView = lazyScreen(() =>
+  import("./OrganizationSettingsView").then(
+    (module) => module.OrganizationSettingsView,
+  ),
+);
+const PreferencesView = lazyScreen(() =>
+  import("./PreferencesView").then((module) => module.PreferencesView),
+);
+const CompaniesPage = lazyScreen(() =>
+  import("./setup/CompaniesPage").then((module) => module.CompaniesPage),
+);
+const VehiclesPage = lazyScreen(() =>
+  import("./setup/VehiclesPage").then((module) => module.VehiclesPage),
+);
+const ExpenseCategoriesPage = lazyScreen(() =>
+  import("./setup/ExpenseCategoriesPage").then(
+    (module) => module.ExpenseCategoriesPage,
+  ),
+);
+const RecurringPage = lazyScreen(() =>
+  import("./setup/RecurringPage").then((module) => module.RecurringPage),
+);
+const HistoryPage = lazyScreen(() =>
+  import("./setup/HistoryPage").then((module) => module.HistoryPage),
+);
+
+// A screen's code that did not download: what Turbopack throws (a ChunkLoadError, "Failed to load chunk …"), what
+// webpack throws ("Loading chunk … failed") and what the browsers' own import() rejects with.
+function isLoadFailure(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.name === "ChunkLoadError" ||
+      /Loading chunk|Failed to load chunk|dynamically imported module|Importing a module script failed/i.test(
+        error.message,
+      ))
+  );
+}
+
+// After Try again, moves focus to the page's heading once it shows, or to its placeholder while it loads, rather than
+// leaving keyboard and screen-reader users on the page body.
+function FocusPage() {
+  useEffect(() => {
+    const main = document.querySelector("main");
+    const target =
+      main?.querySelector("h1") ??
+      main?.querySelector<HTMLElement>('[role="status"]');
+    if (!target) return;
+    target.tabIndex = -1;
+    target.focus();
+  }, []);
+  return null;
+}
+
+// Opens one page: placeholders while its code loads (each screen shows its own as soon as it has loaded, so until
+// then only its title's), and a problem inside the page if it fails, with the header and menu still working. Try again
+// renders it afresh, importing again a screen that did not download; a reload picks up a new release. React and
+// Next.js log each error caught here to the console.
+class PageBoundary extends Component<
+  { children: ReactNode },
+  { problem: "load" | "other" | null; retried: boolean }
+> {
+  state: { problem: "load" | "other" | null; retried: boolean } = {
+    problem: null,
+    retried: false,
+  };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { problem: isLoadFailure(error) ? "load" : "other" };
+  }
+
+  render() {
+    const { problem, retried } = this.state;
+    if (!problem)
+      return (
+        <Suspense
+          fallback={
+            <>
+              {retried && <FocusPage />}
+              <LoadingRegion label="Loading the page">
+                <Skeleton className="h-8 w-1/3" />
+              </LoadingRegion>
+            </>
+          }
+        >
+          {this.props.children}
+          {retried && <FocusPage />}
+        </Suspense>
+      );
+    return (
+      <section>
+        <Banner>
+          {problem === "load"
+            ? "This page could not be loaded. Check your connection and try again."
+            : "Something went wrong on this page."}
+        </Banner>
+        <FormActions className="mt-4">
+          <Button
+            // A retry that failed again keeps focus on Try again.
+            autoFocus={retried}
+            onClick={() => {
+              retryFailedScreens();
+              this.setState({ problem: null, retried: true });
+            }}
+          >
+            Try again
+          </Button>
+          {/* Offline, a reload would lose the app, not bring the page back. */}
+          {navigator.onLine && (
+            <Button tone="outline" onClick={() => window.location.reload()}>
+              Reload the app
+            </Button>
+          )}
+        </FormActions>
+      </section>
+    );
+  }
+}
 
 type NavItem = { id: View; label: string; permission?: string | string[] };
 
@@ -162,6 +316,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
     : "";
 
   function navigate(next: View, nextParams: ViewParams = {}) {
+    retryFailedScreens();
     setView(next);
     setParams(nextParams);
     setVisit((current) => current + 1);
@@ -302,13 +457,16 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                 />
               )}
               <main className="min-w-0 flex-1 px-8 pt-7 pb-12 max-[899px]:px-4 max-[899px]:pt-5 max-[899px]:pb-10">
-                <Page
-                  key={visit}
-                  view={view}
-                  params={params}
-                  sessionError={sessionError}
-                  onNavigate={navigate}
-                />
+                {/* Keyed on the visit, so a screen still loading shows placeholders, never the page it replaced, and a
+                    page that failed to load is left behind on the next one. */}
+                <PageBoundary key={visit}>
+                  <Page
+                    view={view}
+                    params={params}
+                    sessionError={sessionError}
+                    onNavigate={navigate}
+                  />
+                </PageBoundary>
                 <p className="mt-8 mb-0 text-xs text-grey">XCODE Web v0.9</p>
               </main>
             </div>
