@@ -11,9 +11,13 @@ public sealed record AccessRole(Guid Id, string Name, IReadOnlyList<string> Perm
 public sealed record ScopeCompanyOption(Guid Id, string Name);
 public sealed record ScopeVehicleOption(Guid Id, string Registration, Guid CompanyId);
 public sealed record ScopeOptions(IReadOnlyList<ScopeCompanyOption> Companies, IReadOnlyList<ScopeVehicleOption> Vehicles);
+// CompanyIds and VehicleIds hold only what the viewer can reach; OtherCompanies and OtherVehicles count what is hidden.
 public sealed record PersonDto(Guid Id, string FirstName, string LastName, string Email, string PhoneNumber,
     string Role, bool Active, string ScopeMode, IReadOnlyList<Guid> CompanyIds, IReadOnlyList<Guid> VehicleIds,
-    IReadOnlyList<string> Permissions, decimal? ApprovalLimit, bool HasPin, long Version);
+    IReadOnlyList<string> Permissions, decimal? ApprovalLimit, bool HasPin, long Version,
+    int OtherCompanies, int OtherVehicles);
+// The caller's own data scope: what the companies and vehicles lists would show them.
+public sealed record MyScope(bool AllCompanies, IReadOnlyList<ScopeCompanyOption> Companies, IReadOnlyList<ScopeVehicleOption> Vehicles);
 public sealed record SavePerson(string FirstName, string LastName, string Email, string PhoneNumber, string Role,
     string ScopeMode, List<Guid> CompanyIds, List<Guid> VehicleIds, List<string> Permissions, decimal? ApprovalLimit,
     long? Version = null);
@@ -93,13 +97,13 @@ public static class PermissionCatalog
 
     public static readonly IReadOnlyDictionary<string, string[]> RolePermissions = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
     {
-        ["Owner"] = All.Where(x => x is not ("dash.capture" or "dash.float" or "pettycash.spend")).ToArray(),
+        ["Owner"] = All.Where(x => x is not "dash.capture").ToArray(),
         ["Office admin"] =
         [
-            "dash.capture", "dash.revenue", "dash.costs", "dash.gaps", "dash.commitments", "dash.investment", "dash.edits",
-            "revenue.view", "revenue.capture", "revenue.no_earnings", "revenue.correct",
+            "dash.revenue", "dash.costs", "dash.gaps", "dash.commitments", "dash.edits",
+            "revenue.view", "revenue.correct",
             "expenses.view", "expenses.capture", "expenses.correct", "expenses.setup",
-            "bills.view", "bills.capture", "bills.approve",
+            "bills.view", "bills.capture",
             "commitments.view", "commitments.manage",
             "reports.view", "reports.export",
             "invest.view", "invest.manage",

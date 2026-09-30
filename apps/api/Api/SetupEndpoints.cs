@@ -51,6 +51,8 @@ public static class SetupEndpoints
             .Produces<IReadOnlyList<AccessRole>>().WithName("ListAccessRoles");
         group.MapGet("/access/scope-options", (AccessUseCases useCases, CancellationToken ct) => useCases.ScopeOptions(ct))
             .Produces<ScopeOptions>().WithName("GetAccessScopeOptions");
+        group.MapGet("/access/me", (AccessUseCases useCases, CancellationToken ct) => useCases.Me(ct))
+            .Produces<MyScope>().WithName("GetMyAccessScope");
         group.MapGet("/people", (AccessUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
             .Produces<Page<PersonDto>>().WithName("ListPeople");
         group.MapGet("/people/{id:guid}", (Guid id, AccessUseCases useCases, CancellationToken ct) => useCases.Get(id, ct))

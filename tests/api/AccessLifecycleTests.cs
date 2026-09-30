@@ -129,9 +129,12 @@ public sealed class AccessLifecycleTests : IDisposable
         using var clerk = await app.SignIn(RevenueClerk);
         Assert.Equal(HttpStatusCode.OK, (await clerk.GetAsync("/setup/access/catalog")).StatusCode);
 
+        // An Office admin does not capture revenue (Web v2.8), so they cannot take over a clerk's sign-in: only an Owner can.
         using var admin = await app.SignIn(OfficeAdmin);
         var person = await Find(admin, RevenueClerk);
-        Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/setup/people/{person.Id}", Edit(person, phoneNumber: "0799000111"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await admin.PutAsJsonAsync($"/setup/people/{person.Id}", Edit(person, phoneNumber: "0799000111"))).StatusCode);
+        using var owner = await app.SignIn(Owner);
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/setup/people/{person.Id}", Edit(person, phoneNumber: "0799000111"))).StatusCode);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await clerk.GetAsync("/setup/access/catalog")).StatusCode);
 
