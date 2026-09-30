@@ -200,6 +200,12 @@ C6 and C5's `returned` and `percentPaidOff`.
 - If time allows: fetch the Codex reviews on each PR. Fix every finding, and every similar code smell across the codebase, not only the flagged lines. Then push and verify.
 - The final subagent tasks: open a browser and visit every page and workflow on web (desktop and responsive widths) and on mobile. Take screenshots and check each against the designs (Web v2.8 and Mobile), fixing anything that looks wrong or improving on the design.
 - If the context grows large: compact, update this Status section, and continue in a new session from this file with the same instructions.
+- **Cost rules (2026-09-30) override the parallel work-package orchestration in this plan:**
+  - Work inline by default. At most one Sonnet subagent at a time, and at most 2 per session without asking.
+  - Run checks with condensed Bash output. Work on one stream at a time.
+  - Hand off at about 100k context or about 3 hours.
+  - Ask before bulk GitHub writes.
+  - Usage reports twice showed 100% of usage from subagent-heavy sessions, 97% from 8h+ sessions, 88% at >150k context and 82% from general-purpose agents.
 - Note: an earlier commit attempt made before this instruction was blocked by the permission check. Until a commit succeeds, all work lives uncommitted in the worktrees, and integration moves between worktrees as `git diff` / `git apply` patches.
 
 ## Status (update after every stage)
@@ -225,7 +231,7 @@ C6 and C5's `returned` and `percentPaidOff`.
   - Revenue: merges 80d2264 and cfed27b (settings into revenue), plus 207291e. Not pushed yet. All green: API 176 passed and 2 failed of 178 (the 2 are SQL Server), web 111/111, mobile 40/40, typecheck and eslint clean.
   - Running: WP-X (report v2 and investment returned, API and web) and the WP-M follow-up (offline lockout policy, wording, 503 message).
 - **Verification setup:**
-  - SQL Server is at localhost,1433 (sqlcmd available). Use throwaway databases only; never the user's `XCode` database.
+  - SQL Server is at localhost,1433 (sqlcmd available). **Use the one fixed `XCodeTest` database for every test, migration check and try-out; never create another** (user, 2026-09-30). Never migrate, seed or alter the user's `XCode`. Add `Connect Timeout=60`, because AUTO_CLOSE makes opening a database take 7–12 s.
   - Browsers: Playwright's Chromium is cached in `%LOCALAPPDATA%/ms-playwright` and Edge is installed. Use `npx -y playwright` in a scratch folder with `channel: "msedge"`.
   - The design HTML files can be opened in the same browser for side-by-side screenshots.
 
@@ -248,35 +254,53 @@ C6 and C5's `returned` and `percentPaidOff`.
     - API: 219/221 (the 2 are SQL Server environment tests). SQL Server tests pass with `SQLSERVER_TEST_CONNECTION` and invariant globalization off. Migrations up, down to develop and up again all pass. The Phase 1 phone contract holds.
     - Web: 137/137, next build OK.
     - Mobile: 63/63 (a flaky dashboard test was made deterministic). No native changes. **No expo-updates, so shipping to phones needs a new binary.**
-  - **In progress:**
-    - resolving the web E2E patch conflicts in 5 files (`p-e2e-web.patch`, applied with --3way);
-    - final API fixes: startup on a new database, forwarded headers so web users stop sharing one rate limit, pause shown on the causing attempt, automatic plus typed reasons, revenue history naming the vehicle, the demo fleet manager's scope.
-  - **Next:** run the full checks, commit, push revenue, PR #6 re-review, final report.
+  - **Finished and pushed:** web E2E fixes 11fba72, mobile E2E fixes c1f3f45, final API fixes 9785aca (startup on a new database, forwarded client address per web user, pause on the causing attempt, automatic plus typed reasons, revenue history naming the vehicle, demo fleet manager scope). Checks at 18019a2: API 233/233 (SQL Server included), web 148/148, mobile 63/63, shared 23/23, typecheck and eslint clean.
+  - Note: 9785aca touches access-owned (`AuthService`, `AccessUseCases`, `Program.cs`) and settings-owned (setup use cases, `DemoSeed`, web proxies) files but lives only on revenue, so PRs #4 and #5 alone don't carry it. Merging #6 (or all three in order) does.
 
-### Decisions for the user (collected)
-- D1. Legacy cost category → bucket mapping (A2).
-- D2. `EditedRecords` counts records for days in the period, while the design counts edits made in the period. Counting edits needs the business date of each edit, which isn't stored.
-- D3. Rounding: cells are shown to 2 dp, while the prototype rounds each day to whole KES.
-- D4. Vehicle lifecycle and revenue:
-  - A leave date in the past hides revenue already recorded.
-  - Moving the join date later hides earlier records.
-  - Restoring a vehicle turns its away days into missing days that block capture.
-- D5. An identical replay returns 200 even when the person could no longer make that change, and 409 is checked before 403 (both accepted for now).
-- D6. `AllowPinSignIn` is stored but not enforced, and PIN is the only sign-in method.
-- D7. How old mobile offline access may be before it is refused (Security review, High).
-- D8. Unsent phone captures are keyed by phone number and survive Switch user; they stay on the phone until that person signs in again. The alternative is a warning plus an explicit discard.
-- D9. Weeks are cached only in memory on the phone. After a cold start with no network, there is nothing to capture against. Persisting the vehicle list means caching finance data on the device (Safety SAFE-09).
-- D11. Should change-log people entries also require `people.view`? Today an all-company auditor without people.view sees email, phone and permissions.
-- D12. `PersonDto` returns a person's full company and vehicle id lists to a scoped viewer. Redact them, which needs a contract and web change?
-- D13. Mobile delivery: add `expo-updates` (a native change, needing one binary release) to allow JS updates later?
-- D14. Web CSP: needs nonce work in Next; not added.
-- D15. "Your access" lacks the "Can see" line, and the dashboard lacks the company selector, because the session carries no data scope (needs a session contract addition).
-- D10. Align the role default lists with Web v2.8? The Office admin has 5 extra permissions, and the design's Owner includes dash.float and pettycash.spend.
+- **Round 5 (2026-09-30):**
+  - Codex re-review requests on 2026-09-30 00:11, 23:37 and 02:00 UTC all hit "Codex usage limits", so 1b52ab2 (#4), 9f955b4 (#5) and everything after b8ad1ea on #6 were never reviewed. Re-requested on all three at 10:47 UTC.
+  - Every earlier Codex finding (#4: 3, #5: 12, #6: 4) was replied to with its fixing commit.
+  - Codex updates its summary comment in place (the table shows the last reviewed commit per review kind), so read that comment, not only new comments.
+  - Results: **#4 clean (👍 on 1b52ab2)**. **#5 (9f955b4):** 2 P2s: expense categories/items and companies choose stop/archive from the date-projected `active`, so a future stop or archive can't be cancelled. **#6 (18019a2):** 2 P1s: `body.ts` forwards a client-supplied `X-Forwarded-For` (spoofable rate-limit partitions), and the phone queue is keyed by phone number (captures orphaned when the number changes). 2 P2s: report postings grouped by `itemId` only, and a dashboard percent decimal→int overflow.
+  - **STOPPED at the user's request (session too heavy). State at handoff, all UNCOMMITTED and UNVERIFIED:**
+    - ~~`xcode-wt/settings`: PR #5 fixes~~ **Done in the next session: settings f948c9c pushed** (future stop/archive shown as pending with Restore/Turn on; `Stop`/`Archive` on another date → 400). API 170/171 (only the SQL Server env test, unaffected: no migration change), web typecheck clean, 105/105, eslint clean. Main folder fast-forwarded to f948c9c. Codex re-review not yet requested (ask first).
+    - `xcode-wt/revenue`: PR #6 fixes. **Next session:** the killed agent had left body.ts and the report grouping as tests only. Both were implemented and committed locally as **1019262** (web + API; not pushed). Web typecheck, 151/151 and eslint clean (`InvestViewer` "shows Vehicles in the menu" failed once under the full parallel run and passed on rerun, so it's flaky under load). API 233/234 (SQL Server env only). **Mobile queue keyed by user id: uncommitted, waiting for the user's try-out** (mobile typecheck, 65/65 and eslint clean). No migration of phone-number-keyed queues, because the queue never shipped. After the OK: commit the mobile part, then push revenue once.
+    - ~~`xcode-wt/access`: decisions D10, D12 and D15~~ **Done in the next session: access 7929372 pushed** (PR #4). The partial diff was reviewed and kept. D10 was checked against the Web v2.8 role table (exact match). API 123/124 (SQL Server env only). One test was updated for the D10 consequence below. Codex re-review not yet requested (ask first).
+    - **Still to do, in order:** (a) merge origin/access into settings, then do settings' decisions D6, D11, D12-web (show `otherCompanies`/`otherVehicles`, and hide roles the editor can't give), D14, D15-web ("Your access" from `/setup/access/me`) and D16. (b) Merge settings into revenue, then do D3, D4, D5, D7, D9 and the dashboard `companyId`. (c) Commit the mobile queue fix after the user's try-out and push revenue. (d) Ask before the Codex re-reviews and thread replies. (e) Add SQL Server migration tests on `XCodeTest`.
+  - The 19 earlier findings are all verified FIXED (a read-only check, one line each). Two lack tests: the b907c13 migration Down and the NormalizeSecurityPolicy migration SQL. Add SQL Server migration tests.
+  - Thread replies for those 19 are drafted in `scratchpad/replies.tsv` (session 4b939e6e). **The user rejected posting them in bulk. Ask before any GitHub write.**
+  - Next session, one step at a time, at most one Sonnet agent at once:
+    1. Finish and verify settings. Commit, push, then fast-forward the main folder.
+    2. Finish and verify revenue #6. Commit, and give the user a mobile try-out before pushing.
+    3. Reply in the Codex threads, after asking.
+    4. Implement the decisions per branch: access, then settings, then revenue.
+  - Main folder synced: local `settings` fast-forwarded to origin/settings 9f955b4. The user's superseded staged `Access.cs` and csproj edits were dropped (backup `main-folder-staged-backup.patch` in session scratchpad 4b939e6e). Their `design/` → `docs/design` move and review `.txt` files are kept uncommitted. After each settings push, `git merge --ff-only origin/settings` in the main folder keeps it in sync (their staged deletions don't collide).
+
+### Decisions (taken 2026-09-30, on the merits: spec, integrity, security)
+Each line gives the decision, then why, then the branch that implements it.
+- D1. **Keep the mapping** (RepairsAndUpkeep → Repairs and maintenance; RunningCosts, CrewCosts, FixedCommitments → Recurring charges). No legacy value is a loan, and guessing FixedCommitments = loans would misstate reports. Owners reclassify by picking an expense item on the next edit. No work.
+- D2. **Keep** counting records for days in the period that were edited after capture. Every revenue card is by the record's business date, and the card and permission speak of "records edited after capture". No work.
+- D3. **Keep 2 dp storage.** Display follows the organization's `numberDecimals` (whole amounts already show without decimals). The web capture input now matches the API and phone: more than 0, at most 2 dp. Rounding stored cents away would make totals disagree with records. *revenue (web)*
+- D4. **Recorded revenue never disappears.** A leave date on or before a recorded day, or a join date after the first recorded day, is refused (400 naming the day). Restoring a vehicle whose leave already took effect records the away period (leave date → return date, default the business date); away days are neither expected nor missing. The addendum keeps a departed vehicle in every past report. *revenue (API + web)*
+- D5. **Keep the identical replay = 200** (nothing changes, nothing is disclosed). **Move the permission checks before the version check,** so a 409 carrying `current` reaches only someone allowed to make that change. Authorization comes before state disclosure. *revenue (API)*
+- D6. **PIN is the only sign-in method,** so the server refuses `AllowPinSignIn = false` (400). The field stays for compatibility. An "off" switch that isn't enforced (SEC-01) is worse than none, and enforcing it would lock everyone out. *settings (API)*
+- D7. **Offline unlock expires 72 hours** after the person's last online sign-in or refresh; after that the phone asks to connect. Queued captures stay. Per SEC-03 and SAFE-09, 72 hours covers a weekend in the field. *revenue (mobile)*
+- D8. **Keep unsent captures** (now keyed by user id). Switch user warns with the count and whose they are; nothing is discarded. The addendum says "No entry is ever lost." *revenue (mobile)*
+- D9. **Persist a minimal capture list** in SecureStore: vehicle id, registration, company name, capturable days and permission flags, with no amounts, targets or totals, under the same 72-hour limit. This allows capture after an offline cold start without caching finance data (SAFE-09). *revenue (mobile)*
+- D10. **Align role defaults with Web v2.8.** Owner = every catalog key except `dash.capture`. Office admin drops dash.capture, dash.investment, revenue.capture, revenue.no_earnings and bills.approve. The design is the spec, and overrides still grant extras. *access*
+  - **Consequence (accepted, 2026-09-30):** under addendum §2 a non-Owner gives only roles whose defaults they hold, and changes sign-in details only for someone whose permissions they hold. So an Office admin can no longer give the Revenue clerk or Fleet manager role, or change those people's email or mobile; the Owner does. Both rules are spec text, and together they separate duties: whoever corrects revenue can't create or take over an account that captures it. The settings web should offer only the roles the editor can give.
+- D11. **The people section of the change log also needs `people.view`.** It carries contact details and permissions. *settings (API)*
+- D12. **`PersonDto` shows only companies and vehicles within the viewer's reach,** plus additive counts `otherCompanies` and `otherVehicles`. Saves keep out-of-reach assignments untouched, which is already the rule. Least privilege. *access (API), settings (web)*
+- D13. **Add `expo-updates` with the next binary,** which is needed anyway. **Needs the user's Expo account** (`eas init`, `eas update:configure`), so it is escalated with exact steps.
+- D14. **Nonce-based CSP** through Next 16's proxy: `script-src 'self' 'nonce-…' 'strict-dynamic'`, `style-src 'self' 'unsafe-inline'`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`, `form-action 'self'`, `connect-src 'self'`, `img-src 'self' data: blob:`, and `'unsafe-eval'` in development only. The app is an authenticated shell, so dynamic rendering costs nothing (SEC-07). *settings (web)*
+- D15. **New `GET /setup/access/me`** returns the caller's scope. `/auth/*` stays byte-for-byte for shipped phones. "Your access" shows "Can see", and the dashboard gets the company selector (the dashboard accepts `companyId`). *access (API), settings (web "Your access"), revenue (dashboard API + web)*
+- D16 (new). **A scheduled item's stop dated after the business date can be cancelled** ("Cancel stop"). A stop already in effect stays final. This matches companies and expense items. *settings*
 
 ### Progress
 - **WP-M done** (uncommitted, revenue worktree): 40 of 40 mobile tests, shared 22 of 22, eslint clean, mobile typecheck clean.
 - **Environment:** the revenue worktree's `node_modules` is now a junction to `xcode-wt/nm-rev`, built by `xcode-wt/nm-build.cjs`, so that `@xcode/shared` resolves to the worktree's own packages/shared. Do the same for any worktree whose shared package differs from the main folder's.
 - **Contract gap:** the phone needs `lockoutThreshold` and `lockoutMinutes` in `/setup/appearance`. Asked of WP-S, with a mobile follow-up after the merge.
-- [ ] WP-I merges
-- [ ] WP-WR, WP-X
-- [ ] WP-V verification and the final report
+- [x] WP-I merges (develop → access → settings → revenue, all ancestors of origin/revenue)
+- [x] WP-WR, WP-X
+- [x] WP-V verification (API, web, mobile verifiers; web and mobile E2E screenshot passes)
+- [ ] Codex round 5 on the current heads, then the final report
