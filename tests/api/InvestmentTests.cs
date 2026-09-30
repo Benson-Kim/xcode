@@ -102,6 +102,32 @@ public sealed class InvestmentTests : IDisposable
     }
 
     [Fact]
+    public async Task AnInvestmentViewerFindsTheVehiclesWithoutTheirTargetsOrScheduledItems()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var (north, mine, _) = await Fleet(owner);
+
+        // The list lets them reach each vehicle's Investment tab; its weekly targets are vehicles.manage's to see.
+        await Scope(RevenueClerk, allCompanies: false, "invest.view", north);
+        using var viewer = await app.SignIn(RevenueClerk);
+        var listed = await viewer.GetFromJsonAsync<JsonElement>("/setup/vehicles");
+        var row = Assert.Single(listed.GetProperty("items").EnumerateArray());
+        Assert.Equal(mine, row.GetProperty("id").GetGuid());
+        Assert.Equal("KDA 482M", row.GetProperty("registration").GetString());
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("weeklyTarget").ValueKind);
+        Assert.Empty(row.GetProperty("targets").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("recurringItems").ValueKind);
+
+        // A vehicle manager still sees them.
+        var managed = await owner.GetFromJsonAsync<JsonElement>("/setup/vehicles");
+        var same = managed.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == mine);
+        Assert.True(same.GetProperty("weeklyTarget").GetDecimal() > 0);
+        Assert.NotEmpty(same.GetProperty("targets").EnumerateArray());
+        Assert.Equal(JsonValueKind.Number, same.GetProperty("recurringItems").ValueKind);
+    }
+
+    [Fact]
     public async Task AScopedPersonSeesAndChangesOnlyTheirVehiclesInvestment()
     {
         await app.SeedDemo();

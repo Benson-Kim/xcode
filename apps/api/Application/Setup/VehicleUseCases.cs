@@ -12,7 +12,13 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
     {
         await SetupPermissions.RequireAny(organizations, actor, Listers, ct);
         SetupPagination.Validate(page, pageSize);
-        return await repository.Vehicles(actor, page, pageSize, ct);
+        var vehicles = await repository.Vehicles(actor, page, pageSize, ct);
+        // Reaching a vehicle's investment needs its registration and company, not the targets it is run against or
+        // its scheduled items.
+        return actor.Permissions.Contains("vehicles.manage") ? vehicles : vehicles with
+        {
+            Items = [.. vehicles.Items.Select(v => v with { WeeklyTarget = null, Targets = [], RecurringItems = null })]
+        };
     }, ct);
 
     public Task<IReadOnlyList<CompanyOption>> CompanyOptions(CancellationToken ct) =>

@@ -178,7 +178,7 @@ public sealed class RevenueCaptureTests : IDisposable
         var history = await owner.GetFromJsonAsync<JsonElement>("/setup/history?pageSize=100");
         var reasons = history.GetProperty("items").EnumerateArray()
             .Where(x => x.GetProperty("section").GetString() == "revenue")
-            .Select(x => x.GetProperty("reason").GetString())
+            .Select(x => x.GetProperty("reason").GetString()!)
             .ToArray();
         Assert.Equal(["Corrected revenue after capture", "Updated revenue", "Recorded revenue"], reasons);
     }
@@ -378,9 +378,9 @@ public sealed class RevenueCaptureTests : IDisposable
             Assert.Equal(JsonValueKind.Null, edits.GetProperty(hidden).ValueKind);
         Assert.Equal(0, edits.GetProperty("editedRecords").GetInt32());
 
-        // A clerk sees the capture and gaps cards, but not the edits card.
+        // A clerk sees the capture and gaps cards, but not the revenue or edits card.
         var capture = await Dashboard(clerk, "week");
-        Assert.Equal(2000m, capture.GetProperty("revenue").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, capture.GetProperty("revenue").ValueKind);
         Assert.Equal(1, capture.GetProperty("vehiclesToday").GetInt32());
         Assert.Equal(1, capture.GetProperty("missingDays").GetInt32());
         Assert.Equal(JsonValueKind.Null, capture.GetProperty("editedRecords").ValueKind);

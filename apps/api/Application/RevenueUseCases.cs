@@ -15,19 +15,21 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
     public Task<RevenueDashboardDto> Dashboard(string period, CancellationToken ct) =>
         execution.ReadAny(DashboardPermissions, async actor => Visible(actor, await repository.Dashboard(actor, period, ct)), ct);
 
-    // Each card's figures reach only the people who may see that card; the rest are null.
+    // Each card's figures reach only the people who hold that card's own permission; the rest are null. Capture
+    // (the Revenue clerk's card) never opens the revenue totals, and the revenue card never opens the capture counts.
     private static RevenueDashboardDto Visible(SetupActor actor, RevenueDashboardDto dashboard)
     {
-        var totals = actor.Permissions.Contains("dash.revenue") || actor.Permissions.Contains("dash.capture");
+        var revenue = actor.Permissions.Contains("dash.revenue");
+        var capture = actor.Permissions.Contains("dash.capture");
         var gaps = actor.Permissions.Contains("dash.gaps");
         var edits = actor.Permissions.Contains("dash.edits");
         return dashboard with
         {
-            Revenue = totals ? dashboard.Revenue : null,
-            Expected = totals ? dashboard.Expected : null,
-            Percent = totals ? dashboard.Percent : null,
-            CapturedToday = totals ? dashboard.CapturedToday : null,
-            VehiclesToday = totals ? dashboard.VehiclesToday : null,
+            Revenue = revenue ? dashboard.Revenue : null,
+            Expected = revenue ? dashboard.Expected : null,
+            Percent = revenue ? dashboard.Percent : null,
+            CapturedToday = capture ? dashboard.CapturedToday : null,
+            VehiclesToday = capture ? dashboard.VehiclesToday : null,
             MissingDays = gaps ? dashboard.MissingDays : null,
             MissingVehicles = gaps ? dashboard.MissingVehicles : null,
             EditedRecords = edits ? dashboard.EditedRecords : null
@@ -54,13 +56,13 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
                 throw new RevenueConflictException(RevenueCellDto.For(actor, vehicle, date, existing, null));
 
             if (entry.Reason is not null && !actor.Permissions.Contains("revenue.no_earnings"))
-                throw new UnauthorizedAccessException();
+                throw Needs("Recording a no-earnings reason", "revenue.no_earnings");
             var canCapture = actor.Permissions.Contains("revenue.capture");
             var canCorrect = actor.Permissions.Contains("revenue.correct");
             if (existing is null && !canCapture)
-                throw new UnauthorizedAccessException();
+                throw Needs("Recording a day that has no record yet", "revenue.capture");
             if (existing is not null && date < actor.Today && !canCorrect)
-                throw new UnauthorizedAccessException();
+                throw Needs("Changing a past day", "revenue.correct");
 
             if (existing is null)
             {
@@ -87,6 +89,10 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
             await repository.RecordChange(actor, existing.Id, before, after, reason, ct);
             return new RevenueSaved(existing.Id, existing.Version);
         }, ct);
+
+    // A refusal names the permission it needs, as People and access labels it, so the phone and the web can say so.
+    private static UnauthorizedAccessException Needs(string action, string permission) =>
+        new($"{action} needs the permission \"{PermissionCatalog.Groups.SelectMany(g => g.Items).Single(i => i.Key == permission).Label}\".");
 
     private static object Snapshot(RevenueRecord record) => new
     {

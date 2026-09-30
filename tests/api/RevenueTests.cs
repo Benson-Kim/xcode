@@ -97,7 +97,8 @@ public sealed class RevenueTests : IDisposable
         Assert.NotNull(dashboard);
         Assert.Equal(2700m, dashboard!.Revenue);
         Assert.Equal(3000m, dashboard.Expected);
-        Assert.Equal(1, dashboard.CapturedToday);
+        // The Owner role has no dash.capture, so the capture card's counts are left out.
+        Assert.Null(dashboard.CapturedToday);
         Assert.Equal(0, dashboard.MissingDays);
         Assert.Equal(1, dashboard.EditedRecords);
 
@@ -134,7 +135,7 @@ public sealed class RevenueTests : IDisposable
     private sealed record RevenueDashboardResponse(
         decimal Revenue,
         decimal Expected,
-        int CapturedToday,
+        int? CapturedToday,
         int MissingDays,
         int EditedRecords);
 

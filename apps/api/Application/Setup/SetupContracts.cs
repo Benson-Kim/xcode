@@ -6,8 +6,10 @@ public sealed record Page<T>(IReadOnlyList<T> Items, int PageNumber, int PageSiz
 public sealed record CompanyDto(Guid Id, string Name, int VehicleCount, bool Active, DateOnly? ArchivedOn);
 public sealed record CompanyOption(Guid Id, string Name);
 public sealed record TargetDto(DateOnly EffectiveFrom, decimal WeeklyAmount, int Revision);
+// The weekly target and the scheduled item count are null, and the targets empty, for someone who lists vehicles only
+// to reach their investment (invest.view without vehicles.manage).
 public sealed record VehicleDto(Guid Id, Guid CompanyId, string CompanyName, string Registration, DateOnly JoinedOn,
-    DateOnly? LeftOn, bool Active, decimal WeeklyTarget, IReadOnlyList<TargetDto> Targets, int RecurringItems);
+    DateOnly? LeftOn, bool Active, decimal? WeeklyTarget, IReadOnlyList<TargetDto> Targets, int? RecurringItems);
 // One change-log line: who changed which setup record, and the reason they gave.
 public sealed record HistoryEntry(long Version, string Section, Guid EntityId, string Reason, DateTimeOffset OccurredAt, Guid ActorId, string ActorName,
     string? Before = null, string? After = null);
