@@ -192,9 +192,10 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         if (input.Version is null || input.Version != target.Membership.Version)
             throw new DbUpdateConcurrencyException("This person's access changed. Reload before saving.");
 
+        // Removing access needs a typed reason, which follows the automatic one rather than replacing it.
         var reason = active
             ? $"Restored access for {before.Name}"
-            : SetupPagination.Reason(input.Reason);
+            : SetupPagination.Automatic($"Removed access for {before.Name}", SetupPagination.Reason(input.Reason));
 
         if (active)
         {

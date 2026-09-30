@@ -24,3 +24,11 @@ export async function readLimitedBody(request: NextRequest): Promise<string | nu
   }
   return Buffer.concat(chunks).toString("utf8");
 }
+
+// Names the browser to the API, which limits sign-in tries per client and would otherwise see only this proxy. Next.js
+// fills x-forwarded-for from the connection unless a proxy in front of it already set one; the first entry is the
+// browser. The API believes the header only from a proxy it trusts (ForwardedHeaders:KnownProxies).
+export function forwardedFor(request: NextRequest): Record<string, string> {
+  const address = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || request.headers.get("x-real-ip")?.trim();
+  return address ? { "X-Forwarded-For": address } : {};
+}

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Auth.Application.Setup;
 using Auth.Domain;
@@ -83,9 +84,11 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
             }
 
             var after = Snapshot(existing);
+            // The change log names the vehicle and the day, as in "Corrected revenue for KDA 482M on 28 Sep 2026".
+            var which = $"for {vehicle.Registration} on {date.ToString("d MMM yyyy", CultureInfo.InvariantCulture)}";
             var reason = before is null
-                ? entry.Reason is null ? "Recorded revenue" : $"Recorded no revenue: {entry.DisplayReason}"
-                : existing.BusinessDate < actor.Today ? "Corrected revenue after capture" : "Updated revenue";
+                ? entry.Reason is null ? $"Recorded revenue {which}" : $"Recorded no revenue {which}: {entry.DisplayReason}"
+                : existing.BusinessDate < actor.Today ? $"Corrected revenue {which}" : $"Updated revenue {which}";
             await repository.RecordChange(actor, existing.Id, before, after, reason, ct);
             return new RevenueSaved(existing.Id, existing.Version);
         }, ct);

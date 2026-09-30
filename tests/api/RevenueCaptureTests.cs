@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -180,7 +181,9 @@ public sealed class RevenueCaptureTests : IDisposable
             .Where(x => x.GetProperty("section").GetString() == "revenue")
             .Select(x => x.GetProperty("reason").GetString()!)
             .ToArray();
-        Assert.Equal(["Corrected revenue after capture", "Updated revenue", "Recorded revenue"], reasons);
+        string Day(DateOnly date) => date.ToString("d MMM yyyy", CultureInfo.InvariantCulture);
+        Assert.Equal([$"Corrected revenue for KAA 141A on {Day(today.AddDays(-1))}", $"Updated revenue for KAA 141A on {Day(today)}",
+            $"Recorded revenue for KAA 141A on {Day(today)}"], reasons);
     }
 
     [Fact]

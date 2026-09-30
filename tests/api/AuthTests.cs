@@ -27,9 +27,11 @@ public sealed class AuthTests : IDisposable
         Assert.NotNull(body);
         return (response.StatusCode, body);
     }
+    // Five wrong PINs on the trusted phone: the fifth starts the pause, and already shows its timer.
     private async Task Pause(string path = "sign-in")
     {
-        for (var i = 0; i < 5; i++) Assert.Equal(HttpStatusCode.Unauthorized, (await Post(path, Request(pin: "9998"))).Status);
+        for (var i = 0; i < 4; i++) Assert.Equal(HttpStatusCode.Unauthorized, (await Post(path, Request(pin: "9998"))).Status);
+        Assert.Equal((HttpStatusCode)423, (await Post(path, Request(pin: "9998"))).Status);
     }
     // Everything a caller can see of a response, to compare two byte for byte.
     private async Task<string> Seen(string path, AuthRequest request)
@@ -67,6 +69,35 @@ public sealed class AuthTests : IDisposable
         Assert.Equal("paused", trusted.Body.Status);
         Assert.Equal(900, trusted.Body.RetryAfterSeconds);
         Assert.Equal((HttpStatusCode)423, (await Post("unlock")).Status);
+    }
+
+    [Theory]
+    [InlineData("sign-in")]
+    [InlineData("unlock")]
+    public async Task TheWrongPinThatStartsAPauseShowsTheTimerOnATrustedDevice(string path)
+    {
+        await app.Seed();
+        for (var i = 0; i < 4; i++) Assert.Equal(HttpStatusCode.Unauthorized, (await Post(path, Request(pin: "9998"))).Status);
+
+        // The fifth wrong PIN starts the pause, and the person sees the timer now rather than on their next try.
+        var paused = await Post(path, Request(pin: "9998"));
+        Assert.Equal((HttpStatusCode)423, paused.Status);
+        Assert.Equal("paused", paused.Body.Status);
+        Assert.Equal(900, paused.Body.RetryAfterSeconds);
+        await app.WithDb(async db => Assert.Equal(app.Clock.UtcNow.AddMinutes(15), (await db.Users.SingleAsync()).PausedUntil));
+    }
+
+    [Theory]
+    [InlineData("sign-in")]
+    [InlineData("unlock")]
+    public async Task TheWrongPinThatStartsAPauseLooksLikeAnUnknownNumberOnAnotherDevice(string path)
+    {
+        await app.Seed();
+        for (var i = 0; i < 4; i++) await Post(path, Request(pin: "9998", device: "stranger"));
+
+        // Anywhere but a trusted device, the try that starts the pause answers exactly as a number with no account does.
+        Assert.Equal(await Seen(path, Request(phoneNumber: Unknown, pin: "9998", device: "stranger")), await Seen(path, Request(pin: "9998", device: "stranger")));
+        await app.WithDb(async db => Assert.Equal(app.Clock.UtcNow.AddMinutes(15), (await db.Users.SingleAsync()).PausedUntil));
     }
 
     [Fact]
@@ -440,7 +471,8 @@ public sealed class AuthTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => app.Policy(p => p.LockoutMinutes = 61));
         await app.Policy(p => { p.LockoutThreshold = 3; p.LockoutMinutes = 60; });
 
-        for (var i = 0; i < 3; i++) Assert.Equal(HttpStatusCode.Unauthorized, (await Post("sign-in", Request(pin: "9998"))).Status);
+        for (var i = 0; i < 2; i++) Assert.Equal(HttpStatusCode.Unauthorized, (await Post("sign-in", Request(pin: "9998"))).Status);
+        Assert.Equal((HttpStatusCode)423, (await Post("sign-in", Request(pin: "9998"))).Status);
         var paused = await Post("sign-in");
         Assert.Equal((HttpStatusCode)423, paused.Status);
         Assert.Equal(3600, paused.Body.RetryAfterSeconds);

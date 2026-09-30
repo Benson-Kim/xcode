@@ -79,7 +79,7 @@ public static class OrganizationEndpoints
                // Saving what is already stored changes nothing, so it adds no version or change-log entry.
                if (before == after)
                     return Results.Ok(new SettingsSectionResponse(section));
-               RecordChange(db, context, organization, clock, section, before, after, reason ?? SetupPagination.Automatic(AutomaticReason(section, before, after)));
+               RecordChange(db, context, organization, clock, section, before, after, SetupPagination.Automatic(AutomaticReason(section, before, after), reason));
                await db.SaveChangesAsync(ct);
                return Results.Ok(new SettingsSectionResponse(section));
           })
@@ -92,7 +92,7 @@ public static class OrganizationEndpoints
           group.MapPut("/organization/logo", async (SaveLogo input, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
                await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
-               var reason = SetupPagination.OptionalReason(input.Reason) ?? "Uploaded a new logo";
+               var reason = SetupPagination.Automatic("Uploaded a new logo", SetupPagination.OptionalReason(input.Reason));
                var organization = await db.Organizations.SingleAsync(ct);
                var uploaded = OrganizationLogo.FromDataUrl(context.OrganizationId, input.DataUrl, clock.UtcNow);
                var existing = await db.Logos.SingleOrDefaultAsync(ct);
@@ -109,7 +109,7 @@ public static class OrganizationEndpoints
           group.MapDelete("/organization/logo", async (string? reason, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
                await EnsurePermission(organizations, context.ActorId, "organization.manage", ct);
-               var changeReason = SetupPagination.OptionalReason(reason) ?? "Removed the logo";
+               var changeReason = SetupPagination.Automatic("Removed the logo", SetupPagination.OptionalReason(reason));
                var existing = await db.Logos.SingleOrDefaultAsync(ct);
                if (existing is null)
                     return Results.Ok(new LogoResponse(null));
@@ -241,7 +241,7 @@ public static class OrganizationEndpoints
           ["allowPinSignIn"] = "PIN sign-in",
      };
 
-     // Contract C7: without a typed reason, the change log says what changed, such as "Changed the time zone to UTC".
+     // Contract C7: the change log says what changed, such as "Changed the time zone to UTC", and a typed reason follows it.
      private static string AutomaticReason(string section, string before, string after)
      {
           if (section == "businessDate")

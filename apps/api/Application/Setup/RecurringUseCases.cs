@@ -1,3 +1,4 @@
+using System.Globalization;
 using Auth.Domain.Setup;
 
 namespace Auth.Application.Setup;
@@ -15,7 +16,7 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
 
     public Task<Guid> Save(Guid? id, SaveRecurring input, CancellationToken ct) => execution.Write("commitments.manage", async actor =>
     {
-        var reason = SetupPagination.OptionalReason(input.Reason);
+        var typed = SetupPagination.OptionalReason(input.Reason);
         var definition = await Definition(actor, input, ct);
 
         var item = id is null ? null : await repository.RecurringItem(actor, id.Value, ct) ?? throw new KeyNotFoundException();
@@ -49,25 +50,29 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
             if (Same(latest, definition)) return item.Id;
             item.Revise(definition, actor.Today);
         }
-        reason ??= SetupPagination.Automatic(latest is null
+        var reason = SetupPagination.Automatic(latest is null
             ? $"Added scheduled {(definition.Kind == RecurringKind.Savings ? "saving" : "expense")} {definition.Name.Trim()}"
-            : Changed(latest, definition));
+            : Changed(latest, definition), typed);
         await repository.RecordChange(actor, "recurring", item.Id, before, Snapshot(item), reason, ct);
         return item.Id;
     }, ct);
 
     public Task<Guid> Stop(Guid id, StopRecurring input, CancellationToken ct) => execution.Write("commitments.manage", async actor =>
     {
-        var reason = SetupPagination.Reason(input.Reason);
+        var typed = SetupPagination.Reason(input.Reason);
         if (!input.Confirmed) throw new ArgumentException("Confirm stopping this item. Past postings are retained; no posting occurs from today.");
         var item = await repository.RecurringItem(actor, id, ct) ?? throw new KeyNotFoundException();
         // Only someone who can see every vehicle on the item may stop it; one read for all of them.
-        var shares = item.Versions.OrderByDescending(v => v.Revision).First().Allocations;
+        var latest = item.Versions.OrderByDescending(v => v.Revision).First();
+        var shares = latest.Allocations;
         var visible = await repository.VehiclesById(actor, shares.Select(a => a.VehicleId), ct);
         if (shares.Any(share => !visible.ContainsKey(share.VehicleId)))
             throw new UnauthorizedAccessException();
         var before = Snapshot(item);
-        if (item.Stop(actor.Today)) await repository.RecordChange(actor, "recurring", item.Id, before, Snapshot(item), reason, ct);
+        // Stopping needs a typed reason, which follows the automatic one rather than replacing it.
+        if (item.Stop(actor.Today))
+            await repository.RecordChange(actor, "recurring", item.Id, before, Snapshot(item),
+                SetupPagination.Automatic($"Stopped {latest.Name} from {actor.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}", typed), ct);
         return item.Id;
     }, ct);
 

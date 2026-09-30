@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using Auth.Domain;
@@ -104,9 +105,14 @@ public sealed class RevenueTests : IDisposable
 
         var history = await client.GetFromJsonAsync<HistoryPage>("/setup/history?pageSize=100");
         var revenueHistory = history!.Items.Where(x => x.Section == "revenue").ToList();
-        Assert.Equal(4, revenueHistory.Count);
-        Assert.Contains(revenueHistory, x => x.Reason == "Corrected revenue after capture" &&
-            x.Before is not null && x.After is not null);
+        // Newest first; each names the vehicle and the day, so the change log says which record changed.
+        string Day(DateOnly date) => date.ToString("d MMM yyyy", CultureInfo.InvariantCulture);
+        Assert.Equal([
+            $"Corrected revenue for KQA 321M on {Day(joined)}",
+            $"Recorded revenue for KQA 321M on {Day(businessDate)}",
+            $"Recorded no revenue for KQA 321M on {Day(joined.AddDays(1))}: Garage",
+            $"Recorded revenue for KQA 321M on {Day(joined)}"], revenueHistory.Select(x => x.Reason));
+        Assert.True(revenueHistory[0] is { Before: not null, After: not null });
     }
 
     private sealed record IdResponse(Guid Id);

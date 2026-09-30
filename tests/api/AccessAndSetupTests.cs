@@ -401,7 +401,7 @@ public sealed class AccessAndSetupTests : IDisposable
 
         var history = await owner.GetFromJsonAsync<JsonElement>("/setup/history");
         var entry = history.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("section").GetString() == "securityPolicy");
-        Assert.Equal("Tighten lockout after audit", entry.GetProperty("reason").GetString());
+        Assert.Equal("Changed the wrong PIN tries before a pause to 3. Reason: Tighten lockout after audit.", entry.GetProperty("reason").GetString());
         Assert.Equal("Antony Maina", entry.GetProperty("actorName").GetString());
         await app.WithDb(async db =>
         {

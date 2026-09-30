@@ -51,7 +51,7 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         var people = (await History(owner)).Where(x => x.Section == "people").ToList();
         Assert.All(people, x => Assert.Equal(id, x.EntityId));
         Assert.Equal(
-            ["Left the organization", "Signed Jane Njeri out of every device", "Changed role for Jane Njeri", "Added Jane Njeri as Revenue clerk"],
+            ["Removed access for Jane Njeri. Reason: Left the organization.", "Signed Jane Njeri out of every device", "Changed role for Jane Njeri", "Added Jane Njeri as Revenue clerk"],
             people.Select(x => x.Reason));
         Assert.All(people, x => Assert.Equal("Antony Maina", x.ActorName));
 
@@ -129,7 +129,7 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         }
         var companies = (await owner.GetFromJsonAsync<Page<CompanyDto>>("/setup/companies"))!.Items;
         Assert.Equal(["North Star", "South Line"], companies.Select(x => x.Name).Order());
-        Assert.Equal(2, (await History(owner)).Count(x => x.Reason == "Rename"));
+        Assert.Equal(2, (await History(owner)).Count(x => x.Reason is "Renamed company North to North Star. Reason: Rename." or "Renamed company South to South Line. Reason: Rename."));
 
         // A collision that keeps happening gives up after three retries.
         app.Database.Reset();

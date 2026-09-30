@@ -97,7 +97,7 @@ public sealed class OrganizationSettingsTests : IDisposable
         using var history = JsonDocument.Parse(await (await client.GetAsync("/setup/history")).Content.ReadAsStringAsync());
         Assert.Contains(history.RootElement.GetProperty("items").EnumerateArray(),
             item => item.GetProperty("section").GetString() == "businessDate" &&
-                    item.GetProperty("reason").GetString() == "Reconcile the prior business day");
+                    item.GetProperty("reason").GetString() == $"Set the business date to {businessDate:yyyy-MM-dd}. Reason: Reconcile the prior business day.");
     }
 
     // A frozen business date can move forward up to the organization's own calendar date, so the settings say what it is.

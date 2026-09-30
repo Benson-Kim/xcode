@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import type { AuthRequest, AuthResponse } from "@xcode/shared";
-import { readLimitedBody } from "../../body";
+import { forwardedFor, readLimitedBody } from "../../body";
 
 const allowed = new Set([
   "sign-in",
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
   if (!access) return NextResponse.json({ status: "authentication_failed" }, { status: 401 });
   try {
     const response = await fetch(`${process.env.API_URL || "http://localhost:5000"}/auth/session`, {
-      headers: { Authorization: `Bearer ${access}` },
+      headers: { Authorization: `Bearer ${access}`, ...forwardedFor(request) },
       cache: "no-store",
       signal: AbortSignal.timeout(15_000),
     });
@@ -116,6 +116,7 @@ export async function POST(
         cache: "no-store",
         headers: {
           "Content-Type": "application/json",
+          ...forwardedFor(request),
           ...(jar.get("access")
             ? { Authorization: `Bearer ${jar.get("access")!.value}` }
             : {}),

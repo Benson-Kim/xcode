@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.RateLimiting;
@@ -6,7 +7,10 @@ using Auth.Application;
 using Auth.Domain;
 using Auth.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.IdentityModel.Tokens;
 
 DotNetEnv.Env.NoClobber().TraversePath().Load();
@@ -36,11 +40,26 @@ if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Te
 else builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddDbContext<AuthDb>(o => o.UseSqlServer(builder.Configuration.GetConnectionString("Auth")));
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? []).AllowAnyHeader().AllowAnyMethod()));
+// The web app's sign-ins all reach the API from its Next.js proxy, which names the browser's address in X-Forwarded-For.
+// Only a configured proxy (ForwardedHeaders:KnownProxies, loopback when unset) is believed, so the rate limit below
+// counts each client separately, and an X-Forwarded-For sent by anyone else is ignored.
+var knownProxies = (builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() is { Length: > 0 } configured ? configured : ["127.0.0.1", "::1"])
+    .Select(x => IPAddress.TryParse(x, out var address) ? address : throw new InvalidOperationException($"ForwardedHeaders:KnownProxies has \"{x}\", which is not an IP address."))
+    .ToArray();
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+    o.KnownIPNetworks.Clear();
+    o.KnownProxies.Clear();
+    foreach (var proxy in knownProxies) o.KnownProxies.Add(proxy);
+});
+var authPermitLimit = builder.Configuration.GetValue<int?>("RateLimiting:AuthPermitLimit") ?? (builder.Environment.IsEnvironment("Testing") ? 10000 : 30);
+if (authPermitLimit <= 0) throw new InvalidOperationException("RateLimiting:AuthPermitLimit must be positive.");
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = 429;
     o.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-        _ => new FixedWindowRateLimiterOptions { PermitLimit = builder.Environment.IsEnvironment("Testing") ? 10000 : 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = authPermitLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o =>
 {
@@ -77,6 +96,8 @@ builder.Services.AddOpenApi(OpenApiDocumentation.Configure);
 var app = builder.Build();
 // Codes sent after their reply are still going out at shutdown; give them a moment rather than drop them.
 app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<VerificationMailer>().Idle().Wait(TimeSpan.FromSeconds(10)));
+// First, so everything after it (the rate limiter above all) sees the client's address rather than the proxy's.
+app.UseForwardedHeaders();
 app.UseExceptionHandler();
 app.UseCors();
 app.UseRateLimiter();
@@ -95,12 +116,15 @@ if (!app.Environment.IsEnvironment("Testing"))
     await using var scope = app.Services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<AuthDb>();
     // 20260924172309 was renamed from Phase1Setup to OrganizationsAndFleet. Databases that applied it under the
-    // old name must not run it again; this is a no-op everywhere else.
-    await db.Database.ExecuteSqlRawAsync("""
-        IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NOT NULL
-            UPDATE [__EFMigrationsHistory] SET [MigrationId] = N'20260924172309_OrganizationsAndFleet'
-            WHERE [MigrationId] = N'20260924172309_Phase1Setup'
-        """);
+    // old name must not run it again; this is a no-op everywhere else. A database that does not exist yet has nothing to
+    // rename (and cannot be opened), so MigrateAsync below creates it. ExistsAsync is false only for a missing database;
+    // any other connection failure still stops startup here.
+    if (await db.Database.GetService<IRelationalDatabaseCreator>().ExistsAsync())
+        await db.Database.ExecuteSqlRawAsync("""
+            IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NOT NULL
+                UPDATE [__EFMigrationsHistory] SET [MigrationId] = N'20260924172309_OrganizationsAndFleet'
+                WHERE [MigrationId] = N'20260924172309_Phase1Setup'
+            """);
     await db.Database.MigrateAsync();
     if (app.Environment.IsDevelopment()) await DemoSeed.Run(db);
     string? Option(string name) => Array.IndexOf(args, name) is var at and >= 0 && at + 1 < args.Length && !args[at + 1].StartsWith("--") ? args[at + 1] : null;

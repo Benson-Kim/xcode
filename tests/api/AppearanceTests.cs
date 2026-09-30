@@ -83,7 +83,7 @@ public sealed class AppearanceTests : IDisposable
 
         var history = await owner.GetFromJsonAsync<JsonElement>("/setup/history");
         var reasons = history.GetProperty("items").EnumerateArray().Select(entry => entry.GetProperty("reason").GetString()).Reverse().ToList();
-        Assert.Equal(["Uploaded a new logo", "Removed the logo", "New brand for 2027", "Brand withdrawn"], reasons.Skip(reasons.Count - 4));
+        Assert.Equal(["Uploaded a new logo", "Removed the logo", "Uploaded a new logo. Reason: New brand for 2027.", "Removed the logo. Reason: Brand withdrawn."], reasons.Skip(reasons.Count - 4));
     }
 
     public void Dispose() => app.Dispose();

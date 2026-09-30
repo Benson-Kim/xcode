@@ -13,7 +13,7 @@ public sealed record VehicleDto(Guid Id, Guid CompanyId, string CompanyName, str
 // One change-log line: who changed which setup record, and the reason they gave.
 public sealed record HistoryEntry(long Version, string Section, Guid EntityId, string Reason, DateTimeOffset OccurredAt, Guid ActorId, string ActorName,
     string? Before = null, string? After = null);
-// Reasons are optional on these saves (contract C7): without one, the change log gets an automatic reason.
+// Reasons are optional on these saves (contract C7): the change log always gets an automatic reason, and a typed one follows it.
 public sealed record SaveCompany(string Name, string? Reason = null);
 public sealed record CompanyLifecycleRequest(string? Reason = null);
 public sealed record SaveVehicle(Guid CompanyId, string Registration, DateOnly JoinedOn, decimal WeeklyTarget, string? Reason = null);
@@ -79,10 +79,20 @@ public static class SetupPagination
         if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 500) throw new ArgumentException("A reason of 1–500 characters is required.");
         return reason.Trim();
     }
-    // A typed reason is checked and kept; with none, the caller writes an automatic reason instead (contract C7).
+    // A typed reason is checked and kept; the change log shows it after the automatic reason (contract C7).
     public static string? OptionalReason(string? reason) => string.IsNullOrWhiteSpace(reason) ? null : Reason(reason);
     // Automatic reasons quote names, so they are clipped to what the change log holds.
     public static string Automatic(string reason) => reason.Length <= 500 ? reason : reason[..497] + "...";
+    // Keeps the automatic reason and adds a typed one after it, as in "Removed access for Grace Achieng. Reason: Moved to
+    // another SACCO." When both do not fit the change log, the automatic part is shortened first, so the words a person
+    // typed are kept whole wherever they fit.
+    public static string Automatic(string reason, string? typed)
+    {
+        if (string.IsNullOrEmpty(typed)) return Automatic(reason);
+        var suffix = $". Reason: {typed}{(typed[^1] is '.' or '!' or '?' ? "" : ".")}";
+        var room = Math.Max(500 - suffix.Length, 100);
+        return Automatic((reason.Length <= room ? reason : reason[..(room - 3)] + "...") + suffix);
+    }
     // "a", "a and b", "a, b and c".
     public static string Listed(IReadOnlyList<string> parts) =>
         parts.Count <= 1 ? string.Concat(parts) : string.Join(", ", parts.Take(parts.Count - 1)) + " and " + parts[^1];

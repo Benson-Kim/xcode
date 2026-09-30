@@ -92,3 +92,25 @@ it("refuses a body over 1 MB before forwarding it, by its declared and its actua
   expect(fetcher).toHaveBeenCalledOnce();
   expect((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].body).toBe(logo);
 });
+
+it("tells the API which browser a request comes from, when it knows", async () => {
+  const fetcher = vi.fn(async () => new Response("{}", { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  const call = (headers: Record<string, string>) =>
+    GET(new NextRequest("http://localhost:3000/api/setup/people", { headers }), { params: Promise.resolve({ path: ["people"] }) });
+  await call({ "x-forwarded-for": "198.51.100.7, 10.0.0.1" });
+  await call({ "x-real-ip": "198.51.100.8" });
+  await call({});
+  const sent = (fetcher.mock.calls as unknown as [string, RequestInit][]).map(([, init]) => (init.headers as Record<string, string>)["X-Forwarded-For"]);
+  expect(sent).toEqual(["198.51.100.7", "198.51.100.8", undefined]);
+});
+
+it("never forwards an empty body, which fetch would send as text/plain and the API would refuse", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  const request = new NextRequest("http://localhost:3000/api/setup/people/3f2c/deactivate", { method: "POST" });
+  expect((await POST(request, { params: Promise.resolve({ path: ["people", "3f2c", "deactivate"] }) })).status).toBe(200);
+  const init = fetcher.mock.calls[0][1];
+  expect(init.body).toBeUndefined();
+  expect(init.headers["Content-Type"]).toBeUndefined();
+});

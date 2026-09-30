@@ -85,3 +85,25 @@ it("refuses a sign-in body over 1 MB without calling the API", async () => {
   expect(await result.json()).toEqual({ status: "payload_too_large" });
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+// The API limits sign-in tries per client. Every browser reaches it from this proxy, so the proxy names the browser.
+it("tells the API which browser a sign-in comes from", async () => {
+  const fetcher = upstream({ status: "authentication_failed" }, 401);
+  vi.stubGlobal("fetch", fetcher);
+  const signIn = (headers: Record<string, string>) => POST(
+    new NextRequest("http://localhost:3000/api/auth/sign-in", { method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json", ...headers }, body: "{}" }),
+    { params: Promise.resolve({ path: ["sign-in"] }) });
+  await signIn({ "x-forwarded-for": " 198.51.100.7 , 10.0.0.1", "x-real-ip": "198.51.100.9" });
+  await signIn({ "x-real-ip": "198.51.100.8" });
+  await signIn({});
+  expect(fetcher.mock.calls.map(([, init]) => init.headers["X-Forwarded-For"])).toEqual(["198.51.100.7", "198.51.100.8", undefined]);
+  expect(Object.keys(fetcher.mock.calls[2][1].headers)).not.toContain("X-Forwarded-For");
+});
+
+it("tells the API which browser a session check comes from", async () => {
+  jar.set("access", "access-value");
+  const fetcher = upstream({ userId: "u-1" });
+  vi.stubGlobal("fetch", fetcher);
+  await GET(new NextRequest("http://localhost:3000/api/auth/session", { headers: { "x-forwarded-for": "198.51.100.7" } }), { params: Promise.resolve({ path: ["session"] }) });
+  expect(fetcher.mock.calls[0][1].headers["X-Forwarded-For"]).toBe("198.51.100.7");
+});

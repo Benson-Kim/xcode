@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { readLimitedBody } from "../../body";
+import { forwardedFor, readLimitedBody } from "../../body";
 
 const allowedMethods = new Set(["GET", "POST", "PUT", "DELETE"]);
 
@@ -78,9 +78,11 @@ async function proxy(
         cache: "no-store",
         headers: {
           Authorization: `Bearer ${access}`,
+          ...forwardedFor(request),
           ...(body ? { "Content-Type": "application/json" } : {}),
         },
-        body,
+        // An empty body is not forwarded: fetch would send it as text/plain, which the API refuses (415).
+        body: body || undefined,
         signal: AbortSignal.timeout(15_000),
       },
     );
