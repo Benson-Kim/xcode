@@ -6,6 +6,7 @@ using Auth.Application.Setup;
 using Auth.Domain;
 using Auth.Domain.Setup;
 using Auth.Infrastructure;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Api;
@@ -24,18 +25,16 @@ public static class OrganizationEndpoints
                var localization = await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct)
                     ?? new OrganizationLocalization { OrganizationId = context.OrganizationId };
                var calendarDate = OrganizationCalendarDate(localization.TimeZone, clock.UtcNow);
-               return Results.Ok(new
-               {
+               return Results.Ok(new OrganizationSettingsResponse(
                     organization,
                     localization,
-                    branding = await db.Brandings.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationBranding { OrganizationId = context.OrganizationId },
-                    securityPolicy = await db.SecurityPolicies.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationSecurityPolicy { OrganizationId = context.OrganizationId },
-                    effectiveBusinessDate = organization.BusinessDate ?? calendarDate,
+                    await db.Brandings.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationBranding { OrganizationId = context.OrganizationId },
+                    await db.SecurityPolicies.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationSecurityPolicy { OrganizationId = context.OrganizationId },
+                    organization.BusinessDate ?? calendarDate,
                     // Today in the organization's time zone, whatever the business date is set to: the latest date it may take.
                     calendarDate,
-                    effective = await organizations.Settings(context.ActorId, ct)
-               });
-          }).WithName("GetOrganizationSettings");
+                    await organizations.Settings(context.ActorId, ct)));
+          }).Produces<OrganizationSettingsResponse>().WithName("GetOrganizationSettings");
 
           group.MapPut("/organization/settings/{section}", async (string section, SaveOrganizationSettings input, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
@@ -79,11 +78,16 @@ public static class OrganizationEndpoints
                }
                // Saving what is already stored changes nothing, so it adds no version or change-log entry.
                if (before == after)
-                    return Results.Ok(new { section });
+                    return Results.Ok(new SettingsSectionResponse(section));
                RecordChange(db, context, organization, clock, section, before, after, reason ?? SetupPagination.Automatic(AutomaticReason(section, before, after)));
                await db.SaveChangesAsync(ct);
-               return Results.Ok(new { section });
-          }).WithName("UpdateOrganizationSettings");
+               return Results.Ok(new SettingsSectionResponse(section));
+          })
+          // The organization section's own checks answer a plain JSON { detail } instead of a problem.
+          .Produces<SettingsSectionResponse>()
+          .Produces<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json", "application/json")
+          .Produces<ProblemDetails>(StatusCodes.Status409Conflict, "application/problem+json", "application/json")
+          .WithName("UpdateOrganizationSettings");
 
           group.MapPut("/organization/logo", async (SaveLogo input, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
@@ -99,8 +103,8 @@ public static class OrganizationEndpoints
                     (existing.ContentType, existing.Data, existing.UpdatedAt) = (uploaded.ContentType, uploaded.Data, uploaded.UpdatedAt);
                RecordChange(db, context, organization, clock, "logo", before, DescribeLogo(uploaded), reason);
                await db.SaveChangesAsync(ct);
-               return Results.Ok(new { logo = uploaded.ToDataUrl() });
-          }).WithName("UpdateOrganizationLogo");
+               return Results.Ok(new LogoResponse(uploaded.ToDataUrl()));
+          }).Produces<LogoResponse>().WithName("UpdateOrganizationLogo");
 
           group.MapDelete("/organization/logo", async (string? reason, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
           {
@@ -108,13 +112,13 @@ public static class OrganizationEndpoints
                var changeReason = SetupPagination.OptionalReason(reason) ?? "Removed the logo";
                var existing = await db.Logos.SingleOrDefaultAsync(ct);
                if (existing is null)
-                    return Results.Ok(new { logo = (string?)null });
+                    return Results.Ok(new LogoResponse(null));
                var organization = await db.Organizations.SingleAsync(ct);
                db.Logos.Remove(existing);
                RecordChange(db, context, organization, clock, "logo", DescribeLogo(existing), "null", changeReason);
                await db.SaveChangesAsync(ct);
-               return Results.Ok(new { logo = (string?)null });
-          }).WithName("DeleteOrganizationLogo");
+               return Results.Ok(new LogoResponse(null));
+          }).Produces<LogoResponse>().WithName("DeleteOrganizationLogo");
 
           // What every member's screens need to look and format as the organization and the person chose.
           group.MapGet("/appearance", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, IClock clock, CancellationToken ct) =>
@@ -125,21 +129,19 @@ public static class OrganizationEndpoints
                var effective = await organizations.Settings(context.ActorId, ct);
                var logo = await db.Logos.AsNoTracking().SingleOrDefaultAsync(ct);
                var branding = effective.Branding;
-               return Results.Ok(new
-               {
-                    organizationName = organization.Name,
-                    settingsVersion = organization.SettingsVersion,
-                    businessDate = organization.BusinessDate ?? OrganizationCalendarDate(localization.TimeZone, clock.UtcNow),
-                    branding = new { branding.DisplayName, branding.LogoAlt, branding.Primary, branding.Secondary, branding.Accent, logo = logo?.ToDataUrl() },
-                    formats = effective.Formats,
+               return Results.Ok(new AppearanceResponse(
+                    organization.Name,
+                    organization.SettingsVersion,
+                    organization.BusinessDate ?? OrganizationCalendarDate(localization.TimeZone, clock.UtcNow),
+                    new(branding.DisplayName, branding.LogoAlt, branding.Primary, branding.Secondary, branding.Accent, logo?.ToDataUrl()),
+                    effective.Formats,
                     effective.ThemeMode,
                     effective.ReducedMotion,
                     effective.FontScale,
                     // Appended for the phone, which enforces the wrong-PIN policy offline; older clients ignore them.
                     effective.SecurityPolicy.LockoutThreshold,
-                    effective.SecurityPolicy.LockoutMinutes,
-               });
-          }).WithName("GetAppearance");
+                    effective.SecurityPolicy.LockoutMinutes));
+          }).Produces<AppearanceResponse>().WithName("GetAppearance");
 
           group.MapGet("/preferences", async (IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, CancellationToken ct) =>
           {
@@ -148,23 +150,21 @@ public static class OrganizationEndpoints
                // Which overrides the organization allows, and its own values, so the form only offers what will take effect.
                var localization = await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationLocalization();
                // A value kept from before an override was withdrawn is not offered back, so saving the form clears it.
-               return Results.Ok(new
-               {
+               return Results.Ok(new PreferencesResponse(
                     preference.OrganizationId,
                     preference.UserId,
-                    Locale = localization.AllowLocaleOverride ? preference.Locale : null,
-                    TimeZone = localization.AllowTimeZoneOverride ? preference.TimeZone : null,
-                    Hour12 = localization.AllowHour12Override ? preference.Hour12 : null,
-                    ThemeMode = localization.AllowThemeOverride ? preference.ThemeMode : null,
+                    Locale: localization.AllowLocaleOverride ? preference.Locale : null,
+                    TimeZone: localization.AllowTimeZoneOverride ? preference.TimeZone : null,
+                    Hour12: localization.AllowHour12Override ? preference.Hour12 : null,
+                    ThemeMode: localization.AllowThemeOverride ? preference.ThemeMode : null,
                     preference.ReducedMotion,
                     preference.FontScale,
                     localization.AllowLocaleOverride,
                     localization.AllowTimeZoneOverride,
                     localization.AllowHour12Override,
                     localization.AllowThemeOverride,
-                    organization = new { localization.Locale, localization.TimeZone, localization.Hour12 },
-               });
-          }).WithName("GetUserPreferences");
+                    new(localization.Locale, localization.TimeZone, localization.Hour12)));
+          }).Produces<PreferencesResponse>().WithName("GetUserPreferences");
 
           group.MapPut("/preferences", async (SaveUserPreferences input, IOrganizationContext context, IOrganizationRepository organizations, AuthDb db, CancellationToken ct) =>
           {
@@ -181,7 +181,7 @@ public static class OrganizationEndpoints
                (await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct) ?? new OrganizationLocalization()).EnsureAllowed(preference);
                await db.SaveChangesAsync(ct);
                return Results.Ok(preference);
-          }).WithName("UpdateUserPreferences");
+          }).Produces<UserPreference>().WithName("UpdateUserPreferences");
      }
 
      // Every settings change bumps the version, joins the change log with its reason, and is audited.
@@ -316,4 +316,16 @@ public static class OrganizationEndpoints
      public sealed record OrganizationDetails(string? Name, string? Slug);
      public sealed record SaveLogo(string? DataUrl, string? Reason);
      public sealed record SaveUserPreferences(string? Locale, string? TimeZone, bool? Hour12, string? ThemeMode, bool ReducedMotion, double FontScale);
+
+     // Response bodies, named so the API description can show them.
+     public sealed record OrganizationSettingsResponse(Organization Organization, OrganizationLocalization Localization, OrganizationBranding Branding, OrganizationSecurityPolicy SecurityPolicy,
+          DateOnly EffectiveBusinessDate, DateOnly CalendarDate, EffectiveSettings Effective);
+     public sealed record SettingsSectionResponse(string Section);
+     public sealed record LogoResponse(string? Logo);
+     public sealed record AppearanceResponse(string OrganizationName, long SettingsVersion, DateOnly BusinessDate, AppearanceBranding Branding, EffectiveFormats Formats, string ThemeMode,
+          bool ReducedMotion, double FontScale, int LockoutThreshold, int LockoutMinutes);
+     public sealed record AppearanceBranding(string DisplayName, string LogoAlt, string Primary, string Secondary, string Accent, string? Logo);
+     public sealed record PreferencesResponse(Guid OrganizationId, Guid UserId, string? Locale, string? TimeZone, bool? Hour12, string? ThemeMode, bool ReducedMotion, double FontScale,
+          bool AllowLocaleOverride, bool AllowTimeZoneOverride, bool AllowHour12Override, bool AllowThemeOverride, OrganizationPreferenceDefaults Organization);
+     public sealed record OrganizationPreferenceDefaults(string Locale, string TimeZone, bool Hour12);
 }
