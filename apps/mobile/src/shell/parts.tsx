@@ -20,11 +20,12 @@ export function SectionTitle({ children }: { children: string }) {
 
 // Avatar, name and role, with an optional action (the lock button on Home).
 export function WhoRow({ initials, name, role, action }: { initials: string; name: string; role: string; action?: ReactNode }) {
-  const { colors } = useTheme();
+  const { colors, fontScale } = useTheme();
   return (
     <View style={styles.who}>
       <View style={[styles.avatar, { backgroundColor: colors.brand }]} aria-hidden>
-        <Text weight="bold" style={{ color: colors.white, fontSize: 16 }}>
+        {/* Decorative initials keep their size so a larger text preference cannot push them out of the circle. */}
+        <Text weight="bold" style={{ color: colors.white, fontSize: 16 / fontScale, lineHeight: 20 / fontScale }}>
           {initials}
         </Text>
       </View>
@@ -68,10 +69,12 @@ export function Segmented<T extends string>({ label, options, value, onChange }:
             key={option.value}
             accessibilityRole="button"
             accessibilityState={{ selected }}
+            // The track's padding counts as part of each option, so every option is at least 48 points tall to touch.
+            hitSlop={{ top: 4, bottom: 4 }}
             onPress={() => onChange(option.value)}
             style={[styles.segment, selected && [styles.selected, { backgroundColor: colors.white }]]}
           >
-            <Text weight="semibold" style={{ fontSize: 14, color: selected ? colors.navy : colors.grey }}>
+            <Text weight="semibold" style={{ fontSize: 14, textAlign: "center", color: selected ? colors.navy : colors.grey }}>
               {option.label}
             </Text>
           </Pressable>
@@ -96,11 +99,36 @@ export function Card({ title, sub, children }: { title: string; sub?: string; ch
   );
 }
 
-export function CardValue({ children }: { children: string }) {
+// bad: a figure that needs attention, in red as in the design.
+export function CardValue({ children, bad }: { children: string; bad?: boolean }) {
+  const { colors } = useTheme();
   return (
-    <Text weight="bold" style={styles.value}>
+    <Text weight="bold" style={[styles.value, bad && { color: colors.red }]}>
       {children}
     </Text>
+  );
+}
+
+// A share of a target. The note beside it states the percentage, so the bar itself is hidden from screen readers.
+export function ProgressBar({ percent }: { percent: number }) {
+  const { colors } = useTheme();
+  const width = `${Math.max(0, Math.min(100, Math.round(percent)))}%` as const;
+  return (
+    <View aria-hidden style={[styles.bar, { backgroundColor: colors.divider }]}>
+      <View style={[styles.barFill, { width, backgroundColor: colors.blue }]} />
+    </View>
+  );
+}
+
+// A small grey label: a reason for no revenue, or a card that is not available yet.
+export function Chip({ children }: { children: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={[styles.chip, { backgroundColor: colors.divider }]}>
+      <Text weight="bold" style={{ fontSize: 13, lineHeight: 18 }}>
+        {children}
+      </Text>
+    </View>
   );
 }
 
@@ -167,5 +195,8 @@ const styles = StyleSheet.create({
   cardHeader: { gap: 2 },
   cardTitle: { fontSize: 16, lineHeight: 21 },
   value: { marginTop: 4, fontSize: 30, lineHeight: 35 },
+  bar: { height: 8, borderRadius: 999, overflow: "hidden" },
+  barFill: { height: 8, borderRadius: 999 },
+  chip: { alignSelf: "flex-start", paddingVertical: 2, paddingHorizontal: 10, borderRadius: 999 },
   cardAction: { marginTop: 6, minHeight: 52, borderWidth: 2, borderRadius: 999, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
 });

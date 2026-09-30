@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 16,
   },
-  label: { fontSize: 17 },
+  label: { fontSize: 17, textAlign: "center" },
   disabled: { opacity: 0.55 },
   link: { minHeight: 44, paddingHorizontal: 8, justifyContent: "center" },
 });

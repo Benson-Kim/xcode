@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { apiGet, SessionEndedError } from "../lib/api";
 import { money } from "../lib/format";
+import { dayLabel, isDate, rangeLabel, shiftDate } from "../revenue/dates";
 import type { StoredPerson } from "../lib/storage";
 import type { RevenueDashboard } from "../revenue/types";
 import { initials } from "../session";
 import { Banner, Button, Text, useTheme } from "../ui";
 import { VERSION } from "../auth/AuthLayout";
 import { DASHBOARD_CARDS, SETUP_LINKS, TABS, periodLabel, type Period, type PermissionGroup, type Tab } from "./access";
-import { Bullets, Card, CardAction, CardNote, CardValue, IconButton, LineSkeleton, ScreenTitle, SectionTitle, Segmented, WhoRow } from "./parts";
+import { Bullets, Card, CardAction, CardNote, CardValue, Chip, IconButton, LineSkeleton, ProgressBar, ScreenTitle, SectionTitle, Segmented, WhoRow } from "./parts";
 
 export type Catalog = { groups: PermissionGroup[] | null; error: string };
 
@@ -24,10 +25,12 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 
 // What a revenue card shows, from that card's own figures only, or null when the API left them out (null: not shown
 // to this person). A note never speaks for a figure that is null.
-function revenueFigures(permission: string, dashboard: RevenueDashboard): { value: string; note?: string } | null {
+// The wording follows XCODE Web.
+function revenueFigures(permission: string, dashboard: RevenueDashboard, period: Period): { value?: string; bad?: boolean; bar?: number; note?: string } | null {
   const { capturedToday, vehiclesToday, revenue, expected, percent, missingDays, missingVehicles, editedRecords } = dashboard;
   if (permission === "dash.capture") {
     if (capturedToday === null || vehiclesToday === null) return null;
+    if (vehiclesToday === 0) return { note: "None of your vehicles is in the fleet today." };
     const left = Math.max(0, vehiclesToday - capturedToday);
     return {
       value: `${capturedToday} of ${vehiclesToday} captured`,
@@ -36,27 +39,28 @@ function revenueFigures(permission: string, dashboard: RevenueDashboard): { valu
   }
   if (permission === "dash.revenue") {
     if (revenue === null) return null;
-    return {
-      value: money(revenue),
-      note: expected === null ? undefined : percent === null ? "No dated target is available." : `${percent}% of expected ${money(expected)}`,
-    };
+    const soFar = period !== "month" && capturedToday !== null && vehiclesToday ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.` : "";
+    if (percent === null || expected === null) return { value: revenue ? money(revenue) : undefined, note: `No weekly target applies in this period${soFar}` };
+    return { value: money(revenue), bar: percent, note: `${percent}% of target ${money(expected)}, from each vehicle’s weekly target${soFar}` };
   }
   if (permission === "dash.gaps") {
     if (missingDays === null) return null;
     return {
       value: plural(missingDays, "day", "days"),
-      note: !missingDays
-        ? "No missing days so far this month."
-        : missingVehicles === null
-          ? undefined
-          : `${plural(missingVehicles, "vehicle", "vehicles")} with missing days`,
+      bad: missingDays > 0,
+      note: missingDays ? `${missingVehicles === null ? "" : `On ${plural(missingVehicles, "vehicle", "vehicles")}. `}Always this month, whatever period you pick.` : "Every vehicle has a record for every day.",
     };
   }
   if (editedRecords === null) return null;
-  return {
-    value: plural(editedRecords, "record", "records"),
-    note: editedRecords ? "Changed after the original capture." : "Nothing was changed after capture in this period.",
-  };
+  return { value: plural(editedRecords, "record", "records"), note: editedRecords ? undefined : "Nothing was changed after capture in this period." };
+}
+
+// Missing days count the month up to yesterday: today is not a gap before it is captured.
+function gapsSub(businessDate?: string) {
+  if (!isDate(businessDate)) return "This month. No record and no reason.";
+  const first = `${businessDate.slice(0, 8)}01`;
+  const yesterday = shiftDate(businessDate, -1);
+  return first <= yesterday ? `${rangeLabel(first, yesterday)}. No record and no reason.` : "No record and no reason.";
 }
 
 export function HomeScreen({
@@ -120,18 +124,25 @@ export function HomeScreen({
           // Revenue cards show the API's figures, never placeholder zeros while loading, offline or refused.
           const live = REVENUE_CARDS.includes(card.permission);
           const dashboard = dashboards[periodOf(card)];
-          const figures = live && dashboard ? revenueFigures(card.permission, dashboard) : null;
-          const sub = card.period ? `${periodLabel(card.period, businessDate)}. ${card.sub}` : (card.sub ?? label);
+          const figures = live && dashboard ? revenueFigures(card.permission, dashboard, periodOf(card)) : null;
+          const sub =
+            card.permission === "dash.capture"
+              ? `Your vehicles, ${isDate(businessDate) ? dayLabel(businessDate) : "today"}`
+              : card.permission === "dash.gaps"
+                ? gapsSub(businessDate)
+                : (card.sub ?? "").replace("{period}", label);
+          const action = card.action && card.tab && canOpen(card.tab) && (!card.actionNeeds || card.actionNeeds.some(has));
           return (
             <Card key={card.permission} title={card.title} sub={sub}>
-              {!live ? (
+              {card.unavailable ? (
                 <>
-                  <CardValue>{typeof card.value === "number" ? money(card.value) : card.value}</CardValue>
-                  <CardNote>{card.note}</CardNote>
+                  <Chip>Not available yet</Chip>
+                  <CardNote>{card.unavailable}</CardNote>
                 </>
               ) : figures ? (
                 <>
-                  <CardValue>{figures.value}</CardValue>
+                  {figures.value ? <CardValue bad={figures.bad}>{figures.value}</CardValue> : null}
+                  {figures.bar !== undefined ? <ProgressBar percent={figures.bar} /> : null}
                   {figures.note ? <CardNote>{figures.note}</CardNote> : null}
                 </>
               ) : dashboard ? (
@@ -143,9 +154,9 @@ export function HomeScreen({
               ) : (
                 <LineSkeleton lines={2} />
               )}
-              {card.action && card.tab && canOpen(card.tab) ? (
+              {action ? (
                 <CardAction primary={card.primary} onPress={() => onOpen(card.tab!)}>
-                  {card.action}
+                  {card.action!}
                 </CardAction>
               ) : null}
             </Card>

@@ -29,11 +29,16 @@ it("shows an owner the tabs, cards and setup links their permissions allow", asy
   expect(tabs()).toEqual(["Home", "Revenue", "More"]);
   // No capture or float permission: the dashboard opens on the month so far.
   expect(screen.getByRole("button", { name: "This month", selected: true })).toBeTruthy();
-  for (const title of ["Revenue", "Net contribution", "Costs", "Missing revenue days"]) expect(screen.getByRole("header", { name: title })).toBeTruthy();
+  for (const title of ["Revenue", "Net contribution", "Money out", "Missing revenue days"]) expect(screen.getByRole("header", { name: title })).toBeTruthy();
   expect(screen.queryByText("Today's revenue")).toBeNull();
-  expect(screen.queryByText("Renewals due")).toBeNull();
+  expect(screen.queryByText("Yearly items due")).toBeNull();
+  // Figures the API does not serve yet say so, never a screen of zeros. The revenue card shows its real figure (nothing
+  // captured against a KES 2,000 target) once the dashboard has loaded, so wait for it rather than race it.
+  expect(await screen.findByText(/^0% of target KES 2,000/)).toBeTruthy();
+  expect(screen.getAllByText("Not available yet")).toHaveLength(2);
+  expect(screen.getAllByText("KES 0")).toHaveLength(1);
 
-  await fireEvent.press(screen.getByText("Open revenue"));
+  await fireEvent.press(screen.getByText("Fill the gaps"));
   // Viewing and correcting without capture: a missing day shows as missing and does not open.
   expect(await screen.findByLabelText("KDA 482M, Missing")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "KDA 482M, Enter revenue" })).toBeNull();

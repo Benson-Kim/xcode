@@ -18,6 +18,18 @@ export function dayLabel(value: string) {
   return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
+// "21 to 27 Sep 2026", "28 Sep to 4 Oct 2026", "29 Dec 2025 to 4 Jan 2026": a month or year shown once when shared.
+export function rangeLabel(from: string, through: string) {
+  const [start, end] = [new Date(toTime(from)), new Date(toTime(through))];
+  const first =
+    start.getUTCFullYear() !== end.getUTCFullYear()
+      ? dayLabel(from)
+      : start.getUTCMonth() !== end.getUTCMonth()
+        ? `${start.getUTCDate()} ${MONTHS[start.getUTCMonth()]}`
+        : `${start.getUTCDate()}`;
+  return `${first} to ${dayLabel(through)}`;
+}
+
 // "Tue 29 Sep 2026"
 export const longDayLabel = (value: string) => `${WEEKDAYS[new Date(toTime(value)).getUTCDay()]} ${dayLabel(value)}`;
 

@@ -1,14 +1,16 @@
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, type TextInputProps } from "react-native";
+import { useNetworkState } from "expo-network";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { OfflineError, SessionEndedError } from "../lib/api";
 import { currencyCode, money } from "../lib/format";
 import type { StoredPerson } from "../lib/storage";
-import { dayLabel, longDayLabel, shiftDate, shortDayLabel, weekHolding } from "../revenue/dates";
+import { dayLabel, longDayLabel, rangeLabel, shiftDate, shortDayLabel, weekHolding } from "../revenue/dates";
 import { queueCounts, type NewCapture, type RevenueQueue } from "../revenue/queue";
 import { NOTE_LIMIT, REASONS, type QueuedCapture, type RevenueCell, type RevenueReason, type RevenueVehicle, type RevenueWeek } from "../revenue/types";
 import { loadWeek } from "../revenue/week";
 import { Banner, Button, ErrorText, Icon, Text, fonts, useTheme } from "../ui";
-import { Card, IconButton, LineSkeleton, ScreenTitle, Segmented } from "./parts";
+import { Card, Chip, IconButton, LineSkeleton, ScreenTitle, Segmented } from "./parts";
 
 type ViewMode = "day" | "week";
 const MODES: { value: ViewMode; label: string }[] = [
@@ -52,7 +54,7 @@ function targetFor(vehicle: RevenueVehicle, date: string, week: RevenueWeek, wai
   if (cell.status !== "missing" || !canCapture) return null;
   const first = nextMissing(vehicle, week, waiting);
   if (!first || first >= date) return { vehicle, date, cell, info: "" };
-  return { vehicle, date: first, cell: cellOf(vehicle, first), info: `Fill ${dayLabel(first)} first.` };
+  return { vehicle, date: first, cell: cellOf(vehicle, first), info: `Fill ${longDayLabel(first)} first.` };
 }
 
 // After saving, the next vehicle (from this one on) still missing that day.
@@ -68,12 +70,24 @@ function nextTarget(week: RevenueWeek, fromVehicle: string, day: string, waiting
 
 const STATE_TAG: Record<QueuedCapture["state"], string> = { pending: "Not sent yet", blocked: "Waiting for an earlier day", conflict: "Conflict", failed: "Not saved" };
 
-export function RevenueScreen({ person, queue, onSessionEnded }: { person: StoredPerson; queue: RevenueQueue; onSessionEnded: () => void }) {
+export function RevenueScreen({
+  person,
+  queue,
+  businessDate,
+  onSessionEnded,
+}: {
+  person: StoredPerson;
+  queue: RevenueQueue;
+  // The business date the phone last saw, for when no week has loaded (offline).
+  businessDate?: string;
+  onSessionEnded: () => void;
+}) {
   const { colors } = useTheme();
   const owner = person.phoneNumber;
   const canView = person.permissions.includes("revenue.view");
   const canCapture = person.permissions.includes("revenue.capture");
   const canReason = person.permissions.includes("revenue.no_earnings");
+  const canCorrect = person.permissions.includes("revenue.correct");
 
   const [mode, setMode] = useState<ViewMode>("day");
   // undefined: the current week, which the API works out from the organization's business date.
@@ -85,6 +99,8 @@ export function RevenueScreen({ person, queue, onSessionEnded }: { person: Store
   const [detail, setDetail] = useState<string | null>(null);
   const [target, setTarget] = useState<Target | null>(null);
   const [fromDay, setFromDay] = useState(true);
+  // Bumped by Try again after a failed load.
+  const [attempt, setAttempt] = useState(0);
   // Reloads once a round of sending settles, not on every answer in it.
   const [shown, setShown] = useState(queue.revision);
   useEffect(() => {
@@ -112,9 +128,22 @@ export function RevenueScreen({ person, queue, onSessionEnded }: { person: Store
     return () => {
       active = false;
     };
-  }, [canView, owner, weekStart, shown, onSessionEnded]);
+  }, [canView, owner, weekStart, shown, attempt, onSessionEnded]);
+
+  // When the connection comes back, a week that could not load, or that shows an earlier copy, loads again.
+  const network = useNetworkState();
+  const online = network.isConnected !== false && network.isInternetReachable !== false;
+  const stale = Boolean(error || data?.saved);
+  useEffect(() => {
+    if (online && stale) setAttempt((value) => value + 1);
+    // Only the connection coming back retries; a failure while online waits for Try again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online]);
 
   const week = data?.week;
+  // Replacing a saved record is changing it: today needs capture or correct, an earlier day needs correct (as the API rules).
+  const today = week?.businessDate ?? businessDate;
+  const canReplace = useCallback((entry: QueuedCapture) => canCorrect || (canCapture && entry.date === today), [canCorrect, canCapture, today]);
   const waiting = useMemo<Waiting>(() => new Map(queue.entries.map((entry) => [keyOf(entry.vehicleId, entry.date), entry])), [queue.entries]);
 
   // Opens on the earliest day still missing for people who capture, otherwise on the business date (never the phone's clock).
@@ -204,7 +233,9 @@ export function RevenueScreen({ person, queue, onSessionEnded }: { person: Store
     }
   const counted = rows.filter((row) => row.cell.status !== "none");
   const done = counted.filter((row) => recorded(row.cell) || row.queued).length;
-  const unsent = counted.filter((row) => row.queued).length;
+  // Not sent yet: waiting on this phone to go out (a conflict or refusal is shown as such).
+  const unsent = counted.filter((row) => row.queued && (row.queued.state === "pending" || row.queued.state === "blocked")).length;
+  const retry = () => setAttempt((value) => value + 1);
 
   const header = (
     <View style={styles.header}>
@@ -221,16 +252,23 @@ export function RevenueScreen({ person, queue, onSessionEnded }: { person: Store
         />
       )}
       {data?.saved ? <Banner tone="offline">{OFFLINE_SAVED}</Banner> : error ? <Banner tone={error === OFFLINE_EMPTY ? "offline" : "error"}>{error}</Banner> : null}
-      <QueuePanel queue={queue} onOpenDay={goToDay} />
+      {error && !loading ? (
+        <Button tone="outline" onPress={retry} style={styles.smallButton}>
+          Try again
+        </Button>
+      ) : null}
+      <QueuePanel queue={queue} canReplace={canReplace} onOpenDay={goToDay} />
       {week && detailVehicle ? (
         <View style={styles.dateNav}>
           <IconButton icon="back" label="Back to the week" onPress={() => setDetail(null)} />
           <View style={styles.navText}>
-            <Text weight="bold" style={{ fontSize: 17 }}>
+            <Text weight="bold" accessibilityRole="header" style={{ fontSize: 17, textAlign: "center" }}>
               {detailVehicle.registration}
             </Text>
-            <Text style={{ fontSize: 14, color: colors.grey, textAlign: "center" }}>{`${detailVehicle.companyName}, ${dayLabel(week.weekStart)} to ${dayLabel(week.weekThrough)}`}</Text>
+            <Text style={{ fontSize: 14, color: colors.grey, textAlign: "center" }}>{`${detailVehicle.companyName}, ${rangeLabel(week.weekStart, week.weekThrough)}`}</Text>
           </View>
+          {/* Balances the back button, so the title sits in the middle as the day and week titles do. */}
+          <View style={styles.navSpacer} />
         </View>
       ) : week && mode === "day" && day ? (
         <>
@@ -241,18 +279,21 @@ export function RevenueScreen({ person, queue, onSessionEnded }: { person: Store
             </Text>
             <IconButton icon="forward" label="Next day" disabled={day >= week.businessDate} onPress={() => goToDay(shiftDate(day, 1))} />
           </View>
-          {inWeek && (
-            <Text style={{ fontSize: 14, color: colors.grey }}>{`${done} of ${counted.length} captured${unsent ? `, ${unsent} not sent yet` : ""}`}</Text>
+          {inWeek && counted.length > 0 && (
+            <Text style={{ fontSize: 14, color: colors.grey }}>
+              <Text weight="bold" style={{ fontSize: 14, color: colors.navy }}>{`${done} of ${counted.length}`}</Text>
+              {` captured${unsent ? `, ${unsent} not sent yet` : ""}`}
+            </Text>
           )}
           {earliest && (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`Earlier days are missing. Start with ${dayLabel(earliest)}`}
+              accessibilityLabel={`Earlier days are missing. Start with ${longDayLabel(earliest)}`}
               onPress={() => goToDay(earliest!)}
               style={[styles.missBanner, { borderColor: colors.redLine, backgroundColor: colors.redBg }]}
             >
               <Icon name="alert" size={18} color={colors.redText} />
-              <Text style={{ flex: 1, fontSize: 14, color: colors.redText }}>{`Earlier days are missing. Start with ${dayLabel(earliest)}`}</Text>
+              <Text style={{ flex: 1, fontSize: 14, color: colors.redText }}>{`Earlier days are missing. Start with ${longDayLabel(earliest)}`}</Text>
             </Pressable>
           )}
         </>
@@ -261,7 +302,7 @@ export function RevenueScreen({ person, queue, onSessionEnded }: { person: Store
           <View style={styles.dateNav}>
             <IconButton icon="back" label="Previous week" onPress={() => setWeekStart(shiftDate(week.weekStart, -7))} />
             <Text weight="bold" style={[styles.navText, { fontSize: 17 }]}>
-              {`${dayLabel(week.weekStart)} to ${dayLabel(week.weekThrough)}`}
+              {rangeLabel(week.weekStart, week.weekThrough)}
             </Text>
             <IconButton
               icon="forward"
@@ -273,9 +314,14 @@ export function RevenueScreen({ person, queue, onSessionEnded }: { person: Store
               }}
             />
           </View>
-          <Text style={{ fontSize: 14, color: colors.grey }}>
-            {`${money(week.totalAmount)} of ${money(week.totalExpected)} expected to date${week.percent === null ? "" : `, ${week.percent}%`}`}
-          </Text>
+          {week.vehicles.length > 0 && (
+            <Text style={{ fontSize: 14, color: colors.grey }}>
+              <Text weight="bold" style={{ fontSize: 14, color: colors.navy }}>
+                {money(week.totalAmount)}
+              </Text>
+              {` of ${money(week.totalExpected)} expected to date${week.percent === null ? "" : `, ${week.percent}%`}`}
+            </Text>
+          )}
         </>
       ) : null}
     </View>
@@ -443,15 +489,11 @@ const WeekRow = memo(function WeekRow({ vehicle, first, last, onOpen }: { vehicl
   );
 });
 
-function Chip({ children }: { children: string }) {
-  const { colors } = useTheme();
-  return (
-    <View style={[styles.chip, { backgroundColor: colors.divider }]}>
-      <Text weight="bold" style={{ fontSize: 13 }}>
-        {children}
-      </Text>
-    </View>
-  );
+// The day and expected columns of the vehicle week, widened with the person's text size.
+function useColumns() {
+  const { fontScale } = useTheme();
+  // Capped, so the actual column keeps room for its amounts; beyond the caps the text wraps inside its column.
+  return useMemo(() => ({ day: { width: 60 * Math.min(fontScale, 1.35) }, number: { width: 92 * Math.min(fontScale, 1.15) } }), [fontScale]);
 }
 
 const gap = (actual: number, expected: number) => {
@@ -480,6 +522,7 @@ function VehicleWeek({
   onSessionEnded: () => void;
 }) {
   const { colors } = useTheme();
+  const columns = useColumns();
   const [vehicle, setVehicle] = useState<RevenueVehicle>(fallback);
   const [problem, setProblem] = useState("");
   useEffect(() => {
@@ -514,10 +557,10 @@ function VehicleWeek({
           {header}
           {problem ? <ErrorText>{problem}</ErrorText> : null}
           <View style={[styles.detailRow, styles.detailHead, { borderBottomColor: colors.cardLine }]}>
-            <Text weight="semibold" style={[styles.detailDay, { color: colors.grey }]}>
+            <Text weight="semibold" style={[styles.detailDay, columns.day, { color: colors.grey }]}>
               Day
             </Text>
-            <Text weight="semibold" style={[styles.detailNumber, { color: colors.grey }]}>
+            <Text weight="semibold" style={[styles.detailNumber, columns.number, { color: colors.grey }]}>
               Expected
             </Text>
             <Text weight="semibold" style={[styles.detailActual, { fontSize: 14, color: colors.grey, textAlign: "right" }]}>
@@ -537,10 +580,10 @@ function VehicleWeek({
       )}
       ListFooterComponent={
         <View accessible accessibilityLabel={`To date: expected ${money(vehicle.totalExpected)}, actual ${money(vehicle.totalAmount)}, ${gap(vehicle.totalAmount, vehicle.totalExpected)}`} style={styles.detailRow}>
-          <Text weight="bold" style={styles.detailDay}>
+          <Text weight="bold" style={[styles.detailDay, columns.day]}>
             To date
           </Text>
-          <Text weight="bold" style={styles.detailNumber}>
+          <Text weight="bold" style={[styles.detailNumber, columns.number]}>
             {money(vehicle.totalExpected)}
           </Text>
           <View style={styles.detailActual}>
@@ -555,6 +598,7 @@ function VehicleWeek({
 
 const DayBar = memo(function DayBar({ cell, today, queued, tappable, onOpen }: { cell: RevenueCell; today: string; queued?: QueuedCapture; tappable: boolean; onOpen: (date: string) => void }) {
   const { colors } = useTheme();
+  const columns = useColumns();
   // Not a shortfall: future days, days outside the fleet, and today before capture.
   const counted = recorded(cell) || Boolean(queued) || (cell.status === "missing" && cell.date < today);
   const actual = queued ? queued.amount ?? 0 : cell.amount ?? 0;
@@ -576,8 +620,8 @@ const DayBar = memo(function DayBar({ cell, today, queued, tappable, onOpen }: {
   const difference = counted ? gap(actual, cell.expected) : "";
   const content = (
     <>
-      <Text style={styles.detailDay}>{shortDayLabel(cell.date)}</Text>
-      <Text style={[styles.detailNumber, { color: counted ? colors.navy : colors.grey }]}>{cell.status === "none" ? "" : money(cell.expected)}</Text>
+      <Text style={[styles.detailDay, columns.day]}>{shortDayLabel(cell.date)}</Text>
+      <Text style={[styles.detailNumber, columns.number, { color: counted ? colors.navy : colors.grey }]}>{cell.status === "none" ? "" : money(cell.expected)}</Text>
       <View style={styles.detailActual}>
         <Text
           weight={cell.status === "amount" || queued ? "semibold" : "regular"}
@@ -612,8 +656,12 @@ const DayBar = memo(function DayBar({ cell, today, queued, tappable, onOpen }: {
 });
 
 // Captures that have not reached the API yet. Conflicts and refusals wait for the person; the rest go on their own.
-function QueuePanel({ queue, onOpenDay }: { queue: RevenueQueue; onOpenDay: (date: string) => void }) {
+function QueuePanel({ queue, canReplace, onOpenDay }: { queue: RevenueQueue; canReplace: (entry: QueuedCapture) => boolean; onOpenDay: (date: string) => void }) {
+  // Replacing needs the person's own right to change that day, and the API's say on the saved record (canEdit).
+  const mayReplace = (entry: QueuedCapture) => canReplace(entry) && entry.current?.canEdit !== false;
   const { colors } = useTheme();
+  const network = useNetworkState();
+  const offline = network.isConnected === false || network.isInternetReachable === false;
   if (!queue.entries.length) return null;
   const counts = queueCounts(queue.entries);
   const summary = [
@@ -629,6 +677,9 @@ function QueuePanel({ queue, onOpenDay }: { queue: RevenueQueue; onOpenDay: (dat
             On this phone
           </Text>
           <Text style={{ fontSize: 14, color: colors.amberText }}>{summary.join(", ")}</Text>
+          {offline && counts.waiting > 0 ? (
+            <Text style={{ fontSize: 14, color: colors.amberText }}>No internet. They are sent when you are back online.</Text>
+          ) : null}
         </View>
         {counts.waiting > 0 && (
           <Button tone="outline" busy={queue.syncing} busyText="Sending…" onPress={() => void queue.sync()} style={styles.smallButton}>
@@ -648,23 +699,29 @@ function QueuePanel({ queue, onOpenDay }: { queue: RevenueQueue; onOpenDay: (dat
                   {entry.current ? `Saved: ${valueText(entry.current)}${entry.current.note ? ` (${entry.current.note})` : ""}` : "Connect to the internet to see what was saved."}
                 </Text>
                 <Text style={{ fontSize: 14, color: colors.grey }}>{`Yours: ${valueText(entry)}${entry.note ? ` (${entry.note})` : ""}`}</Text>
-                {entry.current?.canEdit === false && (
-                  <Text style={{ fontSize: 14, color: colors.grey }}>Your access does not include changing the saved record for this day.</Text>
-                )}
-                <View style={styles.actions}>
-                  <Button tone="outline" onPress={() => void queue.discard(entry)} style={styles.flexButton}>
-                    Keep saved value
-                  </Button>
-                  {/* The API says whether this person may change the saved record; a clerk may not change a past day. */}
-                  {entry.current?.canEdit === false ? null : entry.current ? (
-                    <Button onPress={() => void queue.replace(entry)} style={styles.flexButton}>
-                      Replace with mine
-                    </Button>
+                {entry.current && !mayReplace(entry) ? (
+                  <Text style={{ fontSize: 14, color: colors.grey }}>
+                    {canReplace(entry)
+                      ? "Your access does not include changing the saved record for this day."
+                      : "Changing a day after it has passed needs Correct revenue after the day."}
+                  </Text>
+                ) : null}
+                {/* Stacked: each choice keeps its whole label on one line on a narrow phone. */}
+                <View style={styles.choices}>
+                  {entry.current ? (
+                    mayReplace(entry) && (
+                      <Button onPress={() => void queue.replace(entry)} style={styles.choice}>
+                        Replace with mine
+                      </Button>
+                    )
                   ) : (
-                    <Button onPress={() => void queue.retry(entry)} style={styles.flexButton}>
+                    <Button onPress={() => void queue.retry(entry)} style={styles.choice}>
                       Check again
                     </Button>
                   )}
+                  <Button tone="outline" onPress={() => void queue.discard(entry)} style={styles.choice}>
+                    Keep saved value
+                  </Button>
                 </View>
               </>
             ) : (
@@ -704,6 +761,8 @@ function CaptureSheet({
   onClose: () => void;
 }) {
   const { colors, fontScale } = useTheme();
+  const insets = useSafeAreaInsets();
+  const [focused, setFocused] = useState<"amount" | "note" | null>(null);
   const start = target.waiting ?? (recorded(target.cell) ? target.cell : undefined);
   const [amount, setAmount] = useState(start?.amount != null ? String(start.amount) : "");
   const [reason, setReason] = useState<RevenueReason | "">(REASONS.find((item) => item === start?.reason) ?? "");
@@ -727,11 +786,18 @@ function CaptureSheet({
     }
   }
 
+  // The focused field, as Field shows it: a blue border and, in the web preview, the design's soft ring instead of the browser's.
+  const focus = (field: "amount" | "note"): TextInputProps["style"] =>
+    focused === field
+      ? { borderColor: colors.blue, outlineStyle: "solid", outlineWidth: 3, outlineOffset: 1, outlineColor: `${colors.blue}59` }
+      : { outlineWidth: 0 };
+  const track = (field: "amount" | "note") => ({ onFocus: () => setFocused(field), onBlur: () => setFocused((now) => (now === field ? null : now)) });
+
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={[styles.scrim, { backgroundColor: colors.scrim }]} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View accessibilityViewIsModal style={[styles.sheet, { backgroundColor: colors.white }]}>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.sheetContent}>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.sheetContent, { paddingBottom: 28 + insets.bottom }]}>
             <View style={styles.sheetHead}>
               <View style={{ flex: 1 }}>
                 <Text weight="bold" accessibilityRole="header" style={{ fontSize: 22, lineHeight: 28 }}>
@@ -760,7 +826,10 @@ function CaptureSheet({
                   }}
                   keyboardType="decimal-pad"
                   autoFocus={!reason}
-                  style={[styles.amount, { borderColor: colors.line, color: colors.navy, fontFamily: fonts.regular, fontSize: 26 * fontScale }]}
+                  returnKeyType="done"
+                  onSubmitEditing={() => void save()}
+                  {...track("amount")}
+                  style={[styles.amount, { borderColor: colors.line, color: colors.navy, fontFamily: fonts.regular, fontSize: 26 * fontScale }, focus("amount")]}
                 />
               </View>
             </View>
@@ -803,11 +872,16 @@ function CaptureSheet({
                       accessibilityLabel="What happened"
                       value={note}
                       maxLength={NOTE_LIMIT}
+                      // Picking Other asks what happened, so the note is ready to type, as in the design.
+                      autoFocus
+                      returnKeyType="done"
+                      onSubmitEditing={() => void save()}
+                      {...track("note")}
                       onChangeText={(value) => {
                         setNote(value.slice(0, NOTE_LIMIT));
                         setError("");
                       }}
-                      style={[styles.note, { borderColor: colors.line, color: colors.navy, fontFamily: fonts.regular, fontSize: 18 * fontScale }]}
+                      style={[styles.note, { borderColor: colors.line, color: colors.navy, fontFamily: fonts.regular, fontSize: 18 * fontScale }, focus("note")]}
                     />
                     <Text style={{ fontSize: 13, color: colors.grey }}>{`${note.length} of ${NOTE_LIMIT} characters`}</Text>
                   </View>
@@ -831,6 +905,7 @@ const styles = StyleSheet.create({
   header: { gap: 16, marginBottom: 16 },
   dateNav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   navText: { flex: 1, textAlign: "center", alignItems: "center" },
+  navSpacer: { width: 44 },
   missBanner: { flexDirection: "row", gap: 8, alignItems: "flex-start", minHeight: 44, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderRadius: 12 },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12, minHeight: 60, paddingVertical: 8, paddingHorizontal: 16, borderLeftWidth: 1, borderRightWidth: 1 },
   firstRow: { borderTopWidth: 1, borderTopLeftRadius: 14, borderTopRightRadius: 14 },
@@ -838,7 +913,6 @@ const styles = StyleSheet.create({
   rowLeft: { flexShrink: 1 },
   rowRight: { alignItems: "flex-end", flexShrink: 0 },
   enter: { paddingVertical: 6, paddingHorizontal: 14, borderWidth: 1, borderStyle: "dashed", borderRadius: 999 },
-  chip: { paddingVertical: 2, paddingHorizontal: 10, borderRadius: 999 },
   detailHead: { minHeight: 0, paddingVertical: 6 },
   detailRow: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 60, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "transparent" },
   detailDay: { width: 60, fontSize: 14 },
@@ -852,6 +926,8 @@ const styles = StyleSheet.create({
   problem: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 6 },
   actions: { flexDirection: "row", gap: 8, marginTop: 4 },
   flexButton: { flex: 1, width: "auto", height: 48, paddingHorizontal: 8 },
+  choices: { gap: 8, marginTop: 4 },
+  choice: { height: 48 },
   scrim: { flex: 1, justifyContent: "flex-end" },
   sheet: { width: "100%", maxWidth: 420, maxHeight: "92%", alignSelf: "center", borderTopLeftRadius: 20, borderTopRightRadius: 20 },
   sheetContent: { gap: 14, padding: 20, paddingBottom: 28 },

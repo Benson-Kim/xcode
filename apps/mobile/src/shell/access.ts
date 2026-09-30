@@ -1,3 +1,5 @@
+import { firstDayOfWeek } from "../lib/format";
+import { dayLabel, isDate, rangeLabel, shiftDate } from "../revenue/dates";
 import type { IconName } from "../ui";
 
 export type PermissionGroup = {
@@ -58,90 +60,33 @@ export const allowedTabs = (permissions: string[]) =>
 
 export type Period = "today" | "week" | "month";
 
-// The dashboard cards: each needs one permission and shows zero until its data is live.
+// The dashboard cards, in the order XCODE Web shows them, each for the people with its permission. Cards whose
+// figures the API does not serve yet say so (unavailable) rather than showing zeros. In sub, {period} stands for the
+// period picked ("This month, 1 to 30 Sep 2026"); the capture and missing days cards work out their own.
 export const DASHBOARD_CARDS: {
   permission: string;
   title: string;
   sub?: string;
-  // A money amount (formatted in the organization's currency) or a count.
-  value: number | string;
-  note: string;
+  unavailable?: string;
   action?: string;
   tab?: Tab;
   primary?: boolean;
+  // The action shows only to people holding one of these (as well as the tab).
+  actionNeeds?: string[];
   // A card that always covers this period, whichever the person picks.
   period?: Period;
 }[] = [
-  {
-    permission: "dash.capture",
-    title: "Today's revenue",
-    sub: "Your vehicles, today",
-    value: "0 captured",
-    note: "Revenue capture data will appear here.",
-    action: "Capture revenue",
-    tab: "revenue",
-    primary: true,
-  },
-  {
-    permission: "dash.revenue",
-    title: "Revenue",
-    value: 0,
-    note: "No revenue records are available yet.",
-  },
-  {
-    permission: "dash.net",
-    title: "Net contribution",
-    sub: "Revenue less all costs",
-    value: 0,
-    note: "Cost and revenue data will appear here.",
-  },
-  {
-    permission: "dash.costs",
-    title: "Costs",
-    value: 0,
-    note: "Cost totals are waiting for records.",
-  },
-  {
-    permission: "dash.gaps",
-    title: "Missing revenue days",
-    sub: "No record and no reason",
-    period: "month",
-    value: "0 days",
-    note: "No gaps are available yet.",
-    action: "Open revenue",
-    tab: "revenue",
-  },
-  {
-    permission: "dash.commitments",
-    title: "Renewals due",
-    sub: "Next 30 days",
-    value: "0 renewals",
-    note: "Renewal data will appear here.",
-  },
-  {
-    permission: "dash.edits",
-    title: "Edited after capture",
-    value: "0 records",
-    note: "Change history will appear here.",
-  },
+  { permission: "dash.capture", title: "Today's revenue", action: "Capture revenue", tab: "revenue", primary: true },
+  { permission: "dash.float", title: "My petty cash float", sub: "Cash in hand now", unavailable: "Petty cash is not connected yet." },
+  { permission: "dash.revenue", title: "Revenue", sub: "{period}" },
+  { permission: "dash.net", title: "Net contribution", sub: "Revenue less all costs. {period}", unavailable: "Needs cost totals, which are not connected yet." },
+  { permission: "dash.costs", title: "Money out", sub: "{period}. Fuel and crew pay are not tracked.", unavailable: "Cost totals are not connected yet." },
+  { permission: "dash.gaps", title: "Missing revenue days", period: "month", action: "Fill the gaps", tab: "revenue", actionNeeds: ["revenue.capture", "revenue.correct"] },
+  { permission: "dash.pettycash", title: "Petty cash to approve", sub: "All managers", unavailable: "Petty cash is not connected yet." },
+  { permission: "dash.commitments", title: "Yearly items due", sub: "Next 30 days", unavailable: "Yearly items are not connected yet." },
+  { permission: "dash.investment", title: "Money invested", sub: "Against what has come back", unavailable: "What has come back is not connected yet." },
+  { permission: "dash.edits", title: "Edited after capture", sub: "{period}" },
 ];
-
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-const day = (date: Date) =>
-  `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 
 const PERIOD_NAMES: Record<Period, string> = {
   today: "Today",
@@ -149,22 +94,16 @@ const PERIOD_NAMES: Record<Period, string> = {
   month: "This month",
 };
 
-// "Today, 27 Sep 2026", "This week, 21 to 27 Sep 2026" (weeks run Monday to Sunday), "This month, 1 to 27 Sep 2026".
+// "Today, 27 Sep 2026", "This week, 21 to 27 Sep 2026", "This month, 1 to 27 Sep 2026". The week starts on the
+// organization's first day of the week, as the API counts its dashboard week (Monday until the phone knows).
 // Today is the organization's business date ("yyyy-MM-dd"), never the phone's clock; until the phone has one,
 // the label leaves the date out.
-export function periodLabel(period: Period, businessDate?: string) {
+export function periodLabel(period: Period, businessDate?: string, weekStartsOn = firstDayOfWeek()) {
   const name = PERIOD_NAMES[period];
-  if (!businessDate || !/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return name;
-  const now = new Date(`${businessDate}T00:00:00Z`);
-  if (period === "today") return `${name}, ${day(now)}`;
-  if (period === "month") return `${name}, 1 to ${day(now)}`;
-  const start = new Date(now);
-  start.setUTCDate(now.getUTCDate() - ((now.getUTCDay() + 6) % 7));
-  const end = new Date(start);
-  end.setUTCDate(start.getUTCDate() + 6);
-  const startText =
-    start.getUTCMonth() === end.getUTCMonth()
-      ? `${start.getUTCDate()}`
-      : `${start.getUTCDate()} ${MONTHS[start.getUTCMonth()]}`;
-  return `${name}, ${startText} to ${day(end)}`;
+  if (!isDate(businessDate)) return name;
+  if (period === "today") return `${name}, ${dayLabel(businessDate)}`;
+  if (period === "month") return `${name}, 1 to ${dayLabel(businessDate)}`;
+  const weekday = new Date(`${businessDate}T00:00:00Z`).getUTCDay();
+  const start = shiftDate(businessDate, -((weekday - weekStartsOn + 7) % 7));
+  return `${name}, ${rangeLabel(start, shiftDate(start, 6))}`;
 }

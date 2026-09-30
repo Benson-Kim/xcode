@@ -22,7 +22,7 @@ type Props = {
 // The signed-in app: one screen at a time above the bottom menu. Menus show only what the person may use;
 // the server checks every action.
 export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, onSessionEnded }: Props) {
-  const { colors } = useTheme();
+  const { colors, fontScale } = useTheme();
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("home");
   const [catalog, setCatalog] = useState<Catalog>({ groups: null, error: "" });
@@ -68,7 +68,7 @@ export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, 
     <View style={[styles.shell, { backgroundColor: colors.cream }]}>
       {tab === "revenue" ? (
         // The revenue lists scroll themselves (FlatList), so only the rows on screen are drawn.
-        <RevenueScreen person={person} queue={queue} onSessionEnded={sessionEnded} />
+        <RevenueScreen person={person} queue={queue} businessDate={businessDate} onSessionEnded={sessionEnded} />
       ) : (
         <ScrollView ref={scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           {tab === "home" ? (
@@ -113,7 +113,14 @@ export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, 
               <View>
                 <Icon name={item.icon} size={24} color={current ? colors.blue : colors.grey} />
                 {badge ? (
-                  <View style={[styles.badge, { backgroundColor: counts.conflicts || counts.failed ? colors.red : colors.amberText }]}>
+                  <View
+                    style={[
+                      styles.badge,
+                      // The count grows with the person's text size, and its circle with it.
+                      { top: -6 * fontScale, minWidth: 18 * fontScale, height: 18 * fontScale, borderRadius: 9 * fontScale },
+                      { backgroundColor: counts.conflicts || counts.failed ? colors.red : colors.amberText },
+                    ]}
+                  >
                     <Text weight="bold" style={{ fontSize: 11, lineHeight: 14, color: colors.white }}>
                       {badge > 99 ? "99+" : String(badge)}
                     </Text>

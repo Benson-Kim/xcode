@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, AppState, StyleSheet, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { addNetworkStateListener } from "expo-network";
 import { Figtree_400Regular, Figtree_500Medium, Figtree_600SemiBold, Figtree_700Bold, useFonts } from "@expo-google-fonts/figtree";
 import { AppShell } from "./src/shell/AppShell";
 import { fetchAppearance, forgetAppearance, loadSavedAppearance, pinPolicyOf, themeFor, type Appearance } from "./src/appearance";
 import { AuthFlow } from "./src/auth/AuthFlow";
-import { forgetThisPhone } from "./src/lib/api";
+import { SessionEndedError, forgetThisPhone } from "./src/lib/api";
 import { configureFormats } from "./src/lib/format";
 import { loadPerson, loadSession, type StoredPerson } from "./src/lib/storage";
+import { fetchPerson } from "./src/session";
 import { ThemeProvider } from "./src/ui";
 
 type State =
@@ -61,6 +63,27 @@ export default function App() {
       active = false;
     };
   }, [signedIn]);
+
+  // Unlocked offline, the app goes back online when the connection returns rather than at the next unlock: the API
+  // checks the session (with the tokens the revenue queue already sends), and a session it has ended locks the app.
+  const offlinePerson = state.phase === "signed-in" && state.offline ? state.person : null;
+  useEffect(() => {
+    if (!offlinePerson) return;
+    let active = true;
+    const listener = addNetworkStateListener((network) => {
+      if (!network.isConnected || network.isInternetReachable === false) return;
+      fetchPerson(offlinePerson.phoneNumber, offlinePerson.pinLength).then(
+        (person) => active && setState((current) => (current.phase === "signed-in" && current.offline ? { phase: "signed-in", person, offline: false } : current)),
+        (error) => {
+          if (active && error instanceof SessionEndedError) setState({ phase: "signed-out", trusted: offlinePerson });
+        },
+      );
+    });
+    return () => {
+      active = false;
+      listener.remove();
+    };
+  }, [offlinePerson]);
 
   configureFormats(appearance?.formats);
   const theme = useMemo(() => themeFor(appearance), [appearance]);

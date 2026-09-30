@@ -198,9 +198,9 @@ it("opens on the earliest missing day and fills earlier days first", async () =>
 
   // A later missing day opens on the earliest one.
   await fireEvent.press(screen.getByRole("button", { name: "Next day" }));
-  expect(screen.getByRole("button", { name: "Earlier days are missing. Start with 28 Sep 2026" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Earlier days are missing. Start with Mon 28 Sep 2026" })).toBeTruthy();
   await fireEvent.press(screen.getByRole("button", { name: "KDA 482M, Enter revenue" }));
-  expect(screen.getByText("Fill 28 Sep 2026 first.")).toBeTruthy();
+  expect(screen.getByText("Fill Mon 28 Sep 2026 first.")).toBeTruthy();
   expect(screen.getByText("Mon 28 Sep 2026. Expected KES 1,000")).toBeTruthy();
   await fireEvent.press(screen.getByRole("radio", { name: "Garage" }));
   await fireEvent.press(screen.getByRole("button", { name: "Save" }));
@@ -294,8 +294,9 @@ it("takes today from the organization's business date, never the phone's clock, 
       routes.on("setup/revenue", [200, week(leapDay, "2024-02-26", [{ id: "v-1", registration: "KDA 482M" }])]);
     });
     expect(await screen.findByText("Today, 29 Feb 2024")).toBeTruthy();
-    // Missing revenue days always covers the month so far.
-    expect(screen.getByText("This month, 1 to 29 Feb 2024. No record and no reason")).toBeTruthy();
+    // Missing revenue days always covers the month so far, up to yesterday: today is not a gap before it is captured.
+    expect(screen.getByText("1 to 28 Feb 2024. No record and no reason.")).toBeTruthy();
+    expect(screen.getByText("Your vehicles, 29 Feb 2024")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "This week" }));
     expect(screen.getByText("This week, 26 Feb to 3 Mar 2024")).toBeTruthy();
 
@@ -316,4 +317,50 @@ it("takes today from the organization's business date, never the phone's clock, 
   } finally {
     jest.useRealTimers();
   }
+});
+
+it("offers Replace with mine only for a day the person may still change", async () => {
+  // A clerk captures and changes today only; an earlier day needs "Correct revenue after the day".
+  const yesterday = "2026-09-28";
+  const api = await signIn(people.clerk, "0712000012", (routes) =>
+    routes.on("setup/revenue", [200, week(TODAY, "2026-09-28", [{ id: "v-1", registration: "KDA 482M", earliestMissing: yesterday }])]),
+  );
+  api.on(`setup/revenue/v-1/${yesterday}`, [409, { title: "This day already has a different record.", status: 409, current: { ...saved, date: yesterday } }]);
+  await openRevenue();
+  await captureAmount("KDA 482M, Enter revenue", "1000");
+
+  expect(await screen.findByText("Saved: KES 900")).toBeTruthy();
+  expect(screen.getByText("Changing a day after it has passed needs Correct revenue after the day.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Replace with mine" })).toBeNull();
+  await fireEvent.press(screen.getByRole("button", { name: "Keep saved value" }));
+  await waitFor(() => expect(tabLabel()).toBe("Revenue"));
+  expect(api.sent(`setup/revenue/v-1/${yesterday}`)).toHaveLength(1);
+});
+
+it("loads the week again with Try again after it failed", async () => {
+  const api = await signIn(people.clerk, "0712000013", (routes) => routes.on("setup/revenue", [500, { title: "An error occurred while processing your request.", status: 500 }]));
+  await openRevenue();
+  expect(await screen.findByText("Something went wrong on the server. Try again in a moment.")).toBeTruthy();
+  api.on("setup/revenue", [200, oneVehicle]);
+  await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByRole("button", { name: "KDA 482M, Enter revenue" })).toBeTruthy();
+  expect(screen.queryByText("Something went wrong on the server. Try again in a moment.")).toBeNull();
+});
+
+it("goes back online when the connection returns after an offline unlock", async () => {
+  const api = await signIn({ ...people.clerk, permissions: [...people.clerk.permissions, "dash.revenue"] }, "0712000014", (routes) => {
+    routes.on("setup/revenue/dashboard?period=today", [200, { period: "today", from: TODAY, through: TODAY, businessDate: TODAY, revenue: 1500, expected: 2000, percent: 75, capturedToday: 1, vehiclesToday: 2, missingDays: 0, missingVehicles: 0, editedRecords: 0 }]);
+    routes.on("setup/revenue/dashboard?period=month", [200, { period: "month", from: "2026-09-01", through: TODAY, businessDate: TODAY, revenue: 1500, expected: 2000, percent: 75, capturedToday: 1, vehiclesToday: 2, missingDays: 0, missingVehicles: 0, editedRecords: 0 }]);
+  });
+  expect(await screen.findByText("1 of 2 captured")).toBeTruthy();
+  await fireEvent.press(screen.getByRole("button", { name: "Lock app" }));
+  api.on("auth/unlock", "offline");
+  await typePin("4826");
+  await screen.findByText("No internet. You are seeing what this phone saved at your last sign in.");
+  expect(screen.queryByText("1 of 2 captured")).toBeNull();
+
+  // The connection returns: the API confirms the session and the figures load again, without another unlock.
+  await act(async () => require("expo-network").__emit({ isConnected: true, isInternetReachable: true }));
+  expect(await screen.findByText("1 of 2 captured")).toBeTruthy();
+  expect(screen.queryByText("No internet. You are seeing what this phone saved at your last sign in.")).toBeNull();
 });

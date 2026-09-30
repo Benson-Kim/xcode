@@ -123,7 +123,9 @@ async function authorized(path: string, init: RequestInit = {}) {
 export async function apiGet<T>(path: string): Promise<T> {
   const response = await authorized(path);
   const body = await response.json().catch(() => ({}));
-  // The API's detail says what to fix; its title is only the category.
+  // The API's detail says what to fix; its title is only the category. A server failure has nothing to fix on the phone.
+  if (response.status >= 500)
+    throw new Error("Something went wrong on the server. Try again in a moment.");
   if (!response.ok)
     throw new Error(
       body.detail || body.title || "The request could not be completed.",
