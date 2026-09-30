@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react-nativ
 import { catalog, fakeApi, people, revenueDashboard, revenueWeek, tokens } from "./fakeApi";
 import { startApp, storedText, trustPhone, typePin } from "./helpers";
 
-async function unlockAs(person: (typeof people)[keyof typeof people], phone: string) {
+async function unlockAs(person: (typeof people)[keyof typeof people], phone: string, figures: Partial<typeof revenueDashboard> = {}) {
   await trustPhone(person, phone);
   const api = fakeApi();
   api.on("auth/unlock", [200, tokens(2)]);
@@ -11,9 +11,9 @@ async function unlockAs(person: (typeof people)[keyof typeof people], phone: str
   api.on("setup/revenue", [200, revenueWeek]);
   api.on("setup/revenue?weekStart=2026-09-28", [200, revenueWeek]);
   api.on("setup/revenue/vehicle-1/2026-09-28", [200, { id: "record-1", version: 1 }]);
-  api.on("setup/revenue/dashboard?period=today", [200, { ...revenueDashboard, period: "today" }]);
-  api.on("setup/revenue/dashboard?period=month", [200, { ...revenueDashboard, period: "month" }]);
-  api.on("setup/revenue/dashboard?period=week", [200, revenueDashboard]);
+  api.on("setup/revenue/dashboard?period=today", [200, { ...revenueDashboard, ...figures, period: "today" }]);
+  api.on("setup/revenue/dashboard?period=month", [200, { ...revenueDashboard, ...figures, period: "month" }]);
+  api.on("setup/revenue/dashboard?period=week", [200, { ...revenueDashboard, ...figures }]);
   await startApp();
   await screen.findByText(`Welcome back, ${person.firstName}`);
   await typePin("4826");
@@ -66,6 +66,27 @@ it("starts a revenue clerk on today with capture first", async () => {
   await fireEvent.press(screen.getByRole("tab", { name: "More" }));
   await screen.findByText("Wanjiru Kamau");
   expect(screen.queryByText("Setup")).toBeNull();
+});
+
+const cardOf = (title: string) => screen.getByRole("header", { name: title }).parent!.parent!;
+
+it("shows each home card from its own figures only", async () => {
+  // What the API sends a revenue clerk (dash.capture and dash.gaps): no revenue totals and no edits count.
+  await unlockAs(people.clerk, "0712345678", { revenue: null, expected: null, percent: null, editedRecords: null } as never);
+  expect(await within(cardOf("Today's revenue")).findByText("0 of 1 captured")).toBeTruthy();
+  expect(within(cardOf("Missing revenue days")).getByText("1 day")).toBeTruthy();
+  expect(screen.queryByRole("header", { name: "Revenue" })).toBeNull();
+  expect(screen.queryByRole("header", { name: "Edited after capture" })).toBeNull();
+});
+
+it("shows nothing for a figure the API leaves out", async () => {
+  // No "no missing days" beside a count of missing days, and no "no target" when the target was left out.
+  await unlockAs(people.owner, "0733520614", { revenue: 5000, expected: null, percent: null, missingDays: 2, missingVehicles: null } as never);
+  expect(await within(cardOf("Revenue")).findByText("KES 5,000")).toBeTruthy();
+  expect(within(cardOf("Revenue")).queryByText("No dated target is available.")).toBeNull();
+  expect(within(cardOf("Missing revenue days")).getByText("2 days")).toBeTruthy();
+  expect(within(cardOf("Missing revenue days")).queryByText("No missing days so far this month.")).toBeNull();
+  expect(screen.queryByText(/null|undefined|NaN/)).toBeNull();
 });
 
 it("shows the Spend tab to people who hold a petty cash permission", async () => {

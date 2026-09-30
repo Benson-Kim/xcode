@@ -22,8 +22,9 @@ const PERIODS: { value: Period; label: string }[] = [
 const REVENUE_CARDS = ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"];
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-// What a revenue card shows, or null when the API left its figures out (null: not shown to this person).
-function revenueFigures(permission: string, dashboard: RevenueDashboard) {
+// What a revenue card shows, from that card's own figures only, or null when the API left them out (null: not shown
+// to this person). A note never speaks for a figure that is null.
+function revenueFigures(permission: string, dashboard: RevenueDashboard): { value: string; note?: string } | null {
   const { capturedToday, vehiclesToday, revenue, expected, percent, missingDays, missingVehicles, editedRecords } = dashboard;
   if (permission === "dash.capture") {
     if (capturedToday === null || vehiclesToday === null) return null;
@@ -37,14 +38,18 @@ function revenueFigures(permission: string, dashboard: RevenueDashboard) {
     if (revenue === null) return null;
     return {
       value: money(revenue),
-      note: percent === null || expected === null ? "No dated target is available." : `${percent}% of expected ${money(expected)}`,
+      note: expected === null ? undefined : percent === null ? "No dated target is available." : `${percent}% of expected ${money(expected)}`,
     };
   }
   if (permission === "dash.gaps") {
     if (missingDays === null) return null;
     return {
       value: plural(missingDays, "day", "days"),
-      note: missingDays && missingVehicles !== null ? `${plural(missingVehicles, "vehicle", "vehicles")} with missing days` : "No missing days so far this month.",
+      note: !missingDays
+        ? "No missing days so far this month."
+        : missingVehicles === null
+          ? undefined
+          : `${plural(missingVehicles, "vehicle", "vehicles")} with missing days`,
     };
   }
   if (editedRecords === null) return null;
@@ -127,7 +132,7 @@ export function HomeScreen({
               ) : figures ? (
                 <>
                   <CardValue>{figures.value}</CardValue>
-                  <CardNote>{figures.note}</CardNote>
+                  {figures.note ? <CardNote>{figures.note}</CardNote> : null}
                 </>
               ) : dashboard ? (
                 <CardNote>Not shown with your access.</CardNote>

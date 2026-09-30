@@ -20,6 +20,14 @@ import {
 // Every capture is written to the Keychain before anything is sent, and leaves it only when the API accepts it
 // (200) or the person discards it. Each capture has its own small entry in a numbered slot; the index holds one
 // character per slot, so it stays under QUEUE_LIMIT bytes however many vehicles and days are waiting.
+//
+// The Keychain cannot list its keys, and the app can be killed between any two writes (each write on its own is all
+// or nothing). So every slot holding a capture is named by the stored index, except at most one, which is the stored
+// index's lowest free slot: a new capture takes the lowest free slot and is written there before the index names it;
+// a slot is emptied before the index frees it; a queue counts a slot as used only once the stored index names it; and
+// each change finishes its writes before the next starts. Opening reads that one slot as well, so a capture kept just
+// before a kill is found, not written over. A kill after the API accepted a capture but before its slot was emptied
+// sends it once more at the next start; the API answers an identical replay with 200 and changes nothing.
 
 export const QUEUE_LIMIT = 500;
 const MESSAGE_LIMIT = 160;
@@ -36,6 +44,18 @@ const indexKey = (owner: string) => `xcode.revenue-queue.${owner}`;
 const slotKey = (owner: string, slot: number) => `${indexKey(owner)}.${slot}`;
 const keyOf = (vehicleId: string, date: string) => `${vehicleId}/${date}`;
 
+// Slots in use: "1" marks one; trailing free slots are trimmed.
+function withSlot(bits: string, slot: number, inUse: boolean) {
+  const padded = bits.padEnd(slot + 1, "0");
+  return (padded.slice(0, slot) + (inUse ? "1" : "0") + padded.slice(slot + 1)).replace(/0+$/, "");
+}
+// The lowest free slot, or -1 when the queue is full.
+function firstFree(bits: string) {
+  const free = bits.indexOf("0");
+  if (free >= 0) return free;
+  return bits.length < QUEUE_LIMIT ? bits.length : -1;
+}
+
 const text = (value: unknown, limit: number): value is string => typeof value === "string" && value.length <= limit;
 const orNull = (value: unknown, valid: (value: unknown) => boolean) => value === null || valid(value);
 const whole = (value: unknown) => Number.isInteger(value);
@@ -47,7 +67,8 @@ const validSaved = (value: unknown) => {
     orNull(saved.amount, (amount) => typeof amount === "number" && Number.isFinite(amount)) &&
     orNull(saved.reason, (reason) => text(reason, 20)) &&
     orNull(saved.note, (note) => text(note, NOTE_LIMIT)) &&
-    orNull(saved.version, whole)
+    orNull(saved.version, whole) &&
+    (saved.canEdit === undefined || typeof saved.canEdit === "boolean")
   );
 };
 
@@ -67,7 +88,13 @@ const validCapture = (entry: QueuedCapture) =>
   orNull(entry.current, validSaved) &&
   Number.isFinite(entry.queuedAt);
 
-const savedValue = (cell: RevenueCell): SavedValue => ({ amount: cell.amount, reason: cell.reason, note: cell.note, version: cell.version ?? null });
+const savedValue = (cell: RevenueCell): SavedValue => ({
+  amount: cell.amount,
+  reason: cell.reason,
+  note: cell.note,
+  version: cell.version ?? null,
+  canEdit: cell.canEdit,
+});
 
 // Oldest day first, so an earlier day for a vehicle always reaches the API before a later one.
 const byDay = (a: QueuedCapture, b: QueuedCapture) => a.date.localeCompare(b.date) || a.registration.localeCompare(b.registration);
@@ -80,14 +107,18 @@ function exclusive<T>(owner: string, work: () => Promise<T>): Promise<T> {
   locks.set(owner, next.catch(() => undefined));
   return next;
 }
+// The queue that last read each person's slots back. Only it knows every slot in use, so only it may take a new one.
+const readBy = new Map<string, object>();
 
 export type NewCapture = Pick<QueuedCapture, "vehicleId" | "registration" | "date" | "amount" | "reason" | "note" | "version">;
 export type QueueSnapshot = { entries: QueuedCapture[]; revision: number; loaded: boolean; syncing: boolean };
 
 export function openQueue(owner: string, hooks: { onChange: (snapshot: QueueSnapshot) => void; onSessionEnded: () => void }) {
   const held = new Map<string, { slot: number; entry: QueuedCapture }>();
-  // "1" marks a slot in use; trailing free slots are trimmed.
+  // Never ahead of the stored index: a slot is marked here only after an index naming it was written.
   let used = "";
+  // Set when the load has finished. A queue whose load failed writes nothing, since it may not know every slot.
+  let intact = false;
   let loaded = false;
   let closed = false;
   let syncing = false;
@@ -101,26 +132,21 @@ export function openQueue(owner: string, hooks: { onChange: (snapshot: QueueSnap
   const changed = () => {
     if (!closed) hooks.onChange({ entries: entries(), revision, loaded, syncing });
   };
-  const saveIndex = () => vault.set(indexKey(owner), JSON.stringify({ used }));
-  function mark(slot: number, inUse: boolean) {
-    const bits = used.padEnd(slot + 1, "0");
-    used = (bits.slice(0, slot) + (inUse ? "1" : "0") + bits.slice(slot + 1)).replace(/0+$/, "");
-  }
-  function firstFree() {
-    const free = used.indexOf("0");
-    if (free >= 0) return free;
-    return used.length < QUEUE_LIMIT ? used.length : -1;
-  }
+  const saveIndex = (bits: string) => vault.set(indexKey(owner), JSON.stringify({ used: bits }));
 
-  // One index read, then one read per waiting capture. A slot that is missing or fails its check is cleared,
-  // as storage.ts treats corrupt state.
+  // One index read, then one read per waiting capture and one for the index's lowest free slot, where a capture
+  // kept just before a kill would be. A slot that is missing or fails its check is cleared, as storage.ts treats
+  // corrupt state.
+  const self = {};
   const ready = exclusive(owner, async () => {
+    readBy.set(owner, self);
     const index = await read<{ used: string }>(
       indexKey(owner),
       (value) => typeof value.used === "string" && value.used.length <= QUEUE_LIMIT && /^[01]*$/.test(value.used),
     );
-    const stored = index?.used ?? "";
-    const slots = [...stored].flatMap((bit, slot) => (bit === "1" ? [slot] : []));
+    const stored = (index?.used ?? "").replace(/0+$/, "");
+    const unnamed = firstFree(stored);
+    const slots = [...stored].flatMap((bit, slot) => (bit === "1" ? [slot] : [])).concat(unnamed >= 0 ? [unnamed] : []);
     const found = await Promise.all(slots.map((slot) => read<QueuedCapture>(slotKey(owner, slot), validCapture)));
     for (const [position, entry] of found.entries()) {
       if (!entry) continue;
@@ -134,24 +160,28 @@ export function openQueue(owner: string, hooks: { onChange: (snapshot: QueueSnap
       if (other) await vault.remove(slotKey(owner, other.slot));
       held.set(key, { slot, entry });
     }
-    for (const { slot } of held.values()) mark(slot, true);
-    if (used !== stored.replace(/0+$/, "")) await saveIndex();
+    const next = [...held.values()].reduce((bits, { slot }) => withSlot(bits, slot, true), "");
+    if (next !== stored) await saveIndex(next);
+    used = next;
+    intact = true;
   }).finally(() => {
     loaded = true;
     changed();
   });
 
-  // Replaces the stored entry for a vehicle and day, unless the queue closed or a newer capture replaced it meanwhile.
+  // Replaces the stored entry for a vehicle and day in one write, unless the queue closed or a newer capture
+  // replaced it meanwhile.
   function update(sent: QueuedCapture, change: Partial<QueuedCapture> | "remove") {
     return exclusive(owner, async () => {
       const key = keyOf(sent.vehicleId, sent.date);
       const now = held.get(key);
-      if (closed || !now || now.entry !== sent) return;
+      if (closed || !intact || !now || now.entry !== sent) return;
       if (change === "remove") {
+        // The capture goes before its bit; the bit goes here even if the index write fails, as the slot is empty.
         await vault.remove(slotKey(owner, now.slot));
         held.delete(key);
-        mark(now.slot, false);
-        await saveIndex();
+        used = withSlot(used, now.slot, false);
+        await saveIndex(used);
         return;
       }
       const entry = { ...sent, ...change, message: (change.message ?? sent.message).slice(0, MESSAGE_LIMIT) };
@@ -234,10 +264,11 @@ export function openQueue(owner: string, hooks: { onChange: (snapshot: QueueSnap
   async function add(capture: NewCapture) {
     await ready;
     await exclusive(owner, async () => {
+      // A newer queue for this person read the slots back while this one waited: it would not know the slot taken
+      // here, and would write over it. A queue that merely closed (the app locked) still keeps what was saved.
+      if (readBy.get(owner) !== self) throw new Error("The app locked before this entry was kept. Capture it again.");
       const key = keyOf(capture.vehicleId, capture.date);
       const existing = held.get(key);
-      const slot = existing?.slot ?? firstFree();
-      if (slot < 0) throw new QueueFullError();
       const entry: QueuedCapture = {
         ...capture,
         registration: capture.registration.slice(0, 40),
@@ -247,11 +278,23 @@ export function openQueue(owner: string, hooks: { onChange: (snapshot: QueueSnap
         current: null,
         queuedAt: Date.now(),
       };
-      await vault.set(slotKey(owner, slot), JSON.stringify(entry));
-      if (!existing) {
-        mark(slot, true);
-        await saveIndex();
+      if (existing) {
+        await vault.set(slotKey(owner, existing.slot), JSON.stringify(entry));
+        held.set(key, { slot: existing.slot, entry });
+        return;
       }
+      const slot = firstFree(used);
+      if (slot < 0) throw new QueueFullError();
+      const next = withSlot(used, slot, true);
+      try {
+        await vault.set(slotKey(owner, slot), JSON.stringify(entry));
+        await saveIndex(next);
+      } catch (error) {
+        // Not kept: the slot stays free here, and is cleared if the Keychain allows. It held nothing kept before.
+        await vault.remove(slotKey(owner, slot)).catch(() => undefined);
+        throw error;
+      }
+      used = next;
       held.set(key, { slot, entry });
     });
     changed();

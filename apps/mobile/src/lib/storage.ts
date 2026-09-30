@@ -185,10 +185,9 @@ export async function saveOfflineTries(tries: OfflineTries): Promise<void> {
 }
 
 // Switch user: this phone stops being trusted for anyone. The device id stays; it names the install.
+// One removal at a time, session and person first: the phone is trusted only while both are kept, so a kill part
+// way leaves it trusted for no one, never trusted with its PIN check or wrong-PIN pause gone.
 export async function forgetPerson(): Promise<void> {
-  await Promise.all(
-    [keys.session, keys.person, keys.pinCheck, keys.offlineTries].map((key) =>
-      vault.remove(key),
-    ),
-  );
+  for (const key of [keys.session, keys.person, keys.pinCheck, keys.offlineTries])
+    await vault.remove(key);
 }

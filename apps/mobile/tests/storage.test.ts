@@ -1,5 +1,5 @@
 import * as SecureStore from "expo-secure-store";
-import { clearSession, forgetPerson, getDeviceId, loadPerson, loadSession, matchesPinCheck, savePerson, savePinCheck, savePinPolicy, saveSession } from "../src/lib/storage";
+import { clearSession, forgetPerson, getDeviceId, loadPerson, loadSession, matchesPinCheck, saveOfflineTries, savePerson, savePinCheck, savePinPolicy, saveSession } from "../src/lib/storage";
 
 const session = { phoneNumber: "0712345678", accessToken: "jwt", refreshToken: "refresh" };
 
@@ -51,6 +51,51 @@ it("switch user forgets the person but keeps the installation id", async () => {
   expect(await loadSession()).toBeNull();
   expect(await matchesPinCheck("2580")).toBeNull();
   expect(await getDeviceId()).toBe(device);
+});
+
+it("switch user stops trusting the phone before it forgets the PIN check and the wrong-PIN pause", async () => {
+  const items = require("expo-secure-store").__items as Map<string, string>;
+  await saveSession(session);
+  await savePerson({ phoneNumber: session.phoneNumber, firstName: "Wanjiru", lastName: "Kamau", role: "Revenue clerk", permissions: [], pinLength: 4, lockoutThreshold: 5, lockoutMinutes: 15 });
+  await savePinCheck("2580");
+  await saveOfflineTries({ count: 0, pausedUntil: Date.now() + 15 * 60_000 });
+  const before = JSON.stringify([...items]);
+
+  // The app can be killed after any removal, and removals started together may finish in any order: here the
+  // last one started finishes first.
+  const remove = jest.mocked(SecureStore.deleteItemAsync);
+  const original = remove.getMockImplementation()!;
+  const started: (() => void)[] = [];
+  const states: [string, string][][] = [];
+  remove.mockImplementation(
+    (key) =>
+      new Promise<void>((resolve) => {
+        started.push(() => {
+          items.delete(key);
+          states.push([...items]);
+          resolve();
+        });
+        if (started.length === 1) setTimeout(() => started.splice(0).reverse().forEach((finish) => finish()));
+      }),
+  );
+  try {
+    await forgetPerson();
+  } finally {
+    remove.mockImplementation(original);
+  }
+  expect(states.at(-1)).toEqual([]);
+
+  // App.tsx trusts the phone for someone only while the session and the person match. After each removal the phone
+  // is either as it was or trusted for no one, never trusted with its PIN check or pause gone.
+  const outcomes = [];
+  for (const state of states) {
+    items.clear();
+    for (const [key, value] of state) items.set(key, value);
+    const [kept, person] = await Promise.all([loadSession(), loadPerson()]);
+    const trusted = kept !== null && person?.phoneNumber === kept.phoneNumber;
+    outcomes.push(!trusted ? "trusted for no one" : JSON.stringify([...items]) === before ? "as it was" : "trusted, with its PIN check or pause gone");
+  }
+  expect(outcomes).toEqual(["trusted for no one", "trusted for no one", "trusted for no one", "trusted for no one"]);
 });
 
 it("concurrent requests share a single persistent installation identifier", async () => {

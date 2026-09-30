@@ -3,8 +3,9 @@
 export type { RevenueCell, RevenueStatus, RevenueVehicle, RevenueWeek, SaveRevenue } from "@xcode/shared";
 import type { RevenueCell, RevenueDashboard as SharedDashboard } from "@xcode/shared";
 
-// The API leaves a figure null when the person may not see it (revenue, expected and percent, and today's capture
-// counts, without dash.revenue or dash.capture; missing days without dash.gaps; edited records without dash.edits).
+// The API leaves a figure null when the person may not see its card: revenue, expected and percent without
+// dash.revenue; today's capture counts without dash.capture; missing days without dash.gaps; edited records without
+// dash.edits.
 type Figures = "revenue" | "expected" | "percent" | "capturedToday" | "vehiclesToday" | "missingDays" | "missingVehicles" | "editedRecords";
 export type RevenueDashboard = Omit<SharedDashboard, Figures> & { [K in Figures]: number | null };
 
@@ -14,8 +15,9 @@ export type RevenueReason = (typeof REASONS)[number];
 // Other needs a short description of what happened.
 export const NOTE_LIMIT = 80;
 
-// What the API holds for a day, as a 409 reports it.
-export type SavedValue = Pick<RevenueCell, "amount" | "reason" | "note"> & { version: number | null };
+// What the API holds for a day, as a 409 reports it, and whether this person may change it (absent on entries a phone
+// kept before it stored that).
+export type SavedValue = Pick<RevenueCell, "amount" | "reason" | "note"> & { version: number | null; canEdit?: boolean };
 
 // pending: waiting to be sent. blocked: the API wants an earlier day first, and it is sent again once that day is in.
 // conflict: the day already holds a different record; the person keeps it or replaces it with theirs.

@@ -159,6 +159,19 @@ it("keeps a conflict until the person keeps the saved value", async () => {
   expect(storedText()).not.toContain('"amount":1000');
 });
 
+it("offers no Replace with mine when the saved record is not the person's to change, as XCODE Web does", async () => {
+  const api = await signIn(people.clerk, "0712000014", (routes) => routes.on("setup/revenue", [200, oneVehicle]));
+  // The API says whether this person may change the saved record: a clerk may not change a past day.
+  api.on(PUT, [409, { title: "This day already has a different record.", detail: "This day was changed after you opened it.", status: 409, current: { ...saved, canEdit: false } }]);
+  await openRevenue();
+  await captureAmount("KDA 482M, Enter revenue", "1000");
+
+  expect(await screen.findByText("Saved: KES 900")).toBeTruthy();
+  expect(screen.getByText("Your access does not include changing the saved record for this day.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Replace with mine" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Keep saved value" })).toBeTruthy();
+});
+
 it("replaces the saved value with mine over the version the API reported, even when a race left it out", async () => {
   const api = await signIn(people.clerk, "0712000005", (routes) => routes.on("setup/revenue", [200, oneVehicle]));
   // Two phones created the record at once: the 409 has no current record, so the phone reads the day again.

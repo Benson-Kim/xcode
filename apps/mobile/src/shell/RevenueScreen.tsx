@@ -648,11 +648,15 @@ function QueuePanel({ queue, onOpenDay }: { queue: RevenueQueue; onOpenDay: (dat
                   {entry.current ? `Saved: ${valueText(entry.current)}${entry.current.note ? ` (${entry.current.note})` : ""}` : "Connect to the internet to see what was saved."}
                 </Text>
                 <Text style={{ fontSize: 14, color: colors.grey }}>{`Yours: ${valueText(entry)}${entry.note ? ` (${entry.note})` : ""}`}</Text>
+                {entry.current?.canEdit === false && (
+                  <Text style={{ fontSize: 14, color: colors.grey }}>Your access does not include changing the saved record for this day.</Text>
+                )}
                 <View style={styles.actions}>
                   <Button tone="outline" onPress={() => void queue.discard(entry)} style={styles.flexButton}>
                     Keep saved value
                   </Button>
-                  {entry.current ? (
+                  {/* The API says whether this person may change the saved record; a clerk may not change a past day. */}
+                  {entry.current?.canEdit === false ? null : entry.current ? (
                     <Button onPress={() => void queue.replace(entry)} style={styles.flexButton}>
                       Replace with mine
                     </Button>
