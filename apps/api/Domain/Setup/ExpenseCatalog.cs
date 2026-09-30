@@ -68,7 +68,11 @@ public sealed class ExpenseCategory : IOrganizationEntity
 
      public bool Stop(DateOnly today)
      {
-          if (StoppedOn is not null) return false;
+          if (StoppedOn is not null)
+          {
+               if (StoppedOn != today) throw new ArgumentException("It is already turned off. Turn it on first to cancel that.");
+               return false;
+          }
           StoppedOn = today;
           return true;
      }
@@ -114,7 +118,11 @@ public sealed class ExpenseItem : IOrganizationEntity
 
      public bool Stop(DateOnly today)
      {
-          if (StoppedOn is not null) return false;
+          if (StoppedOn is not null)
+          {
+               if (StoppedOn != today) throw new ArgumentException("It is already turned off. Turn it on first to cancel that.");
+               return false;
+          }
           StoppedOn = today;
           return true;
      }

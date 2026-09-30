@@ -141,6 +141,30 @@ public sealed class AccessAndSetupTests : IDisposable
     }
 
     [Fact]
+    public async Task AnArchiveOnAnotherDateIsRefusedAndRestoreCancelsAScheduledArchive()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var company = (await (await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("Lifecycle Line", "Add Lifecycle Line")))
+            .Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        (await owner.PostAsJsonAsync($"/setup/companies/{company}/archive", new { })).EnsureSuccessStatusCode();
+
+        // The business date moves back, so the archive is now scheduled and the company still counts as active.
+        app.Clock.Advance(TimeSpan.FromDays(-3));
+        var row = (await owner.GetFromJsonAsync<Page<CompanyDto>>("/setup/companies"))!.Items.Single(x => x.Id == company);
+        Assert.True(row.Active);
+        Assert.NotNull(row.ArchivedOn);
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/companies/{company}/archive", new { })).StatusCode);
+        (await owner.PostAsJsonAsync($"/setup/companies/{company}/restore", new { })).EnsureSuccessStatusCode();
+        Assert.Null((await owner.GetFromJsonAsync<Page<CompanyDto>>("/setup/companies"))!.Items.Single(x => x.Id == company).ArchivedOn);
+
+        // Archived earlier and the date moved on: archiving again says so instead of pretending it worked.
+        (await owner.PostAsJsonAsync($"/setup/companies/{company}/archive", new { })).EnsureSuccessStatusCode();
+        app.Clock.Advance(TimeSpan.FromDays(5));
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/companies/{company}/archive", new { })).StatusCode);
+    }
+
+    [Fact]
     public async Task RoleDefaultsComeOnlyFromTheCatalog()
     {
         await app.SeedDemo();

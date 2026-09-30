@@ -38,7 +38,11 @@ public sealed class RecurringItem : IOrganizationEntity
      }
      public bool Stop(DateOnly today)
      {
-          if (StoppedFrom is not null) return false;
+          if (StoppedFrom is not null)
+          {
+               if (StoppedFrom != today) throw new ArgumentException("The item is already stopped.");
+               return false;
+          }
           StoppedFrom = today;
           return true;
      }
