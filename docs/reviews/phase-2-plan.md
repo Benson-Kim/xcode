@@ -269,6 +269,47 @@ C6 and C5's `returned` and `percentPaidOff`.
     - **Still to do, in order:** (a) merge origin/access into settings, then do settings' decisions D6, D11, D12-web (show `otherCompanies`/`otherVehicles`, and hide roles the editor can't give), D14, D15-web ("Your access" from `/setup/access/me`) and D16. (b) Merge settings into revenue, then do D3, D4, D5, D7, D9 and the dashboard `companyId`. (c) Commit the mobile queue fix after the user's try-out and push revenue. (d) Ask before the Codex re-reviews and thread replies. (e) Add SQL Server migration tests on `XCodeTest`.
   - The 19 earlier findings are all verified FIXED (a read-only check, one line each). Two lack tests: the b907c13 migration Down and the NormalizeSecurityPolicy migration SQL. Add SQL Server migration tests.
   - Thread replies for those 19 are drafted in `scratchpad/replies.tsv` (session 4b939e6e). **The user rejected posting them in bulk. Ask before any GitHub write.**
+
+- **Round 6 (2026-09-30 to 10-01): browser passes before any try-out.**
+  - New user rule: before the user is handed anything to try, one Sonnet agent tries every changed flow and its edge cases in a real browser, for mobile (Expo web) and web.
+  - **Why the user's phone try-out failed:**
+    - The cause was setup, not code: the main folder's ignored `apps/mobile/.env` points at a stale LAN address, 192.168.100.9, and Expo had been started from the main folder.
+    - Phone recipe:
+      - API from the revenue worktree with `ASPNETCORE_URLS=http://0.0.0.0:5000`.
+      - Expo from the revenue worktree with `EXPO_PUBLIC_API_URL=http://192.168.0.100:5000`.
+    - The DevTools "multiple React Native hosts" notice is an Expo Go limitation.
+  - **Mobile pass** (`scratchpad/mobile-pass`, session 4b939e6e):
+    - Setup:
+      - `EXPO_PUBLIC_API_URL=http://localhost:5100 npx expo export -p web --output-dir <that>/mobile-web`.
+      - `api-bin/Auth.Api.exe --urls http://localhost:5100`, run from `api-bin`, with Development, the XCodeTest string, `Cors__Origins__1=http://localhost:8090` and `RateLimiting__AuthPermitLimit=600`.
+      - `node static.mjs mobile-web` serves the export on port 8090.
+      - Run `node mobile-pass.mjs [A..J]`; `bash build.sh` rebuilds the script from `parts/`.
+    - First run: 241 passed, 3 failed.
+    - Fixes, uncommitted on revenue alongside the queue fix:
+      - Non-whole money shows the organization's decimals in full ("KES 1,500.50"), in both mobile and web `format.ts`.
+      - A past day or week with no vehicle in service says "No vehicles on this day" or "No vehicles this week".
+      - An online unlock refused (401) with the PIN this phone knows says "This phone can no longer unlock with your PIN…" and doesn't count a try.
+    - Rerun: **244 passed, 0 failed.** Pending: D7, D9 and mobile dark theme.
+    - Other checks: mobile 67/67 and web 151/151, with typecheck and eslint clean.
+  - **Web pass** (`scratchpad/web-pass`):
+    - Setup:
+      - API on 5200, from `mobile-pass/api-bin`.
+      - `npm run build` in apps/web, then `API_URL=http://localhost:5200 npx next start -p 3100`.
+      - Run `node web-pass.mjs [A..L]`.
+    - All scenarios, A to L, are written.
+    - **Paused at the user's request** during the first full run. It had covered A to E and part of F: 105 passed, 3 failed, and 1 is pending (D3).
+    - Failures to triage:
+      - A, "ran to the end": a click timed out at script line 274, probably a script problem.
+      - D: a huge record shows an uncapped percent, 1249977794% on the dashboard and 2147483647% on the Revenue page. The API only clamps to the int range; decide on a display cap.
+    - Restore `apps/web/next-env.d.ts` after each build.
+  - Follow-ups:
+    - Mobile ignores `appearance.themeMode`, so there is no dark theme.
+    - 99,999,999,999 is accepted, because the spec sets no upper limit; the user was asked about a cap.
+    - The "-" key is dropped silently.
+  - **Still to do, in order:**
+    1. Rerun the full web pass, triage, fix inline and rerun.
+    2. The user tries the mobile changes on the phone. After their OK, commit the mobile and format fixes and push revenue: 1019262, d541a9d, this plan and the new commits.
+    3. Then (a), (b), (d) and (e) from Round 5.
   - Next session, one step at a time, at most one Sonnet agent at once:
     1. Finish and verify settings. Commit, push, then fast-forward the main folder.
     2. Finish and verify revenue #6. Commit, and give the user a mobile try-out before pushing.
