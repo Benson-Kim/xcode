@@ -32,6 +32,8 @@ import {
 } from "./ui";
 
 const REASONS = ["Garage", "Arrest", "No Crew", "Other"] as const;
+// What the API and the phone accept for a day's revenue: digits, optionally two decimals.
+const AMOUNT = /^\d{1,12}(\.\d{1,2})?$/;
 type Reason = (typeof REASONS)[number];
 const isReason = (value: string | null): value is Reason => REASONS.includes(value as Reason);
 
@@ -646,10 +648,12 @@ function CaptureForm({
   }, []);
 
   function entry(): SaveRevenue | string {
-    const text = amount.trim();
-    const value = text ? Number(text) : 0;
-    if (!Number.isFinite(value) || value < 0) return "Enter the revenue as an amount.";
-    if (value) return { amount: value, reason: null, note: null };
+    // The same rule the API and the phone apply: more than zero, at most two decimals. Cents are kept,
+    // so a total always agrees with the records behind it (D3).
+    const text = amount.replace(/[,\s]/g, "");
+    if (text && (!AMOUNT.test(text) || Number(text) <= 0))
+      return "Enter the revenue as a positive amount with at most two decimals.";
+    if (text) return { amount: Number(text), reason: null, note: null };
     if (!canChooseReason) return "Enter the revenue.";
     if (!reason) return "Enter the revenue or pick a reason.";
     if (reason === "Other" && !note.trim()) return "Say what happened.";

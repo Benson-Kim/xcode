@@ -541,3 +541,30 @@ it("returns focus to the day that opened the dialog when it closes", async () =>
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(day).toHaveFocus();
 });
+
+// D3: cents are kept, so the web takes exactly what the API and the phone take.
+it("refuses an amount with more than two decimals, or of zero, and keeps the cents it accepts", async () => {
+  const fetcher = serveWeek(() => week([vehicle("vehicle-1", "KDA 482M", {}, { earliestMissing: DATES[0] })]));
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+
+  fireEvent.click(await screen.findByRole("button", { name: "Capture revenue" }));
+  await screen.findByRole("dialog", { name: "KDA 482M" });
+
+  for (const refused of ["1500.567", "12.3456", "0", "0.00"]) {
+    fireEvent.change(screen.getByLabelText("Revenue"), { target: { value: refused } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Enter the revenue as a positive amount with at most two decimals.",
+    );
+    expect(puts(fetcher)).toHaveLength(0);
+  }
+
+  // The field itself never takes a negative, so a minus is dropped rather than refused on save.
+  fireEvent.change(screen.getByLabelText("Revenue"), { target: { value: "-20" } });
+  expect(screen.getByLabelText("Revenue")).toHaveValue("20");
+
+  fireEvent.change(screen.getByLabelText("Revenue"), { target: { value: "1,500.50" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(puts(fetcher)).toHaveLength(1));
+  expect(puts(fetcher)[0].body).toMatchObject({ amount: 1500.5, reason: null });
+});
