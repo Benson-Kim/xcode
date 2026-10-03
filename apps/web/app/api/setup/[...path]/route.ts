@@ -49,11 +49,19 @@ async function proxy(
 
   const { path } = await context.params;
   // Each segment is one plain name or id: "..", "." or an encoded slash must never reach the API as a path step.
-  if (path.some((segment) => segment === "" || segment === "." || segment === ".." || /[/\\]/.test(segment)))
+  if (
+    path.some(
+      (segment) =>
+        segment === "" ||
+        segment === "." ||
+        segment === ".." ||
+        /[/\\]/.test(segment),
+    )
+  )
     return NextResponse.json({ status: "invalid_request" }, { status: 404 });
   const operation = path.map(encodeURIComponent).join("/");
   if (
-    !/^(companies|vehicles|recurring|revenue|expense-categories|expense-items|investment|history|preferences|appearance|organization\/logo|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy|businessDate)|access\/(catalog|roles|scope-options)|people)(\/[^/]+)*$/.test(
+    !/^(companies|vehicles|recurring|revenue|expense-categories|expense-items|investment|history|preferences|appearance|organization\/logo|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy|businessDate)|access\/(catalog|me|roles|scope-options)|people)(\/[^/]+)*$/.test(
       operation,
     )
   )

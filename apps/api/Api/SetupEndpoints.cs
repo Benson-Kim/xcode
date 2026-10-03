@@ -1,6 +1,5 @@
 using Auth.Application.Setup;
 using Auth.Application;
-using Auth.Domain.Setup;
 using Auth.Infrastructure.Setup;
 using Microsoft.EntityFrameworkCore;
 
@@ -46,23 +45,44 @@ public static class SetupEndpoints
 
     public static void MapSetup(this WebApplication app)
     {
-        var group = app.MapGroup("/setup").RequireAuthorization().WithTags("Setup").WithSetupErrors();
-        group.MapGet("/access/catalog", (AccessUseCases useCases, CancellationToken ct) => useCases.Catalog(ct))
-            .Produces<IReadOnlyList<PermissionGroup>>().WithName("GetAccessCatalog");
-        group.MapGet("/access/roles", (AccessUseCases useCases, CancellationToken ct) => useCases.Roles(ct))
-            .Produces<IReadOnlyList<AccessRole>>().WithName("ListAccessRoles");
-        group.MapGet("/access/scope-options", (AccessUseCases useCases, CancellationToken ct) => useCases.ScopeOptions(ct))
-            .Produces<ScopeOptions>().WithName("GetAccessScopeOptions");
-        group.MapGet("/access/me", (AccessUseCases useCases, CancellationToken ct) => useCases.Me(ct))
-            .Produces<MyScope>().WithName("GetMyAccessScope");
-        group.MapGet("/people", (AccessUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
-            .Produces<Page<PersonDto>>().WithName("ListPeople");
-        group.MapGet("/people/{id:guid}", (Guid id, AccessUseCases useCases, CancellationToken ct) => useCases.Get(id, ct))
-            .Produces<PersonDto>().WithName("GetPerson");
-        group.MapPost("/people", async (SavePerson input, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Save(null, input, ct))))
-            .Produces<IdResponse>().WithName("CreatePerson");
-        group.MapPut("/people/{id:guid}", async (Guid id, SavePerson input, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Save(id, input, ct))))
-            .Produces<IdResponse>().WithName("UpdatePerson");
+        var group = app
+            .MapGroup("/setup")
+            .RequireAuthorization()
+            .WithTags("Setup")
+            .WithSetupErrors();
+
+        group
+            .MapGet("/access/catalog", (AccessUseCases useCases, CancellationToken ct) => useCases.Catalog(ct))
+            .Produces<IReadOnlyList<PermissionGroup>>()
+            .WithName("GetAccessCatalog");
+        group
+            .MapGet("/access/roles", (AccessUseCases useCases, CancellationToken ct) => useCases.Roles(ct))
+            .Produces<IReadOnlyList<AccessRole>>()
+            .WithName("ListAccessRoles");
+        group
+            .MapGet("/access/scope-options", (AccessUseCases useCases, CancellationToken ct) => useCases.ScopeOptions(ct))
+            .Produces<ScopeOptions>()
+            .WithName("GetAccessScopeOptions");
+        group
+            .MapGet("/access/me", (AccessUseCases useCases, CancellationToken ct) => useCases.Me(ct))
+            .Produces<MyScope>()
+            .WithName("GetMyAccessScope");
+        group
+            .MapGet("/people", (AccessUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
+            .Produces<Page<PersonDto>>()
+            .WithName("ListPeople");
+        group
+            .MapGet("/people/{id:guid}", (Guid id, AccessUseCases useCases, CancellationToken ct) => useCases.Get(id, ct))
+            .Produces<PersonDto>()
+            .WithName("GetPerson");
+        group
+            .MapPost("/people", async (SavePerson input, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Save(null, input, ct))))
+            .Produces<IdResponse>()
+            .WithName("CreatePerson");
+        group
+            .MapPut("/people/{id:guid}", async (Guid id, SavePerson input, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Save(id, input, ct))))
+            .Produces<IdResponse>()
+            .WithName("UpdatePerson");
         // The body is optional (nullable): Phase 1's web posts these with none, and must get the reload problem, not a bare 400 or 415.
         group.MapPost("/people/{id:guid}/activate", async (Guid id, PersonLifecycleRequest? input, AccessUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.SetActive(id, true, input, ct))))
             .Produces<IdResponse>().WithName("ActivatePerson");
@@ -81,7 +101,8 @@ public static class SetupEndpoints
         group.MapPost("/companies/{id:guid}/restore", async (Guid id, CompanyLifecycleRequest input, CompanyUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.SetArchived(id, false, input, ct))))
             .Produces<IdResponse>().WithName("RestoreSetupCompany");
         group.MapGet("/vehicles", (VehicleUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
-            .Produces<Page<VehicleDto>>().WithName("ListSetupVehicles");
+            .Produces<Page<VehicleDto>>()
+            .WithName("ListSetupVehicles");
         group.MapPost("/vehicles", async (SaveVehicle input, VehicleUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Save(null, input, ct))))
             .Produces<IdResponse>().WithName("CreateSetupVehicle");
         group.MapPut("/vehicles/{id:guid}", async (Guid id, SaveVehicle input, VehicleUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Save(id, input, ct))))

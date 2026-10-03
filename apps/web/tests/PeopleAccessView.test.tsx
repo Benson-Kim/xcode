@@ -17,6 +17,7 @@ const responses: Record<string, unknown> = {
   ],
   "/api/setup/access/roles": [
     { id: "role-1", name: "Revenue clerk", permissions: ["revenue.view", "revenue.capture"] },
+    { id: "role-2", name: "Fleet manager", permissions: ["fleet.view", "fleet.manage"] },
   ],
   "/api/setup/access/scope-options": {
     companies: [{ id: "company-1", name: "North Star" }],
@@ -25,6 +26,12 @@ const responses: Record<string, unknown> = {
 };
 
 beforeEach(() => {
+  responses["/api/setup/people?page=1&pageSize=25"] = {
+    items: [],
+    pageNumber: 1,
+    pageSize: 25,
+    total: 0,
+  };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) =>
@@ -38,7 +45,9 @@ beforeEach(() => {
 async function openNewPerson(canManageAccess: boolean) {
   renderInApp(<PeopleAccessView canManageAccess={canManageAccess} />, {
     role: "Office admin",
-    permissions: canManageAccess ? ["people.view", "people.manage", "access.manage"] : ["people.view", "people.manage"],
+    permissions: canManageAccess
+      ? ["people.view", "people.manage", "access.manage", "revenue.view", "revenue.capture"]
+      : ["people.view", "people.manage", "revenue.view", "revenue.capture"],
   });
   fireEvent.click(await screen.findByRole("button", { name: "Add person" }));
   fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Jane" } });
@@ -105,4 +114,74 @@ it("says why the server refused to save a person", async () => {
 
   expect(await screen.findByRole("alert")).toHaveTextContent(detail);
   expect(screen.queryByText("Not permitted in this organization or data scope.")).not.toBeInTheDocument();
+});
+
+it("offers only roles whose defaults the editor can grant", async () => {
+  responses["/api/setup/access/roles"] = [
+    { id: "role-1", name: "Revenue clerk", permissions: ["revenue.view", "revenue.capture"] },
+    { id: "role-2", name: "Fleet manager", permissions: ["fleet.view", "fleet.manage"] },
+    { id: "role-3", name: "People viewer", permissions: ["people.view"] },
+  ];
+  renderInApp(<PeopleAccessView canManageAccess />, {
+    role: "Office admin",
+    permissions: ["people.view", "people.manage", "access.manage"],
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Add person" }));
+
+  const rolePicker = await screen.findByRole("combobox", { name: "Role" });
+  await waitFor(() => expect(rolePicker).toHaveValue("People viewer"));
+  expect(screen.queryByRole("option", { name: "Revenue clerk" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: "Fleet manager" })).not.toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "People viewer" })).toBeInTheDocument();
+});
+
+it("includes hidden companies and vehicles in each person's scope summary", async () => {
+  responses["/api/setup/people?page=1&pageSize=25"] = {
+    items: [
+      {
+        id: "person-1",
+        firstName: "Alex",
+        lastName: "Kim",
+        email: "alex@example.com",
+        phoneNumber: "0711000001",
+        role: "Revenue clerk",
+        active: true,
+        scopeMode: "companies",
+        companyIds: [],
+        vehicleIds: [],
+        otherCompanies: 2,
+        otherVehicles: 0,
+        permissions: [],
+        hasPin: true,
+        version: 1,
+      },
+      {
+        id: "person-2",
+        firstName: "Sam",
+        lastName: "Lee",
+        email: "sam@example.com",
+        phoneNumber: "0711000002",
+        role: "Revenue clerk",
+        active: true,
+        scopeMode: "vehicles",
+        companyIds: [],
+        vehicleIds: ["vehicle-1"],
+        otherCompanies: 0,
+        otherVehicles: 1,
+        permissions: [],
+        hasPin: true,
+        version: 1,
+      },
+    ],
+    pageNumber: 1,
+    pageSize: 25,
+    total: 2,
+  };
+
+  renderInApp(<PeopleAccessView />, {
+    permissions: ["people.view"],
+  });
+
+  expect(await screen.findByText("2 companies (2 hidden)")).toBeInTheDocument();
+  expect(screen.getByText("2 vehicles (1 hidden)")).toBeInTheDocument();
 });
