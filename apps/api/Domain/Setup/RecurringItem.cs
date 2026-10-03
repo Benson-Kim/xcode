@@ -40,13 +40,25 @@ public sealed class RecurringItem : IOrganizationEntity
      {
           if (StoppedFrom is not null)
           {
-               if (StoppedFrom <= today)
-               {
-                    if (StoppedFrom != today) throw new ArgumentException("The item is already stopped.");
-                    return false;
-               }
+               // A stop already in effect is final. One dated later is pending: it is cancelled, never re-dated, so
+               // stopping again on an earlier business date cannot quietly move the date (D16).
+               if (StoppedFrom != today)
+                    throw new ArgumentException(StoppedFrom > today
+                        ? "This item is already due to stop on a later date. Cancel that stop first."
+                        : "The item is already stopped.");
+               return false;
           }
           StoppedFrom = today;
+          return true;
+     }
+     // A stop dated after the business date has not taken effect yet, so it can be cancelled and the item keeps
+     // posting. One already in effect stays final, because its missed postings were never written (D16).
+     public bool CancelStop(DateOnly today)
+     {
+          if (StoppedFrom is null) return false;
+          if (StoppedFrom <= today)
+               throw new ArgumentException("This item has already stopped. Add a new scheduled item instead.");
+          StoppedFrom = null;
           return true;
      }
      public RecurringVersion? DueOn(DateOnly date)

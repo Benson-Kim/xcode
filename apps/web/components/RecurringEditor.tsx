@@ -459,6 +459,25 @@ export function RecurringEditor({
     }
   }
 
+  // A stop dated after the business date has not taken effect, so it can be cancelled and the item keeps posting
+  // (D16). Cancelling is not one of the places that ask for a typed reason, so the server writes its own.
+  async function cancelStop() {
+    if (!item || !canEdit || busy) return;
+    setBusy(true);
+    try {
+      await apiRequest(`setup/recurring/${item.id}/restore`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      toast(`The stop of ${item.name} was cancelled.`);
+      await onSaved();
+    } catch (value) {
+      setSaveError((value as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // What an item saved before expense items still uses, shown as read-only labels.
   const legacyUses = [
     legacyCategory && `the old cost type ${legacyCategoryName}`,
@@ -508,7 +527,7 @@ export function RecurringEditor({
         {futureStop && (
           <Note tone="info">
             Scheduled to stop on {formatDateOnly(futureStop)}. You can still
-            change the schedule before then.
+            change the schedule, or cancel the stop, before then.
           </Note>
         )}
         {legacyUses.length > 0 && !stopped && (
@@ -922,7 +941,12 @@ export function RecurringEditor({
             {canEdit && !stopped ? "Cancel" : "Back"}
           </Button>
           <Spacer />
-          {item && canEdit && !stopped && (
+          {item && canEdit && !stopped && futureStop && (
+            <Button tone="outline" disabled={busy} onClick={() => void cancelStop()}>
+              Cancel stop
+            </Button>
+          )}
+          {item && canEdit && !stopped && !futureStop && (
             <>
               {confirmStop && (
                 <TextInput

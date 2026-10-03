@@ -125,6 +125,8 @@ public static class SetupEndpoints
             .Produces<IdResponse>().WithName("ReviseSetupRecurring");
         group.MapPost("/recurring/{id:guid}/stop", async (Guid id, StopRecurring input, RecurringUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Stop(id, input, ct))))
             .Produces<IdResponse>().WithName("StopSetupRecurring");
+        group.MapPost("/recurring/{id:guid}/restore", async (Guid id, RecurringUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.CancelStop(id, ct))))
+            .Produces<IdResponse>().WithName("CancelSetupRecurringStop");
         group.MapGet("/history", (ISetupExecution execution, ISetupRepository repository, CancellationToken ct, int page = 1, int pageSize = 25) =>
             execution.Read("audit.view", actor => { SetupPagination.Validate(page, pageSize); return repository.History(actor, page, pageSize, ct); }, ct))
             .Produces<Page<HistoryEntry>>().WithName("ListSetupHistory");

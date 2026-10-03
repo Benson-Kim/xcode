@@ -159,10 +159,11 @@ namespace Auth.Api.Infrastructure.Migrations
                 "UPDATE [RecurringVersion] SET [Bucket] = CASE WHEN [Category] = 2 THEN 1 ELSE 2 END " +
                 "WHERE [Kind] = 1 AND [Category] IS NOT NULL AND [Bucket] IS NULL;");
 
-            migrationBuilder.InsertData(
-                table: "RecurrenceFrequencyLookup",
-                columns: new[] { "Id", "Name" },
-                values: new object[] { 4, "Yearly" });
+            // Down keeps this row when a yearly schedule still references it, so a database that was rolled back and
+            // upgraded again would hit the primary key here. Insert it only when it is missing.
+            migrationBuilder.Sql(
+                "IF NOT EXISTS (SELECT 1 FROM [RecurrenceFrequencyLookup] WHERE [Id] = 4) " +
+                "INSERT INTO [RecurrenceFrequencyLookup] ([Id], [Name]) VALUES (4, N'Yearly');");
 
             migrationBuilder.CreateIndex(
                 name: "IX_RecurringVersion_Bucket",
