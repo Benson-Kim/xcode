@@ -287,6 +287,8 @@ public sealed class OrganizationSecurityPolicy : IOrganizationEntity
      public bool AllowPinSignIn { get; set; } = true;
      public void Validate()
      {
+          if (!AllowPinSignIn)
+               throw new ArgumentException("PIN sign-in cannot be disabled.");
           if (PasswordMinLength is < 12 or > 128 || PasswordHistory is < 0 or > 24 || PinLength is < 4 or > 8 || LockoutThreshold is < 3 or > 10 || LockoutMinutes is < 1 or > 60 || AccessTokenMinutes is < 1 or > 15 || RefreshTokenDays is < 1 or > 90 || IdleUnlockSeconds is < 30 or > 3600)
                throw new ArgumentException("Invalid security policy.");
      }

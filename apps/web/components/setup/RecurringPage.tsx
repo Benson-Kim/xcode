@@ -73,7 +73,8 @@ export function RecurringPage({
   // loaded, next postings wait for it.
   const today = appearance?.businessDate;
   const hasActiveVehicle = (item: RecurringItem) => item.allocations.some((allocation) => allocation.active !== false);
-  const finished = (item: RecurringItem) => (!hasActiveVehicle(item) || item.stoppedFrom || (today && item.end && item.end < today) ? 1 : 0);
+  const stopped = (item: RecurringItem) => Boolean(item.stoppedFrom && (!today || item.stoppedFrom <= today));
+  const finished = (item: RecurringItem) => (!hasActiveVehicle(item) || stopped(item) || (today && item.end && item.end < today) ? 1 : 0);
   // Companies come from the vehicle options, which only editors load: allocations carry no company.
   const companyOf = new Map((options.data ?? []).map((vehicle) => [vehicle.id, vehicle.companyId]));
   const companies = [...new Map((options.data ?? []).map((vehicle) => [vehicle.companyId, vehicle.companyName])).entries()].sort((left, right) =>
@@ -142,7 +143,9 @@ export function RecurringPage({
       >
         {visible.map((item) => {
           const active = hasActiveVehicle(item);
-          const next = item.stoppedFrom || !active || !today ? null : recurringNextPosting(item, today);
+          const isStopped = stopped(item);
+          const futureStop = item.stoppedFrom && today && item.stoppedFrom > today ? item.stoppedFrom : null;
+          const next = isStopped || !active || !today ? null : recurringNextPosting(item, today);
           const registrations = item.allocations.map((allocation) => allocation.registration).filter((registration): registration is string => Boolean(registration));
           const outOfFleetCount = item.allocations.filter((allocation) => allocation.active === false).length;
           // What posts now. `amount` is the saved total, which still counts vehicles not in the fleet today.
@@ -183,14 +186,19 @@ export function RecurringPage({
                 {item.end ? ` to ${formatDateOnly(item.end)}` : <CellNote>No end date</CellNote>}
               </Td>
               <Td label="Next posting">
-                {item.stoppedFrom ? (
+                {isStopped ? (
                   <StatusBadge tone="off">Stopped</StatusBadge>
                 ) : !active ? (
                   <StatusBadge tone="off">No active vehicles</StatusBadge>
                 ) : !today ? (
                   "—"
                 ) : next ? (
-                  formatDateOnly(next)
+                  <>
+                    {formatDateOnly(next)}
+                    {futureStop && <CellNote>Stops {formatDateOnly(futureStop)}</CellNote>}
+                  </>
+                ) : futureStop ? (
+                  <StatusBadge tone="warn">Stops {formatDateOnly(futureStop)}</StatusBadge>
                 ) : (
                   <StatusBadge tone="off">Finished</StatusBadge>
                 )}

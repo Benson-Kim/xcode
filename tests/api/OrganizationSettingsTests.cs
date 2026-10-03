@@ -163,7 +163,7 @@ public sealed class OrganizationSettingsTests : IDisposable
 
         await Save("organization", new { name = "North Star Fleet", slug = "demo-fleet" });
         await Save("localization", new { currency = "USD", firstDayOfWeek = 0 });
-        await Save("securityPolicy", new { lockoutThreshold = 3, allowPinSignIn = false });
+        await Save("securityPolicy", new { lockoutThreshold = 3, allowPinSignIn = true });
         await Save("branding", new { displayName = "North Star" });
         await Save("businessDate", yesterday);
         await Save("businessDate", null!);
@@ -177,7 +177,7 @@ public sealed class OrganizationSettingsTests : IDisposable
         Assert.Equal([
             "Changed the organization name to North Star Fleet",
             "Changed the first day of the week to Sunday and the currency to USD",
-            "Changed the wrong PIN tries before a pause to 3 and PIN sign-in to off",
+            "Changed the wrong PIN tries before a pause to 3",
             "Changed the display name to North Star",
             $"Set the business date to {yesterday}",
             "Returned the business date to the calendar",
@@ -212,6 +212,25 @@ public sealed class OrganizationSettingsTests : IDisposable
         using var wrongType = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
             new { value = new { lockoutThreshold = "three" }, reason = "Wrong type" });
         Assert.Equal(HttpStatusCode.BadRequest, wrongType.StatusCode);
+    }
+
+    [Fact]
+    public async Task SecurityPolicyCannotDisablePinSignIn()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(DemoSeed.Logins[0].Email);
+
+        using var refused = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
+            new { value = new { allowPinSignIn = false }, reason = "Disable PIN sign-in" });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("PIN sign-in cannot be disabled.",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString());
+
+        var settings = await owner.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        Assert.True(settings.GetProperty("securityPolicy").GetProperty("allowPinSignIn").GetBoolean());
+        var history = await owner.GetFromJsonAsync<JsonElement>("/setup/history?pageSize=100");
+        Assert.DoesNotContain(history.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("reason").GetString() == "Disable PIN sign-in");
     }
 
     [Fact]
