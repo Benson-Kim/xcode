@@ -23,6 +23,7 @@ import {
   Dialog,
   IconButton,
   ListSkeleton,
+  Skeleton,
   MenuIcon,
   PageHeader,
   SegmentedControl,
@@ -36,14 +37,14 @@ import {
   useSession,
   type Session,
 } from "../lib/session-context";
-import { configureFormats, initials } from "../lib/format";
+import { configureFormats, initials, plural } from "../lib/format";
 import { useResource } from "../lib/data";
 import {
   AppearanceProvider,
   applyAppearance,
   type Appearance,
 } from "../lib/appearance";
-import type { PermissionGroup, View } from "../lib/types";
+import type { MyScope, PermissionGroup, View } from "../lib/types";
 
 type NavItem = { id: View; label: string; permission?: string | string[] };
 
@@ -539,6 +540,17 @@ function RevenueModule({ onBack }: { onBack: () => void }) {
   );
 }
 
+// The companies the server says this person reaches: named while there are few enough to read, counted
+// after that. An organization-wide viewer sees "All companies" and no vehicle count, as in the people list.
+function myScopeLabel(scope?: MyScope) {
+  if (!scope) return "Not assigned";
+  if (scope.allCompanies) return "All companies";
+  if (!scope.companies.length) return "Nothing yet";
+  return scope.companies.length <= 2
+    ? scope.companies.map((company) => company.name).join(", ")
+    : plural(scope.companies.length, "company", "companies");
+}
+
 // "Your access": the signed-in person's role and permissions, grouped as in the catalog.
 function AccessDialog({
   open,
@@ -551,6 +563,7 @@ function AccessDialog({
   const catalog = useResource<PermissionGroup[]>(
     open ? "setup/access/catalog" : null,
   );
+  const scope = useResource<MyScope>(open ? "setup/access/me" : null);
   const mine = new Set(session?.permissions ?? []);
   return (
     <Dialog open={open} title="Your access" onClose={onClose}>
@@ -559,6 +572,27 @@ function AccessDialog({
           <dt className="text-[13px] text-grey">Role</dt>
           <dd className="m-0 font-semibold">
             {session?.role || "Not assigned"}
+          </dd>
+        </div>
+        <div className="flex flex-col">
+          <dt className="text-[13px] text-grey">Can see</dt>
+          <dd className="m-0 font-semibold">
+            {scope.loading ? (
+              <Skeleton className="mt-1 h-5 w-40" />
+            ) : scope.error ? (
+              <span className="font-normal text-grey">
+                Connect to see what you can reach.
+              </span>
+            ) : (
+              <>
+                {myScopeLabel(scope.data)}
+                {scope.data && !scope.data.allCompanies ? (
+                  <CardNote>
+                    {plural(scope.data.vehicles.length, "vehicle", "vehicles")}
+                  </CardNote>
+                ) : null}
+              </>
+            )}
           </dd>
         </div>
       </dl>
