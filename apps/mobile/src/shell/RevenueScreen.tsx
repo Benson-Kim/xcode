@@ -319,7 +319,7 @@ export function RevenueScreen({
               <Text weight="bold" style={{ fontSize: 14, color: colors.navy }}>
                 {money(week.totalAmount)}
               </Text>
-              {` of ${money(week.totalExpected)} expected to date${week.percent === null ? "" : `, ${week.percent}%`}`}
+              {week.totalExpected > 0 ? ` of ${money(week.totalExpected)} expected to date${week.percent === null ? "" : `, ${week.percent}%`}` : " so far"}
             </Text>
           )}
         </>
@@ -806,7 +806,7 @@ function CaptureSheet({
                 <Text weight="bold" accessibilityRole="header" style={{ fontSize: 22, lineHeight: 28 }}>
                   {target.vehicle.registration}
                 </Text>
-                <Text style={{ fontSize: 14, color: colors.grey }}>{target.cell ? `${longDayLabel(target.date)}. Expected ${money(target.cell.expected)}` : longDayLabel(target.date)}</Text>
+                <Text style={{ fontSize: 14, color: colors.grey }}>{target.cell && target.cell.expected > 0 ? `${longDayLabel(target.date)}. Expected ${money(target.cell.expected)}` : longDayLabel(target.date)}</Text>
               </View>
               <IconButton icon="close" label="Close" onPress={onClose} />
             </View>
