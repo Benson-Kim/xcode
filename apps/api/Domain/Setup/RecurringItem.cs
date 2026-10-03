@@ -23,7 +23,7 @@ public sealed class RecurringItem : IOrganizationEntity
      }
      public void Revise(RecurringDefinition definition, DateOnly today)
      {
-          if (StoppedFrom is not null)
+          if (StoppedFrom is not null && StoppedFrom <= today)
                throw new ArgumentException("Stopped items cannot be edited.");
           // "Running" follows the current version's start, not the earliest start ever recorded, so a postponed item
           // is still editable until its new start date.
@@ -38,7 +38,14 @@ public sealed class RecurringItem : IOrganizationEntity
      }
      public bool Stop(DateOnly today)
      {
-          if (StoppedFrom is not null) return false;
+          if (StoppedFrom is not null)
+          {
+               if (StoppedFrom <= today)
+               {
+                    if (StoppedFrom != today) throw new ArgumentException("The item is already stopped.");
+                    return false;
+               }
+          }
           StoppedFrom = today;
           return true;
      }
@@ -48,22 +55,48 @@ public sealed class RecurringItem : IOrganizationEntity
           var version = Versions.Where(v => v.EffectiveFrom <= date)
               .OrderByDescending(v => v.Revision).FirstOrDefault();
           return version is not null && date >= version.Start && (version.End is null || date <= version.End)
-              && new RecurringSchedule(version.Frequency, version.Day, version.LastDay).IsDue(date) ? version : null;
+              && version.Schedule().IsDue(date) ? version : null;
+     }
+     // Every day from `from` through `through` on which DueOn gives a version, with that version, without asking about
+     // each day. A version is in charge from its EffectiveFrom until a higher revision takes effect, so each version's
+     // due dates are stepped within [max(from, EffectiveFrom, Start), min(through, End, next EffectiveFrom − 1, StoppedFrom − 1)].
+     // O(R log R + due dates), against O(D·R log R) for calling DueOn on each of D days. Dates come out per version.
+     public IEnumerable<(DateOnly Date, RecurringVersion Version)> DueBetween(DateOnly from, DateOnly through)
+     {
+          var end = StoppedFrom is { } stopped && stopped <= through ? stopped.DayNumber - 1 : through.DayNumber;
+          var supersededFrom = int.MaxValue;
+          foreach (var version in Versions.OrderByDescending(v => v.Revision))
+          {
+               var first = Math.Max(from.DayNumber, Math.Max(version.EffectiveFrom.DayNumber, version.Start.DayNumber));
+               var last = Math.Min(Math.Min(end, supersededFrom - 1), version.End?.DayNumber ?? int.MaxValue);
+               supersededFrom = Math.Min(supersededFrom, version.EffectiveFrom.DayNumber);
+               if (first > last) continue;
+               foreach (var date in version.Schedule().Occurrences(DateOnly.FromDayNumber(first), DateOnly.FromDayNumber(last)))
+                    yield return (date, version);
+          }
      }
 }
 
 public sealed record VehicleShare(Guid VehicleId, decimal Amount);
 
 
+// Category is the Phase 1 cost category, kept only so legacy versions stay readable. New costs name an expense
+// item instead, and carry the bucket of that item's category at the time of saving.
 public sealed record RecurringDefinition(string Name, RecurringKind Kind, CostCategory? Category, decimal Amount,
-    RecurringSchedule Schedule, DateOnly Start, DateOnly? End, IReadOnlyList<VehicleShare> Allocations)
+    RecurringSchedule Schedule, DateOnly Start, DateOnly? End, IReadOnlyList<VehicleShare> Allocations,
+    Guid? ExpenseItemId = null, ExpenseBucket? Bucket = null, string? Note = null)
 {
+     public const int NoteLength = 200;
+
      public void Validate()
      {
           SetupValue.Name(Name);
           SetupValue.Money(Amount);
-          if (!Enum.IsDefined(Kind) || (Kind == RecurringKind.Cost ? Category is null || !Enum.IsDefined(Category.Value) : Category is not null))
-               throw new ArgumentException("Costs require a valid category; savings must not have a cost category.");
+          var costTypeValid = Category is null ? Bucket is not null && Enum.IsDefined(Bucket.Value) : Enum.IsDefined(Category.Value) && Bucket is null;
+          if (!Enum.IsDefined(Kind) || (Kind == RecurringKind.Cost ? !costTypeValid : Category is not null || Bucket is not null || ExpenseItemId is not null))
+               throw new ArgumentException("Costs need an expense item; savings must not have one.");
+          if (Note?.Length > NoteLength)
+               throw new ArgumentException($"A note can have at most {NoteLength} characters.");
           if (End < Start)
                throw new ArgumentException("End date must be on or after start date.");
           if (Allocations is null || Allocations.Count is < 1 or > 500 || Allocations.Any(a => a.VehicleId == Guid.Empty)
@@ -72,6 +105,24 @@ public sealed record RecurringDefinition(string Name, RecurringKind Kind, CostCa
           foreach (var allocation in Allocations) SetupValue.Money(allocation.Amount);
           if (Allocations.Sum(a => a.Amount) != Amount)
                throw new ArgumentException("Vehicle shares must equal the total exactly.");
+     }
+
+     // What may be saved from now on (addendum 1). Versions saved before it (daily schedules, the four old cost
+     // categories, older starts) are history: they stay readable and keep posting, and are never checked against this.
+     public void ValidateNew(DateOnly today, DateOnly? currentStart)
+     {
+          Validate();
+          if (Schedule.Frequency == RecurrenceFrequency.Daily)
+               throw new ArgumentException("Daily schedules are no longer offered. Choose weekly, monthly or yearly.");
+          if (Kind == RecurringKind.Savings && Schedule.Frequency is not (RecurrenceFrequency.Weekly or RecurrenceFrequency.Monthly))
+               throw new ArgumentException("Savings are set aside weekly or monthly.");
+          if (Kind == RecurringKind.Cost && (ExpenseItemId is null || Category is not null))
+               throw new ArgumentException("Choose the expense item this cost is for.");
+          if (Start == default)
+               throw new ArgumentException("Start date is required.");
+          // Anything older than the current month is a one-off expense, not a schedule.
+          if (Start != currentStart && Start < new DateOnly(today.Year, today.Month, 1))
+               throw new ArgumentException("A schedule can start no earlier than the first of the current month.");
      }
 }
 
@@ -97,13 +148,27 @@ public sealed class RecurringVersion : IOrganizationEntity
      public bool LastDay { get; private set; }
      public DateOnly Start { get; private set; }
      public DateOnly? End { get; private set; }
+     public Guid? ExpenseItemId { get; private set; }
+     // Every cost version carries its bucket; legacy versions were backfilled from their category (assumption A2).
+     public ExpenseBucket? Bucket { get; private set; }
+     public string? Note { get; private set; }
+     public int? Month { get; private set; }
      public List<RecurringAllocation> Allocations { get; private set; } = [];
+     public RecurringSchedule Schedule() => new(Frequency, Day, LastDay, Month);
+     // The bucket a cost reports under. A Phase 1 version stored without one follows its category (assumption A2), and
+     // any other cost counts as a recurring charge, so every cost lands in exactly one bucket. Savings have none.
+     // Every cost reports under a bucket; one stored with neither a bucket nor a legacy category counts as a recurring charge.
+     public ExpenseBucket? ReportedBucket() =>
+          ExpenseBuckets.Of(Kind, Category, Bucket) ?? (Kind == RecurringKind.Cost ? ExpenseBucket.RecurringCharges : null);
      internal RecurringVersion(Guid org, Guid item, int revision, DateOnly effectiveFrom, RecurringDefinition definition)
      {
           definition.Validate();
           (OrganizationId, ItemId, Revision, EffectiveFrom) = (org, item, revision, effectiveFrom);
           (Name, Kind, Category, Amount) = (SetupValue.Name(definition.Name), definition.Kind, definition.Category, definition.Amount);
-          (Frequency, Day, LastDay, Start, End) = (definition.Schedule.Frequency, definition.Schedule.Day, definition.Schedule.LastDay, definition.Start, definition.End);
+          (Frequency, Day, LastDay, Month, Start, End) = (definition.Schedule.Frequency, definition.Schedule.Day, definition.Schedule.LastDay,
+               definition.Schedule.Month, definition.Start, definition.End);
+          (ExpenseItemId, Note) = (definition.ExpenseItemId, definition.Note);
+          Bucket = definition.Bucket ?? (definition.Category is { } category ? ExpenseBuckets.FromLegacy(category) : null);
           Allocations = definition.Allocations.Select(a => new RecurringAllocation(org, Id, a.VehicleId, a.Amount)).ToList();
      }
 }

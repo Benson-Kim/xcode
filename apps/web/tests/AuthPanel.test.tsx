@@ -68,7 +68,7 @@ it("AUTH-13 sends new devices through verification before showing a session", as
   fireEvent.change(screen.getByLabelText("6 digit code"), {
     target: { value: "123456" },
   });
-  fireEvent.click(screen.getByLabelText("Remember this device"));
+  fireEvent.click(screen.getByLabelText(/^Remember this device/));
   fireEvent.click(screen.getByRole("button", { name: "Confirm code" }));
   expect(
     await screen.findByRole("heading", { name: "Dashboard" }),

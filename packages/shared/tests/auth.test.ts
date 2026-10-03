@@ -33,3 +33,13 @@ it("explains an organization's longer minimum when a new PIN is too short", () =
     "Use 4-8 digits, not all the same or an ascending/descending sequence.",
   );
 });
+it("says the service is unavailable on a 503, as when a new-device email cannot be sent", async () => {
+  const unavailable = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "service_unavailable" }), { status: 503 }));
+  await expect(createAuthClient("/auth", unavailable)("sign-in", {})).rejects.toMatchObject({
+    httpStatus: 503,
+    response: { status: "service_unavailable" },
+    message: "The service is not available right now. Try again shortly.",
+  });
+  // An empty 503 from a proxy says the same.
+  expect(new AuthError({ status: "authentication_failed" }, 503).message).toBe("The service is not available right now. Try again shortly.");
+});

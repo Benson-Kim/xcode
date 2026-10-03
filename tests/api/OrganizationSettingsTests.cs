@@ -66,6 +66,211 @@ public sealed class OrganizationSettingsTests : IDisposable
         Assert.Equal("long", root.GetProperty("localization").GetProperty("datePattern").GetString());
     }
 
+    [Fact]
+    public async Task BusinessDateUsesTheServerDateForSetupAndIsAudited()
+    {
+        using var client = await CreateOwnerClient();
+        var calendarDate = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+        var businessDate = calendarDate.AddDays(-1);
+
+        using var update = await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new
+        {
+            value = businessDate.ToString("yyyy-MM-dd"),
+            reason = "Reconcile the prior business day"
+        });
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+
+        using var settings = JsonDocument.Parse(await (await client.GetAsync("/setup/organization/settings")).Content.ReadAsStringAsync());
+        Assert.Equal(businessDate.ToString("yyyy-MM-dd"), settings.RootElement.GetProperty("organization").GetProperty("businessDate").GetString());
+        Assert.Equal(businessDate.ToString("yyyy-MM-dd"), settings.RootElement.GetProperty("effectiveBusinessDate").GetString());
+
+        using var appearance = JsonDocument.Parse(await (await client.GetAsync("/setup/appearance")).Content.ReadAsStringAsync());
+        Assert.Equal(businessDate.ToString("yyyy-MM-dd"), appearance.RootElement.GetProperty("businessDate").GetString());
+
+        using var future = await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new
+        {
+            value = calendarDate.AddDays(1).ToString("yyyy-MM-dd"),
+            reason = "Invalid future date"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, future.StatusCode);
+
+        using var history = JsonDocument.Parse(await (await client.GetAsync("/setup/history")).Content.ReadAsStringAsync());
+        Assert.Contains(history.RootElement.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("section").GetString() == "businessDate" &&
+                    item.GetProperty("reason").GetString() == $"Set the business date to {businessDate:yyyy-MM-dd}. Reason: Reconcile the prior business day.");
+    }
+
+    // A frozen business date can move forward up to the organization's own calendar date, so the settings say what it is.
+    [Fact]
+    public async Task SettingsShowTheCalendarDateAFrozenBusinessDateCanAdvanceTo()
+    {
+        using var client = await CreateOwnerClient();
+        var calendarDate = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+        (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = calendarDate.AddDays(-3).ToString("yyyy-MM-dd") })).EnsureSuccessStatusCode();
+
+        var settings = await client.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        Assert.Equal(calendarDate.AddDays(-3).ToString("yyyy-MM-dd"), settings.GetProperty("effectiveBusinessDate").GetString());
+        Assert.Equal(calendarDate.ToString("yyyy-MM-dd"), settings.GetProperty("calendarDate").GetString());
+
+        (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = settings.GetProperty("calendarDate").GetString() })).EnsureSuccessStatusCode();
+        var advanced = await client.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        Assert.Equal(calendarDate.ToString("yyyy-MM-dd"), advanced.GetProperty("effectiveBusinessDate").GetString());
+    }
+
+    // A time zone decides the organization's calendar date, so a held business date must still be on or before it in the
+    // zone being saved. Only UTC resolves under the tests' invariant globalization, so the zone "still on the previous
+    // date" is simulated by putting the clock back a day: the calendar date in the saved zone is then before the held one.
+    [Fact]
+    public async Task ALocalizationSaveCannotLeaveAHeldBusinessDateInTheFuture()
+    {
+        using var client = await CreateOwnerClient();
+        var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+        (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = today.ToString("yyyy-MM-dd") })).EnsureSuccessStatusCode();
+        app.Clock.Advance(TimeSpan.FromDays(-1));
+
+        using var refused = await client.PutAsJsonAsync("/setup/organization/settings/localization", new { value = new { timeZone = "UTC", currency = "USD" } });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("The held business date would be in the future in that time zone. Change the business date first.",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString());
+        var unchanged = await client.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        Assert.Equal("KES", unchanged.GetProperty("localization").GetProperty("currency").GetString());
+
+        (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = today.AddDays(-1).ToString("yyyy-MM-dd") })).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync("/setup/organization/settings/localization", new { value = new { timeZone = "UTC", currency = "USD" } })).EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public void ChangingTheTimeZoneChecksTheHeldBusinessDate()
+    {
+        var organization = new Organization();
+        var localization = new OrganizationLocalization { OrganizationId = organization.Id, TimeZone = "UTC" };
+        var today = new DateOnly(2026, 9, 30);
+        organization.ChangeBusinessDate(today, today);
+        Assert.Throws<ArgumentException>(() => organization.ChangeTimeZone(localization, new TimeZoneId("UTC"), today.AddDays(-1)));
+        organization.ChangeTimeZone(localization, new TimeZoneId("UTC"), today);
+        Assert.Equal("UTC", localization.TimeZone);
+    }
+
+    // Contract C7: organization settings keep the automatic reason; a typed one is optional but still checked.
+    [Fact]
+    public async Task SettingsSavedWithoutAReasonGetAnAutomaticOne()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(DemoSeed.Logins[0].Email);
+        var yesterday = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime).AddDays(-1).ToString("yyyy-MM-dd");
+        async Task Save(string section, object value) =>
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/setup/organization/settings/{section}", new { value })).StatusCode);
+
+        await Save("organization", new { name = "North Star Fleet", slug = "demo-fleet" });
+        await Save("localization", new { currency = "USD", firstDayOfWeek = 0 });
+        await Save("securityPolicy", new { lockoutThreshold = 3, allowPinSignIn = true });
+        await Save("branding", new { displayName = "North Star" });
+        await Save("businessDate", yesterday);
+        await Save("businessDate", null!);
+        (await owner.PutAsJsonAsync("/setup/organization/logo", new { dataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" })).EnsureSuccessStatusCode();
+        (await owner.DeleteAsync("/setup/organization/logo")).EnsureSuccessStatusCode();
+        using var tooLong = await owner.PutAsJsonAsync("/setup/organization/settings/localization", new { value = new { currency = "EUR" }, reason = new string('r', 501) });
+        Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+
+        var history = await owner.GetFromJsonAsync<JsonElement>("/setup/history?pageSize=100");
+        var reasons = history.GetProperty("items").EnumerateArray().Reverse().Select(x => x.GetProperty("reason").GetString()).ToList();
+        Assert.Equal([
+            "Changed the organization name to North Star Fleet",
+            "Changed the first day of the week to Sunday and the currency to USD",
+            "Changed the wrong PIN tries before a pause to 3",
+            "Changed the display name to North Star",
+            $"Set the business date to {yesterday}",
+            "Returned the business date to the calendar",
+            "Uploaded a new logo",
+            "Removed the logo"], reasons);
+    }
+
+    [Fact]
+    public async Task APartialSectionKeepsTheFieldsItOmits()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(DemoSeed.Logins[0].Email);
+        (await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
+            new { value = new { lockoutMinutes = 30 }, reason = "Longer pause" })).EnsureSuccessStatusCode();
+        (await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
+            new { value = new { lockoutThreshold = 3 }, reason = "Fewer tries" })).EnsureSuccessStatusCode();
+        // Localization omitted from this payload includes the organization's UTC time zone.
+        using var localization = await owner.PutAsJsonAsync("/setup/organization/settings/localization",
+            new { value = new { currency = "USD" }, reason = "Report in dollars" });
+        Assert.Equal(HttpStatusCode.OK, localization.StatusCode);
+
+        var settings = await owner.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        var policy = settings.GetProperty("securityPolicy");
+        Assert.Equal(3, policy.GetProperty("lockoutThreshold").GetInt32());
+        Assert.Equal(30, policy.GetProperty("lockoutMinutes").GetInt32());
+        Assert.Equal("USD", settings.GetProperty("localization").GetProperty("currency").GetString());
+        Assert.Equal("UTC", settings.GetProperty("localization").GetProperty("timeZone").GetString());
+
+        using var notAnObject = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
+            new { value = 3, reason = "Wrong shape" });
+        Assert.Equal(HttpStatusCode.BadRequest, notAnObject.StatusCode);
+        using var wrongType = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
+            new { value = new { lockoutThreshold = "three" }, reason = "Wrong type" });
+        Assert.Equal(HttpStatusCode.BadRequest, wrongType.StatusCode);
+    }
+
+    [Fact]
+    public async Task SecurityPolicyCannotDisablePinSignIn()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(DemoSeed.Logins[0].Email);
+
+        using var refused = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy",
+            new { value = new { allowPinSignIn = false }, reason = "Disable PIN sign-in" });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("PIN sign-in cannot be disabled.",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString());
+
+        var settings = await owner.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        Assert.True(settings.GetProperty("securityPolicy").GetProperty("allowPinSignIn").GetBoolean());
+        var history = await owner.GetFromJsonAsync<JsonElement>("/setup/history?pageSize=100");
+        Assert.DoesNotContain(history.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("reason").GetString() == "Disable PIN sign-in");
+    }
+
+    [Fact]
+    public async Task PreferenceWritesRefuseOverridesTheOrganizationDoesNotAllow()
+    {
+        await app.SeedDemo();
+        using var clerk = await app.SignIn("wanjiru.kamau@zurigenesis.co.ke");
+        object Preferences(string? locale = null, string? timeZone = null, bool? hour12 = null, string? themeMode = null) =>
+            new { locale, timeZone, hour12, themeMode, reducedMotion = true, fontScale = 1.25 };
+
+        // The organization allows no personal time zone by default.
+        using var zone = await clerk.PutAsJsonAsync("/setup/preferences", Preferences(timeZone: "UTC"));
+        Assert.Equal(HttpStatusCode.BadRequest, zone.StatusCode);
+        Assert.Contains("time zone", (await zone.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString());
+        (await clerk.PutAsJsonAsync("/setup/preferences", Preferences(locale: "fr-FR", hour12: true, themeMode: "dark"))).EnsureSuccessStatusCode();
+
+        await app.WithDb(async db =>
+        {
+            db.Provisioning = true;
+            var localization = await db.Localizations.IgnoreQueryFilters().SingleAsync();
+            (localization.AllowLocaleOverride, localization.AllowHour12Override, localization.AllowThemeOverride) = (false, false, false);
+            await db.SaveChangesAsync();
+        });
+        foreach (var forbidden in new[] { Preferences(locale: "fr-FR"), Preferences(hour12: true), Preferences(themeMode: "dark") })
+            Assert.Equal(HttpStatusCode.BadRequest, (await clerk.PutAsJsonAsync("/setup/preferences", forbidden)).StatusCode);
+
+        // Values saved while allowed are not offered back, so resaving the form clears them instead of failing.
+        var loaded = await clerk.GetFromJsonAsync<JsonElement>("/setup/preferences");
+        Assert.Equal(JsonValueKind.Null, loaded.GetProperty("locale").ValueKind);
+        Assert.Equal(JsonValueKind.Null, loaded.GetProperty("themeMode").ValueKind);
+        (await clerk.PutAsJsonAsync("/setup/preferences", Preferences())).EnsureSuccessStatusCode();
+        await app.WithDb(async db =>
+        {
+            var stored = await db.UserPreferences.IgnoreQueryFilters().SingleAsync();
+            Assert.Null(stored.Locale);
+            Assert.Null(stored.ThemeMode);
+            Assert.Equal(1.25, stored.FontScale);
+        });
+    }
+
     private async Task<HttpClient> CreateOwnerClient()
     {
         await app.WithDb(async db =>

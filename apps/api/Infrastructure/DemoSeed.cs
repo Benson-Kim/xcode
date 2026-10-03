@@ -15,6 +15,14 @@ public static class DemoSeed
         ("+254712345678", "wanjiru.kamau@zurigenesis.co.ke", "2580"), // Revenue clerk
     ];
 
+    // The expense categories and items of Web v2.8 (EXPENSE_CATS and EXPENSE_ITEMS).
+    public static readonly (string Name, ExpenseBucket Bucket, string[] Items)[] ExpenseCatalog =
+    [
+        ("Garage and repairs", ExpenseBucket.RepairsAndMaintenance, ["Garage labour", "Spares", "Tyres", "Service and maintenance", "Body work", "Towing"]),
+        ("Charges", ExpenseBucket.RecurringCharges, ["Parking", "City council", "SACCO fee", "Insurance", "Licence", "Inspection"]),
+        ("Loans", ExpenseBucket.LoanRepayments, ["Loan repayment"]),
+    ];
+
 
     // Adds missing people only, so a PIN changed or reset during development survives restarts.
     public static async Task Run(AuthDb db, CancellationToken cancellationToken = default)
@@ -48,10 +56,25 @@ public static class DemoSeed
                 if (membership is null) db.Memberships.Add(new OrganizationMembership { OrganizationId = organization.Id, UserId = user.Id, FirstName = email.Split('.')[0] is var first ? char.ToUpperInvariant(first[0]) + first[1..] : "Demo", LastName = email.Split('.')[1].Split('@')[0] is var last ? char.ToUpperInvariant(last[0]) + last[1..] : "User" });
                 var role = roles.Single(x => x.Name == roleName);
                 if (!await db.PersonRoles.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organization.Id && x.UserId == user.Id, cancellationToken)) db.PersonRoles.Add(new PersonRole { OrganizationId = organization.Id, UserId = user.Id, RoleId = role.Id });
-                if (roleName is "Owner" or "Office admin" && !await db.SetupDataScopes.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organization.Id && x.UserId == user.Id, cancellationToken)) db.SetupDataScopes.Add(new SetupDataScope { OrganizationId = organization.Id, UserId = user.Id, AllCompanies = true });
+                // The seed has no companies or vehicles to choose from, and a scope of none cannot be saved, so these roles see
+                // every company. A scope chosen during development is kept.
+                if (roleName is "Owner" or "Office admin" or "Fleet manager" && !await HasScope(db, organization.Id, user.Id, cancellationToken)) db.SetupDataScopes.Add(new SetupDataScope { OrganizationId = organization.Id, UserId = user.Id, AllCompanies = true });
             }
+            // Only into an empty catalog, so categories renamed, stopped or added during development survive restarts.
+            if (!await db.Set<ExpenseCategory>().IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organization.Id, cancellationToken))
+                foreach (var (name, bucket, items) in ExpenseCatalog)
+                {
+                    var category = new ExpenseCategory(organization.Id, name, bucket);
+                    db.Add(category);
+                    foreach (var item in items) db.Add(new ExpenseItem(category, item));
+                }
             await db.SaveChangesAsync(cancellationToken);
         }
         finally { db.Provisioning = false; }
     }
+
+    private static async Task<bool> HasScope(AuthDb db, Guid organizationId, Guid userId, CancellationToken cancellationToken) =>
+        await db.SetupDataScopes.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organizationId && x.UserId == userId, cancellationToken) ||
+        await db.SetupCompanyScopes.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organizationId && x.UserId == userId, cancellationToken) ||
+        await db.SetupVehicleScopes.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organizationId && x.UserId == userId, cancellationToken);
 }

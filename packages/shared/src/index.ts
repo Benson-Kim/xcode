@@ -22,7 +22,9 @@ export type AuthStatus =
   | "invalid_pin"
   | "invalid_request"
   | "signed_out"
-  | "device_revoked";
+  | "device_revoked"
+  // 503: the API could not finish right now, for example a new-device email could not be sent.
+  | "service_unavailable";
 
 export interface AuthRequest {
   email?: string;
@@ -82,7 +84,9 @@ export class AuthError extends Error {
           ? pinHelp(response.minimumPinLength ?? undefined)
           : httpStatus === 429
             ? "Too many requests. Please wait a minute."
-            : "Authentication could not be completed. Check your details and try again.",
+            : httpStatus === 503
+              ? "The service is not available right now. Try again shortly."
+              : "Authentication could not be completed. Check your details and try again.",
     );
   }
 }
@@ -114,4 +118,75 @@ export function createAuthClient(
 
 export function pauseSeconds(until: number, now = Date.now()): number {
   return Math.max(0, Math.ceil((until - now) / 1000));
+}
+
+
+export type RevenueStatus = "none" | "future" | "missing" | "amount" | "reason";
+
+export interface RevenueCompanyOption {
+  id: string;
+  name: string;
+}
+
+export interface RevenueCell {
+  date: string;
+  status: RevenueStatus;
+  expected: number;
+  amount: number | null;
+  reason: string | null;
+  note: string | null;
+  canEdit: boolean;
+  editedAfterCapture: boolean;
+  // The record's version, for a correction to send back; null when the day has no record.
+  version?: number | null;
+}
+
+export interface RevenueVehicle {
+  id: string;
+  companyId: string;
+  companyName: string;
+  registration: string;
+  joinedOn: string;
+  leftOn: string | null;
+  earliestMissing: string | null;
+  days: RevenueCell[];
+  totalAmount: number;
+  totalExpected: number;
+  percent: number | null;
+}
+
+export interface RevenueWeek {
+  weekStart: string;
+  weekThrough: string;
+  currentWeekStart: string;
+  businessDate: string;
+  companies: RevenueCompanyOption[];
+  vehicles: RevenueVehicle[];
+  totalAmount: number;
+  totalExpected: number;
+  percent: number | null;
+}
+
+// Each figure is null for a viewer who may not see the card it belongs to.
+export interface RevenueDashboard {
+  period: "today" | "week" | "month" | string;
+  from: string;
+  through: string;
+  businessDate: string;
+  revenue: number | null;
+  expected: number | null;
+  percent: number | null;
+  capturedToday: number | null;
+  vehiclesToday: number | null;
+  missingDays: number | null;
+  missingVehicles: number | null;
+  editedRecords: number | null;
+}
+
+export interface SaveRevenue {
+  amount: number | null;
+  reason: string | null;
+  note: string | null;
+  // null for a new record; a correction sends the version it was read at.
+  version?: number | null;
 }

@@ -35,13 +35,19 @@ export function currencyCode() {
   return formats.currency;
 }
 
-// "KES 49,000": whole amounts stay whole; the organization's decimals are the most shown.
+// "KES 49,000" and "KES 1,500.50": whole amounts stay whole; any other shows the organization's decimals in full.
 export function kes(amount: number) {
   const number = amount.toLocaleString(formats.locale, {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : formats.numberDecimals,
     maximumFractionDigits: formats.numberDecimals,
     useGrouping: formats.useGroupping,
   });
   return `${formats.currency} ${number}`;
+}
+
+// A result that can go below zero, as the design writes it: "KES 1,200 loss" rather than a minus sign.
+export function money(amount: number) {
+  return amount < 0 ? `${kes(-amount)} loss` : kes(amount);
 }
 
 export function plural(count: number, one: string, many: string) {

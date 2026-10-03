@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { apiRequest } from "../lib/data";
 import { useResource } from "../lib/data";
 import { useAppearance } from "../lib/appearance";
+import { formatDateOnly } from "./recurringPresentation";
 import {
   Banner,
   BrandIcon,
@@ -28,7 +29,10 @@ import {
 } from "./ui";
 
 type Settings = {
-  organization: { name: string; slug: string };
+  organization: { name: string; slug: string; businessDate?: string | null };
+  effectiveBusinessDate?: string;
+  // Today in the organization's time zone: the latest date the business date may be set to.
+  calendarDate?: string;
   localization: {
     locale: string;
     timeZone: string;
@@ -73,14 +77,32 @@ type Section = keyof Pick<
   "organization" | "localization" | "branding" | "securityPolicy"
 >;
 
-// Change-log wording for each section.
-const reasons: Record<Section, string> = {
-  organization: "Updated organization details",
-  localization: "Updated locale and time",
-  branding: "Updated brand",
-  securityPolicy: "Updated security policy",
+type PolicyNumber = Exclude<keyof Settings["securityPolicy"], "passwordComplexity" | "allowPinSignIn">;
+
+// The security policy's bounds, as the server checks them (OrganizationSecurityPolicy.Validate). The form uses them
+// for its inputs and hints, and checks every number before saving, including those it does not show.
+const POLICY_BOUNDS: Record<PolicyNumber, { min: number; max: number; label: string }> = {
+  pinLength: { min: 4, max: 8, label: "Shortest new PIN" },
+  lockoutThreshold: { min: 3, max: 10, label: "Wrong PINs before a pause" },
+  lockoutMinutes: { min: 1, max: 60, label: "Pause length in minutes" },
+  accessTokenMinutes: { min: 1, max: 15, label: "Session renews every (minutes)" },
+  refreshTokenDays: { min: 1, max: 90, label: "Stay signed in for (days)" },
+  idleUnlockSeconds: { min: 30, max: 3600, label: "Idle unlock (seconds)" },
+  passwordMinLength: { min: 12, max: 128, label: "Shortest password" },
+  passwordHistory: { min: 0, max: 24, label: "Passwords remembered" },
 };
 
+// Every number outside its bounds, field by field, rather than the server's one-line refusal. Empty when all are in.
+function policyProblem(policy: Settings["securityPolicy"]) {
+  return (Object.entries(POLICY_BOUNDS) as [PolicyNumber, (typeof POLICY_BOUNDS)[PolicyNumber]][])
+    .filter(([key, { min, max }]) => !Number.isInteger(policy[key]) || policy[key] < min || policy[key] > max)
+    .map(([, { min, max, label }]) => `${label} must be a whole number from ${min} to ${max}.`)
+    .join(" ");
+}
+
+const bounds = (key: PolicyNumber) => ({ min: String(POLICY_BOUNDS[key].min), max: String(POLICY_BOUNDS[key].max) });
+
+// The toast after each save. Saves carry no typed reason: the server writes one for the change log.
 const saved: Record<Section, string> = {
   organization: "Organization details saved.",
   localization: "Locale and time saved.",
@@ -104,11 +126,15 @@ export function OrganizationSettingsView() {
           title="Organization settings"
           description="Defaults for everyone in the organization."
         />
-        <FormSkeleton cards={4} label="Loading organization settings" />
+        <FormSkeleton cards={5} label="Loading organization settings" />
       </section>
     );
-  return <SettingsForm initial={loaded.data} />;
+  // Reloaded after every save: the calendar date and the effective business date are worked out by the server.
+  return <SettingsForm initial={loaded.data} onSaved={loaded.reload} />;
 }
+
+// Day numbers as the API stores them: 0 is Sunday.
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const LOGO_MAX_BYTES = 256 * 1024;
@@ -122,19 +148,40 @@ function readAsDataUrl(file: File) {
   });
 }
 
-function SettingsForm({ initial }: { initial: Settings }) {
+function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => void }) {
   const toast = useToast();
   // Saved settings show at once: the shell reloads branding and formats after each save.
   const { appearance, loading: appearanceLoading, refresh } = useAppearance();
   const [logoBusy, setLogoBusy] = useState(false);
   const [settings, setSettings] = useState(initial);
   const [errors, setErrors] = useState<Partial<Record<Section, string>>>({});
+  const [businessDateError, setBusinessDateError] = useState("");
   const [busy, setBusy] = useState<Section | null>(null);
+  const [businessDateBusy, setBusinessDateBusy] = useState(false);
   const update = <T extends Section>(section: T, value: Partial<Settings[T]>) =>
     setSettings({ ...settings, [section]: { ...settings[section], ...value } });
 
   async function save(section: Section) {
     let value: object = settings[section];
+    if (section === "securityPolicy") {
+      // Said here, field by field, rather than as the server's one-line refusal. The pause is capped at one hour.
+      const policy = settings.securityPolicy;
+      const limits: [string, number, number, number][] = [
+        ["Shortest new PIN", policy.pinLength, 4, 8],
+        ["Wrong PINs before a pause", policy.lockoutThreshold, 3, 10],
+        ["Pause length", policy.lockoutMinutes, 1, 60],
+        ["Session renews every", policy.accessTokenMinutes, 1, 15],
+        ["Stay signed in for", policy.refreshTokenDays, 1, 90],
+      ];
+      const outside = limits.filter(([, current, min, max]) => !Number.isInteger(current) || current < min || current > max);
+      if (outside.length) {
+        setErrors({
+          ...errors,
+          securityPolicy: outside.map(([label, , min, max]) => `${label}: use ${min} to ${max}.`).join(" "),
+        });
+        return;
+      }
+    }
     if (section === "organization") {
       const name = settings.organization.name.trim();
       const slug = settings.organization.slug.trim();
@@ -153,19 +200,43 @@ function SettingsForm({ initial }: { initial: Settings }) {
       }
       value = { name, slug };
     }
+    if (section === "securityPolicy") {
+      const problem = policyProblem(settings.securityPolicy);
+      if (problem) return setErrors({ ...errors, securityPolicy: problem });
+    }
     setBusy(section);
     try {
       await apiRequest(`setup/organization/settings/${section}`, {
         method: "PUT",
-        body: JSON.stringify({ value, reason: reasons[section] }),
+        body: JSON.stringify({ value }),
       });
       setErrors({ ...errors, [section]: undefined });
       toast(saved[section]);
       refresh();
+      onSaved();
     } catch (reason) {
       setErrors({ ...errors, [section]: (reason as Error).message });
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function saveBusinessDate() {
+    const value = settings.organization.businessDate || null;
+    setBusinessDateBusy(true);
+    try {
+      await apiRequest("setup/organization/settings/businessDate", {
+        method: "PUT",
+        body: JSON.stringify({ value }),
+      });
+      setBusinessDateError("");
+      toast(value ? "Business date saved." : "Business date now follows the organization time zone.");
+      refresh();
+      onSaved();
+    } catch (reason) {
+      setBusinessDateError((reason as Error).message);
+    } finally {
+      setBusinessDateBusy(false);
     }
   }
 
@@ -191,6 +262,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
       setErrors({ ...errors, branding: undefined });
       toast(file ? "Logo updated." : "Logo removed.");
       refresh();
+      onSaved();
     } catch (reason) {
       setErrors({ ...errors, branding: (reason as Error).message });
     } finally {
@@ -199,6 +271,10 @@ function SettingsForm({ initial }: { initial: Settings }) {
   }
 
   const { organization, branding, localization, securityPolicy } = settings;
+  // The business date the form will save: a held date, or null to follow the organization's calendar date. The field
+  // and its hint follow it, so dropping a held date shows the calendar date at once, before it is saved. The calendar
+  // date itself is read again after every save.
+  const held = organization.businessDate || null;
   const logo = appearance?.branding.logo;
   return (
     <section>
@@ -238,6 +314,59 @@ function SettingsForm({ initial }: { initial: Settings }) {
               />
             </Field>
           </Grid2>
+        </SettingsCard>
+
+        <SettingsCard
+          title="Business date"
+          description="The accounting date used by reports, targets, scheduled postings, and setup changes. Leave it blank to follow the organization's time zone."
+          error={businessDateError}
+          action="Save business date"
+          busy={businessDateBusy}
+          onSave={() => void saveBusinessDate()}
+        >
+          <Grid2 narrow>
+            <Field
+              id="business-date"
+              label="Business date"
+              hint={
+                held
+                  ? `Held at ${formatDateOnly(held)}.${initial.calendarDate ? ` The organization's calendar date is ${formatDateOnly(initial.calendarDate)}.` : ""}`
+                  : initial.calendarDate
+                    ? `Following the organization's calendar date, ${formatDateOnly(initial.calendarDate)}.`
+                    : "Following the organization's calendar date."
+              }
+            >
+              <TextInput
+                type="date"
+                // Without a held date the business date is the organization's calendar date.
+                value={held || initial.calendarDate || initial.effectiveBusinessDate || ""}
+                max={initial.calendarDate}
+                onChange={(event) =>
+                  setSettings({
+                    ...settings,
+                    organization: {
+                      ...organization,
+                      businessDate: event.target.value || null,
+                    },
+                  })
+                }
+              />
+            </Field>
+          </Grid2>
+          {held && (
+            <Button
+              tone="outline"
+              disabled={businessDateBusy}
+              onClick={() =>
+                setSettings({
+                  ...settings,
+                  organization: { ...organization, businessDate: null },
+                })
+              }
+            >
+              Follow organization time zone
+            </Button>
+          )}
         </SettingsCard>
 
         <SettingsCard
@@ -440,6 +569,12 @@ function SettingsForm({ initial }: { initial: Settings }) {
                 <option value="1">Monday</option>
                 <option value="0">Sunday</option>
                 <option value="6">Saturday</option>
+                {/* The API takes any day; one set elsewhere is shown as it is rather than as Monday. */}
+                {![0, 1, 6].includes(localization.firstDayOfWeek) && (
+                  <option value={localization.firstDayOfWeek}>
+                    {WEEKDAYS[localization.firstDayOfWeek] ?? localization.firstDayOfWeek}
+                  </option>
+                )}
               </SelectInput>
             </Field>
           </Grid2>
@@ -488,8 +623,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
             >
               <TextInput
                 type="number"
-                min="4"
-                max="8"
+                {...bounds("pinLength")}
                 value={securityPolicy.pinLength}
                 onChange={(event) =>
                   update("securityPolicy", {
@@ -501,12 +635,11 @@ function SettingsForm({ initial }: { initial: Settings }) {
             <Field
               id="lockout-attempts"
               label="Wrong PINs before a pause"
-              hint="1 to 10."
+              hint="3 to 10."
             >
               <TextInput
                 type="number"
-                min="1"
-                max="10"
+                {...bounds("lockoutThreshold")}
                 value={securityPolicy.lockoutThreshold}
                 onChange={(event) =>
                   update("securityPolicy", {
@@ -515,11 +648,14 @@ function SettingsForm({ initial }: { initial: Settings }) {
                 }
               />
             </Field>
-            <Field id="lockout-minutes" label="Pause length in minutes">
+            <Field
+              id="lockout-minutes"
+              label="Pause length in minutes"
+              hint="1 to 60, so a pause lasts at most an hour. A PIN reset by email still lifts a pause."
+            >
               <TextInput
                 type="number"
-                min="1"
-                max="1440"
+                {...bounds("lockoutMinutes")}
                 value={securityPolicy.lockoutMinutes}
                 onChange={(event) =>
                   update("securityPolicy", {
@@ -535,8 +671,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
             >
               <TextInput
                 type="number"
-                min="1"
-                max="15"
+                {...bounds("accessTokenMinutes")}
                 value={securityPolicy.accessTokenMinutes}
                 onChange={(event) =>
                   update("securityPolicy", {
@@ -552,8 +687,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
             >
               <TextInput
                 type="number"
-                min="1"
-                max="90"
+                {...bounds("refreshTokenDays")}
                 value={securityPolicy.refreshTokenDays}
                 onChange={(event) =>
                   update("securityPolicy", {
@@ -592,7 +726,7 @@ function SettingsCard({
       {error && <Banner>{error}</Banner>}
       {children}
       <FormActions>
-        <Button disabled={busy} onClick={onSave}>
+        <Button tone="ok" disabled={busy} onClick={onSave}>
           {action}
         </Button>
       </FormActions>

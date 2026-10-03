@@ -1,11 +1,13 @@
 import { apiGet } from "./lib/api";
 import type { Formats } from "./lib/format";
+import { savePinPolicy, validPinPolicy, type PinPolicy } from "./lib/storage";
 import { vault } from "./lib/vault";
 import { defaultTheme, mix, type Theme } from "./ui";
 
 export type Appearance = {
   organizationName: string;
   settingsVersion: number;
+  businessDate?: string;
   branding: {
     displayName: string;
     logoAlt: string;
@@ -18,7 +20,14 @@ export type Appearance = {
   themeMode: string;
   reducedMotion: boolean;
   fontScale: number;
+  // The organization's wrong-PIN policy, which the phone enforces when it unlocks offline.
+  lockoutThreshold?: number;
+  lockoutMinutes?: number;
 };
+
+// The policy an appearance carries, or null when it has none (an older API) or it is out of bounds.
+export const pinPolicyOf = (appearance: Appearance): PinPolicy | null =>
+  validPinPolicy(appearance) ? { lockoutThreshold: appearance.lockoutThreshold!, lockoutMinutes: appearance.lockoutMinutes! } : null;
 
 const KEY = "xcode.appearance";
 
@@ -37,6 +46,8 @@ export async function loadSavedAppearance(): Promise<Appearance | null> {
 export async function fetchAppearance(): Promise<Appearance> {
   const appearance = await apiGet<Appearance>("setup/appearance");
   await vault.set(KEY, JSON.stringify(appearance));
+  const policy = pinPolicyOf(appearance);
+  if (policy) await savePinPolicy(policy);
   return appearance;
 }
 

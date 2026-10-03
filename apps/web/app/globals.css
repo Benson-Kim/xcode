@@ -26,10 +26,15 @@
   --color-red-bg: #fdecea;
   --color-red-line: #f3c1bb;
   --color-red-text: #8a1c12;
+  --color-red-hover: #fbd9d4;
+  --color-amber: #c9861c;
   --color-amber-bg: #fff4de;
   --color-amber-line: #e7c27a;
   --color-amber-text: #6b4200;
+  --color-amber-hover: #fbe9c6;
   --color-green: #1e6b3a;
+  /* Follows the organization's accent colour when branding changes it. */
+  --color-green-dark: color-mix(in srgb, var(--color-green) 80%, black);
   --color-green-bg: #e3f1e8;
   --color-green-line: #b8ddc3;
 

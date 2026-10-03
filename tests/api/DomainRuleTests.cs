@@ -1,6 +1,7 @@
 using Auth.Application.Setup;
 using Auth.Domain;
 using Auth.Domain.Setup;
+using Auth.Infrastructure;
 using Xunit;
 
 namespace Auth.Tests;
@@ -24,6 +25,89 @@ public sealed class DomainRuleTests
     [InlineData("", "")]
     public void PhoneNumbersNormalizeToTheFullKenyanPrefix(string input, string expected) =>
         Assert.Equal(expected, PhoneNumber.Normalize(input));
+
+    [Fact]
+    public void StoppingSomethingAlreadyStoppedOnAnotherDateIsRefusedAndRestoreCancelsIt()
+    {
+        var category = new ExpenseCategory(Organization, "Road costs", ExpenseBucket.RecurringCharges);
+        var item = new ExpenseItem(category, "Tolls");
+        Assert.True(category.Stop(Today));
+        Assert.False(category.Stop(Today));
+        Assert.Throws<ArgumentException>(() => category.Stop(Today.AddDays(-2)));
+        Assert.True(category.Restore());
+        Assert.True(item.Stop(Today));
+        Assert.False(item.Stop(Today));
+        Assert.Throws<ArgumentException>(() => item.Stop(Today.AddDays(1)));
+        Assert.True(item.Restore());
+        Assert.Null(item.StoppedOn);
+    }
+
+    [Fact]
+    public void PermissionDependenciesAreTransitiveAndDenyingARequiredPermissionRemovesDependents()
+    {
+        var resolver = new EffectivePermissionResolver();
+        var permission = resolver.Resolve(["dash.capture"], Array.Empty<PersonPermissionOverride>());
+
+        Assert.Contains("dash.capture", permission);
+        Assert.Contains("revenue.capture", permission);
+        Assert.Contains("revenue.view", permission);
+
+        var denied = resolver.Resolve(["dash.capture"],
+            [new PersonPermissionOverride { Permission = "revenue.view", Granted = false }]);
+
+        Assert.DoesNotContain("dash.capture", denied);
+        Assert.DoesNotContain("revenue.capture", denied);
+        Assert.DoesNotContain("revenue.view", denied);
+    }
+
+    [Fact]
+    public void SecurityPolicyRequiresThreeAttemptsAndCapsPauseAtOneHour()
+    {
+        var policy = new OrganizationSecurityPolicy { LockoutThreshold = 2 };
+        Assert.Throws<ArgumentException>(() => policy.Validate());
+
+        policy.LockoutThreshold = 3;
+        policy.LockoutMinutes = 61;
+        Assert.Throws<ArgumentException>(() => policy.Validate());
+
+        policy.LockoutMinutes = 60;
+        policy.Validate();
+    }
+
+    // The bounds the database checks and sign-in clamps to are exactly the ones a save validates.
+    [Fact]
+    public void SecurityPolicyBoundsAgreeWithValidation()
+    {
+        Assert.Equal(8, SecurityPolicyBounds.All.Count);
+        foreach (var bound in SecurityPolicyBounds.All)
+        {
+            var property = typeof(OrganizationSecurityPolicy).GetProperty(bound.Column)!;
+            OrganizationSecurityPolicy With(int value) { var policy = new OrganizationSecurityPolicy(); property.SetValue(policy, value); return policy; }
+            With(bound.Min).Validate();
+            With(bound.Max).Validate();
+            Assert.Throws<ArgumentException>(With(bound.Min - 1).Validate);
+            Assert.Throws<ArgumentException>(With(bound.Max + 1).Validate);
+            Assert.Equal(bound.Min, bound.Clamp(bound.Min - 1));
+            Assert.Equal(bound.Max, bound.Clamp(int.MaxValue));
+        }
+    }
+
+    // Addendum 1, section 2: at least three tries, and the pause is capped at one hour.
+    [Theory]
+    [InlineData(2, 15, false)]
+    [InlineData(3, 15, true)]
+    [InlineData(10, 15, true)]
+    [InlineData(11, 15, false)]
+    [InlineData(5, 0, false)]
+    [InlineData(5, 1, true)]
+    [InlineData(5, 60, true)]
+    [InlineData(5, 61, false)]
+    public void WrongPinPolicyBounds(int tries, int pauseMinutes, bool valid)
+    {
+        var policy = new OrganizationSecurityPolicy { LockoutThreshold = tries, LockoutMinutes = pauseMinutes };
+        if (valid) policy.Validate();
+        else Assert.Throws<ArgumentException>(policy.Validate);
+    }
 
     private static RecurringDefinition Daily(DateOnly start, decimal amount = 100m) =>
         new("Insurance", RecurringKind.Cost, CostCategory.FixedCommitments, amount, new RecurringSchedule(RecurrenceFrequency.Daily), start, null, [new VehicleShare(Vehicle, amount)]);
@@ -51,6 +135,42 @@ public sealed class DomainRuleTests
 
         Assert.NotNull(item.DueOn(Today.AddDays(-3)));
         Assert.NotNull(item.DueOn(Today.AddDays(5)));
+    }
+
+    [Fact]
+    public void BusinessDateCannotMoveIntoTheFutureAndCanFollowTheOrganizationClock()
+    {
+        var organization = new Organization { Slug = "fleet", Name = "Fleet" };
+        Assert.True(organization.ChangeBusinessDate(Today.AddDays(-2), Today));
+        Assert.Equal(Today.AddDays(-2), organization.BusinessDate);
+        Assert.Throws<ArgumentException>(() => organization.ChangeBusinessDate(Today.AddDays(1), Today));
+        Assert.True(organization.ChangeBusinessDate(null, Today));
+        Assert.Null(organization.BusinessDate);
+    }
+
+    [Fact]
+    public void LeavingTheFleetEndsTargetsUntilTheVehicleIsRestored()
+    {
+        var company = Guid.NewGuid();
+        var vehicle = new FleetVehicle(Organization, company, new VehicleRegistration("KDA 482M"), Today.AddDays(-10), 7000m);
+
+        Assert.True(vehicle.Retire(Today, Today));
+        Assert.Equal(0m, vehicle.TargetOn(Today));
+        Assert.False(vehicle.ActiveOn(Today));
+        Assert.True(vehicle.Restore());
+        Assert.Equal(7000m, vehicle.TargetOn(Today));
+        Assert.True(vehicle.ActiveOn(Today));
+    }
+
+    [Fact]
+    public void ACompanyCanBeArchivedAndRestoredWithoutDeletingItsIdentity()
+    {
+        var company = new PsvCompany(Organization, "North Star");
+        Assert.True(company.Archive(Today));
+        Assert.False(company.ActiveOn(Today));
+        Assert.True(company.Restore());
+        Assert.True(company.ActiveOn(Today));
+        Assert.Equal("North Star", company.Name);
     }
 
     [Fact]
