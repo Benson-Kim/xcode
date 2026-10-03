@@ -187,7 +187,7 @@ public sealed class RevenueCaptureTests : IDisposable
     }
 
     [Fact]
-    public async Task AClerksOfflineReplayIsAcceptedOrShownAsAConflictNeverRefused()
+    public async Task AClerksOfflineReplayIsAcceptedUntilSomeoneElseChangesTheDay()
     {
         var (today, company) = await Arrange();
         var vehicle = await Vehicle(app, company, "KAA 151A", today.AddDays(-10));
@@ -204,16 +204,20 @@ public sealed class RevenueCaptureTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
         Assert.Equal(captured.GetProperty("id").GetGuid(), (await Body(replay)).GetProperty("id").GetGuid());
 
+        // Someone who may correct the day changes it, so the clerk's queued entry is no longer an identical replay.
         Assert.Equal(HttpStatusCode.OK, (await Put(admin, vehicle, today, amount: 1400m, version: 1)).StatusCode);
-        var stale = await Put(clerk, vehicle, today, amount: 1500m);
-        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
-        var current = (await Body(stale)).GetProperty("current");
-        Assert.Equal(1400m, current.GetProperty("amount").GetDecimal());
-        Assert.Equal(2, current.GetProperty("version").GetInt64());
-        Assert.True(current.GetProperty("editedAfterCapture").GetBoolean());
-        Assert.False(current.GetProperty("canEdit").GetBoolean());
 
+        // D5: authorization comes before state disclosure. A capture-only clerk may not correct a past day, so the
+        // replay is refused and the saved record is never handed to them, with or without a version.
+        var stale = await Put(clerk, vehicle, today, amount: 1500m);
+        Assert.Equal(HttpStatusCode.Forbidden, stale.StatusCode);
+        Assert.False((await Body(stale)).TryGetProperty("current", out _));
         Assert.Equal(HttpStatusCode.Forbidden, (await Put(clerk, vehicle, today, amount: 1500m, version: 2)).StatusCode);
+
+        // Nothing the clerk sent changed what is stored.
+        var saved = Assert.Single((await GetWeek(admin, $"?vehicleId={vehicle}")).Vehicles).On(today);
+        Assert.Equal(1400m, saved.Amount);
+        Assert.Equal(2, saved.Version);
     }
 
     [Fact]

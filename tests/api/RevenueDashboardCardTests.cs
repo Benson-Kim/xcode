@@ -33,7 +33,9 @@ public sealed class RevenueDashboardCardTests : IDisposable
         var company = await Company(app, "Dashboard Cards Fleet");
         var vehicle = await Vehicle(app, company, "KAA 301A", today.AddDays(-10));
         await Records(app, vehicle, today.AddDays(-10), today, skip: [today.AddDays(-2)]);
-        // The office admin holds all four cards; each run keeps one of them.
+        // Each run leaves the office admin exactly one card, named rather than taken from the role's defaults: D10
+        // dropped dash.capture from every default, so relying on them would leave no card at all.
+        await Grant(app, Admin, card);
         foreach (var other in Cards.Where(x => x != card))
             await Deny(app, Admin, other);
         using var admin = await app.SignIn(Admin);

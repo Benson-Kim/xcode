@@ -41,7 +41,9 @@ public sealed class PeopleHistoryTests : IDisposable
             db.Provisioning = true;
             var clerk = await db.Users.SingleAsync(x => x.Email == RevenueClerk);
             var organizationId = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
+            // D11: the people section carries contact details and permissions, so it needs people.view as well.
             db.PermissionOverrides.Add(new PersonPermissionOverride { OrganizationId = organizationId, UserId = clerk.Id, Permission = "audit.view", Granted = true });
+            db.PermissionOverrides.Add(new PersonPermissionOverride { OrganizationId = organizationId, UserId = clerk.Id, Permission = "people.view", Granted = true });
             db.SetupCompanyScopes.Add(new SetupCompanyScope { OrganizationId = organizationId, UserId = clerk.Id, CompanyId = north });
             await db.SaveChangesAsync();
         });

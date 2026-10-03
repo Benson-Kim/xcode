@@ -83,6 +83,14 @@ internal static class RevenueTestData
         db.PermissionOverrides.Add(new() { OrganizationId = organizationId, UserId = user, Permission = permission, Granted = false });
     });
 
+    // An override, so a test states the permission it needs rather than relying on a role's defaults (D10 changed them).
+    public static Task Grant(AuthFactory app, string email, string permission) => Provision(app, async db =>
+    {
+        var organizationId = await OrganizationId(db);
+        var user = (await db.Users.SingleAsync(x => x.Email == email)).Id;
+        db.PermissionOverrides.Add(new() { OrganizationId = organizationId, UserId = user, Permission = permission, Granted = true });
+    });
+
     private static async Task<Guid> OrganizationId(AuthDb db) => (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
 
     private static Task Provision(AuthFactory app, Func<AuthDb, Task> change) => app.WithDb(async db =>
