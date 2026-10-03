@@ -7,4 +7,4 @@ export type ScopeOptions = {
   companies: { id: string; name: string }[];
   vehicles: { id: string; registration: string; companyId: string }[];
 };
-export type Person = { id: string; firstName: string; lastName: string; email: string; phoneNumber: string; role: string; active: boolean; scopeMode: string; companyIds: string[]; vehicleIds: string[]; permissions: string[]; approvalLimit?: number; hasPin: boolean };
+export type Person = { id: string; firstName: string; lastName: string; email: string; phoneNumber: string; role: string; active: boolean; scopeMode: string; companyIds: string[]; vehicleIds: string[]; otherCompanies: number; otherVehicles: number; permissions: string[]; approvalLimit?: number; hasPin: boolean; version: number };

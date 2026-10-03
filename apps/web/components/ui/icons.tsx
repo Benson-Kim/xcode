@@ -1,7 +1,11 @@
 import type { ComponentProps } from "react";
 
 // Stroke icons from the design (24px grid, drawn at the size given).
-function Icon({ size = 20, children, ...props }: ComponentProps<"svg"> & { size?: number }) {
+function Icon({
+  size = 20,
+  children,
+  ...props
+}: ComponentProps<"svg"> & { size?: number }) {
   return (
     <svg
       width={size}

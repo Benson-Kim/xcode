@@ -4,6 +4,7 @@ using Auth.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Auth.Api.Infrastructure.Migrations
 {
     [DbContext(typeof(AuthDb))]
-    partial class AuthDbModelSnapshot : ModelSnapshot
+    [Migration("20260929200000_AccessIntegrity")]
+    partial class AccessIntegrity
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -301,24 +304,7 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasKey("OrganizationId");
 
-                    b.ToTable("SecurityPolicies", t =>
-                        {
-                            t.HasCheckConstraint("CK_SecurityPolicies_AccessTokenMinutes", "[AccessTokenMinutes] BETWEEN 1 AND 15");
-
-                            t.HasCheckConstraint("CK_SecurityPolicies_IdleUnlockSeconds", "[IdleUnlockSeconds] BETWEEN 30 AND 3600");
-
-                            t.HasCheckConstraint("CK_SecurityPolicies_LockoutMinutes", "[LockoutMinutes] BETWEEN 1 AND 60");
-
-                            t.HasCheckConstraint("CK_SecurityPolicies_LockoutThreshold", "[LockoutThreshold] BETWEEN 3 AND 10");
-
-                            t.HasCheckConstraint("CK_SecurityPolicies_PasswordHistory", "[PasswordHistory] BETWEEN 0 AND 24");
-
-                            t.HasCheckConstraint("CK_SecurityPolicies_PasswordMinLength", "[PasswordMinLength] BETWEEN 12 AND 128");
-
-                            t.HasCheckConstraint("CK_SecurityPolicies_PinLength", "[PinLength] BETWEEN 4 AND 8");
-
-                            t.HasCheckConstraint("CK_SecurityPolicies_RefreshTokenDays", "[RefreshTokenDays] BETWEEN 1 AND 90");
-                        });
+                    b.ToTable("SecurityPolicies");
                 });
 
             modelBuilder.Entity("Auth.Domain.PersonPermissionOverride", b =>

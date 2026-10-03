@@ -75,8 +75,11 @@ export function loadSession() {
     keys.session,
     (session) =>
       typeof session.phoneNumber === "string" &&
+      session.phoneNumber.length > 0 &&
       typeof session.accessToken === "string" &&
-      typeof session.refreshToken === "string",
+      session.accessToken.length > 0 &&
+      typeof session.refreshToken === "string" &&
+      session.refreshToken.length > 0,
   );
 }
 
@@ -93,7 +96,18 @@ export function loadPerson() {
     keys.person,
     (person) =>
       typeof person.phoneNumber === "string" &&
-      Array.isArray(person.permissions),
+      person.phoneNumber.length > 0 &&
+      typeof person.firstName === "string" &&
+      person.firstName.length > 0 &&
+      typeof person.lastName === "string" &&
+      person.lastName.length > 0 &&
+      typeof person.role === "string" &&
+      person.role.length > 0 &&
+      Array.isArray(person.permissions) &&
+      person.permissions.every((permission) => typeof permission === "string") &&
+      Number.isInteger(person.pinLength) &&
+      person.pinLength >= 4 &&
+      person.pinLength <= 8,
   );
 }
 
@@ -127,7 +141,11 @@ export async function loadOfflineTries(): Promise<OfflineTries> {
   return (
     (await read<OfflineTries>(
       keys.offlineTries,
-      (value) => typeof value.count === "number",
+      (value) =>
+        Number.isInteger(value.count) &&
+        value.count >= 0 &&
+        Number.isFinite(value.pausedUntil) &&
+        value.pausedUntil >= 0,
     )) ?? { count: 0, pausedUntil: 0 }
   );
 }
