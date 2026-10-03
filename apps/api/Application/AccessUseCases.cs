@@ -532,17 +532,41 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     }
 
     // Sign-in codes go to the person's email, so whoever sets their email and mobile can sign in as them. That is
-    // only allowed for someone who could have granted them everything they hold anyway: an Owner, or an editor
-    // whose own permissions and assignable roles cover all of the person's (and, for an approval limit, access.manage).
+    // only allowed for an Owner, or an editor whose data scope and permissions cover the person (and, for an approval
+    // limit, access.manage).
     private async Task AuthorizeSignInDetailsChange(SetupActor actor, AccessPerson target, bool actorIsOwner, CancellationToken ct)
     {
         if (actorIsOwner)
             return;
 
+        if (!await CanSeeFullScope(actor, target, ct))
+            throw new UnauthorizedAccessException("Only an Owner, or someone who can see this person's full data scope, can change their email or mobile number.");
+
         var held = await organizations.Permissions(actor.UserId, ct);
         if (target.Permissions.Any(x => !held.Contains(x)) ||
             (target.Membership.ApprovalLimit is not null && !held.Contains("access.manage")))
             throw new UnauthorizedAccessException("Only an Owner, or someone who holds everything this person holds, can change their email or mobile number.");
+    }
+
+    private async Task<bool> CanSeeFullScope(SetupActor actor, AccessPerson target, CancellationToken ct)
+    {
+        if (actor.AllCompanies)
+            return true;
+        if (target.Scope?.AllCompanies == true || target.CompanyIds.Any(id => !actor.CompanyIds.Contains(id)))
+            return false;
+
+        var vehicleIds = target.VehicleIds.Distinct().ToArray();
+        if (vehicleIds.Length == 0)
+            return true;
+
+        var vehicles = await db.Set<FleetVehicle>()
+            .AsNoTracking()
+            .Where(vehicle => vehicleIds.Contains(vehicle.Id))
+            .Select(vehicle => new { vehicle.Id, vehicle.CompanyId })
+            .ToListAsync(ct);
+
+        return vehicles.Count == vehicleIds.Length &&
+            vehicles.All(vehicle => CanSeeVehicle(actor, vehicle.Id, vehicle.CompanyId));
     }
 
     private static bool IsOwnerRole(Role role) => role.Name.Equals("Owner", StringComparison.OrdinalIgnoreCase);

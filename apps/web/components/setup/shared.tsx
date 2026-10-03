@@ -1,4 +1,8 @@
-export type Company = { id: string; name: string; vehicleCount: number };
+export type Company = {
+  id: string;
+  name: string;
+  vehicleCount: number
+};
 
 export type Vehicle = {
   id: string;
