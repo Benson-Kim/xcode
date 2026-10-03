@@ -19,8 +19,10 @@ import {
 } from "../lib/phone";
 import {
   DEFAULT_PIN_POLICY,
+  OFFLINE_UNLOCK_HOURS,
   loadOfflineTries,
   matchesPinCheck,
+  offlineUnlockUntil,
   saveOfflineTries,
   savePinCheck,
   type StoredPerson,
@@ -330,6 +332,13 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
     const match = await matchesPinCheck(entered);
     if (match === null || !person)
       return setPadError("No internet. Connect to unlock this phone.");
+    // D7: after 72 hours away from the server the phone stops opening on its PIN alone. Captures waiting
+    // to be sent are kept, so connecting once costs nothing but the connection.
+    const until = await offlineUnlockUntil();
+    if (until !== null && Date.now() > until)
+      return setPadError(
+        `This phone has been offline for more than ${OFFLINE_UNLOCK_HOURS} hours. Connect to the internet and unlock once to carry on. Anything waiting to be sent is kept.`,
+      );
     const tries = await loadOfflineTries();
     if (match) {
       await saveOfflineTries({ count: 0, pausedUntil: 0 });

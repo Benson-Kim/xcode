@@ -77,6 +77,9 @@ export async function keepSession(
     phoneNumber,
     accessToken: result.accessToken || "",
     refreshToken: result.refreshToken || "",
+    // Every sign-in and every renewal passes through here, so this is the last time the phone reached
+    // the server: what the 72-hour offline unlock window is measured from (D7).
+    lastOnlineAt: Date.now(),
   };
   await saveSession(session);
   return session;

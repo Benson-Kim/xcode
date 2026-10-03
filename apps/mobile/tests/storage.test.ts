@@ -95,7 +95,8 @@ it("switch user stops trusting the phone before it forgets the PIN check and the
     const trusted = kept !== null && person?.phoneNumber === kept.phoneNumber;
     outcomes.push(!trusted ? "trusted for no one" : JSON.stringify([...items]) === before ? "as it was" : "trusted, with its PIN check or pause gone");
   }
-  expect(outcomes).toEqual(["trusted for no one", "trusted for no one", "trusted for no one", "trusted for no one"]);
+  // Every step, however many keys forgetPerson clears, leaves the phone trusted for no one.
+  expect(outcomes).toEqual(states.map(() => "trusted for no one"));
 });
 
 it("concurrent requests share a single persistent installation identifier", async () => {

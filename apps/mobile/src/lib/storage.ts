@@ -8,11 +8,20 @@ const keys = {
   person: "xcode.person",
   pinCheck: "xcode.pin-check",
   offlineTries: "xcode.offline-tries",
+  captureList: "xcode.capture-list",
 };
 
 export interface StoredSession extends SessionTokens {
   phoneNumber: string;
+  // When this phone last reached the server, as a sign-in or a token renewal. Absent on records a Phase 1
+  // app saved; the offline window then starts the first time it is asked for.
+  lastOnlineAt?: number;
 }
+
+// D7: a trusted phone unlocks without internet only within 72 hours of its last online sign-in or
+// renewal. After that it asks the person to connect once. Long enough to cover a weekend in the field.
+export const OFFLINE_UNLOCK_HOURS = 72;
+const OFFLINE_UNLOCK_MS = OFFLINE_UNLOCK_HOURS * 60 * 60 * 1000;
 
 // The organization's wrong-PIN policy: tries before a pause, and the pause. The phone enforces it offline.
 export interface PinPolicy {
@@ -101,8 +110,22 @@ export function loadSession() {
       typeof session.accessToken === "string" &&
       session.accessToken.length > 0 &&
       typeof session.refreshToken === "string" &&
-      session.refreshToken.length > 0,
+      session.refreshToken.length > 0 &&
+      (session.lastOnlineAt === undefined ||
+        (Number.isFinite(session.lastOnlineAt) && session.lastOnlineAt! >= 0)),
   );
+}
+
+// When offline unlock stops working, or null when this phone is trusted for nobody. A session saved before
+// this rule shipped has no stamp, so the clock starts now rather than locking someone out mid-shift.
+export async function offlineUnlockUntil(): Promise<number | null> {
+  const session = await loadSession();
+  if (!session) return null;
+  if (session.lastOnlineAt !== undefined)
+    return session.lastOnlineAt + OFFLINE_UNLOCK_MS;
+  const now = Date.now();
+  await saveSession({ ...session, lastOnlineAt: now });
+  return now + OFFLINE_UNLOCK_MS;
 }
 
 export async function clearSession(): Promise<void> {
@@ -188,10 +211,66 @@ export async function saveOfflineTries(tries: OfflineTries): Promise<void> {
   else await write(keys.offlineTries, tries);
 }
 
+// D9: enough to capture against after an offline cold start, and no more. No amounts, no targets and no
+// totals are written to the phone: just which vehicles the person may capture for and on which days.
+// What they are allowed to do is not repeated here; it comes from the person record already kept.
+export interface StoredCaptureVehicle {
+  id: string;
+  registration: string;
+  companyName: string;
+  // The dates still open to capture, in order.
+  days: string[];
+}
+
+export interface StoredCaptureList {
+  owner: string;
+  weekStart: string;
+  weekThrough: string;
+  currentWeekStart: string;
+  businessDate: string;
+  vehicles: StoredCaptureVehicle[];
+  savedAt: number;
+}
+
+export async function saveCaptureList(list: StoredCaptureList): Promise<void> {
+  await write(keys.captureList, list);
+}
+
+// The list for this person, or null when there is none, it belongs to someone else, or it has gone stale.
+// It keeps the same 72 hours as offline unlock, so nothing on the phone outlives the window.
+export async function loadCaptureList(owner: string): Promise<StoredCaptureList | null> {
+  const list = await read<StoredCaptureList>(
+    keys.captureList,
+    (value) =>
+      typeof value.owner === "string" &&
+      value.owner.length > 0 &&
+      typeof value.weekStart === "string" &&
+      typeof value.weekThrough === "string" &&
+      typeof value.currentWeekStart === "string" &&
+      typeof value.businessDate === "string" &&
+      Number.isFinite(value.savedAt) &&
+      Array.isArray(value.vehicles) &&
+      value.vehicles.every(
+        (vehicle) =>
+          typeof vehicle.id === "string" &&
+          typeof vehicle.registration === "string" &&
+          typeof vehicle.companyName === "string" &&
+          Array.isArray(vehicle.days) &&
+          vehicle.days.every((day) => typeof day === "string"),
+      ),
+  );
+  if (!list) return null;
+  if (list.owner !== owner || Date.now() - list.savedAt > OFFLINE_UNLOCK_MS) {
+    await vault.remove(keys.captureList);
+    return null;
+  }
+  return list;
+}
+
 // Switch user: this phone stops being trusted for anyone. The device id stays; it names the install.
 // One removal at a time, session and person first: the phone is trusted only while both are kept, so a kill part
 // way leaves it trusted for no one, never trusted with its PIN check or wrong-PIN pause gone.
 export async function forgetPerson(): Promise<void> {
-  for (const key of [keys.session, keys.person, keys.pinCheck, keys.offlineTries])
+  for (const key of [keys.session, keys.person, keys.pinCheck, keys.offlineTries, keys.captureList])
     await vault.remove(key);
 }

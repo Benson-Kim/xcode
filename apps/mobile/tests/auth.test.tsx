@@ -244,6 +244,59 @@ it("switch user stops trusting the phone and returns to sign in", async () => {
   expect(storedText()).not.toContain("Antony");
 });
 
+// D7: a trusted phone opens on its PIN alone only while it has been online in the last 72 hours.
+const HOURS = 60 * 60 * 1000;
+
+it("stops unlocking offline after 72 hours away from the server, and says to connect", async () => {
+  await trustPhone(people.owner, "0733520614", "4826", Date.now() - 73 * HOURS);
+  fakeApi().on("auth/unlock", "offline");
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+
+  await typePin("4826");
+  await screen.findByText(
+    "This phone has been offline for more than 72 hours. Connect to the internet and unlock once to carry on. Anything waiting to be sent is kept.",
+  );
+  // Refused for being stale, not for a wrong PIN: no try is counted against the person.
+  expect(screen.queryByText("Wrong PIN. 4 tries left.")).toBeNull();
+  expect(screen.queryByText("Hi Antony")).toBeNull();
+});
+
+it("still unlocks offline inside the 72 hours", async () => {
+  await trustPhone(people.owner, "0733520614", "4826", Date.now() - 71 * HOURS);
+  fakeApi().on("auth/unlock", "offline");
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+
+  await typePin("4826");
+  await screen.findByText("Hi Antony");
+});
+
+it("starts the 72 hours from now for a phone that signed in before the rule shipped", async () => {
+  // A Phase 1 session has no record of when the phone was last online; it must not lock anyone out at once.
+  await trustPhone();
+  fakeApi().on("auth/unlock", "offline");
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+
+  await typePin("4826");
+  await screen.findByText("Hi Antony");
+});
+
+it("puts the offline window back on the clock after signing in online", async () => {
+  await trustPhone(people.owner, "0733520614", "4826", Date.now() - 80 * HOURS);
+  const api = fakeApi();
+  api.on("auth/unlock", [200, tokens()]);
+  api.on("auth/session", [200, people.owner]);
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+
+  await typePin("4826");
+  await screen.findByText("Hi Antony");
+  const saved = JSON.parse((require("expo-secure-store").__items as Map<string, string>).get("xcode.session")!);
+  expect(Date.now() - saved.lastOnlineAt).toBeLessThan(5 * 60 * 1000);
+});
+
 it("locks again when the app goes to the background", async () => {
   let change: (state: "active" | "background") => void = () => {};
   const listener = jest.spyOn(AppState, "addEventListener").mockImplementation((_, handler) => {
