@@ -32,10 +32,11 @@ public sealed class AccessAndSetupTests : IDisposable
     {
         await app.SeedDemo();
         using var admin = await app.SignIn(OfficeAdmin);
-        var clerkDefaults = await Defaults(admin, "Revenue clerk");
-        Assert.Contains("revenue.capture", clerkDefaults);
+        // Web v2.8: the Office admin holds no capture permissions, so the only role they can give is their own.
+        var adminDefaults = await Defaults(admin, "Office admin");
+        Assert.DoesNotContain("revenue.capture", adminDefaults);
 
-        using var withDefaults = await admin.PostAsJsonAsync("/setup/people", Person("jane.one@example.com", "0711000001", clerkDefaults));
+        using var withDefaults = await admin.PostAsJsonAsync("/setup/people", Person("jane.one@example.com", "0711000001", adminDefaults, role: "Office admin"));
         Assert.Equal(HttpStatusCode.OK, withDefaults.StatusCode);
 
         var fleetDefaults = await Defaults(admin, "Fleet manager");
@@ -44,13 +45,13 @@ public sealed class AccessAndSetupTests : IDisposable
             fleetDefaults.ToList(), null));
         Assert.Equal(HttpStatusCode.Forbidden, ungrantableRole.StatusCode);
 
-        using var escalated = await admin.PostAsJsonAsync("/setup/people", Person("jane.two@example.com", "0711000002", clerkDefaults.Append("organization.manage")));
+        using var escalated = await admin.PostAsJsonAsync("/setup/people", Person("jane.two@example.com", "0711000002", adminDefaults.Append("organization.manage"), role: "Office admin"));
         Assert.Equal(HttpStatusCode.Forbidden, escalated.StatusCode);
-        using var withLimit = await admin.PostAsJsonAsync("/setup/people", Person("jane.three@example.com", "0711000003", clerkDefaults, approvalLimit: 5000m));
+        using var withLimit = await admin.PostAsJsonAsync("/setup/people", Person("jane.three@example.com", "0711000003", adminDefaults, role: "Office admin", approvalLimit: 5000m));
         Assert.Equal(HttpStatusCode.Forbidden, withLimit.StatusCode);
 
         using var owner = await app.SignIn(Owner);
-        using var granted = await owner.PostAsJsonAsync("/setup/people", Person("jane.four@example.com", "0711000004", clerkDefaults.Append("reports.view"), approvalLimit: 5000m));
+        using var granted = await owner.PostAsJsonAsync("/setup/people", Person("jane.four@example.com", "0711000004", adminDefaults.Append("pettycash.approve_day"), role: "Office admin", approvalLimit: 5000m));
         Assert.Equal(HttpStatusCode.OK, granted.StatusCode);
     }
 
@@ -254,11 +255,12 @@ public sealed class AccessAndSetupTests : IDisposable
         // Once their effective permissions cover the role (here through single permissions), they can give it.
         await Override("dash.float", true);
         await Override("pettycash.spend", true);
+        await Override("revenue.capture", true);
+        await Override("revenue.no_earnings", true);
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync("/setup/people", Person("jane.manager@example.com", "0711000012", managerDefaults, role: "Fleet manager"))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/setup/people/{clerk.Id}", ClerkAsManager(clerk.Version))).StatusCode);
 
-        // A permission taken away from them counts too: without "Record a no earnings reason" they cannot give Revenue clerk.
-        await Override("revenue.no_earnings", false);
+        // A default they still lack counts too: without "See today's capture for my vehicles" they cannot give Revenue clerk.
         using var clerkRole = await admin.PostAsJsonAsync("/setup/people", Person("jane.clerk@example.com", "0711000013", await Defaults(admin, "Revenue clerk")));
         Assert.Equal(HttpStatusCode.Forbidden, clerkRole.StatusCode);
     }
@@ -441,6 +443,101 @@ public sealed class AccessAndSetupTests : IDisposable
         var companyId = (await company.Content.ReadFromJsonAsync<IdResponse>())!.Id;
         using var vehicle = await owner.PostAsJsonAsync("/setup/vehicles", new SaveVehicle(companyId, "KQA 321M", new DateOnly(2026, 1, 1), 20000m, "Add review vehicle"));
         return (companyId, (await vehicle.Content.ReadFromJsonAsync<IdResponse>())!.Id);
+    }
+
+    [Fact]
+    public void RoleDefaultsFollowWebV28()
+    {
+        Assert.Equal(PermissionCatalog.All.Where(x => x != "dash.capture").Order(StringComparer.Ordinal), PermissionCatalog.RolePermissions["Owner"].Order(StringComparer.Ordinal));
+        var admin = PermissionCatalog.DefaultsFor("Office admin");
+        Assert.All(new[] { "dash.capture", "dash.investment", "revenue.capture", "revenue.no_earnings", "bills.approve" }, x => Assert.DoesNotContain(x, admin));
+        Assert.Contains("bills.capture", admin);
+        Assert.Contains("dash.float", PermissionCatalog.DefaultsFor("Fleet manager"));
+        Assert.Equal(["dash.capture", "dash.gaps", "revenue.view", "revenue.capture", "revenue.no_earnings"], PermissionCatalog.RolePermissions["Revenue clerk"]);
+    }
+
+    private async Task<(Guid North, Guid South, Guid NorthVehicle, Guid SouthVehicle)> TwoCompanies(HttpClient owner)
+    {
+        async Task<Guid> Id(HttpResponseMessage response) => (await response.Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        var north = await Id(await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("North Star", "Add North Star")));
+        var south = await Id(await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("South Line", "Add South Line")));
+        var northVehicle = await Id(await owner.PostAsJsonAsync("/setup/vehicles", new SaveVehicle(north, "KAA 111A", new DateOnly(2026, 1, 1), 20000m, "Add vehicle")));
+        var southVehicle = await Id(await owner.PostAsJsonAsync("/setup/vehicles", new SaveVehicle(south, "KBB 222B", new DateOnly(2026, 1, 1), 20000m, "Add vehicle")));
+        return (north, south, northVehicle, southVehicle);
+    }
+
+    // Limits the Office admin to one company.
+    private Task ScopeAdminTo(Guid company) => app.WithDb(async db =>
+    {
+        db.Provisioning = true;
+        var admin = await db.Users.SingleAsync(x => x.Email == OfficeAdmin);
+        var organizationId = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
+        db.SetupDataScopes.RemoveRange(db.SetupDataScopes.IgnoreQueryFilters().Where(x => x.UserId == admin.Id));
+        db.SetupCompanyScopes.Add(new SetupCompanyScope { OrganizationId = organizationId, UserId = admin.Id, CompanyId = company });
+        await db.SaveChangesAsync();
+    });
+
+    [Fact]
+    public async Task PeopleShowOnlyTheCompaniesAndVehiclesTheViewerCanReach()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var (north, south, northVehicle, southVehicle) = await TwoCompanies(owner);
+        var defaults = await Defaults(owner, "Revenue clerk");
+        var byCompany = (await (await owner.PostAsJsonAsync("/setup/people", new SavePerson("Jane", "Njeri", "jane.c@example.com", "0711000021", "Revenue clerk", "companies",
+            [north, south], [], defaults.ToList(), null))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        var byVehicle = (await (await owner.PostAsJsonAsync("/setup/people", new SavePerson("John", "Njeri", "john.v@example.com", "0711000022", "Revenue clerk", "vehicles",
+            [], [northVehicle, southVehicle], defaults.ToList(), null))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
+
+        var full = await owner.GetFromJsonAsync<PersonDto>($"/setup/people/{byCompany}");
+        Assert.Equal((2, 0, 0), (full!.CompanyIds.Count, full.OtherCompanies, full.OtherVehicles));
+
+        await ScopeAdminTo(north);
+        using var scoped = await app.SignIn(OfficeAdmin);
+        var companies = await scoped.GetFromJsonAsync<PersonDto>($"/setup/people/{byCompany}");
+        Assert.Equal([north], companies!.CompanyIds);
+        Assert.Equal((1, 0), (companies.OtherCompanies, companies.OtherVehicles));
+        var vehicles = await scoped.GetFromJsonAsync<PersonDto>($"/setup/people/{byVehicle}");
+        Assert.Equal([northVehicle], vehicles!.VehicleIds);
+        Assert.Equal((0, 1), (vehicles.OtherCompanies, vehicles.OtherVehicles));
+        var listed = (await scoped.GetFromJsonAsync<Page<PersonDto>>("/setup/people"))!.Items.Single(x => x.Id == byVehicle);
+        Assert.Equal([northVehicle], listed.VehicleIds);
+
+        // Saving what the viewer can see leaves the hidden company and vehicle assigned.
+        using var saved = await scoped.PutAsJsonAsync($"/setup/people/{byVehicle}", new SavePerson(vehicles.FirstName, vehicles.LastName, vehicles.Email, vehicles.PhoneNumber,
+            vehicles.Role, "vehicles", [], [.. vehicles.VehicleIds], [.. vehicles.Permissions], vehicles.ApprovalLimit, vehicles.Version));
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var after = await owner.GetFromJsonAsync<PersonDto>($"/setup/people/{byVehicle}");
+        Assert.Equal(new[] { northVehicle, southVehicle }.Order(), after!.VehicleIds.Order());
+        Assert.Equal(0, after.OtherVehicles);
+    }
+
+    [Fact]
+    public async Task MeListsTheCompaniesAndVehiclesTheCallerWouldSee()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var (north, south, northVehicle, southVehicle) = await TwoCompanies(owner);
+
+        var all = await owner.GetFromJsonAsync<MyScope>("/setup/access/me");
+        Assert.True(all!.AllCompanies);
+        Assert.Contains(all.Companies, x => x.Id == south);
+        Assert.Contains(all.Vehicles, x => x.Id == southVehicle && x.Registration == "KBB 222B" && x.CompanyId == south);
+
+        await ScopeAdminTo(north);
+        using var scoped = await app.SignIn(OfficeAdmin);
+        var mine = await scoped.GetFromJsonAsync<MyScope>("/setup/access/me");
+        Assert.False(mine!.AllCompanies);
+        Assert.Equal([north], mine.Companies.Select(x => x.Id));
+        Assert.Equal([northVehicle], mine.Vehicles.Select(x => x.Id));
+        // The same rows the lists show.
+        Assert.Equal(mine.Vehicles.Select(x => x.Id), (await scoped.GetFromJsonAsync<Page<VehicleDto>>("/setup/vehicles"))!.Items.Select(x => x.Id));
+
+        // No permission is needed: a clerk holds none of the setup ones.
+        using var clerk = await app.SignIn(RevenueClerk);
+        Assert.Equal(HttpStatusCode.OK, (await clerk.GetAsync("/setup/access/me")).StatusCode);
+        using var signedOut = app.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await signedOut.GetAsync("/setup/access/me")).StatusCode);
     }
 
     public void Dispose() => app.Dispose();
