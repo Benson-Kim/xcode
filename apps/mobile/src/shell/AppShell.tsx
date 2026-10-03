@@ -36,7 +36,7 @@ export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, 
   });
   const sessionEnded = useCallback(() => ended.current(), []);
   // Revenue captured on this phone and not yet accepted by the API.
-  const queue = useRevenueQueue(person.phoneNumber, sessionEnded);
+  const queue = useRevenueQueue(person.userId, sessionEnded);
   const counts = queueCounts(queue.entries);
   const unsent = [
     counts.waiting ? `${counts.waiting} waiting to send` : "",

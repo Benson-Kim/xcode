@@ -127,6 +127,19 @@ it("unlocks without internet against the PIN check the phone kept", async () => 
   expect(screen.getByText("No internet. You are seeing what this phone saved at your last sign in.")).toBeTruthy();
 });
 
+// After the person's number changed elsewhere, the server refuses the old number with the PIN they still know.
+it("does not count the PIN the phone knows as wrong when the server refuses it", async () => {
+  await trustPhone();
+  fakeApi().on("auth/unlock", [401, { status: "authentication_failed" }]);
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+
+  await typePin("4826");
+  await screen.findByText('This phone can no longer unlock with your PIN. If your mobile number changed, choose "Not you? Switch user" and sign in again.');
+  await typePin("1111");
+  await screen.findByText("Wrong PIN. 4 tries left.");
+});
+
 it("follows the organization's wrong-PIN policy offline, as the phone last loaded it", async () => {
   await trustPhone();
   const api = fakeApi();

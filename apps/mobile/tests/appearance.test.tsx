@@ -32,7 +32,7 @@ it("formats money in the organization's currency", () => {
   configureFormats({ currency: "USD" });
   expect(money(1200)).toBe("USD 1,200");
   configureFormats(null);
-  expect(money(49000.5)).toBe("KES 49,000.5");
+  expect(money(49000.5)).toBe("KES 49,000.50");
 });
 
 it("applies saved settings at sign in and keeps them for the next unlock", async () => {

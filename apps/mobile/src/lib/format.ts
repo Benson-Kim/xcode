@@ -36,9 +36,10 @@ export function firstDayOfWeek() {
   return Number.isInteger(first) && first! >= 0 && first! <= 6 ? first! : 1;
 }
 
-// "KES 49,000": whole amounts stay whole; the organization's decimals are the most shown.
+// "KES 49,000" and "KES 1,500.50": whole amounts stay whole; any other shows the organization's decimals in full.
 export function money(amount: number) {
   const number = amount.toLocaleString(formats.locale, {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : formats.numberDecimals,
     maximumFractionDigits: formats.numberDecimals,
     useGrouping: formats.useGroupping,
   });

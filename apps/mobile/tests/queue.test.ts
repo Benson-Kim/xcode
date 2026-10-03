@@ -1,6 +1,7 @@
+import { renderHook } from "@testing-library/react-native";
 import * as SecureStore from "expo-secure-store";
 import { saveSession } from "../src/lib/storage";
-import { QUEUE_LIMIT, QueueFullError, openQueue, type NewCapture, type QueueSnapshot } from "../src/revenue/queue";
+import { QUEUE_LIMIT, QueueFullError, openQueue, useRevenueQueue, type NewCapture, type QueueSnapshot } from "../src/revenue/queue";
 import type { QueuedCapture } from "../src/revenue/types";
 import { fakeApi } from "./fakeApi";
 
@@ -439,4 +440,11 @@ it("still keeps a capture from a queue that closed while no newer queue had read
   api.answer(() => [200, { version: 1 }]);
   await next.queue.sync();
   expect(api.reached.map((sent) => sent.date)).toEqual(["2026-09-25"]);
+});
+
+it("opens no queue for a person without an account id, and says what to do instead of keeping the capture under another key", async () => {
+  const { result } = await renderHook(() => useRevenueQueue(undefined, () => undefined));
+  expect(result.current.loaded).toBe(true);
+  await expect(result.current.add(capture("2026-09-25"))).rejects.toThrow("Connect to the internet");
+  expect([...items().keys()].filter((key) => key.startsWith("xcode.revenue-queue."))).toEqual([]);
 });

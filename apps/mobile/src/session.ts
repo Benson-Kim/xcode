@@ -17,8 +17,10 @@ export async function fetchPerson(
   const session = await apiGet<AuthSession>("auth/session");
   // The wrong-PIN policy comes with the appearance; keep what this phone already has for the number.
   const kept = await loadPerson();
-  const policy = kept?.phoneNumber === phoneNumber ? kept : DEFAULT_PIN_POLICY;
+  // The same account by its id (its number may have changed), or by number for a record saved before ids were kept.
+  const policy = kept && (kept.userId ? kept.userId === session.userId : kept.phoneNumber === phoneNumber) ? kept : DEFAULT_PIN_POLICY;
   const person = {
+    userId: session.userId,
     phoneNumber,
     firstName: session.firstName,
     lastName: session.lastName,

@@ -299,6 +299,17 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
           Date.now() +
             (error.response.retryAfterSeconds ?? pauseSeconds) * 1000,
         );
+      // The PIN this phone last signed in with, refused online: the person's number (or PIN) was changed
+      // elsewhere, so another try cannot help and must not count toward a pause.
+      if (
+        error instanceof AuthError &&
+        error.httpStatus === 401 &&
+        mode === "unlock" &&
+        (await matchesPinCheck(entered))
+      )
+        return setPadError(
+          'This phone can no longer unlock with your PIN. If your mobile number changed, choose "Not you? Switch user" and sign in again.',
+        );
       if (error instanceof AuthError && error.httpStatus === 401)
         return wrongPin();
       if (error instanceof OfflineError && mode === "unlock")

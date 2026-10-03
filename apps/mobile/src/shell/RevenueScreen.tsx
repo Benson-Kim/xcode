@@ -83,7 +83,7 @@ export function RevenueScreen({
   onSessionEnded: () => void;
 }) {
   const { colors } = useTheme();
-  const owner = person.phoneNumber;
+  const owner = person.userId ?? person.phoneNumber;
   const canView = person.permissions.includes("revenue.view");
   const canCapture = person.permissions.includes("revenue.capture");
   const canReason = person.permissions.includes("revenue.no_earnings");
@@ -327,11 +327,14 @@ export function RevenueScreen({
     </View>
   );
 
+  // A day or earlier week before the vehicles joined (or after they left) is empty too, which is not having none.
   const empty = loading ? (
     <LineSkeleton lines={4} />
-  ) : week && week.vehicles.length === 0 ? (
+  ) : !week || (mode === "day" && !inWeek) ? null : week.vehicles.length === 0 && currentWeek ? (
     <Card title="No vehicles in your view" sub="Vehicles you may capture revenue for will appear here." />
-  ) : null;
+  ) : (
+    <Card title={mode === "day" ? "No vehicles on this day" : "No vehicles this week"} sub="None of the vehicles in your view were in service then." />
+  );
 
   return (
     <>

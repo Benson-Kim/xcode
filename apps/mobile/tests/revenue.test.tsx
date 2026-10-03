@@ -138,6 +138,25 @@ it("keeps waiting captures through an app restart and sends them after the next 
   await waitFor(() => expect(storedText()).not.toContain('"amount":1000'));
 });
 
+it("sends captures kept before an admin changed the person's phone number, because the queue belongs to the account", async () => {
+  const api = await signIn(people.clerk, "0712000021", (routes) => routes.on("setup/revenue", [200, oneVehicle]));
+  api.on(PUT, "offline");
+  await openRevenue();
+  await captureAmount("KDA 482M, Enter revenue", "1000");
+  await screen.findByLabelText("KDA 482M, KES 1,000, not sent yet");
+  await screen.unmount();
+
+  // The admin gave this person a new number; the phone signs them in under it.
+  await trustPhone(people.clerk, "0712000022");
+  api.on(PUT, [200, { id: "r-1", version: 1 }]);
+  await startApp();
+  await screen.findByText("Welcome back, Wanjiru");
+  await typePin("4826");
+  await screen.findByText("Hi Wanjiru");
+  await waitFor(() => expect(api.sent(PUT)).toHaveLength(2));
+  await waitFor(() => expect(storedText()).not.toContain('"amount":1000'));
+});
+
 const saved: RevenueCell = { date: TODAY, status: "amount", expected: 1000, amount: 900, reason: null, note: null, canEdit: true, editedAfterCapture: false, version: 3 };
 
 it("keeps a conflict until the person keeps the saved value", async () => {
@@ -335,6 +354,17 @@ it("offers Replace with mine only for a day the person may still change", async 
   await fireEvent.press(screen.getByRole("button", { name: "Keep saved value" }));
   await waitFor(() => expect(tabLabel()).toBe("Revenue"));
   expect(api.sent(`setup/revenue/v-1/${yesterday}`)).toHaveLength(1);
+});
+
+it("says no vehicle was in service on a day before they joined, rather than that there are none", async () => {
+  const joinedToday = week(TODAY, "2026-09-28", [{ id: "v-1", registration: "KDA 482M" }]);
+  joinedToday.vehicles[0].days = joinedToday.vehicles[0].days.filter((cell) => cell.date >= TODAY);
+  await signIn(people.clerk, "0712000014", (routes) => routes.on("setup/revenue", [200, joinedToday]));
+  await openRevenue();
+  expect(await screen.findByRole("button", { name: "KDA 482M, Enter revenue" })).toBeTruthy();
+  await fireEvent.press(screen.getByRole("button", { name: "Previous day" }));
+  expect(await screen.findByText("No vehicles on this day")).toBeTruthy();
+  expect(screen.queryByText("No vehicles in your view")).toBeNull();
 });
 
 it("loads the week again with Try again after it failed", async () => {

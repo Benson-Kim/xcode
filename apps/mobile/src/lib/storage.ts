@@ -34,6 +34,9 @@ export const validPinPolicy = (policy: Partial<PinPolicy>) =>
 
 // Who this phone is trusted for, kept so the unlock screen can greet them and the app can open offline.
 export interface StoredPerson extends PinPolicy {
+  // The account's id, which never changes; an admin can change the phone number. Absent on records a Phase 1 app
+  // saved: it arrives with the next online sign-in.
+  userId?: string;
   phoneNumber: string;
   firstName: string;
   lastName: string;
@@ -116,6 +119,7 @@ export async function loadPerson(): Promise<StoredPerson | null> {
     (person) =>
       typeof person.phoneNumber === "string" &&
       person.phoneNumber.length > 0 &&
+      (person.userId === undefined || (typeof person.userId === "string" && person.userId.length > 0)) &&
       typeof person.firstName === "string" &&
       person.firstName.length > 0 &&
       typeof person.lastName === "string" &&

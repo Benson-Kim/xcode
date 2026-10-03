@@ -331,9 +331,11 @@ export function openQueue(owner: string, hooks: { onChange: (snapshot: QueueSnap
 
 export type RevenueQueue = Omit<ReturnType<typeof openQueue>, "ready" | "close"> & QueueSnapshot;
 
-// The signed-in person's queue. It sends what is waiting when the shell opens (every unlock, since leaving the
+// The signed-in person's queue, kept under their account id (a phone number can change or be given to someone else).
+// A person saved by a Phase 1 app has no id until they next sign in online, so they get no queue and capturing says
+// so, rather than a queue under a key that could strand or expose what is in it. It sends what is waiting when the shell opens (every unlock, since leaving the
 // app locks it), after each capture, and when the network comes back.
-export function useRevenueQueue(owner: string, onSessionEnded: () => void): RevenueQueue {
+export function useRevenueQueue(owner: string | undefined, onSessionEnded: () => void): RevenueQueue {
   const [snapshot, setSnapshot] = useState<QueueSnapshot>({ entries: [], revision: 0, loaded: false, syncing: false });
   const queue = useRef<ReturnType<typeof openQueue> | null>(null);
   const ended = useRef(onSessionEnded);
@@ -342,6 +344,10 @@ export function useRevenueQueue(owner: string, onSessionEnded: () => void): Reve
   });
 
   useEffect(() => {
+    if (!owner) {
+      setSnapshot({ entries: [], revision: 0, loaded: true, syncing: false });
+      return;
+    }
     const opened = openQueue(owner, { onChange: setSnapshot, onSessionEnded: () => ended.current() });
     queue.current = opened;
     void opened.sync();
@@ -357,6 +363,7 @@ export function useRevenueQueue(owner: string, onSessionEnded: () => void): Reve
 
   return useMemo(() => {
     const open = () => {
+      if (!owner) throw new Error("Connect to the internet and unlock the app once to turn on revenue capture on this phone.");
       if (!queue.current) throw new Error("Revenue capture is still starting. Try again.");
       return queue.current;
     };
@@ -368,7 +375,7 @@ export function useRevenueQueue(owner: string, onSessionEnded: () => void): Reve
       replace: async (entry: QueuedCapture) => open().replace(entry),
       retry: async (entry: QueuedCapture) => open().retry(entry),
     };
-  }, [snapshot]);
+  }, [snapshot, owner]);
 }
 
 // Counts for the Revenue tab: waiting (pending, or waiting for an earlier day), conflicts and refusals.
