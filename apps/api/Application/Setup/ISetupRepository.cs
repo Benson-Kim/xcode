@@ -8,6 +8,9 @@ public interface ISetupRepository
     Task<PsvCompany?> Company(SetupActor actor, Guid id, CancellationToken ct);
     Task<IReadOnlyList<CompanyOption>> CompanyOptions(SetupActor actor, CancellationToken ct);
     Task<bool> HasActiveVehicles(Guid companyId, DateOnly today, CancellationToken ct);
+    // The first and last day this vehicle has revenue recorded for, or null when it has none. A lifecycle
+    // change that would put a recorded day outside the vehicle's time in the fleet is refused (D4).
+    Task<(DateOnly First, DateOnly Last)?> RecordedRevenueDays(Guid vehicleId, CancellationToken ct);
     Task<bool> CompanyNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct);
     Task<Page<VehicleDto>> Vehicles(SetupActor actor, int page, int pageSize, CancellationToken ct);
     Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct);

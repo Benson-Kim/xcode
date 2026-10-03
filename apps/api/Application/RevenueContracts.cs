@@ -113,7 +113,7 @@ public sealed record SaveRevenue(decimal? Amount, string? Reason, string? Note, 
 public interface IRevenueRepository
 {
     Task<RevenueWeekDto> Week(SetupActor actor, DateOnly? weekStart, Guid? companyId, Guid? vehicleId, CancellationToken ct);
-    Task<RevenueDashboardDto> Dashboard(SetupActor actor, string period, CancellationToken ct);
+    Task<RevenueDashboardDto> Dashboard(SetupActor actor, string period, Guid? companyId, CancellationToken ct);
     Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct);
     Task<RevenueRecord?> Record(SetupActor actor, Guid vehicleId, DateOnly date, CancellationToken ct);
     Task<DateOnly?> EarliestMissing(SetupActor actor, FleetVehicle vehicle, DateOnly before, CancellationToken ct);

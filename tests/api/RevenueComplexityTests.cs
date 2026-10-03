@@ -54,9 +54,9 @@ public sealed class RevenueComplexityTests : IDisposable
         // Vehicles with targets, one aggregate row each, at most seven records each and a few option rows: O(V), not O(V·D).
         Assert.True(largeWeek.Reads <= 10 * 12 + 10, $"Read {largeWeek.Reads} rows for a week of 12 vehicles.");
 
-        var smallMonth = await Measure((repository, actor) => repository.Dashboard(actor, "month", CancellationToken.None));
+        var smallMonth = await Measure((repository, actor) => repository.Dashboard(actor, "month", null, CancellationToken.None));
         await Fleet("Second Large Fleet", "KAD", vehicles: 12, days: 150, today);
-        var largeMonth = await Measure((repository, actor) => repository.Dashboard(actor, "month", CancellationToken.None));
+        var largeMonth = await Measure((repository, actor) => repository.Dashboard(actor, "month", null, CancellationToken.None));
         Assert.Equal(smallMonth.Commands, largeMonth.Commands);
     }
 

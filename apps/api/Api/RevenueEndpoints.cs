@@ -37,8 +37,8 @@ public static class RevenueEndpoints
             .Produces<RevenueWeekDto>()
             .WithName("GetRevenueWeek");
 
-        group.MapGet("/dashboard", (RevenueUseCases useCases, CancellationToken ct, string period = "week") =>
-                useCases.Dashboard(period, ct))
+        group.MapGet("/dashboard", (RevenueUseCases useCases, CancellationToken ct, string period = "week", Guid? companyId = null) =>
+                useCases.Dashboard(period, companyId, ct))
             .Produces<RevenueDashboardDto>()
             .WithName("GetRevenueDashboard");
 

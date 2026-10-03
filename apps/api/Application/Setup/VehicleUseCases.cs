@@ -42,6 +42,12 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
         if (vehicle.Registration != registration.Value) throw new ArgumentException("Registration cannot change after a vehicle is added.");
         if (id is null && await repository.RegistrationExists(actor.OrganizationId, registration.Value, ct))
             throw new ArgumentException("This registration already exists.");
+        // D4: moving the join date later would put an already captured day before the vehicle joined, which
+        // takes it out of every report that counted it.
+        if (id is not null && input.JoinedOn > vehicle.JoinedOn &&
+            await repository.RecordedRevenueDays(vehicle.Id, ct) is { } earlier && input.JoinedOn > earlier.First)
+            throw new ArgumentException(
+                $"{vehicle.Registration} has revenue recorded on {Date(earlier.First)}. A vehicle cannot join the fleet after a day it has a record for.");
         var before = id is null ? null : Snapshot(vehicle);
         var (previousCompany, previousJoin, targetCount) = (vehicle.CompanyId, vehicle.JoinedOn, vehicle.Targets.Count);
         if (id is not null && !vehicle.Update(company.Id, input.JoinedOn, input.WeeklyTarget, actor.Today)) return vehicle.Id;
@@ -68,6 +74,12 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
     {
         var typed = SetupPagination.OptionalReason(input.Reason);
         var vehicle = await repository.Vehicle(actor, id, ct) ?? throw new KeyNotFoundException();
+        // D4: recorded revenue never disappears. Leaving on a date means the vehicle is out of the fleet from
+        // that day, so a day already captured on or after it would drop out of every report.
+        var recorded = await repository.RecordedRevenueDays(vehicle.Id, ct);
+        if (recorded is { } days && days.Last >= input.LeftOn)
+            throw new ArgumentException(
+                $"{vehicle.Registration} has revenue recorded on {Date(days.Last)}. A vehicle cannot leave the fleet on or before a day it has a record for.");
         var before = Snapshot(vehicle);
         if (vehicle.Retire(input.LeftOn, actor.Today))
             await repository.RecordChange(actor, "vehicles", vehicle.Id, before, Snapshot(vehicle),

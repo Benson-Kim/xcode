@@ -434,5 +434,34 @@ public sealed class RevenueCaptureTests : IDisposable
     private sealed record Cell(DateOnly Date, string Status, decimal Expected, decimal? Amount, string? Reason, string? Note,
         bool CanEdit, bool EditedAfterCapture, long? Version);
 
+    // D4: recorded revenue never disappears. A lifecycle change that would put a captured day outside the
+    // vehicle's time in the fleet is refused, and the refusal names the day.
+    [Fact]
+    public async Task ALifecycleChangeCannotHideADayThatHasARecord()
+    {
+        var (today, company) = await Arrange();
+        var joined = today.AddDays(-20);
+        var vehicle = await Vehicle(app, company, "KDC 909C", joined);
+        await Records(app, vehicle, today.AddDays(-5), today.AddDays(-2), 1000m);
+
+        using var owner = await app.SignIn(Owner);
+
+        // Leaving on a day it has a record for, or before one, would drop that record out of every report.
+        var leaving = await owner.PostAsJsonAsync($"/setup/vehicles/{vehicle}/retire", new { leftOn = today.AddDays(-2).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) });
+        Assert.Equal(HttpStatusCode.BadRequest, leaving.StatusCode);
+        Assert.Contains(today.AddDays(-2).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), (await Body(leaving)).GetProperty("detail").GetString());
+
+        // Joining after a day it already has a record for would do the same from the other end.
+        var joining = await owner.PutAsJsonAsync($"/setup/vehicles/{vehicle}",
+            new { companyId = company, registration = "KDC 909C", joinedOn = today.AddDays(-4).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), weeklyTarget = 7000m });
+        Assert.Equal(HttpStatusCode.BadRequest, joining.StatusCode);
+        Assert.Contains(today.AddDays(-5).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), (await Body(joining)).GetProperty("detail").GetString());
+
+        // The day after its last record is allowed: nothing recorded falls outside the fleet.
+        var allowed = await owner.PostAsJsonAsync($"/setup/vehicles/{vehicle}/retire", new { leftOn = today.AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) });
+        Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+    }
+
     public void Dispose() => app.Dispose();
+
 }

@@ -64,7 +64,7 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
         return BuildWeek(actor, start, through, currentStart, vehicles, companyNames, recordMap, earliestMissing, companies);
     }
 
-    public async Task<RevenueDashboardDto> Dashboard(SetupActor actor, string period, CancellationToken ct)
+    public async Task<RevenueDashboardDto> Dashboard(SetupActor actor, string period, Guid? companyId, CancellationToken ct)
     {
         if (period is not ("today" or "week" or "month"))
             throw new ArgumentException("Period must be today, week or month.");
@@ -79,7 +79,10 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
             _ => through
         };
 
-        var vehicles = await VisibleVehicles(actor)
+        var visible = VisibleVehicles(actor);
+        // Narrows what the person already reaches; a company outside it simply matches nothing.
+        if (companyId is not null) visible = visible.Where(v => v.CompanyId == companyId.Value);
+        var vehicles = await visible
             .Where(v => v.JoinedOn <= through && (v.LeftOn == null || v.LeftOn > from))
             .Include(v => v.Targets)
             .AsNoTracking()

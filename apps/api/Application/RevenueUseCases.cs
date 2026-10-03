@@ -13,8 +13,10 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
     public Task<RevenueWeekDto> Week(DateOnly? weekStart, Guid? companyId, Guid? vehicleId, CancellationToken ct) =>
         execution.Read("revenue.view", actor => repository.Week(actor, weekStart, companyId, vehicleId, ct), ct);
 
-    public Task<RevenueDashboardDto> Dashboard(string period, CancellationToken ct) =>
-        execution.ReadAny(DashboardPermissions, async actor => Visible(actor, await repository.Dashboard(actor, period, ct)), ct);
+    // The cards can be narrowed to one PSV company, the same filter the week grid takes (D15). It can only
+    // narrow what the person already reaches, never widen it.
+    public Task<RevenueDashboardDto> Dashboard(string period, Guid? companyId, CancellationToken ct) =>
+        execution.ReadAny(DashboardPermissions, async actor => Visible(actor, await repository.Dashboard(actor, period, companyId, ct)), ct);
 
     // Each card's figures reach only the people who hold that card's own permission; the rest are null. Capture
     // (the Revenue clerk's card) never opens the revenue totals, and the revenue card never opens the capture counts.
@@ -52,10 +54,8 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
                 throw new ArgumentException("Revenue cannot be recorded for a future date.");
             if (!vehicle.ActiveOn(date))
                 throw new ArgumentException("Revenue can only be recorded while the vehicle is active.");
-            // Never overwrite what the client did not see.
-            if (existing is not null && input.Version != existing.Version)
-                throw new RevenueConflictException(RevenueCellDto.For(actor, vehicle, date, existing, null));
-
+            // Authorization comes before state disclosure (D5): the conflict below carries the saved record, so
+            // whoever reads it must be someone who was allowed to make this change in the first place.
             if (entry.Reason is not null && !actor.Permissions.Contains("revenue.no_earnings"))
                 throw Needs("Recording a no-earnings reason", "revenue.no_earnings");
             var canCapture = actor.Permissions.Contains("revenue.capture");
@@ -64,6 +64,10 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
                 throw Needs("Recording a day that has no record yet", "revenue.capture");
             if (existing is not null && date < actor.Today && !canCorrect)
                 throw Needs("Changing a past day", "revenue.correct");
+
+            // Never overwrite what the client did not see.
+            if (existing is not null && input.Version != existing.Version)
+                throw new RevenueConflictException(RevenueCellDto.For(actor, vehicle, date, existing, null));
 
             if (existing is null)
             {

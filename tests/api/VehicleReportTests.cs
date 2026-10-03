@@ -129,8 +129,9 @@ public sealed class VehicleReportTests : IDisposable
         await Save(organization => new RecurringItem(organization, Cost("Parking", Weekly(1), ExpenseBucket.RecurringCharges, [new(vehicle, 300m)])));
         await Save(organization => new RecurringItem(organization, Cost("Service", Monthly(19), ExpenseBucket.RepairsAndMaintenance, [new(vehicle, 2000m), new(other, 1000m)])));
         await Save(organization => new RecurringItem(organization, Cost("Loan repayment", Monthly(20), ExpenseBucket.LoanRepayments, [new(vehicle, 10000m)])));
-        // Captured while it was running; the leave date is then set back to the 20th.
-        await Records(app, vehicle, new DateOnly(2026, 3, 1), Today, 1000m);
+        // Captured while it was running, up to its last day in service. A leave date on or before a day that
+        // has a record is refused (D4), so the records stop on the 19th and the vehicle leaves on the 20th.
+        await Records(app, vehicle, new DateOnly(2026, 3, 1), new DateOnly(2026, 3, 19), 1000m);
         await Id(await owner.PostAsJsonAsync($"/setup/vehicles/{vehicle}/retire", new { leftOn = "2026-03-20" }));
 
         // The leave date is its first day away, as for revenue: it was active from 1 to 19 March.

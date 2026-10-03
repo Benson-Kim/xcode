@@ -56,6 +56,17 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
     public Task<bool> HasActiveVehicles(Guid companyId, DateOnly today, CancellationToken ct) =>
         db.Set<FleetVehicle>().AnyAsync(v => v.CompanyId == companyId && (v.LeftOn == null || v.LeftOn > today), ct);
 
+    // One row back, not the records themselves: the earliest and latest day this vehicle has revenue for.
+    public async Task<(DateOnly First, DateOnly Last)?> RecordedRevenueDays(Guid vehicleId, CancellationToken ct)
+    {
+        var range = await db.Set<RevenueRecord>().AsNoTracking()
+            .Where(r => r.VehicleId == vehicleId)
+            .GroupBy(r => 1)
+            .Select(g => new { First = g.Min(r => r.BusinessDate), Last = g.Max(r => r.BusinessDate) })
+            .FirstOrDefaultAsync(ct);
+        return range is null ? null : (range.First, range.Last);
+    }
+
     public Task<bool> CompanyNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct)
         => db
         .Set<PsvCompany>()
@@ -272,8 +283,13 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
         var revenueRecords = db.Set<RevenueRecord>().Where(r => vehicles.Contains(r.VehicleId)).Select(r => r.Id);
         // People changes follow the people list's own visibility rules.
         var people = PeopleVisibility.People(db, actor).Select(m => m.UserId);
+        // D11: people entries carry contact details and permissions, so the section needs permission to view
+        // people as well as to read the log. This holds for an organization-wide viewer too.
+        var seesPeople = actor.Permissions.Contains("people.view");
         // The expense catalog is organization-wide; investment changes are logged against their vehicle.
-        var query = db.Set<OrganizationSettingsVersion>().AsNoTracking().Where(v => actor.AllCompanies ||
+        var query = db.Set<OrganizationSettingsVersion>().AsNoTracking()
+            .Where(v => v.Section != "people" || seesPeople)
+            .Where(v => actor.AllCompanies ||
             (v.Section == "companies" && companies.Contains(v.EntityId)) || (v.Section == "vehicles" && vehicles.Contains(v.EntityId)) ||
             (v.Section == "recurring" && completeItems.Contains(v.EntityId)) || v.Section == "expenses" ||
             (v.Section == "investment" && vehicles.Contains(v.EntityId)) || (v.Section == "people" && people.Contains(v.EntityId)) ||
