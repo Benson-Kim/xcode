@@ -46,6 +46,11 @@ export type ScopeOptions = {
     companyId: string;
   }[];
 };
+
+// What the signed-in person may see, answered by the server (GET /setup/access/me) rather than worked
+// out from the session, so "Your access" cannot drift from what a request is actually allowed to reach.
+export type MyScope = ScopeOptions & { allCompanies: boolean };
+
 export type Person = {
   id: string;
   firstName: string;
@@ -57,6 +62,8 @@ export type Person = {
   scopeMode: string;
   companyIds: string[];
   vehicleIds: string[];
+  otherCompanies: number;
+  otherVehicles: number;
   permissions: string[];
   approvalLimit?: number;
   hasPin: boolean;

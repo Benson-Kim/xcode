@@ -27,6 +27,22 @@ public sealed class DomainRuleTests
         Assert.Equal(expected, PhoneNumber.Normalize(input));
 
     [Fact]
+    public void StoppingSomethingAlreadyStoppedOnAnotherDateIsRefusedAndRestoreCancelsIt()
+    {
+        var category = new ExpenseCategory(Organization, "Road costs", ExpenseBucket.RecurringCharges);
+        var item = new ExpenseItem(category, "Tolls");
+        Assert.True(category.Stop(Today));
+        Assert.False(category.Stop(Today));
+        Assert.Throws<ArgumentException>(() => category.Stop(Today.AddDays(-2)));
+        Assert.True(category.Restore());
+        Assert.True(item.Stop(Today));
+        Assert.False(item.Stop(Today));
+        Assert.Throws<ArgumentException>(() => item.Stop(Today.AddDays(1)));
+        Assert.True(item.Restore());
+        Assert.Null(item.StoppedOn);
+    }
+
+    [Fact]
     public void PermissionDependenciesAreTransitiveAndDenyingARequiredPermissionRemovesDependents()
     {
         var resolver = new EffectivePermissionResolver();

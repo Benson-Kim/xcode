@@ -104,6 +104,29 @@ public sealed class RecurringCrudTests : IDisposable
         var stoppedItem = Assert.Single(afterStop!.Items);
         Assert.Equal(created.Id, stoppedItem.Id);
         Assert.Equal(today, stoppedItem.StoppedFrom);
+
+        var priorBusinessDate = today.AddDays(-1);
+        using var rollBackBusinessDate = await client.PutAsJsonAsync("/setup/organization/settings/businessDate",
+            new { value = priorBusinessDate.ToString("yyyy-MM-dd") });
+        Assert.Equal(HttpStatusCode.OK, rollBackBusinessDate.StatusCode);
+
+        using var reviseBeforeScheduledStop = await client.PutAsJsonAsync($"/setup/recurring/{created.Id}", update with
+        {
+            Name = "Fuel reserve before scheduled stop",
+            Reason = "Revise before the scheduled stop"
+        });
+        Assert.Equal(HttpStatusCode.OK, reviseBeforeScheduledStop.StatusCode);
+
+        var revisedBeforeStop = Assert.Single((await client.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items);
+        Assert.Equal(3, revisedBeforeStop.Revision);
+        Assert.Equal("Fuel reserve before scheduled stop", revisedBeforeStop.Name);
+        Assert.Equal(today, revisedBeforeStop.StoppedFrom);
+
+        using var stopEarlier = await client.PostAsJsonAsync($"/setup/recurring/{created.Id}/stop",
+            new StopRecurring(true, "Stop before the scheduled date"));
+        Assert.Equal(HttpStatusCode.OK, stopEarlier.StatusCode);
+        var stoppedEarlier = Assert.Single((await client.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items);
+        Assert.Equal(priorBusinessDate, stoppedEarlier.StoppedFrom);
     }
 
     // The saved total always equals the shares listed with it, so the editor opens balanced; what still posts is apart.

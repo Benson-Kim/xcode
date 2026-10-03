@@ -86,6 +86,31 @@ public sealed class ExpenseCatalogTests : IDisposable
     }
 
     [Fact]
+    public async Task AFutureStopIsExplicitAndRestoreCancelsItWhenTheBusinessDateMovesBack()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var tyres = (await owner.GetFromJsonAsync<List<ExpenseItemOption>>("/setup/expense-items/options"))!.Single(x => x.Name == "Tyres");
+        var category = tyres.CategoryId;
+        (await owner.PostAsJsonAsync($"/setup/expense-items/{tyres.Id}/stop", new { })).EnsureSuccessStatusCode();
+        (await owner.PostAsJsonAsync($"/setup/expense-categories/{category}/stop", new { })).EnsureSuccessStatusCode();
+
+        app.Clock.Advance(TimeSpan.FromDays(-3));
+        var page = (await owner.GetFromJsonAsync<Page<ExpenseCategoryDto>>("/setup/expense-categories"))!.Items;
+        Assert.True(page.Single(x => x.Id == category).Active);
+        Assert.NotNull(page.Single(x => x.Id == category).StoppedOn);
+        // A stop that is already scheduled for another day is refused, not reported as done.
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/expense-items/{tyres.Id}/stop", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/expense-categories/{category}/stop", new { })).StatusCode);
+
+        (await owner.PostAsJsonAsync($"/setup/expense-items/{tyres.Id}/restore", new { })).EnsureSuccessStatusCode();
+        (await owner.PostAsJsonAsync($"/setup/expense-categories/{category}/restore", new { })).EnsureSuccessStatusCode();
+        page = (await owner.GetFromJsonAsync<Page<ExpenseCategoryDto>>("/setup/expense-categories"))!.Items;
+        Assert.Null(page.Single(x => x.Id == category).StoppedOn);
+        Assert.Null(page.SelectMany(x => x.Items).Single(x => x.Id == tyres.Id).StoppedOn);
+    }
+
+    [Fact]
     public async Task CategoriesArePagedByName()
     {
         await app.SeedDemo();

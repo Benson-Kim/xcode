@@ -200,7 +200,8 @@ export function RecurringEditor({
   const difference =
     Math.round(total * 100) - Math.round(allocationTotal * 100);
   const isBalanced = selected.length > 0 && total > 0 && difference === 0;
-  const stopped = Boolean(item?.stoppedFrom);
+  const stopped = Boolean(item?.stoppedFrom && (!today || item.stoppedFrom <= today));
+  const futureStop = item?.stoppedFrom && today && item.stoppedFrom > today ? item.stoppedFrom : null;
   const startLocked = Boolean(item && (!today || item.start < today));
   const disabled = !canEdit || stopped || busy;
   const companies = [
@@ -505,6 +506,12 @@ export function RecurringEditor({
           <Note>
             Stopped. The last posting was on or before{" "}
             {formatDateOnly(item!.stoppedFrom!)}.
+          </Note>
+        )}
+        {futureStop && (
+          <Note tone="info">
+            Scheduled to stop on {formatDateOnly(futureStop)}. You can still
+            change the schedule before then.
           </Note>
         )}
         {legacyUses.length > 0 && !stopped && (

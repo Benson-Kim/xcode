@@ -100,3 +100,13 @@ it("adds, edits, retires and restores a vehicle without a typed reason", async (
     ["/api/setup/vehicles/vehicle-2/restore", "POST", {}],
   ]);
 });
+
+it("cancels an archive dated ahead of the business date with Restore instead of archiving again", async () => {
+  const scheduled = { id: "company-3", name: "Future Line", vehicleCount: 0, active: true, archivedOn: "2026-09-25" };
+  const fetchMock = serve({ companies: [scheduled] });
+  renderInApp(<CompaniesPage />, { permissions: ["companies.manage"] });
+  expect(await screen.findByText(/Archives on/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Restore Future Line" }));
+  await waitFor(() => expect(writes(fetchMock)).toEqual([["/api/setup/companies/company-3/restore", "POST", {}]]));
+});

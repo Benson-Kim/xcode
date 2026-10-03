@@ -23,7 +23,7 @@ public sealed class RecurringItem : IOrganizationEntity
      }
      public void Revise(RecurringDefinition definition, DateOnly today)
      {
-          if (StoppedFrom is not null)
+          if (StoppedFrom is not null && StoppedFrom <= today)
                throw new ArgumentException("Stopped items cannot be edited.");
           // "Running" follows the current version's start, not the earliest start ever recorded, so a postponed item
           // is still editable until its new start date.
@@ -38,7 +38,14 @@ public sealed class RecurringItem : IOrganizationEntity
      }
      public bool Stop(DateOnly today)
      {
-          if (StoppedFrom is not null) return false;
+          if (StoppedFrom is not null)
+          {
+               if (StoppedFrom <= today)
+               {
+                    if (StoppedFrom != today) throw new ArgumentException("The item is already stopped.");
+                    return false;
+               }
+          }
           StoppedFrom = today;
           return true;
      }

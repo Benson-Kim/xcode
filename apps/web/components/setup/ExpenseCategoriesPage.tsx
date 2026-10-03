@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { apiRequest, useStreamedList } from "../../lib/data";
 import { plural } from "../../lib/format";
+import { formatDateOnly } from "../recurringPresentation";
 import type { ExpenseBucket, ExpenseCategory, ExpenseItem } from "../../lib/types";
 import {
   Banner,
@@ -134,11 +135,13 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
 
   async function toggle(kind: Kind, entity: ExpenseCategory | ExpenseItem) {
     const base = kind === "category" ? `setup/expense-categories/${entity.id}` : `setup/expense-items/${entity.id}`;
-    const failed = await send(`${base}/${entity.active ? "stop" : "restore"}`, "POST", {});
+    // The stored stop date decides, not `active`: that follows the business date, so a stop dated ahead of it still needs turning on to cancel.
+    const off = Boolean(entity.stoppedOn);
+    const failed = await send(`${base}/${off ? "restore" : "stop"}`, "POST", {});
     setError(failed);
     if (failed) return;
     setEditing(null);
-    toast(`${entity.name} ${entity.active ? "turned off" : "turned on"}.`);
+    toast(`${entity.name} ${off ? "turned on" : "turned off"}.`);
   }
 
   function actions(kind: Kind, entity: ExpenseCategory | ExpenseItem) {
@@ -167,12 +170,12 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
           Edit
         </Button>
         <Button
-          tone={entity.active ? "warn" : "ok"}
+          tone={entity.stoppedOn ? "ok" : "warn"}
           disabled={busy}
-          aria-label={`${entity.active ? "Turn off" : "Turn on"} ${entity.name}`}
+          aria-label={`${entity.stoppedOn ? "Turn on" : "Turn off"} ${entity.name}`}
           onClick={() => void toggle(kind, entity)}
         >
-          {entity.active ? "Turn off" : "Turn on"}
+          {entity.stoppedOn ? "Turn on" : "Turn off"}
         </Button>
       </FormActions>
     );
@@ -213,9 +216,11 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
       </SelectInput>
     </>
   );
-  const statusCell = (active: boolean) => (
+  const statusCell = (entity: ExpenseCategory | ExpenseItem) => (
     <Td label="Status">
-      <StatusBadge tone={active ? "ok" : "off"}>{active ? "In use" : "Turned off"}</StatusBadge>
+      <StatusBadge tone={entity.active ? "ok" : "off"}>
+        {!entity.active ? "Turned off" : entity.stoppedOn ? `Turns off on ${formatDateOnly(entity.stoppedOn)}` : "In use"}
+      </StatusBadge>
     </Td>
   );
   const actionColumn = canManage ? [{ label: "Actions", hidden: true }] : [];
@@ -284,7 +289,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
                       {category.active ? `Counts as ${expenseBucketNames[category.bucket]}` : "Its category is turned off"}
                     </CellNote>
                   </Td>
-                  {statusCell(item.active)}
+                  {statusCell(item)}
                   {canManage && <Td>{actions("item", item)}</Td>}
                 </Tr>
               ))}
@@ -337,7 +342,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
                   <Td label="Items" numeric>
                     {category.items.filter((item) => item.active).length}
                   </Td>
-                  {statusCell(category.active)}
+                  {statusCell(category)}
                   {canManage && <Td>{actions("category", category)}</Td>}
                 </Tr>
               ))}

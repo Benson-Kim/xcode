@@ -186,10 +186,15 @@ export function HistoryPage() {
   const rows = history.items;
   return (
     <section>
-      <PageHeader title="Change log" description="Who changed what in setup, people and access, with each value before and after the change." />
+      <PageHeader title="Change log" description="Who changed what in setup, organization settings, people and access, with each value before and after the change." />
       {history.error && <Banner className="mt-5">{history.error}</Banner>}
+
       <DataTable
-        columns={[{ label: "When" }, { label: "Who" }, { label: "What changed" }]}
+        columns={[
+          { label: "When" },
+          { label: "Who" },
+          { label: "What changed" },
+        ]}
         loading={history.loading}
         pendingRows={history.loadingMore ? 1 : 0}
         loadingLabel="Loading the change log"

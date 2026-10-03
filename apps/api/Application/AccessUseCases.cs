@@ -43,6 +43,24 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         return new ScopeOptions(companies, vehicles);
     }, ct);
 
+    // The caller's own data scope, with the same filters as the companies and vehicles lists. Any member may ask.
+    public Task<MyScope> Me(CancellationToken ct) => execution.Read("", async actor =>
+    {
+        var vehicleQuery = db.Set<FleetVehicle>().AsNoTracking()
+            .Where(v => actor.AllCompanies || actor.CompanyIds.Contains(v.CompanyId) || actor.VehicleIds.Contains(v.Id));
+        var companies = await db.Set<PsvCompany>()
+            .AsNoTracking()
+            .Where(c => actor.AllCompanies || actor.CompanyIds.Contains(c.Id) || vehicleQuery.Any(v => v.CompanyId == c.Id))
+            .OrderBy(c => c.Name)
+            .Select(c => new ScopeCompanyOption(c.Id, c.Name))
+            .ToListAsync(ct);
+        var vehicles = await vehicleQuery
+            .OrderBy(v => v.Registration)
+            .Select(v => new ScopeVehicleOption(v.Id, v.Registration, v.CompanyId))
+            .ToListAsync(ct);
+        return new MyScope(actor.AllCompanies, companies, vehicles);
+    }, ct);
+
     // Visibility, order and paging run in the database; only the page's own related rows are loaded.
     public Task<Page<PersonDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read("people.view", async actor =>
     {
@@ -55,11 +73,11 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             .ThenBy(x => x.UserId)
             .Skip((page - 1) * pageSize)
             .Take(pageSize), ct);
-        return new Page<PersonDto>(rows.Select(ToDto).ToArray(), page, pageSize, total);
+        return new Page<PersonDto>(await ToDtos(actor, rows, ct), page, pageSize, total);
     }, ct);
 
     public Task<PersonDto> Get(Guid id, CancellationToken ct) => execution.Read("people.view", async actor =>
-        ToDto(await LoadPerson(actor, id, ct) ?? throw new KeyNotFoundException()), ct);
+        (await ToDtos(actor, [await LoadPerson(actor, id, ct) ?? throw new KeyNotFoundException()], ct))[0], ct);
 
     public Task<Guid> Save(Guid? id, SavePerson input, CancellationToken ct) => execution.Write("people.manage", async actor =>
     {
@@ -270,7 +288,26 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
 
     private static string ScopeModeOf(AccessPerson x) => x.Scope?.AllCompanies == true ? "all" : x.CompanyIds.Count > 0 ? "companies" : "vehicles";
 
-    private static PersonDto ToDto(AccessPerson x) => new(
+    // Shows each viewer only the companies and vehicles they can reach, and counts the rest.
+    private async Task<PersonDto[]> ToDtos(SetupActor actor, List<AccessPerson> people, CancellationToken ct)
+    {
+        var companyOf = new Dictionary<Guid, Guid>();
+        if (!actor.AllCompanies)
+        {
+            var ids = people.SelectMany(x => x.VehicleIds).Distinct().ToList();
+            if (ids.Count > 0)
+                companyOf = await db.Set<FleetVehicle>().AsNoTracking().Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.CompanyId, ct);
+        }
+
+        return people.Select(x =>
+        {
+            var companies = x.CompanyIds.Where(id => actor.AllCompanies || actor.CompanyIds.Contains(id)).ToArray();
+            var vehicles = x.VehicleIds.Where(id => actor.AllCompanies || (companyOf.TryGetValue(id, out var company) && CanSeeVehicle(actor, id, company))).ToArray();
+            return ToDto(x, companies, vehicles, x.CompanyIds.Count - companies.Length, x.VehicleIds.Count - vehicles.Length);
+        }).ToArray();
+    }
+
+    private static PersonDto ToDto(AccessPerson x, IReadOnlyList<Guid> companyIds, IReadOnlyList<Guid> vehicleIds, int otherCompanies, int otherVehicles) => new(
         x.User.Id,
         x.Membership.FirstName,
         x.Membership.LastName,
@@ -279,12 +316,14 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         x.Role.Name,
         x.Membership.Active,
         ScopeModeOf(x),
-        x.CompanyIds,
-        x.VehicleIds,
+        companyIds,
+        vehicleIds,
         x.Permissions.ToArray(),
         x.Membership.ApprovalLimit,
         x.User.PinHash is not null,
-        x.Membership.Version
+        x.Membership.Version,
+        otherCompanies,
+        otherVehicles
     );
 
     private static void Validate(SavePerson input)
@@ -479,17 +518,41 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     }
 
     // Sign-in codes go to the person's email, so whoever sets their email and mobile can sign in as them. That is
-    // only allowed for someone who could have granted them everything they hold anyway: an Owner, or an editor
-    // whose own permissions and assignable roles cover all of the person's (and, for an approval limit, access.manage).
+    // only allowed for an Owner, or an editor whose data scope and permissions cover the person (and, for an approval
+    // limit, access.manage).
     private async Task AuthorizeSignInDetailsChange(SetupActor actor, AccessPerson target, bool actorIsOwner, CancellationToken ct)
     {
         if (actorIsOwner)
             return;
 
+        if (!await CanSeeFullScope(actor, target, ct))
+            throw new UnauthorizedAccessException("Only an Owner, or someone who can see this person's full data scope, can change their email or mobile number.");
+
         var held = await organizations.Permissions(actor.UserId, ct);
         if (target.Permissions.Any(x => !held.Contains(x)) ||
             (target.Membership.ApprovalLimit is not null && !held.Contains("access.manage")))
             throw new UnauthorizedAccessException("Only an Owner, or someone who holds everything this person holds, can change their email or mobile number.");
+    }
+
+    private async Task<bool> CanSeeFullScope(SetupActor actor, AccessPerson target, CancellationToken ct)
+    {
+        if (actor.AllCompanies)
+            return true;
+        if (target.Scope?.AllCompanies == true || target.CompanyIds.Any(id => !actor.CompanyIds.Contains(id)))
+            return false;
+
+        var vehicleIds = target.VehicleIds.Distinct().ToArray();
+        if (vehicleIds.Length == 0)
+            return true;
+
+        var vehicles = await db.Set<FleetVehicle>()
+            .AsNoTracking()
+            .Where(vehicle => vehicleIds.Contains(vehicle.Id))
+            .Select(vehicle => new { vehicle.Id, vehicle.CompanyId })
+            .ToListAsync(ct);
+
+        return vehicles.Count == vehicleIds.Length &&
+            vehicles.All(vehicle => CanSeeVehicle(actor, vehicle.Id, vehicle.CompanyId));
     }
 
     private static bool IsOwnerRole(Role role) => role.Name.Equals("Owner", StringComparison.OrdinalIgnoreCase);

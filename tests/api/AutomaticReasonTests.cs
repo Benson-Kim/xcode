@@ -80,6 +80,10 @@ public sealed class AutomaticReasonTests : IDisposable
         await Id(await owner.PostAsJsonAsync($"/setup/recurring/{item}/stop", new { confirmed = true, reason = "Parking moved into the SACCO fee" }));
         // The typed reason follows the automatic one; it does not replace it.
         Assert.Equal($"Stopped Parking from {today:yyyy-MM-dd}. Reason: Parking moved into the SACCO fee.", (await Reasons(owner, "recurring"))[^1]);
+
+        // Stopped on another business date: stopping again is refused rather than reported as done.
+        app.Clock.Advance(TimeSpan.FromDays(-3));
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/recurring/{item}/stop", new { confirmed = true, reason = "Again" })).StatusCode);
     }
 
     [Fact]

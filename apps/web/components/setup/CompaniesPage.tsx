@@ -4,25 +4,39 @@ import { useState } from "react";
 import { apiRequest } from "../../lib/data";
 import { useStreamedList } from "../../lib/data";
 import { Banner, Button, DataTable, Field, FormActions, PageHeader, StatusBadge, TextInput, Toolbar, Td, Tr, useToast } from "../ui";
+import { formatDateOnly } from "../recurringPresentation";
 import type { Company } from "./shared";
 
+// Whether the company carries an archive date, even one still ahead of the business date. Older rows had none, so inactive counts too.
+const archivedOnRecord = (company: Company) => Boolean(company.archivedOn) || company.active === false;
+
 export function CompaniesPage() {
-  const companies = useStreamedList<Company>("setup/companies");
-  const toast = useToast();
   const [name, setName] = useState("");
   const [addError, setAddError] = useState("");
   // Changes carry no typed reason: the server writes one for the change log.
   const [renaming, setRenaming] = useState<{ id: string; name: string; error: string } | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const companies = useStreamedList<Company>("setup/companies");
   const rows = companies.items;
+
+  const toast = useToast();
 
   async function add() {
     const trimmed = name.trim();
     if (!trimmed) return setAddError("Enter the company name.");
-    if (rows.some((company) => company.name.toLowerCase() === trimmed.toLowerCase())) return setAddError("This company already exists.");
+    if (
+      rows.some(
+        (company) => company.name.toLowerCase() === trimmed.toLowerCase(),
+      )
+    )
+      return setAddError("This company already exists.");
     setBusy(true);
     try {
-      await apiRequest("setup/companies", { method: "POST", body: JSON.stringify({ name: trimmed }) });
+      await apiRequest("setup/companies", {
+        method: "POST",
+        body: JSON.stringify({ name: trimmed }),
+      });
       setName("");
       setAddError("");
       toast(`${trimmed} added.`);
@@ -37,13 +51,26 @@ export function CompaniesPage() {
   async function saveRename(company: Company) {
     if (!renaming) return;
     const trimmed = renaming.name.trim();
-    if (!trimmed) return setRenaming({ ...renaming, error: "Enter the new name." });
-    if (rows.some((other) => other.id !== company.id && other.name.toLowerCase() === trimmed.toLowerCase()))
-      return setRenaming({ ...renaming, error: "Another company already has this name." });
+    if (!trimmed)
+      return setRenaming({ ...renaming, error: "Enter the new name." });
+    if (
+      rows.some(
+        (other) =>
+          other.id !== company.id &&
+          other.name.toLowerCase() === trimmed.toLowerCase(),
+      )
+    )
+      return setRenaming({
+        ...renaming,
+        error: "Another company already has this name.",
+      });
     if (trimmed === company.name) return setRenaming(null);
     setBusy(true);
     try {
-      await apiRequest(`setup/companies/${company.id}`, { method: "PUT", body: JSON.stringify({ name: trimmed }) });
+      await apiRequest(`setup/companies/${company.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: trimmed }),
+      });
       setRenaming(null);
       toast(`Company renamed to ${trimmed}.`);
       companies.reload();
@@ -54,6 +81,7 @@ export function CompaniesPage() {
     }
   }
 
+  // The stored archive date decides, not `active`: that follows the business date, so an archive dated ahead of it is cancelled by restoring.
   async function setArchived(company: Company, archived: boolean) {
     setBusy(true);
     try {
@@ -75,7 +103,12 @@ export function CompaniesPage() {
       <PageHeader title="PSV companies" description="Every vehicle belongs to one company. Archive a company after its vehicles have left the fleet." />
       {(companies.error || addError) && <Banner className="mt-5">{companies.error || addError}</Banner>}
       <Toolbar align="start">
-        <Field id="new-company" label="New PSV company" error={addError} className="min-w-55 flex-1">
+        <Field
+          id="new-company"
+          label="New PSV company"
+          error={addError}
+          className="min-w-55 flex-1"
+        >
           <TextInput
             placeholder="Company name"
             value={name}
@@ -106,11 +139,22 @@ export function CompaniesPage() {
             <Tr key={company.id}>
               <Td colSpan={4}>
                 <div className="flex flex-wrap items-start gap-3">
-                  <Field id={`rename-${company.id}`} label="New name" error={renaming.error} className="min-w-50 flex-1">
+                  <Field
+                    id={`rename-${company.id}`}
+                    label="New name"
+                    error={renaming.error}
+                    className="min-w-50 flex-1"
+                  >
                     <TextInput
                       autoFocus
                       value={renaming.name}
-                      onChange={(event) => setRenaming({ ...renaming, name: event.target.value, error: "" })}
+                      onChange={(event) =>
+                        setRenaming({
+                          ...renaming,
+                          name: event.target.value,
+                          error: "",
+                        })
+                      }
                       onKeyDown={(event) => {
                         if (event.key === "Enter") void saveRename(company);
                         if (event.key === "Escape") setRenaming(null);
@@ -132,7 +176,9 @@ export function CompaniesPage() {
                 <strong>{company.name}</strong>
               </Td>
               <Td label="Status">
-                <StatusBadge tone={company.active === false ? "off" : "ok"}>{company.active === false ? "Archived" : "Active"}</StatusBadge>
+                <StatusBadge tone={company.active === false ? "off" : company.archivedOn ? "warn" : "ok"}>
+                  {company.active === false ? "Archived" : company.archivedOn ? `Archives on ${formatDateOnly(company.archivedOn)}` : "Active"}
+                </StatusBadge>
               </Td>
               <Td label="Vehicles" numeric>{company.vehicleCount}</Td>
               <Td>
@@ -148,13 +194,14 @@ export function CompaniesPage() {
                       Rename
                     </Button>
                   )}
+                  {/* An archive dated ahead has not taken effect, so it can still be cancelled with Restore. */}
                   <Button
-                    tone={company.active !== false ? "warn" : "ok"}
+                    tone={archivedOnRecord(company) ? "ok" : "warn"}
                     disabled={busy}
-                    aria-label={`${company.active !== false ? "Archive" : "Restore"} ${company.name}`}
-                    onClick={() => void setArchived(company, company.active !== false)}
+                    aria-label={`${archivedOnRecord(company) ? "Restore" : "Archive"} ${company.name}`}
+                    onClick={() => void setArchived(company, !archivedOnRecord(company))}
                   >
-                    {company.active !== false ? "Archive" : "Restore"}
+                    {archivedOnRecord(company) ? "Restore" : "Archive"}
                   </Button>
                 </FormActions>
               </Td>

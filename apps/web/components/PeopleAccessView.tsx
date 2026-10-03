@@ -276,6 +276,10 @@ function changesFromRole(permissions: string[], defaults: string[]) {
 function scopeLabel(person: Person, options?: ScopeOptions) {
   if (person.scopeMode === "all") return "All companies";
   if (person.scopeMode === "companies") {
+    if (person.otherCompanies > 0) {
+      const total = person.companyIds.length + person.otherCompanies;
+      return `${plural(total, "company", "companies")} (${person.otherCompanies} hidden)`;
+    }
     const names = person.companyIds
       .map(
         (id) => options?.companies.find((company) => company.id === id)?.name,
@@ -284,6 +288,10 @@ function scopeLabel(person: Person, options?: ScopeOptions) {
     return names.length === person.companyIds.length && names.length <= 2
       ? names.join(", ")
       : plural(person.companyIds.length, "company", "companies");
+  }
+  if (person.otherVehicles > 0) {
+    const total = person.vehicleIds.length + person.otherVehicles;
+    return `${plural(total, "vehicle", "vehicles")} (${person.otherVehicles} hidden)`;
   }
   return plural(person.vehicleIds.length, "vehicle", "vehicles");
 }
@@ -335,6 +343,7 @@ type Errors = Partial<
     | "lastName"
     | "phoneNumber"
     | "email"
+    | "role"
     | "scope"
     | "permissions",
     string
@@ -390,20 +399,27 @@ function PersonEditor({
   const editable = canManage && !self && !ownerLock;
   const permissionsEditable = editable && canManageAccess;
   const all = (groups ?? []).flatMap((group) => group.items);
-  const defaults = roleDefaults(roles, form.role);
-  const permissions = form.permissions ?? defaults;
-  const changes = changesFromRole(permissions, defaults);
-  const needsLimit = permissions.some((key) => APPROVALS.includes(key));
   const permissionsReady = Boolean(roles && groups);
   const label = (key: string) =>
     all.find((item) => item.key === key)?.label ?? key;
   // Only an Owner may give the Owner role, but an owner's own role is still listed, so the locked picker shows it.
   const assignableRoles = (roles ?? []).filter(
     (role) =>
-      role.name !== "Owner" ||
+      role.name === person?.role ||
       session?.role === "Owner" ||
-      role.name === person?.role,
+      (role.name !== "Owner" &&
+        role.permissions.every((permission) =>
+          session?.permissions.includes(permission),
+        )),
   );
+  const selectedRole =
+    assignableRoles.find((role) => role.name === form.role)?.name ??
+    assignableRoles[0]?.name ??
+    (roles ? "" : form.role);
+  const defaults = roleDefaults(roles, selectedRole);
+  const permissions = form.permissions ?? defaults;
+  const changes = changesFromRole(permissions, defaults);
+  const needsLimit = permissions.some((key) => APPROVALS.includes(key));
   const name = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
 
   function togglePermission(item: Permission, checked: boolean) {
@@ -448,6 +464,8 @@ function PersonEditor({
       next.phoneNumber = "Enter all 10 numbers, starting 07 or 01.";
     if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(form.email.trim()))
       next.email = "Enter an email address like name@company.co.ke";
+    if (roles && !assignableRoles.length)
+      next.role = "You cannot assign any available role.";
     if (form.scopeMode === "companies" && !form.companyIds.length)
       next.scope = "Tick at least one company.";
     if (form.scopeMode === "vehicles" && !form.vehicleIds.length)
@@ -465,7 +483,7 @@ function PersonEditor({
           lastName: form.lastName.trim(),
           email: form.email.trim(),
           phoneNumber: phone,
-          role: form.role,
+          role: selectedRole,
           scopeMode: form.scopeMode,
           companyIds: form.scopeMode === "companies" ? form.companyIds : [],
           vehicleIds: form.scopeMode === "vehicles" ? form.vehicleIds : [],
@@ -654,9 +672,12 @@ function PersonEditor({
             <Field
               id="person-role"
               label="Role"
+              error={errors.role}
               hint={
                 person
                   ? "Changing the role resets single permissions to the new role."
+                  : roles && !assignableRoles.length
+                    ? "You cannot assign any available role."
                   : undefined
               }
             >
@@ -664,8 +685,8 @@ function PersonEditor({
                 <Skeleton className="h-12 rounded-[10px]" />
               ) : (
                 <SelectInput
-                  value={form.role}
-                  disabled={!editable}
+                  value={selectedRole}
+                  disabled={!editable || !assignableRoles.length}
                   onChange={(event) => {
                     const role = event.target.value;
                     setPermissionNote("");
@@ -705,7 +726,7 @@ function PersonEditor({
                 name="person-scope"
                 label={option.label}
                 checked={form.scopeMode === option.value}
-                disabled={!editable || form.role === "Owner"}
+                disabled={!editable || selectedRole === "Owner"}
                 onChange={() => setForm({ ...form, scopeMode: option.value })}
               />
             ))}
@@ -779,7 +800,7 @@ function PersonEditor({
             </div>
           ) : (
             <Hint>
-              {form.role === "Owner"
+              {selectedRole === "Owner"
                 ? "The owner always sees every company."
                 : "Includes any company added later."}
             </Hint>
@@ -793,7 +814,7 @@ function PersonEditor({
             description={
               !permissionsReady
                 ? undefined
-                : `${permissions.length} ticked. ${changes ? `${plural(changes, "change", "changes")} from the ${form.role} role, marked below.` : `Same as the ${form.role} role.`}`
+                : `${permissions.length} ticked. ${changes ? `${plural(changes, "change", "changes")} from the ${selectedRole} role, marked below.` : `Same as the ${selectedRole} role.`}`
             }
           />
           {editable && !canManageAccess && (

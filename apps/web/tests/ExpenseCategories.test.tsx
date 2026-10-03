@@ -150,3 +150,30 @@ it("says why when the server refuses a change", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Turn off Tyres" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Only people who set up expenses can change categories.");
 });
+
+it("cancels a stop dated ahead of the business date with Turn on instead of stopping again", async () => {
+  const scheduled: ExpenseCategory[] = [
+    {
+      id: "soon",
+      name: "Soon off",
+      bucket: 2,
+      active: true,
+      stoppedOn: "2026-09-25",
+      items: [{ id: "later", categoryId: "soon", name: "Later item", active: true, stoppedOn: "2026-09-26" }],
+    },
+  ];
+  const fetchMock = vi.fn(async (_input: string, init?: RequestInit) =>
+    init?.method
+      ? new Response(JSON.stringify({ id: "x" }), { status: 200 })
+      : new Response(JSON.stringify({ items: scheduled, pageNumber: 1, pageSize: 100, total: 1 }), { status: 200 }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  renderInApp(<ExpenseCategoriesPage canManage />, { permissions: ["expenses.setup"] });
+
+  expect(await screen.findByText(/Turns off on/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Turn on Later item" }));
+  await waitFor(() => expect(writes(fetchMock as ReturnType<typeof serve>)).toEqual([["/api/setup/expense-items/later/restore", "POST", {}]]));
+  fireEvent.click(screen.getByRole("tab", { name: "Categories" }));
+  fireEvent.click(screen.getByRole("button", { name: "Turn on Soon off" }));
+  await waitFor(() => expect(writes(fetchMock as ReturnType<typeof serve>)[1]).toEqual(["/api/setup/expense-categories/soon/restore", "POST", {}]));
+});

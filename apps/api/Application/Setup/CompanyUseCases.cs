@@ -46,9 +46,8 @@ public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository 
             bool changed;
             if (archived)
             {
-                if (!company.ActiveOn(actor.Today))
-                    return company.Id;
-                if (await repository.HasActiveVehicles(company.Id, actor.Today, ct))
+                // Already archived or scheduled: the domain decides, so a moved business date cannot hide it.
+                if (company.ArchivedOn is null && await repository.HasActiveVehicles(company.Id, actor.Today, ct))
                     throw new ArgumentException("Retire every vehicle in this company before archiving it.");
                 changed = company.Archive(actor.Today);
             }

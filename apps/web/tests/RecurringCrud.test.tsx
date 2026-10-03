@@ -282,6 +282,14 @@ it("requires a second click and a typed reason before stopping a scheduled item"
   expect(onSaved).toHaveBeenCalledOnce();
 });
 
+it("keeps an item editable before its future stop date", () => {
+  renderEditor({ item: { ...item, stoppedFrom: "2026-09-25" } });
+
+  expect(screen.getByText("Scheduled to stop on 25 Sep 2026. You can still change the schedule before then.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Stop from today" })).toBeEnabled();
+});
+
 it("loads expense item options only once the editor opens", async () => {
   const fetchMock = mockFetch(async (input) => {
     const url = String(input);
@@ -310,7 +318,8 @@ it("filters the list by company and by running or stopped, as the design does", 
       { ...item, id: "licence", name: "Licence", start: "2026-01-01", end: "2026-06-30", allocations: share(metro) },
     ]);
   });
-  renderInApp(<RecurringPage canManage />, { permissions: ["commitments.view", "commitments.manage"] }, { businessDate });
+
+    renderInApp(<RecurringPage canManage />, { permissions: ["commitments.view", "commitments.manage"] }, { businessDate });
   const names = () => screen.getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("button")[0].textContent);
 
   await screen.findByRole("button", { name: "Parking" });
@@ -328,4 +337,20 @@ it("filters the list by company and by running or stopped, as the design does", 
   expect(names()).toEqual(["Parking"]);
   fireEvent.change(company, { target: { value: "company-2" } });
   expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
+});
+
+it("shows a future stop separately while listing its next posting as running", async () => {
+  mockFetch(async () => listResponse([
+    { ...item, stoppedFrom: "2026-09-25", start: "2026-09-01", frequency: 1, day: null },
+  ]));
+  renderInApp(<RecurringPage canManage={false} />, {}, { businessDate: "2026-09-21" });
+
+  const row = await screen.findByRole("row", { name: /Loan repayment/ });
+  expect(within(row).getByText("21 Sep 2026", { selector: "td[data-label='Next posting']" })).toBeInTheDocument();
+  expect(within(row).getByText("Stops 25 Sep 2026")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByRole("combobox", { name: "Show" }), { target: { value: "stopped" } });
+  expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("combobox", { name: "Show" }), { target: { value: "running" } });
+  expect(screen.getByRole("row", { name: /Loan repayment/ })).toBeInTheDocument();
 });

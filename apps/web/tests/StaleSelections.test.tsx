@@ -85,6 +85,9 @@ const person = (over: Partial<Person>): Person => ({
   scopeMode: "companies",
   companyIds: [],
   vehicleIds: [],
+  // Nothing outside this viewer's reach, unless a test says otherwise.
+  otherCompanies: 0,
+  otherVehicles: 0,
   permissions: ["revenue.view"],
   hasPin: true,
   version: 1,

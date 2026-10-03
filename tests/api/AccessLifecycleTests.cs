@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Auth.Application;
 using Auth.Application.Setup;
+using Auth.Domain.Setup;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -123,15 +124,98 @@ public sealed class AccessLifecycleTests : IDisposable
     }
 
     [Fact]
+    public async Task SignInDetailsRequireTheEditorToSeeTheTargetsFullDataScope()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+
+        var companyResponse = await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("North Star", "Add North Star"));
+        var companyId = (await companyResponse.Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        async Task<Guid> AddVehicle(string registration)
+        {
+            using var response = await owner.PostAsJsonAsync("/setup/vehicles",
+                new SaveVehicle(companyId, registration, new DateOnly(2026, 1, 1), 20000m, "Add vehicle"));
+            response.EnsureSuccessStatusCode();
+            return (await response.Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        }
+
+        var inScopeVehicleId = await AddVehicle("KAA 111A");
+        var outsideScopeVehicleId = await AddVehicle("KAA 222B");
+        var officeAdminPermissions = (await owner.GetFromJsonAsync<List<AccessRole>>("/setup/access/roles"))!
+            .Single(role => role.Name == "Office admin").Permissions;
+
+        using var companyScopedPersonResponse = await owner.PostAsJsonAsync("/setup/people",
+            new SavePerson("Jane", "Njeri", "jane.company@example.com", "0711000008", "Office admin", "companies",
+                [companyId], [], officeAdminPermissions.ToList(), null));
+        companyScopedPersonResponse.EnsureSuccessStatusCode();
+        var companyScopedPersonId = (await companyScopedPersonResponse.Content.ReadFromJsonAsync<IdResponse>())!.Id;
+
+        using var vehicleScopedPersonResponse = await owner.PostAsJsonAsync("/setup/people",
+            new SavePerson("John", "Njeri", "john.vehicle@example.com", "0711000009", "Office admin", "vehicles",
+                [], [inScopeVehicleId], officeAdminPermissions.ToList(), null));
+        vehicleScopedPersonResponse.EnsureSuccessStatusCode();
+        var vehicleScopedPersonId = (await vehicleScopedPersonResponse.Content.ReadFromJsonAsync<IdResponse>())!.Id;
+
+        await app.WithDb(async db =>
+        {
+            db.Provisioning = true;
+            var admin = await db.Users.SingleAsync(user => user.Email == OfficeAdmin);
+            var organizationId = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
+            db.SetupDataScopes.RemoveRange(db.SetupDataScopes.IgnoreQueryFilters().Where(scope => scope.UserId == admin.Id));
+            db.SetupCompanyScopes.RemoveRange(db.SetupCompanyScopes.IgnoreQueryFilters().Where(scope => scope.UserId == admin.Id));
+            db.SetupVehicleScopes.RemoveRange(db.SetupVehicleScopes.IgnoreQueryFilters().Where(scope => scope.UserId == admin.Id));
+            db.SetupVehicleScopes.Add(new SetupVehicleScope
+            {
+                OrganizationId = organizationId,
+                UserId = admin.Id,
+                VehicleId = inScopeVehicleId
+            });
+            await db.SaveChangesAsync();
+            db.Provisioning = false;
+        });
+
+        using var scopedAdmin = await app.SignIn(OfficeAdmin);
+        var companyScopedPerson = await Find(scopedAdmin, "jane.company@example.com");
+        var denied = await scopedAdmin.PutAsJsonAsync($"/setup/people/{companyScopedPersonId}",
+            new SavePerson(companyScopedPerson.FirstName, companyScopedPerson.LastName, "jane.new@example.com", companyScopedPerson.PhoneNumber,
+                companyScopedPerson.Role, "companies", [companyId], [], companyScopedPerson.Permissions.ToList(),
+                companyScopedPerson.ApprovalLimit, companyScopedPerson.Version));
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        Assert.Equal("jane.company@example.com", (await Find(owner, "jane.company@example.com")).Email);
+
+        var vehicleScopedPerson = await Find(scopedAdmin, "john.vehicle@example.com");
+        using var allowed = await scopedAdmin.PutAsJsonAsync($"/setup/people/{vehicleScopedPersonId}",
+            new SavePerson(vehicleScopedPerson.FirstName, vehicleScopedPerson.LastName, vehicleScopedPerson.Email, "0799000111",
+                vehicleScopedPerson.Role, "vehicles", [], [inScopeVehicleId], vehicleScopedPerson.Permissions.ToList(),
+                vehicleScopedPerson.ApprovalLimit, vehicleScopedPerson.Version));
+        Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+
+        using var mixedScopePersonResponse = await owner.PostAsJsonAsync("/setup/people",
+            new SavePerson("Alex", "Njeri", "alex.mixed@example.com", "0711000010", "Office admin", "vehicles",
+                [], [inScopeVehicleId, outsideScopeVehicleId], officeAdminPermissions.ToList(), null));
+        mixedScopePersonResponse.EnsureSuccessStatusCode();
+        var mixedScopePersonId = (await mixedScopePersonResponse.Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        var mixedScopePerson = await Find(scopedAdmin, "alex.mixed@example.com");
+        using var mixedScopeDenied = await scopedAdmin.PutAsJsonAsync($"/setup/people/{mixedScopePersonId}",
+            new SavePerson(mixedScopePerson.FirstName, mixedScopePerson.LastName, "alex.new@example.com", mixedScopePerson.PhoneNumber,
+                mixedScopePerson.Role, "vehicles", [], [inScopeVehicleId, outsideScopeVehicleId], mixedScopePerson.Permissions.ToList(),
+                mixedScopePerson.ApprovalLimit, mixedScopePerson.Version));
+        Assert.Equal(HttpStatusCode.Forbidden, mixedScopeDenied.StatusCode);
+    }
+
+    [Fact]
     public async Task ChangingSignInDetailsEndsSessionsButKeepsThePin()
     {
         await app.SeedDemo();
         using var clerk = await app.SignIn(RevenueClerk);
         Assert.Equal(HttpStatusCode.OK, (await clerk.GetAsync("/setup/access/catalog")).StatusCode);
 
+        // An Office admin does not capture revenue (Web v2.8), so they cannot take over a clerk's sign-in: only an Owner can.
         using var admin = await app.SignIn(OfficeAdmin);
         var person = await Find(admin, RevenueClerk);
-        Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/setup/people/{person.Id}", Edit(person, phoneNumber: "0799000111"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await admin.PutAsJsonAsync($"/setup/people/{person.Id}", Edit(person, phoneNumber: "0799000111"))).StatusCode);
+        using var owner = await app.SignIn(Owner);
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/setup/people/{person.Id}", Edit(person, phoneNumber: "0799000111"))).StatusCode);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await clerk.GetAsync("/setup/access/catalog")).StatusCode);
 

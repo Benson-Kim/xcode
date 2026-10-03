@@ -97,7 +97,9 @@ export function VehiclesPage({
       />
     );
 
-  const visible = rows.filter((vehicle) => filter === "all" || vehicle.companyId === filter);
+  const visible = rows.filter(
+    (vehicle) => filter === "all" || vehicle.companyId === filter,
+  );
   return (
     <section>
       <PageHeader
@@ -109,7 +111,13 @@ export function VehiclesPage({
         <label htmlFor="vehicle-filter" className="text-[13px] text-grey">
           Company
         </label>
-        <SelectInput id="vehicle-filter" density="compact" inline value={filter} onChange={(event) => setFilter(event.target.value)}>
+        <SelectInput
+          id="vehicle-filter"
+          density="compact"
+          inline
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+        >
           <option value="all">All companies</option>
           {companies.map((company) => (
             <option key={company.id} value={company.id}>
@@ -117,7 +125,9 @@ export function VehiclesPage({
             </option>
           ))}
         </SelectInput>
-        {!vehicles.loading && <Hint>{plural(visible.length, "vehicle", "vehicles")}</Hint>}
+        {!vehicles.loading && (
+          <Hint>{plural(visible.length, "vehicle", "vehicles")}</Hint>
+        )}
         <Spacer />
         {canManage && <Button tone="ok" onClick={() => setEditing({ id: null })}>Add vehicle</Button>}
       </Toolbar>
@@ -207,7 +217,9 @@ const REGISTRATION = /^K[A-Z]{2}[0-9]{3}[A-Z]$/;
 
 function normaliseRegistration(value: string) {
   const compact = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return REGISTRATION.test(compact) ? `${compact.slice(0, 3)} ${compact.slice(3)}` : null;
+  return REGISTRATION.test(compact)
+    ? `${compact.slice(0, 3)} ${compact.slice(3)}`
+    : null;
 }
 
 // Saving, retiring and restoring carry no typed reason: the server writes one for the change log.
@@ -307,10 +319,14 @@ function VehicleEditor({
   }
 
   async function save() {
-    const registration = isNew ? normaliseRegistration(form.registration) : vehicle.registration;
+    const registration = isNew
+      ? normaliseRegistration(form.registration)
+      : vehicle.registration;
     const next: Errors = {};
-    if (isNew && !form.registration.trim()) next.registration = "Enter the registration number.";
-    else if (!registration) next.registration = "Use the Kenyan format, for example KDA 482M.";
+    if (isNew && !form.registration.trim())
+      next.registration = "Enter the registration number.";
+    else if (!registration)
+      next.registration = "Use the Kenyan format, for example KDA 482M.";
     if (!form.companyId) next.companyId = "Choose the PSV company.";
     if (weekly <= 0) next.weeklyTarget = "Enter the weekly target in KES.";
     if (!joinedOn) next.joinedOn = "Enter the date it joined the fleet.";
@@ -379,14 +395,23 @@ function VehicleEditor({
               id="vehicle-registration"
               label="Registration number"
               error={errors.registration}
-              hint={isNew ? "Kenyan format, for example KDA 482M." : "A registration cannot change. Add the vehicle again if it is re-registered."}
+              hint={
+                isNew
+                  ? "Kenyan format, for example KDA 482M."
+                  : "A registration cannot change. Add the vehicle again if it is re-registered."
+              }
             >
               <TextInput
                 value={form.registration}
                 disabled={!isNew || retired}
                 placeholder="KDA 482M"
                 autoCapitalize="characters"
-                onChange={(event) => setForm({ ...form, registration: event.target.value.toUpperCase() })}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    registration: event.target.value.toUpperCase(),
+                  })
+                }
               />
             </Field>
             <Field id="vehicle-company" label="PSV company" error={errors.companyId}>
