@@ -44,13 +44,20 @@ internal static class RevenueTestData
     }
 
     public static async Task<Guid> Vehicle(AuthFactory app, Guid companyId, string registration, DateOnly joinedOn,
-        decimal weeklyTarget = 7000m, DateOnly? leftOn = null, (decimal Target, DateOnly From)? revision = null)
+        decimal weeklyTarget = 7000m, DateOnly? leftOn = null, (decimal Target, DateOnly From)? revision = null,
+        (DateOnly Left, DateOnly Returned)? away = null)
     {
         var id = Guid.Empty;
         await Provision(app, async db =>
         {
             var vehicle = new FleetVehicle(await OrganizationId(db), companyId, new VehicleRegistration(registration), joinedOn, weeklyTarget);
             if (revision is { } change) vehicle.Update(companyId, joinedOn, change.Target, change.From);
+            // The stretch is seeded the way it is made: a leave that took effect, then a return (D4).
+            if (away is { } absence)
+            {
+                vehicle.Retire(absence.Left, absence.Left);
+                vehicle.Restore(absence.Returned, absence.Returned);
+            }
             if (leftOn is not null) vehicle.Retire(leftOn.Value, leftOn.Value);
             db.Set<FleetVehicle>().Add(vehicle);
             id = vehicle.Id;

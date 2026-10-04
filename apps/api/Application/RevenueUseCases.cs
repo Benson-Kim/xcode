@@ -53,7 +53,9 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
             if (date == default || date > actor.Today)
                 throw new ArgumentException("Revenue cannot be recorded for a future date.");
             if (!vehicle.ActiveOn(date))
-                throw new ArgumentException("Revenue can only be recorded while the vehicle is active.");
+                throw new ArgumentException(vehicle.AwayOn(date)
+                    ? "The vehicle was away from the fleet on this day, so it is not a day revenue is recorded for."
+                    : "Revenue can only be recorded while the vehicle is active.");
             // Authorization comes before state disclosure (D5): the conflict below carries the saved record, so
             // whoever reads it must be someone who was allowed to make this change in the first place.
             if (entry.Reason is not null && !actor.Permissions.Contains("revenue.no_earnings"))

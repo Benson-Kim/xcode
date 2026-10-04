@@ -9,7 +9,10 @@ public sealed record TargetDto(DateOnly EffectiveFrom, decimal WeeklyAmount, int
 // The weekly target and the scheduled item count are null, and the targets empty, for someone who lists vehicles only
 // to reach their investment (invest.view without vehicles.manage).
 public sealed record VehicleDto(Guid Id, Guid CompanyId, string CompanyName, string Registration, DateOnly JoinedOn,
-    DateOnly? LeftOn, bool Active, decimal? WeeklyTarget, IReadOnlyList<TargetDto> Targets, int? RecurringItems);
+    DateOnly? LeftOn, bool Active, decimal? WeeklyTarget, IReadOnlyList<TargetDto> Targets, int? RecurringItems,
+    IReadOnlyList<AwayPeriodDto> Away);
+// A stretch the vehicle was out of the fleet: away from LeftOn through the day before ReturnedOn (D4).
+public sealed record AwayPeriodDto(DateOnly LeftOn, DateOnly ReturnedOn);
 // One change-log line: who changed which setup record, and the reason they gave.
 public sealed record HistoryEntry(long Version, string Section, Guid EntityId, string Reason, DateTimeOffset OccurredAt, Guid ActorId, string ActorName,
     string? Before = null, string? After = null);
@@ -18,7 +21,8 @@ public sealed record SaveCompany(string Name, string? Reason = null);
 public sealed record CompanyLifecycleRequest(string? Reason = null);
 public sealed record SaveVehicle(Guid CompanyId, string Registration, DateOnly JoinedOn, decimal WeeklyTarget, string? Reason = null);
 public sealed record VehicleLifecycleRequest(DateOnly LeftOn, string? Reason = null);
-public sealed record VehicleRestoreRequest(string? Reason = null);
+// ReturnedOn defaults to the business date; the days from the leave date up to it are recorded as away (D4).
+public sealed record VehicleRestoreRequest(string? Reason = null, DateOnly? ReturnedOn = null);
 // Name is for savings only: a cost is named after its expense item. Category is ignored (Phase 1 rows keep theirs).
 public sealed record SaveRecurring(string? Name, RecurringKind Kind, CostCategory? Category, decimal Amount,
     RecurrenceFrequency Frequency, int? Day, bool LastDay, DateOnly Start, DateOnly? End, List<VehicleShare> Allocations, string? Reason = null,

@@ -14,6 +14,8 @@ export type Vehicle = {
   weeklyTarget: number | null;
   targets?: { effectiveFrom: string; weeklyAmount: number; revision: number }[];
   recurringItems?: number | null;
+  // Each stretch the vehicle was out of the fleet: away from leftOn through the day before returnedOn (D4).
+  away?: { leftOn: string; returnedOn: string }[];
 };
 
 // What the scheduled-item editor needs to pick vehicles (GET recurring/vehicle-options).

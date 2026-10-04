@@ -47,7 +47,8 @@ public sealed class AutomaticReasonTests : IDisposable
             $"Changed the weekly target of KDA 482M to KES 5,000 from {date}",
             "Moved KDA 482M to South Line; changed when KDA 482M joined the fleet to 2026-01-05",
             $"Vehicle KDA 482M left the fleet on {date}",
-            "Vehicle KDA 482M returned to the fleet"], await Reasons(owner, "vehicles"));
+            // Retired and restored on the same date: the leave took effect for no day, so no time away is named.
+            $"Vehicle KDA 482M returned to the fleet on {date}"], await Reasons(owner, "vehicles"));
     }
 
     [Fact]

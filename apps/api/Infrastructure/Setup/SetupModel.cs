@@ -28,6 +28,12 @@ public sealed partial class AuthDb
           target.HasIndex(x => new { x.OrganizationId, x.VehicleId, x.Revision }).IsUnique();
           target.HasOne<FleetVehicle>().WithMany(x => x.Targets).HasForeignKey(x => new { x.OrganizationId, x.VehicleId }).OnDelete(DeleteBehavior.Restrict);
 
+          // Append-only history, like the targets: once a vehicle has been away those days stay out of every report (D4).
+          var away = model.Entity<VehicleAwayPeriod>();
+          away.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(away);
+          away.HasIndex(x => new { x.OrganizationId, x.VehicleId, x.LeftOn }).IsUnique();
+          away.HasOne<FleetVehicle>().WithMany(x => x.AwayPeriods).HasForeignKey(x => new { x.OrganizationId, x.VehicleId }).OnDelete(DeleteBehavior.Restrict);
+
           var item = model.Entity<RecurringItem>();
           item.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(item);
 
@@ -107,7 +113,7 @@ public sealed partial class AuthDb
      {
           foreach (var entry in ChangeTracker.Entries().Where(e => e.State is EntityState.Modified or EntityState.Deleted))
           {
-               if (entry.Entity is OrganizationSettingsVersion or VehicleTarget or RecurringVersion or RecurringAllocation)
+               if (entry.Entity is OrganizationSettingsVersion or VehicleTarget or VehicleAwayPeriod or RecurringVersion or RecurringAllocation)
                     throw new InvalidOperationException("Setup versions and allocations are append-only.");
                if (entry.Entity is PsvCompany or FleetVehicle or RecurringItem or RevenueRecord or ExpenseCategory or ExpenseItem && entry.State == EntityState.Deleted)
                     throw new InvalidOperationException("Setup records cannot be deleted.");

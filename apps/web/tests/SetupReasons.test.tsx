@@ -97,7 +97,8 @@ it("adds, edits, retires and restores a vehicle without a typed reason", async (
     ["/api/setup/vehicles", "POST", { registration: "KDG 905B", companyId: company.id, weeklyTarget: 14000, joinedOn: businessDate }],
     ["/api/setup/vehicles/vehicle-1", "PUT", { registration: "KDA 482M", companyId: company.id, weeklyTarget: 16000, joinedOn: "2026-01-01" }],
     ["/api/setup/vehicles/vehicle-1/retire", "POST", { leftOn: "2026-09-20" }],
-    ["/api/setup/vehicles/vehicle-2/restore", "POST", {}],
+    // The return date follows the business date unless someone chooses another (D4).
+    ["/api/setup/vehicles/vehicle-2/restore", "POST", { returnedOn: businessDate }],
   ]);
 });
 

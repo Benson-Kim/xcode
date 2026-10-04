@@ -32,6 +32,7 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
 
         var vehicles = await vehiclesQuery
             .Include(v => v.Targets)
+            .Include(v => v.AwayPeriods)
             .AsNoTracking()
             .OrderBy(v => v.Registration)
             .ToListAsync(ct);
@@ -85,6 +86,7 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
         var vehicles = await visible
             .Where(v => v.JoinedOn <= through && (v.LeftOn == null || v.LeftOn > from))
             .Include(v => v.Targets)
+            .Include(v => v.AwayPeriods)
             .AsNoTracking()
             .ToListAsync(ct);
         var ids = vehicles.Select(v => v.Id).ToArray();
@@ -129,7 +131,7 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
     }
 
     public Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct) =>
-        VisibleVehicles(actor).Include(v => v.Targets).SingleOrDefaultAsync(v => v.Id == id, ct);
+        VisibleVehicles(actor).Include(v => v.Targets).Include(v => v.AwayPeriods).SingleOrDefaultAsync(v => v.Id == id, ct);
 
     public Task<RevenueRecord?> Record(SetupActor actor, Guid vehicleId, DateOnly date, CancellationToken ct) =>
         VisibleVehicles(actor).Where(v => v.Id == vehicleId).SelectMany(v => db.Set<RevenueRecord>()
@@ -149,14 +151,20 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
             .Select(g => new { VehicleId = g.Key, First = g.Min(r => r.BusinessDate), Last = g.Max(r => r.BusinessDate), Count = g.Count() })
             .ToDictionaryAsync(x => x.VehicleId, ct);
 
+        // A vehicle's active days before the date end at its leave date, or at the date itself.
+        DateOnly End(FleetVehicle vehicle) => vehicle.LeftOn is { } left && left < before ? left : before;
+
         var result = new Dictionary<Guid, DateOnly?>();
         var holed = new List<FleetVehicle>();
         foreach (var vehicle in vehicles)
         {
-            // A vehicle's active days before the date are one run, from JoinedOn to LeftOn or the date.
-            var end = vehicle.LeftOn is { } left && left < before ? left : before;
+            var end = End(vehicle);
             if (end <= vehicle.JoinedOn)
                 result[vehicle.Id] = null;
+            // A vehicle that has been away has no unbroken run of active days, so the count below would read the
+            // stretch it was away as a hole. It walks its own dates instead (D4).
+            else if (vehicle.AwayPeriods.Any(p => p.LeftOn < end && p.ReturnedOn > vehicle.JoinedOn))
+                holed.Add(vehicle);
             else if (!spans.TryGetValue(vehicle.Id, out var span) || span.First > vehicle.JoinedOn)
                 result[vehicle.Id] = vehicle.JoinedOn;
             else if (span.Count == span.Last.DayNumber - span.First.DayNumber + 1)
@@ -173,9 +181,10 @@ public sealed class RevenueRepository(AuthDb db, IOrganizationRepository organiz
         foreach (var vehicle in holed)
         {
             var recorded = dates[vehicle.Id].ToHashSet();
+            var end = End(vehicle);
             var date = vehicle.JoinedOn;
-            while (recorded.Contains(date)) date = date.AddDays(1);
-            result[vehicle.Id] = date;
+            while (date < end && (recorded.Contains(date) || !vehicle.ActiveOn(date))) date = date.AddDays(1);
+            result[vehicle.Id] = date < end ? date : null;
         }
         return result;
     }

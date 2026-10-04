@@ -94,10 +94,18 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
         var company = await repository.Company(actor, vehicle.CompanyId, ct) ?? throw new KeyNotFoundException();
         if (!company.ActiveOn(actor.Today))
             throw new ArgumentException("Restore the vehicle's archived company first.");
+        var returnedOn = input.ReturnedOn ?? actor.Today;
         var before = Snapshot(vehicle);
-        if (vehicle.Restore())
+        var left = vehicle.LeftOn;
+        if (vehicle.Restore(returnedOn, actor.Today))
+        {
+            // Naming the stretch in the change log is the only place the away days are stated in words.
+            var away = left is { } from && from < returnedOn
+                ? $"; it was away from {Date(from)} to {Date(returnedOn.AddDays(-1))}"
+                : "";
             await repository.RecordChange(actor, "vehicles", vehicle.Id, before, Snapshot(vehicle),
-                SetupPagination.Automatic($"Vehicle {vehicle.Registration} returned to the fleet", typed), ct);
+                SetupPagination.Automatic($"Vehicle {vehicle.Registration} returned to the fleet on {Date(returnedOn)}{away}", typed), ct);
+        }
         return vehicle.Id;
     }, ct);
 
@@ -125,6 +133,7 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
         vehicle.CompanyId,
         vehicle.JoinedOn,
         vehicle.LeftOn,
-        Targets = vehicle.Targets.Select(t => new { t.EffectiveFrom, t.WeeklyAmount, t.Revision }).ToArray()
+        Targets = vehicle.Targets.Select(t => new { t.EffectiveFrom, t.WeeklyAmount, t.Revision }).ToArray(),
+        Away = vehicle.AwayPeriods.OrderBy(p => p.LeftOn).Select(p => new { p.LeftOn, p.ReturnedOn }).ToArray()
     };
 }

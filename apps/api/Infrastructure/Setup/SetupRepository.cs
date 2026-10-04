@@ -88,7 +88,8 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 v.Registration,
                 v.JoinedOn,
                 v.LeftOn,
-                Targets = v.Targets.OrderBy(t => t.Revision).Select(t => new TargetDto(t.EffectiveFrom, t.WeeklyAmount, t.Revision)).ToList()
+                Targets = v.Targets.OrderBy(t => t.Revision).Select(t => new TargetDto(t.EffectiveFrom, t.WeeklyAmount, t.Revision)).ToList(),
+                Away = v.AwayPeriods.OrderBy(p => p.LeftOn).Select(p => new AwayPeriodDto(p.LeftOn, p.ReturnedOn)).ToList()
             })
             .ToListAsync(ct);
 
@@ -124,12 +125,13 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                     .FirstOrDefault()
                 : 0m;
             return new VehicleDto(v.Id, v.CompanyId, v.CompanyName, v.Registration, v.JoinedOn, v.LeftOn, active,
-                currentTarget, v.Targets, recurringItems.GetValueOrDefault(v.Id));
+                currentTarget, v.Targets, recurringItems.GetValueOrDefault(v.Id), v.Away);
         }).ToList(), page, pageSize, total);
     }
 
     public Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct) => VisibleVehicles(actor)
         .Include(v => v.Targets)
+        .Include(v => v.AwayPeriods)
         .SingleOrDefaultAsync(v => v.Id == id, ct);
 
     public async Task<IReadOnlyDictionary<Guid, FleetVehicle>> VehiclesById(SetupActor actor, IEnumerable<Guid> ids, CancellationToken ct)
@@ -259,7 +261,8 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             .ToList();
 
         // The revenue module's expected figure: the dated weekly target / 7 for each active day, where today counts
-        // only once it is captured.
+        // only once it is captured. A day the vehicle was away has no target (FleetVehicle.TargetOn), so it is not
+        // expected here either (D4).
         var moneyIn = records.Sum(r => r.Amount ?? 0m);
         var captured = records.Select(r => r.BusinessDate).ToHashSet();
         var target = 0m;

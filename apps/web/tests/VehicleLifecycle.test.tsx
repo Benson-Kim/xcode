@@ -96,6 +96,52 @@ it("keeps a retired vehicle read-only until it is restored, and reloads it after
   expect(screen.getByLabelText("Weekly performance target")).toHaveValue("15,000");
 });
 
+// D4: restoring a vehicle whose leave already took effect records the days it was away, so the editor has to say
+// which day it comes back and then show the stretch it missed.
+it("restores a retired vehicle on a chosen date and lists the days it was away", async () => {
+  const back = { ...retired, leftOn: null, active: true, away: [{ leftOn: "2026-09-10", returnedOn: "2026-09-21" }] };
+  const fetchMock = serve([[retired], [back]]);
+  renderInApp(<VehiclesPage />, { permissions: ["vehicles.manage"] }, { businessDate });
+
+  fireEvent.click(await screen.findByRole("button", { name: "KCY 117T" }));
+  // The return date follows the business date until someone chooses another.
+  expect(screen.getByLabelText("Returns to the fleet")).toHaveValue("2026-09-21");
+  expect(screen.getByText("10 to 20 Sep 2026 is recorded as time away: those days are neither expected nor missing.")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Restore to active fleet" }));
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/setup/vehicles/retired/restore",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ returnedOn: "2026-09-21" }) }),
+    ),
+  );
+
+  expect(await screen.findByText("Time away from the fleet")).toBeInTheDocument();
+  expect(screen.getByText("10 to 20 Sep 2026")).toBeInTheDocument();
+  expect(screen.getByText("Back on 21 Sep 2026")).toBeInTheDocument();
+  // Back in the fleet, so it can be edited and retired again.
+  expect(screen.getByLabelText("Weekly performance target")).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Retire vehicle" })).toBeInTheDocument();
+});
+
+it("says a return on the day it left undoes the leave instead of recording time away", async () => {
+  const fetchMock = serve([[retired]]);
+  renderInApp(<VehiclesPage />, { permissions: ["vehicles.manage"] }, { businessDate });
+
+  fireEvent.click(await screen.findByRole("button", { name: "KCY 117T" }));
+  fireEvent.change(screen.getByLabelText("Returns to the fleet"), { target: { value: "2026-09-10" } });
+  expect(screen.getByText("Returning on the day it left undoes the leave outright.")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Restore to active fleet" }));
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/setup/vehicles/retired/restore",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ returnedOn: "2026-09-10" }) }),
+    ),
+  );
+  expect(screen.queryByText("Time away from the fleet")).not.toBeInTheDocument();
+});
+
 it("says a share for a vehicle that is not in the fleet today does not post, without calling it retired", () => {
   vi.stubGlobal("fetch", vi.fn());
   const item = {

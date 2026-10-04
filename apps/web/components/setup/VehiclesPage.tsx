@@ -8,6 +8,7 @@ import { useSession } from "../../lib/session-context";
 import { kes, money, plural } from "../../lib/format";
 import type { ExpenseBucket } from "../../lib/types";
 import { formatDateOnly, formatDateRange, recurringFrequency } from "../recurringPresentation";
+import { shiftDate } from "../revenueFormat";
 import {
   Banner,
   Button,
@@ -261,6 +262,8 @@ function VehicleEditor({
   const [saveError, setSaveError] = useState("");
   const [lifecycleInput, setLifecycleDate] = useState<string | null>(vehicle?.leftOn ?? null);
   const lifecycleDate = lifecycleInput ?? today ?? "";
+  const [returnInput, setReturnDate] = useState<string | null>(null);
+  const returnedOn = returnInput ?? today ?? "";
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<VehicleTab>("details");
   // Each tab needs its own permission: the details and the report need vehicles.manage.
@@ -280,6 +283,8 @@ function VehicleEditor({
   // Retired means it has a leave date; a vehicle that is not active without one joins after the business date.
   const retired = Boolean(vehicle?.leftOn);
   const joinsLater = Boolean(vehicle && !vehicle.leftOn && vehicle.active === false);
+  // Newest first: the stretch someone is most likely to be checking is the one that just ended.
+  const away = [...(vehicle?.away ?? [])].reverse();
 
   async function retireVehicle() {
     if (!vehicle || retired) return;
@@ -302,15 +307,21 @@ function VehicleEditor({
 
   async function restoreVehicle() {
     if (!vehicle || !retired) return;
+    if (!returnedOn) return setSaveError("Choose the date it returns to the fleet.");
     setBusy(true);
     setSaveError("");
     try {
       await apiRequest(`setup/vehicles/${vehicle.id}/restore`, {
         method: "POST",
-        body: "{}",
+        body: JSON.stringify({ returnedOn }),
       });
       toast(`${vehicle.registration} returned to the active fleet.`);
-      onSaved({ ...vehicle, leftOn: null, active: true });
+      // A leave undone on its own date took effect for no day, so it leaves no stretch away behind (D4).
+      const away =
+        vehicle.leftOn && returnedOn > vehicle.leftOn
+          ? [...(vehicle.away ?? []), { leftOn: vehicle.leftOn, returnedOn }]
+          : vehicle.away;
+      onSaved({ ...vehicle, leftOn: null, active: true, away });
     } catch (value) {
       setSaveError((value as Error).message);
     } finally {
@@ -464,6 +475,25 @@ function VehicleEditor({
                 <Hint>
                   {vehicle.active === false ? "Left the fleet on" : "Leaves the fleet on"} {formatDateOnly(vehicle.leftOn!)}.
                 </Hint>
+                <Grid2 narrow>
+                  <Field
+                    id="vehicle-returned-on"
+                    label="Returns to the fleet"
+                    hint={
+                      returnedOn > vehicle.leftOn!
+                        ? `${formatDateRange(vehicle.leftOn!, shiftDate(returnedOn, -1))} is recorded as time away: those days are neither expected nor missing.`
+                        : "Returning on the day it left undoes the leave outright."
+                    }
+                  >
+                    <TextInput
+                      type="date"
+                      min={vehicle.leftOn!}
+                      max={today}
+                      value={returnedOn}
+                      onChange={(event) => setReturnDate(event.target.value)}
+                    />
+                  </Field>
+                </Grid2>
                 <FormActions>
                   <Button
                     tone="ok"
@@ -493,6 +523,20 @@ function VehicleEditor({
                   </Button>
                 </FormActions>
               </>
+            )}
+            {away.length > 0 && (
+              <div>
+                <p className="m-0 text-sm font-semibold">Time away from the fleet</p>
+                <CardList>
+                  {away.map((period) => (
+                    <CardListItem
+                      key={period.leftOn}
+                      left={formatDateRange(period.leftOn, shiftDate(period.returnedOn, -1))}
+                      rightSub={`Back on ${formatDateOnly(period.returnedOn)}`}
+                    />
+                  ))}
+                </CardList>
+              </div>
             )}
           </Card>
         )}
