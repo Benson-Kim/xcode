@@ -8,9 +8,9 @@ const PILL =
 // or pause, red to remove or block, plain grey to cancel or go back. Blue is for the main action that is none of those.
 const TONES = {
   primary:
-    "border-blue bg-blue text-white hover:enabled:border-blue-dark hover:enabled:bg-blue-dark aria-busy:bg-blue-busy",
+    "border-blue bg-blue text-on-fill hover:enabled:border-blue-dark hover:enabled:bg-blue-dark aria-busy:bg-blue-busy",
   outline: "border-blue bg-transparent text-blue hover:enabled:bg-blue-tint",
-  ok: "border-green bg-green text-white hover:enabled:border-green-dark hover:enabled:bg-green-dark aria-busy:opacity-80",
+  ok: "border-green bg-green text-on-fill hover:enabled:border-green-dark hover:enabled:bg-green-dark aria-busy:opacity-80",
   warn: "border-amber bg-amber-bg text-amber-text hover:enabled:bg-amber-hover",
   danger: "border-red bg-red-bg text-red-text hover:enabled:bg-red-hover",
   quiet: "border-line bg-transparent text-grey hover:enabled:bg-hover hover:enabled:text-navy",
@@ -82,7 +82,7 @@ export function Chip({
       {...props}
       type={type}
       className={cn(
-        "min-h-9 rounded-full border border-line bg-white px-3.5 text-sm font-semibold text-navy hover:enabled:border-blue hover:enabled:text-blue-dark disabled:cursor-not-allowed disabled:opacity-50",
+        "min-h-9 rounded-full border border-line bg-surface px-3.5 text-sm font-semibold text-navy hover:enabled:border-blue hover:enabled:text-blue-dark disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
     />
@@ -166,7 +166,7 @@ export function CardAction({
       className={cn(
         "mt-1.5 min-h-11 self-start rounded-full border-2 border-blue px-5 text-[15px] font-semibold",
         primary
-          ? "bg-blue text-white hover:bg-blue-dark"
+          ? "bg-blue text-on-fill hover:bg-blue-dark"
           : "bg-transparent text-blue hover:bg-blue-tint",
         className,
       )}

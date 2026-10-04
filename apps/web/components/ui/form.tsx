@@ -86,7 +86,7 @@ function useFieldProps<
 }
 
 const CONTROL =
-  "rounded-[10px] border border-line bg-white px-3 text-navy placeholder:text-grey/70 focus:border-blue focus:outline-3 focus:outline-offset-1 focus:outline-blue/30 aria-invalid:border-2 aria-invalid:border-red disabled:bg-hover disabled:text-grey";
+  "rounded-[10px] border border-line bg-surface px-3 text-navy placeholder:text-grey/70 focus:border-blue focus:outline-3 focus:outline-offset-1 focus:outline-blue/30 aria-invalid:border-2 aria-invalid:border-red disabled:bg-hover disabled:text-grey";
 const DENSITY = {
   standard: "h-12 text-base",
   compact: "h-11 text-[15px]",
@@ -208,7 +208,7 @@ export function ColorInput({
         value={valid ? value.toLowerCase() : "#000000"}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value.toUpperCase())}
-        className="h-12 w-14 shrink-0 cursor-pointer rounded-[10px] border border-line bg-white p-1 disabled:cursor-default"
+        className="h-12 w-14 shrink-0 cursor-pointer rounded-[10px] border border-line bg-surface p-1 disabled:cursor-default"
       />
       <TextInput
         value={value}

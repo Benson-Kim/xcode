@@ -2,6 +2,9 @@ import { createContext, useContext, type ReactNode } from "react";
 
 // Colours that follow the organization's branding (primary, secondary, accent)
 //  are read through useTheme() so a saved brand can replace them.
+// Three of them say what a colour is for rather than what it looks like, because the dark palette moves them in
+// opposite directions: "surface" is what a card, a field or a sheet sits on, "onBrand" the ink on the brand colour
+// (which stays dark in both themes) and "onFill" the ink on a blue or green fill (which lightens in the dark one).
 export const palette = {
   cream: "#F6F3EC",
   navy: "#14213D",
@@ -27,11 +30,45 @@ export const palette = {
   amberText: "#6B4200",
   green: "#1E6B3A",
   greenBg: "#E3F1E8",
-  white: "#FFFFFF",
+  surface: "#FFFFFF",
+  onBrand: "#FFFFFF",
+  onFill: "#FFFFFF",
   scrim: "rgba(20, 33, 61, 0.4)",
 };
 
 export type Palette = typeof palette;
+
+// The same design read against a dark surface, kept in step with :root[data-theme="dark"] in the web's globals.css.
+export const darkPalette: Palette = {
+  cream: "#0F1520",
+  navy: "#E9EDF3",
+  brand: "#223253",
+  grey: "#A3AEBF",
+  blue: "#7FA9F5",
+  blueDark: "#A9C6F9",
+  blueBusy: "#5C7FB8",
+  blueTint: "#16202F",
+  blueWash: "#131A26",
+  line: "#394657",
+  keyLine: "#2F3A48",
+  cardLine: "#2B3542",
+  divider: "#242D3A",
+  pressed: "#202936",
+  field: "#151C27",
+  red: "#F0776B",
+  redBg: "#2A1512",
+  redLine: "#5E2A23",
+  redText: "#FFB4A9",
+  amberBg: "#2A2011",
+  amberLine: "#5C4520",
+  amberText: "#F6CE86",
+  green: "#5FC183",
+  greenBg: "#14291C",
+  surface: "#1A222F",
+  onBrand: "#FFFFFF",
+  onFill: "#0F1520",
+  scrim: "rgba(0, 0, 0, 0.6)",
+};
 
 export const fonts = {
   regular: "Figtree_400Regular",
@@ -42,12 +79,15 @@ export const fonts = {
 
 export type Theme = {
   colors: Palette;
+  // Which palette is in use, for the few things a colour cannot say: the status bar's ink, mainly.
+  dark: boolean;
   reducedMotion: boolean;
   fontScale: number;
 };
 
 export const defaultTheme: Theme = {
   colors: palette,
+  dark: false,
   reducedMotion: false,
   fontScale: 1,
 };

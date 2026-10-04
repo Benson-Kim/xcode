@@ -344,7 +344,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
       <AppearanceProvider value={appearanceState}>
         <ToastProvider>
           <div className="flex min-h-screen flex-col">
-            <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-card-line bg-white px-5 max-[899px]:gap-1.5 max-[899px]:pr-2 max-[899px]:pl-1">
+            <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-card-line bg-surface px-5 max-[899px]:gap-1.5 max-[899px]:pr-2 max-[899px]:pl-1">
               <IconButton
                 className="hidden max-[899px]:grid"
                 aria-label="Open menu"
@@ -391,7 +391,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                 {userMenuOpen && (
                   <div
                     role="menu"
-                    className="absolute top-13 right-0 z-40 min-w-50 rounded-xl border border-card-line bg-white p-1.5 shadow-menu"
+                    className="absolute top-13 right-0 z-40 min-w-50 rounded-xl border border-card-line bg-surface p-1.5 shadow-menu"
                   >
                     <MenuButton
                       onClick={() => {
@@ -414,7 +414,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                 id="main-menu"
                 aria-label="Main"
                 className={cn(
-                  "w-62 shrink-0 overflow-y-auto border-r border-card-line bg-white px-3 py-4",
+                  "w-62 shrink-0 overflow-y-auto border-r border-card-line bg-surface px-3 py-4",
                   "max-[899px]:fixed max-[899px]:top-16 max-[899px]:bottom-0 max-[899px]:left-0 max-[899px]:z-30 max-[899px]:transition-transform motion-reduce:transition-none",
                   menuOpen
                     ? "max-[899px]:shadow-drawer"
@@ -709,7 +709,7 @@ function Dashboard({
         title="Dashboard"
         description="Your fleet at a glance, based on the access you have."
       />
-      <div className="mt-5 mb-6 flex flex-wrap items-center gap-3 rounded-[14px] border border-card-line bg-white p-3 max-[480px]:flex-col max-[480px]:items-stretch">
+      <div className="mt-5 mb-6 flex flex-wrap items-center gap-3 rounded-[14px] border border-card-line bg-surface p-3 max-[480px]:flex-col max-[480px]:items-stretch">
         <SegmentedControl
           label="Period"
           options={[...periods]}

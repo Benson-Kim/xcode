@@ -25,7 +25,7 @@ export function WhoRow({ initials, name, role, action }: { initials: string; nam
     <View style={styles.who}>
       <View style={[styles.avatar, { backgroundColor: colors.brand }]} aria-hidden>
         {/* Decorative initials keep their size so a larger text preference cannot push them out of the circle. */}
-        <Text weight="bold" style={{ color: colors.white, fontSize: 16 / fontScale, lineHeight: 20 / fontScale }}>
+        <Text weight="bold" style={{ color: colors.onBrand, fontSize: 16 / fontScale, lineHeight: 20 / fontScale }}>
           {initials}
         </Text>
       </View>
@@ -51,7 +51,7 @@ export function IconButton({ icon, label, onPress, disabled }: { icon: IconName;
       accessibilityState={{ disabled: Boolean(disabled) }}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [styles.iconButton, { borderColor: colors.keyLine, backgroundColor: pressed ? colors.blueWash : colors.white }, disabled && { opacity: 0.35 }]}
+      style={({ pressed }) => [styles.iconButton, { borderColor: colors.keyLine, backgroundColor: pressed ? colors.blueWash : colors.surface }, disabled && { opacity: 0.35 }]}
     >
       <Icon name={icon} size={22} color={colors.navy} />
     </Pressable>
@@ -72,7 +72,7 @@ export function Segmented<T extends string>({ label, options, value, onChange }:
             // The track's padding counts as part of each option, so every option is at least 48 points tall to touch.
             hitSlop={{ top: 4, bottom: 4 }}
             onPress={() => onChange(option.value)}
-            style={[styles.segment, selected && [styles.selected, { backgroundColor: colors.white }]]}
+            style={[styles.segment, selected && [styles.selected, { backgroundColor: colors.surface }]]}
           >
             <Text weight="semibold" style={{ fontSize: 14, textAlign: "center", color: selected ? colors.navy : colors.grey }}>
               {option.label}
@@ -87,7 +87,7 @@ export function Segmented<T extends string>({ label, options, value, onChange }:
 export function Card({ title, sub, children }: { title: string; sub?: string; children?: ReactNode }) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.card, { borderColor: colors.cardLine, backgroundColor: colors.white }]}>
+    <View style={[styles.card, { borderColor: colors.cardLine, backgroundColor: colors.surface }]}>
       <View style={styles.cardHeader}>
         <Text weight="bold" accessibilityRole="header" style={styles.cardTitle}>
           {title}
@@ -148,7 +148,7 @@ export function CardAction({ children, primary, onPress }: { children: string; p
         { borderColor: colors.blue, backgroundColor: primary ? (pressed ? colors.blueDark : colors.blue) : pressed ? colors.blueWash : "transparent" },
       ]}
     >
-      <Text weight="semibold" style={{ color: primary ? colors.white : colors.blue }}>
+      <Text weight="semibold" style={{ color: primary ? colors.onFill : colors.blue }}>
         {children}
       </Text>
     </Pressable>

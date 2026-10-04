@@ -267,7 +267,7 @@ export function RevenuePage() {
 
       {!data ? (
         week.loading && (
-          <LoadingRegion label="Loading revenue" className="mt-4 overflow-hidden rounded-[14px] border border-card-line bg-white">
+          <LoadingRegion label="Loading revenue" className="mt-4 overflow-hidden rounded-[14px] border border-card-line bg-surface">
             <table className="w-full border-collapse">
               <tbody>
                 <TableRowsSkeleton columns={4} />
@@ -278,7 +278,7 @@ export function RevenuePage() {
       ) : (
         // relative: the card is the containing block for the screen-reader-only labels (absolutely positioned) in the
         // grid, so they scroll with it instead of widening the page at tablet widths.
-        <div ref={gridRef} tabIndex={-1} className="relative mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-white">
+        <div ref={gridRef} tabIndex={-1} className="relative mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-surface">
           <table className="w-full border-collapse min-[721px]:min-w-225">
             <caption className="sr-only">Revenue by vehicle and day, {rangeLabel(data.weekStart, data.weekThrough)}</caption>
             <thead>
@@ -319,7 +319,7 @@ export function RevenuePage() {
                   return (
                     <Fragment key={item.id}>
                       <tr>
-                        <th scope="row" className={cn(CELL, "sticky left-0 z-1 min-w-35 bg-white text-left font-normal")}>
+                        <th scope="row" className={cn(CELL, "sticky left-0 z-1 min-w-35 bg-surface text-left font-normal")}>
                           <button
                             type="button"
                             aria-expanded={isOpen}
@@ -740,7 +740,11 @@ function CaptureForm({
         </>
       ) : (
         <>
-          <Field id="revenue-amount" label="Revenue">
+          <Field
+            id="revenue-amount"
+            label="Revenue"
+            hint="What the vehicle handed in for the day, after the crew settle fuel and their own pay."
+          >
             <CurrencyInput
               ref={amountRef}
               value={amount}
@@ -764,7 +768,7 @@ function CaptureForm({
                     type="button"
                     aria-pressed={reason === item}
                     onClick={() => choose(item)}
-                    className="min-h-12 rounded-xl border border-line bg-white text-[15px] font-semibold aria-pressed:border-2 aria-pressed:border-blue aria-pressed:bg-blue-soft aria-pressed:text-blue-dark"
+                    className="min-h-12 rounded-xl border border-line bg-surface text-[15px] font-semibold aria-pressed:border-2 aria-pressed:border-blue aria-pressed:bg-blue-soft aria-pressed:text-blue-dark"
                   >
                     {item}
                   </button>

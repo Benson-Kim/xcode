@@ -95,12 +95,12 @@ export function PinPad({
               <Text
                 weight="bold"
                 // Decorative initials keep their size so a larger text preference cannot push them out of the circle.
-                style={{ color: colors.white, fontSize: (short ? 17 : 21) / fontScale, lineHeight: (short ? 22 : 27) / fontScale }}
+                style={{ color: colors.onBrand, fontSize: (short ? 17 : 21) / fontScale, lineHeight: (short ? 22 : 27) / fontScale }}
               >
                 {header.initials}
               </Text>
             ) : (
-              <Icon name="lock" size={24} color={colors.white} />
+              <Icon name="lock" size={24} color={colors.onBrand} />
             )}
           </View>
           <Text weight="bold" accessibilityRole="header" style={styles.title}>
@@ -167,7 +167,7 @@ export function PinPad({
                         borderColor: pressed ? colors.blue : colors.keyLine,
                         backgroundColor: pressed
                           ? colors.blueWash
-                          : colors.white,
+                          : colors.surface,
                       },
                   busy && styles.disabled,
                 ]}

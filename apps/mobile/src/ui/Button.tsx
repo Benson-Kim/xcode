@@ -58,7 +58,7 @@ export function Button({
     >
       <Text
         weight="semibold"
-        style={[styles.label, { color: primary ? colors.white : colors.blue }]}
+        style={[styles.label, { color: primary ? colors.onFill : colors.blue }]}
       >
         {busy && busyText ? busyText : children}
       </Text>

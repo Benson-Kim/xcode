@@ -197,7 +197,7 @@ export function MoreScreen({ person, catalog, busy, onLock, onSwitchUser }: { pe
       {links.length > 0 && (
         <View style={{ gap: 12 }}>
           <SectionTitle>Setup</SectionTitle>
-          <View style={[styles.links, { borderColor: colors.cardLine, backgroundColor: colors.white }]}>
+          <View style={[styles.links, { borderColor: colors.cardLine, backgroundColor: colors.surface }]}>
             {links.map((link, index) => (
               <View
                 key={link.label}
@@ -213,7 +213,7 @@ export function MoreScreen({ person, catalog, busy, onLock, onSwitchUser }: { pe
         </View>
       )}
       <SectionTitle>Your access</SectionTitle>
-      <View style={[styles.access, { borderColor: colors.cardLine, backgroundColor: colors.white }]}>
+      <View style={[styles.access, { borderColor: colors.cardLine, backgroundColor: colors.surface }]}>
         <View>
           <Text style={{ fontSize: 13, color: colors.grey }}>Role</Text>
           <Text weight="semibold">{person.role || "Not assigned"}</Text>

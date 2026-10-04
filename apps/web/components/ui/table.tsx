@@ -34,7 +34,7 @@ export function DataTable({
       className={cn(
         // A table wider than the card scrolls inside it: clipping would put the last columns, and the row
         // actions in them, out of reach with no way to get at them.
-        "mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-white",
+        "mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-surface",
         className,
       )}
     >

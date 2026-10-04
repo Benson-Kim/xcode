@@ -26,7 +26,7 @@ export function Brand({
         />
       ) : (
         <View style={[styles.mark, { backgroundColor: colors.brand }]}>
-          <Icon name="brand" size={20} color={colors.white} />
+          <Icon name="brand" size={20} color={colors.onBrand} />
         </View>
       )}
       <View style={styles.names}>

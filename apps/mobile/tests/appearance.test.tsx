@@ -1,5 +1,6 @@
 import { fireEvent, screen } from "@testing-library/react-native";
-import { themeFor, type Appearance } from "../src/appearance";
+import { resolveTheme, themeFor, type Appearance } from "../src/appearance";
+import { darkPalette, mix, palette } from "../src/ui";
 import { configureFormats, money } from "../src/lib/format";
 import { periodLabel } from "../src/shell/access";
 import { catalog, fakeApi, people, revenueDashboard, tokens } from "./fakeApi";
@@ -26,6 +27,34 @@ it("mixes the organization's colours into the theme as XCODE Web does", () => {
   expect(theme.fontScale).toBe(1.25);
   // An invalid colour keeps the design's.
   expect(themeFor({ ...appearance, branding: { ...appearance.branding, primary: "teal" } }).colors.blue).toBe("#1D5FD6");
+});
+
+it("reads the organization's colours against a dark surface when the theme asks for one", () => {
+  // "system" follows the phone. An organization that locks the theme is sent "light", so the phone is not consulted.
+  expect(resolveTheme("system", true)).toBe("dark");
+  expect(resolveTheme("light", true)).toBe("light");
+  expect(resolveTheme("dark", false)).toBe("dark");
+  expect(themeFor(appearance, true).dark).toBe(true);
+  expect(themeFor(appearance, false).dark).toBe(false);
+
+  const dark = themeFor({ ...appearance, themeMode: "dark" }, false);
+  // The page, the ink and the surface a card sits on all swap over.
+  expect(dark.colors.cream).toBe(darkPalette.cream);
+  expect(dark.colors.navy).toBe(darkPalette.navy);
+  expect(dark.colors.surface).toBe(darkPalette.surface);
+  // The organization's primary is lightened, because the ink on a filled button goes dark here...
+  expect(dark.colors.blue).toBe(mix("#0B7A75", 60, "#FFFFFF"));
+  expect(dark.colors.onFill).toBe(darkPalette.onFill);
+  // ...while the ink on the brand colour stays white, because that fill stays dark in both themes.
+  expect(dark.colors.brand).toBe("#3B1F5C");
+  expect(dark.colors.onBrand).toBe("#FFFFFF");
+  // A tint is mixed towards the surface it will sit on rather than towards white.
+  expect(dark.colors.blueTint).toBe(mix("#0B7A75", 18, darkPalette.field));
+  // Every colour the app asks for exists in both palettes, so no screen can fall back to a light one.
+  expect(Object.keys(dark.colors).sort()).toEqual(Object.keys(palette).sort());
+  // Before the first appearance arrives - the unlock screen offline - the phone's own setting still decides.
+  expect(themeFor(null, true).colors.cream).toBe(darkPalette.cream);
+  expect(themeFor(null, false).colors.cream).toBe(palette.cream);
 });
 
 it("formats money in the organization's currency", () => {

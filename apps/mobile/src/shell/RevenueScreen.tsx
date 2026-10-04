@@ -386,7 +386,7 @@ type Colors = ReturnType<typeof useTheme>["colors"];
 // Rows sit in one white list, as in the design: rounded at the ends, a divider between them.
 const rowShell = (first: boolean, last: boolean, colors: Colors) => [
   styles.row,
-  { borderColor: colors.cardLine, backgroundColor: colors.white },
+  { borderColor: colors.cardLine, backgroundColor: colors.surface },
   first && styles.firstRow,
   last && styles.lastRow,
   !first && { borderTopWidth: 1, borderTopColor: colors.divider },
@@ -693,7 +693,7 @@ function QueuePanel({ queue, canReplace, onOpenDay }: { queue: RevenueQueue; can
       {queue.entries
         .filter((entry) => entry.state !== "pending")
         .map((entry) => (
-          <View key={keyOf(entry.vehicleId, entry.date)} style={[styles.problem, { borderColor: colors.cardLine, backgroundColor: colors.white }]}>
+          <View key={keyOf(entry.vehicleId, entry.date)} style={[styles.problem, { borderColor: colors.cardLine, backgroundColor: colors.surface }]}>
             <Text weight="bold">{`${entry.registration}, ${longDayLabel(entry.date)}`}</Text>
             <Text style={{ fontSize: 14 }}>{entry.message}</Text>
             {entry.state === "conflict" ? (
@@ -799,7 +799,7 @@ function CaptureSheet({
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={[styles.scrim, { backgroundColor: colors.scrim }]} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <View accessibilityViewIsModal style={[styles.sheet, { backgroundColor: colors.white }]}>
+        <View accessibilityViewIsModal style={[styles.sheet, { backgroundColor: colors.surface }]}>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.sheetContent, { paddingBottom: 28 + insets.bottom }]}>
             <View style={styles.sheetHead}>
               <View style={{ flex: 1 }}>
@@ -814,6 +814,10 @@ function CaptureSheet({
             <View style={{ gap: 8 }}>
               <Text weight="semibold" style={{ fontSize: 15 }}>
                 Revenue
+              </Text>
+              {/* The figure is the day's net revenue: the crew settle fuel and their own pay out of the takings. */}
+              <Text style={{ fontSize: 13, color: colors.grey }}>
+                What the vehicle handed in for the day, after the crew settle fuel and their own pay.
               </Text>
               <View style={styles.money}>
                 <View style={[styles.currency, { borderColor: colors.line, backgroundColor: colors.field }]}>
@@ -857,7 +861,7 @@ function CaptureSheet({
                           setAmount("");
                           setError("");
                         }}
-                        style={[styles.reason, chosen ? { borderWidth: 2, borderColor: colors.blue, backgroundColor: colors.blueTint } : { borderColor: colors.line, backgroundColor: colors.white }]}
+                        style={[styles.reason, chosen ? { borderWidth: 2, borderColor: colors.blue, backgroundColor: colors.blueTint } : { borderColor: colors.line, backgroundColor: colors.surface }]}
                       >
                         <Text weight="semibold" style={{ color: chosen ? colors.blueDark : colors.navy }}>
                           {item}

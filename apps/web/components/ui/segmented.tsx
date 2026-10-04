@@ -22,7 +22,7 @@ export function SegmentedControl<T extends string>({
           type="button"
           aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
-          className="min-h-10 rounded-full px-4 text-sm font-semibold text-grey aria-pressed:bg-white aria-pressed:text-navy aria-pressed:shadow-seg"
+          className="min-h-10 rounded-full px-4 text-sm font-semibold text-grey aria-pressed:bg-surface aria-pressed:text-navy aria-pressed:shadow-seg"
         >
           {option.label}
         </button>

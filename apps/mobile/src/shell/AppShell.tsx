@@ -97,7 +97,7 @@ export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, 
           )}
         </ScrollView>
       )}
-      <View accessibilityRole="tablist" accessibilityLabel="Main" style={[styles.nav, { borderTopColor: colors.cardLine, backgroundColor: colors.white, paddingBottom: insets.bottom }]}>
+      <View accessibilityRole="tablist" accessibilityLabel="Main" style={[styles.nav, { borderTopColor: colors.cardLine, backgroundColor: colors.surface, paddingBottom: insets.bottom }]}>
         {tabs.map((item) => {
           const current = item.id === tab;
           const badge = item.id === "revenue" && unsent.length ? counts.waiting + counts.conflicts + counts.failed : 0;
@@ -121,7 +121,7 @@ export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, 
                       { backgroundColor: counts.conflicts || counts.failed ? colors.red : colors.amberText },
                     ]}
                   >
-                    <Text weight="bold" style={{ fontSize: 11, lineHeight: 14, color: colors.white }}>
+                    <Text weight="bold" style={{ fontSize: 11, lineHeight: 14, color: colors.onFill }}>
                       {badge > 99 ? "99+" : String(badge)}
                     </Text>
                   </View>

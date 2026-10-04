@@ -46,7 +46,7 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
                 : colors.line,
             borderWidth: error ? 2 : 1,
             color: colors.navy,
-            backgroundColor: colors.white,
+            backgroundColor: colors.surface,
             // The design's soft focus ring, in place of the browser's own in the web preview.
             outlineStyle: "solid",
             outlineWidth: focused ? 3 : 0,

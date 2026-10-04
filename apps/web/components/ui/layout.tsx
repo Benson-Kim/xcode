@@ -18,7 +18,7 @@ export function Toolbar({ align = "center", className, ...props }: ComponentProp
     <div
       {...props}
       className={cn(
-        "mt-5 flex flex-wrap gap-3 rounded-[14px] border border-card-line bg-white p-3",
+        "mt-5 flex flex-wrap gap-3 rounded-[14px] border border-card-line bg-surface p-3",
         align === "start" ? "items-start" : "items-center",
         className,
       )}
