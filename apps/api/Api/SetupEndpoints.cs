@@ -127,8 +127,13 @@ public static class SetupEndpoints
             .Produces<IdResponse>().WithName("StopSetupRecurring");
         group.MapPost("/recurring/{id:guid}/restore", async (Guid id, RecurringUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.CancelStop(id, ct))))
             .Produces<IdResponse>().WithName("CancelSetupRecurringStop");
-        group.MapGet("/history", (ISetupExecution execution, ISetupRepository repository, CancellationToken ct, int page = 1, int pageSize = 25) =>
-            execution.Read("audit.view", actor => { SetupPagination.Validate(page, pageSize); return repository.History(actor, page, pageSize, ct); }, ct))
+        group.MapGet("/history", (ISetupExecution execution, ISetupRepository repository, CancellationToken ct, int page = 1, int pageSize = 25,
+            string? section = null, DateOnly? from = null, DateOnly? to = null, string? text = null) =>
+            execution.Read("audit.view", actor =>
+            {
+                SetupPagination.Validate(page, pageSize);
+                return repository.History(actor, HistoryFilter.Of(section, from, to, text), page, pageSize, ct);
+            }, ct))
             .Produces<Page<HistoryEntry>>().WithName("ListSetupHistory");
 
         // Expense categories and items (contract C3).

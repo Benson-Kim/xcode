@@ -219,5 +219,55 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         Assert.Equal(OrganizationLogo.MaxBytes, logo.Data.Length);
     }
 
+    [Fact]
+    public async Task TheChangeLogIsNarrowedByItsFilters()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        await Id(await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("Westlands Movers")));
+        await Id(await owner.PostAsJsonAsync("/setup/expense-categories", new SaveExpenseCategory("Tolls and levies", ExpenseBucket.RecurringCharges)));
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var day = (DateOnly date) => date.ToString("yyyy-MM-dd");
+
+        async Task<Page<HistoryEntry>> Log(string query) =>
+            (await owner.GetFromJsonAsync<Page<HistoryEntry>>($"/setup/history?pageSize=100{query}"))!;
+
+        var all = await Log("");
+        Assert.Contains(all.Items, x => x.Section == "companies");
+        Assert.Contains(all.Items, x => x.Section == "expenses");
+
+        // One section only, and the count describes the narrowed log, not the whole one, so Load more means
+        // more of what was asked for.
+        var companies = await Log("&section=companies");
+        Assert.All(companies.Items, x => Assert.Equal("companies", x.Section));
+        Assert.Equal(companies.Items.Count, companies.Total);
+        Assert.True(companies.Total < all.Total);
+
+        // The text matches the reason a line gives...
+        var named = await Log("&text=Westlands");
+        Assert.NotEmpty(named.Items);
+        Assert.All(named.Items, x => Assert.Contains("Westlands", x.Reason));
+        // ...or the person who made the change, which is the other thing a line shows...
+        var byPerson = await Log("&text=antony");
+        Assert.NotEmpty(byPerson.Items);
+        Assert.All(byPerson.Items, x => Assert.Contains("Antony", x.ActorName));
+        // ...and nothing else. A wildcard typed into the box is a character to look for, not a pattern.
+        Assert.Empty((await Log("&text=nobody%20wrote%20this")).Items);
+        Assert.Empty((await Log("&text=%25")).Items);
+
+        // Both ends of a range are included, and a day on either side of everything holds nothing.
+        Assert.Equal(all.Total, (await Log($"&from={day(today)}&to={day(today)}")).Total);
+        Assert.Empty((await Log($"&from={day(today.AddDays(1))}")).Items);
+        Assert.Empty((await Log($"&to={day(today.AddDays(-1))}")).Items);
+
+        // Filters narrow together, not one at a time.
+        Assert.Empty((await Log($"&section=companies&text=Tolls")).Items);
+
+        // A backwards range is a mistake, and is named as one rather than quietly returning nothing.
+        var refused = await owner.GetAsync($"/setup/history?from={day(today)}&to={day(today.AddDays(-1))}");
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("cannot be after", await refused.Content.ReadAsStringAsync());
+    }
+
     public void Dispose() => app.Dispose();
 }

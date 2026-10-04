@@ -5,7 +5,7 @@ import { apiRequest } from "../../lib/data";
 import { formatDateTime } from "../../lib/format";
 import type { Page } from "../../lib/types";
 import { formatDateOnly } from "../recurringPresentation";
-import { Banner, Button, DataTable, Hint, PageHeader, Td, Tr } from "../ui";
+import { Banner, Button, DataTable, Hint, PageHeader, SelectInput, Td, TextInput, Toolbar, Tr } from "../ui";
 import type { HistoryRow } from "./shared";
 
 const PAGE_SIZE = 25;
@@ -106,31 +106,55 @@ export function fieldChanges(before?: string | null, after?: string | null): Fie
     .filter((change) => change.before !== change.after);
 }
 
-type Loaded = { items: HistoryRow[]; total: number; pages: number; done: boolean; error: string };
+// What the filter bar is asking for. "all" and the empty strings mean "not narrowed".
+type Filters = { section: string; from: string; to: string; text: string };
+
+const NOTHING_SET: Filters = { section: "all", from: "", to: "", text: "" };
+
+const narrowed = (filters: Filters) => filters.section !== "all" || Boolean(filters.from || filters.to || filters.text.trim());
+
+// Only the parts that are set are sent, so the request says exactly what the person asked for.
+function search(filters: Filters) {
+  const parts: string[] = [];
+  if (filters.section !== "all") parts.push(`section=${encodeURIComponent(filters.section)}`);
+  if (filters.from) parts.push(`from=${filters.from}`);
+  if (filters.to) parts.push(`to=${filters.to}`);
+  if (filters.text.trim()) parts.push(`text=${encodeURIComponent(filters.text.trim())}`);
+  return parts.length ? `&${parts.join("&")}` : "";
+}
+
+// The pages held for one query. The query is part of it, so a change of filter is answered by rendering an
+// empty list rather than by clearing this in an effect, which would cost a second render.
+type Loaded = { query: string; items: HistoryRow[]; total: number; pages: number; done: boolean; error: string };
+
+const nothingYet = (query: string): Loaded => ({ query, items: [], total: 0, pages: 0, done: false, error: "" });
 
 const rowKey = (row: HistoryRow) => `${row.version}-${row.entityId}`;
 
 // The change log a page at a time: the first page when it opens, and the next only when the person asks for it.
 // Changes saved meanwhile push older rows down a page, so rows already shown are not added twice.
-function useHistoryPages() {
-  const [loaded, setLoaded] = useState<Loaded>({ items: [], total: 0, pages: 0, done: false, error: "" });
+// The filter is part of the request, so the server counts the narrowed log and "Load more" means more of it;
+// changing the filter starts again at page 1.
+function useHistoryPages(query: string) {
+  const [loaded, setLoaded] = useState<Loaded>(() => nothingYet(query));
   const [pending, setPending] = useState<number | null>(1);
 
   const receive = useCallback(
     (page: number) =>
-      apiRequest<Page<HistoryRow>>(`setup/history?page=${page}&pageSize=${PAGE_SIZE}`)
+      apiRequest<Page<HistoryRow>>(`setup/history?page=${page}&pageSize=${PAGE_SIZE}${query}`)
         .then(
           (result) =>
             setLoaded((current) => {
-              const kept = page === 1 ? [] : current.items;
+              const kept = page === 1 || current.query !== query ? [] : current.items;
               const seen = new Set(kept.map(rowKey));
               const items = [...kept, ...result.items.filter((row) => !seen.has(rowKey(row)))];
-              return { items, total: result.total, pages: page, done: result.items.length < PAGE_SIZE || items.length >= result.total, error: "" };
+              return { query, items, total: result.total, pages: page, done: result.items.length < PAGE_SIZE || items.length >= result.total, error: "" };
             }),
-          (error: Error) => setLoaded((current) => ({ ...current, error: error.message })),
+          // The query is stamped here too, so a first page that fails stops being "still loading" and says why.
+          (error: Error) => setLoaded((current) => ({ ...(current.query === query ? current : nothingYet(query)), error: error.message })),
         )
         .finally(() => setPending(null)),
-    [],
+    [query],
   );
 
   useEffect(() => {
@@ -143,11 +167,15 @@ function useHistoryPages() {
     void receive(loaded.pages + 1);
   }
 
+  // Rows from an earlier filter are not this filter's answer, so they are not shown while its first page is on
+  // its way: a changed query is loading by definition.
+  const changed = loaded.query !== query;
+  const shown = changed ? nothingYet(query) : loaded;
   return {
-    ...loaded,
-    loading: loaded.pages === 0 && pending === 1,
-    loadingMore: loaded.pages > 0 && pending !== null,
-    hasMore: loaded.pages > 0 && !loaded.done,
+    ...shown,
+    loading: changed || (shown.pages === 0 && pending !== null),
+    loadingMore: !changed && shown.pages > 0 && pending !== null,
+    hasMore: !changed && shown.pages > 0 && !shown.done,
     more,
   };
 }
@@ -182,12 +210,58 @@ function ChangeTable({ caption, changes }: { caption: string; changes: FieldChan
 }
 
 export function HistoryPage() {
-  const history = useHistoryPages();
+  const [filters, setFilters] = useState<Filters>(NOTHING_SET);
+  // A section or a date is one choice and is asked for as it is made. Typing is not: the box settles first, so
+  // a word is one request rather than one per letter.
+  const [settled, setSettled] = useState("");
+  useEffect(() => {
+    if (filters.text === settled) return;
+    const settle = setTimeout(() => setSettled(filters.text), 350);
+    return () => clearTimeout(settle);
+  }, [filters.text, settled]);
+
+  const applied = { ...filters, text: settled };
+  const history = useHistoryPages(search(applied));
   const rows = history.items;
+  const some = narrowed(applied);
+  const set = (part: Partial<Filters>) => setFilters((current) => ({ ...current, ...part }));
+  const label = "text-[13px] text-grey";
   return (
     <section>
       <PageHeader title="Change log" description="Who changed what in setup, organization settings, people and access, with each value before and after the change." />
       {history.error && <Banner className="mt-5">{history.error}</Banner>}
+
+      <Toolbar>
+        <label htmlFor="log-section" className={label}>
+          Section
+        </label>
+        <SelectInput id="log-section" density="compact" inline value={filters.section} onChange={(event) => set({ section: event.target.value })}>
+          <option value="all">All sections</option>
+          {Object.entries(sections).map(([key, name]) => (
+            <option key={key} value={key}>
+              {name}
+            </option>
+          ))}
+        </SelectInput>
+        <label htmlFor="log-from" className={label}>
+          From
+        </label>
+        {/* The range cannot be set backwards here, and the server refuses it as well. */}
+        <TextInput id="log-from" type="date" density="compact" inline max={filters.to || undefined} value={filters.from} onChange={(event) => set({ from: event.target.value })} />
+        <label htmlFor="log-to" className={label}>
+          To
+        </label>
+        <TextInput id="log-to" type="date" density="compact" inline min={filters.from || undefined} value={filters.to} onChange={(event) => set({ to: event.target.value })} />
+        <label htmlFor="log-search" className={label}>
+          Search
+        </label>
+        <TextInput id="log-search" type="search" density="compact" inline placeholder="A reason or a name" value={filters.text} onChange={(event) => set({ text: event.target.value })} />
+        {narrowed(filters) && (
+          <Button tone="quiet" onClick={() => setFilters(NOTHING_SET)}>
+            Clear
+          </Button>
+        )}
+      </Toolbar>
 
       <DataTable
         columns={[
@@ -200,7 +274,7 @@ export function HistoryPage() {
         loadingLabel="Loading the change log"
         isEmpty={!rows.length}
         failed={Boolean(history.error)}
-        emptyMessage="No setup changes yet."
+        emptyMessage={some ? "No changes match this filter." : "No setup changes yet."}
       >
         {rows.map((row) => {
           const what = `${sections[row.section] ?? row.section}: ${row.reason}`;
@@ -222,7 +296,11 @@ export function HistoryPage() {
       {rows.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Hint>
-            {history.hasMore ? `Showing ${rows.length} of ${history.total} changes` : rows.length === 1 ? "1 change" : `Showing all ${rows.length} changes`}
+            {history.hasMore
+              ? `Showing ${rows.length} of ${history.total} changes${some ? " that match" : ""}`
+              : rows.length === 1
+                ? `1 change${some ? " matches" : ""}`
+                : `Showing all ${rows.length} changes${some ? " that match" : ""}`}
           </Hint>
           {history.hasMore && (
             <Button tone="outline" disabled={history.loadingMore} aria-busy={history.loadingMore || undefined} onClick={history.more}>

@@ -277,7 +277,7 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             savings, net - savings, moneyOut, postings);
     }
 
-    public async Task<Page<HistoryEntry>> History(SetupActor actor, int page, int pageSize, CancellationToken ct)
+    public async Task<Page<HistoryEntry>> History(SetupActor actor, HistoryFilter filter, int page, int pageSize, CancellationToken ct)
     {
         var vehicles = VisibleVehicles(actor).Select(v => v.Id);
         var companies = VisibleCompanies(actor).Select(c => c.Id);
@@ -296,12 +296,53 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             (v.Section == "recurring" && completeItems.Contains(v.EntityId)) || v.Section == "expenses" ||
             (v.Section == "investment" && vehicles.Contains(v.EntityId)) || (v.Section == "people" && people.Contains(v.EntityId)) ||
             (v.Section == "revenue" && revenueRecords.Contains(v.EntityId)));
+        query = await Narrow(query, filter, ct);
         var entries = await query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize).Take(pageSize)
             .Select(v => new HistoryEntry(v.Version, v.Section, v.EntityId, v.Reason, v.OccurredAt, v.ActorId,
                 db.Memberships.Where(m => m.UserId == v.ActorId).Select(m => m.FirstName + " " + m.LastName).FirstOrDefault() ?? "",
                 v.Before, v.After))
             .ToListAsync(ct);
         return new(actor.AllCompanies ? entries : await WithoutHiddenScope(actor, entries, ct), page, pageSize, await query.CountAsync(ct));
+    }
+
+    // The log narrowed to what the person asked for. It is applied before paging, so the count and Load more
+    // describe the filtered log and not the whole one. A day given here is a day in the organization's own
+    // calendar, so the window is built in its zone rather than in UTC, which would cut the day in the wrong place.
+    private async Task<IQueryable<OrganizationSettingsVersion>> Narrow(
+        IQueryable<OrganizationSettingsVersion> query, HistoryFilter filter, CancellationToken ct)
+    {
+        if (filter.Section is not null) query = query.Where(v => v.Section == filter.Section);
+        if (filter.From is not null || filter.To is not null)
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(
+                await db.Localizations.AsNoTracking().Select(x => x.TimeZone).SingleOrDefaultAsync(ct) ?? "Africa/Nairobi");
+            var midnight = (DateOnly day) =>
+            {
+                var local = day.ToDateTime(TimeOnly.MinValue);
+                return new DateTimeOffset(local, zone.GetUtcOffset(local));
+            };
+            // The window is worked out here, because a query can only carry the two values it compares against.
+            if (filter.From is not null)
+            {
+                var start = midnight(filter.From.Value);
+                query = query.Where(v => v.OccurredAt >= start);
+            }
+            // Through the end of the last day, which is midnight at the start of the day after it.
+            if (filter.To is not null)
+            {
+                var end = midnight(filter.To.Value.AddDays(1));
+                query = query.Where(v => v.OccurredAt < end);
+            }
+        }
+        if (filter.Text is not null)
+        {
+            // The reason or the person who did it: the two things a line shows. Matching is the database's own,
+            // which is case-insensitive under the collations XCODE runs on.
+            var pattern = $"%{filter.Text.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]")}%";
+            query = query.Where(v => EF.Functions.Like(v.Reason, pattern)
+                || db.Memberships.Any(m => m.UserId == v.ActorId && EF.Functions.Like(m.FirstName + " " + m.LastName, pattern)));
+        }
+        return query;
     }
 
     // A scoped viewer sees a person's scope only as far as their own reaches: the companies and vehicles outside it are

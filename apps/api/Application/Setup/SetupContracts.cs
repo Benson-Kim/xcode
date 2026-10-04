@@ -16,6 +16,26 @@ public sealed record AwayPeriodDto(DateOnly LeftOn, DateOnly ReturnedOn);
 // One change-log line: who changed which setup record, and the reason they gave.
 public sealed record HistoryEntry(long Version, string Section, Guid EntityId, string Reason, DateTimeOffset OccurredAt, Guid ActorId, string ActorName,
     string? Before = null, string? After = null);
+// What the change log is narrowed to; every part is optional and nothing set means the whole log.
+// Section is one of the keys the log records ("vehicles", "people", ...). From and To are days in the
+// organization's own calendar and both are included. Text matches the reason or the person's name, which
+// are the two things a line shows, so one box answers "who" and "what".
+public sealed record HistoryFilter(string? Section = null, DateOnly? From = null, DateOnly? To = null, string? Text = null)
+{
+    public static readonly HistoryFilter None = new();
+
+    // Query strings arrive as text: blanks mean "not set", and a backwards range is a mistake worth naming.
+    public static HistoryFilter Of(string? section, DateOnly? from, DateOnly? to, string? text)
+    {
+        if (from is not null && to is not null && from > to)
+            throw new ArgumentException("The first date cannot be after the last date.");
+        var trimmed = text?.Trim();
+        if (trimmed?.Length > 200) throw new ArgumentException("Search for 200 characters or fewer.");
+        return new(string.IsNullOrWhiteSpace(section) ? null : section.Trim(), from, to,
+            string.IsNullOrEmpty(trimmed) ? null : trimmed);
+    }
+}
+
 // Reasons are optional on these saves (contract C7): the change log always gets an automatic reason, and a typed one follows it.
 public sealed record SaveCompany(string Name, string? Reason = null);
 public sealed record CompanyLifecycleRequest(string? Reason = null);
