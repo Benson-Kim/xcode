@@ -76,6 +76,22 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
         return item.Id;
     }, ct);
 
+    // Cancelling a stop that has not taken effect yet is not one of the four places that ask for a typed reason
+    // (contract C7), so it writes an automatic one. The vehicle check is the same as stopping.
+    public Task<Guid> CancelStop(Guid id, CancellationToken ct) => execution.Write("commitments.manage", async actor =>
+    {
+        var item = await repository.RecurringItem(actor, id, ct) ?? throw new KeyNotFoundException();
+        var latest = item.Versions.OrderByDescending(v => v.Revision).First();
+        var visible = await repository.VehiclesById(actor, latest.Allocations.Select(a => a.VehicleId), ct);
+        if (latest.Allocations.Any(share => !visible.ContainsKey(share.VehicleId)))
+            throw new UnauthorizedAccessException();
+        var before = Snapshot(item);
+        if (item.CancelStop(actor.Today))
+            await repository.RecordChange(actor, "recurring", item.Id, before, Snapshot(item),
+                SetupPagination.Automatic($"Cancelled the stop of {latest.Name}"), ct);
+        return item.Id;
+    }, ct);
+
     // A cost is named after its expense item and counted in that item's bucket; a saving keeps the name typed for it.
     private async Task<RecurringDefinition> Definition(SetupActor actor, SaveRecurring input, CancellationToken ct)
     {

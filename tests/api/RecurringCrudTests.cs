@@ -122,11 +122,24 @@ public sealed class RecurringCrudTests : IDisposable
         Assert.Equal("Fuel reserve before scheduled stop", revisedBeforeStop.Name);
         Assert.Equal(today, revisedBeforeStop.StoppedFrom);
 
+        // A pending stop is never quietly re-dated (D16): it is cancelled, then set again on the day wanted.
         using var stopEarlier = await client.PostAsJsonAsync($"/setup/recurring/{created.Id}/stop",
             new StopRecurring(true, "Stop before the scheduled date"));
-        Assert.Equal(HttpStatusCode.OK, stopEarlier.StatusCode);
-        var stoppedEarlier = Assert.Single((await client.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items);
-        Assert.Equal(priorBusinessDate, stoppedEarlier.StoppedFrom);
+        Assert.Equal(HttpStatusCode.BadRequest, stopEarlier.StatusCode);
+        Assert.Equal(today, Assert.Single((await client.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items).StoppedFrom);
+
+        using var cancelStop = await client.PostAsJsonAsync($"/setup/recurring/{created.Id}/restore", new { });
+        Assert.Equal(HttpStatusCode.OK, cancelStop.StatusCode);
+        Assert.Null(Assert.Single((await client.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items).StoppedFrom);
+
+        using var stopAgain = await client.PostAsJsonAsync($"/setup/recurring/{created.Id}/stop",
+            new StopRecurring(true, "Stop before the scheduled date"));
+        Assert.Equal(HttpStatusCode.OK, stopAgain.StatusCode);
+        Assert.Equal(priorBusinessDate, Assert.Single((await client.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items).StoppedFrom);
+
+        // A stop that has taken effect stays final.
+        using var cancelEffective = await client.PostAsJsonAsync($"/setup/recurring/{created.Id}/restore", new { });
+        Assert.Equal(HttpStatusCode.BadRequest, cancelEffective.StatusCode);
     }
 
     // The saved total always equals the shares listed with it, so the editor opens balanced; what still posts is apart.

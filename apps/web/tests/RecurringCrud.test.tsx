@@ -282,12 +282,24 @@ it("requires a second click and a typed reason before stopping a scheduled item"
   expect(onSaved).toHaveBeenCalledOnce();
 });
 
-it("keeps an item editable before its future stop date", () => {
+it("keeps an item editable before its future stop date, and offers to cancel the stop", () => {
   renderEditor({ item: { ...item, stoppedFrom: "2026-09-25" } });
 
-  expect(screen.getByText("Scheduled to stop on 25 Sep 2026. You can still change the schedule before then.")).toBeInTheDocument();
+  expect(screen.getByText("Scheduled to stop on 25 Sep 2026. You can still change the schedule, or cancel the stop, before then.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
-  expect(screen.getByRole("button", { name: "Stop from today" })).toBeEnabled();
+  // The server refuses a second stop on another date (D16), so the only stop action offered is cancelling it.
+  expect(screen.getByRole("button", { name: "Cancel stop" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Stop from today" })).not.toBeInTheDocument();
+});
+
+it("cancelling a future stop posts to restore and reloads", async () => {
+  const fetchMock = mockFetch(async () => new Response(JSON.stringify({ id: item.id }), { status: 200 }));
+  const onSaved = renderEditor({ item: { ...item, stoppedFrom: "2026-09-25" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "Cancel stop" }));
+
+  await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(`/api/setup/recurring/${item.id}/restore`);
 });
 
 it("loads expense item options only once the editor opens", async () => {
