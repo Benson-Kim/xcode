@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { RevenueCell, RevenueVehicle, RevenueWeek, SaveRevenue } from "@xcode/shared";
 import { ApiError, apiRequest, useResource } from "../lib/data";
-import { kes } from "../lib/format";
+import { kes, percentText } from "../lib/format";
 import { useSession } from "../lib/session-context";
 import { dayOfMonth, difference, figure, longDate, rangeLabel, shiftDate, weekday } from "./revenueFormat";
 import {
@@ -254,7 +254,7 @@ export function RevenuePage() {
             <>
               <strong className="text-xl tabular-nums">{kes(data.totalAmount)}</strong>
               <small className="text-xs text-grey">
-                {`of ${kes(data.totalExpected)} expected${data.percent === null ? "" : `, ${data.percent}%`}`}
+                {`of ${kes(data.totalExpected)} expected${data.percent === null ? "" : `, ${percentText(data.percent)}`}`}
               </small>
             </>
           ) : (
@@ -348,7 +348,7 @@ export function RevenuePage() {
                         </td>
                         <td className={cn(CELL, "text-right")}>
                           {item.percent !== null && (
-                            <span className={cn("font-bold", item.percent < 90 && "text-red")}>{item.percent}%</span>
+                            <span className={cn("font-bold", item.percent < 90 && "text-red")}>{percentText(item.percent)}</span>
                           )}
                         </td>
                       </tr>
@@ -381,7 +381,7 @@ export function RevenuePage() {
                     </td>
                   ))}
                   <td className="px-2 py-2 text-right tabular-nums">{figure(data.totalAmount)}</td>
-                  <td className="px-2 py-2 text-right tabular-nums">{data.percent === null ? "" : `${data.percent}%`}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{data.percent === null ? "" : percentText(data.percent)}</td>
                 </tr>
               </tfoot>
             )}

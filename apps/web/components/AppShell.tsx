@@ -43,7 +43,7 @@ import {
   useSession,
   type Session,
 } from "../lib/session-context";
-import { configureFormats, initials, kes, plural } from "../lib/format";
+import { configureFormats, initials, kes, percentText, plural } from "../lib/format";
 import { useResource } from "../lib/data";
 import {
   AppearanceProvider,
@@ -626,7 +626,7 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
       return {
         value: kes(revenue),
         bar: percent,
-        note: `${percent}% of target ${kes(expected ?? 0)}, from each vehicle’s weekly target${soFar || "."}`,
+        note: `${percentText(percent)} of target ${kes(expected ?? 0)}, from each vehicle’s weekly target${soFar || "."}`,
       };
     }),
     unavailable("dash.net", "Net contribution", `Revenue less all costs. ${label}`, "Needs cost totals, which are not connected yet."),

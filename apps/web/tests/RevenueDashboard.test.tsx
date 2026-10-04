@@ -169,3 +169,12 @@ it("offers Fill the gaps only while there are gaps to fill", async () => {
   expect(within(gaps).getByText("Every vehicle has a record for every day.")).toBeInTheDocument();
   expect(within(gaps).queryByRole("button", { name: "Fill the gaps" })).not.toBeInTheDocument();
 });
+
+it("caps the revenue percent at 999% and reads 999%+ beyond it, on the dashboard", async () => {
+  serve(EVERYTHING, (period) => json(dashboard(period, { revenue: 100000009219, expected: 8000.14, percent: 1249977794 })));
+  render(<AppShell onSignOut={() => {}} />);
+
+  const revenue = await screen.findByRole("article", { name: "Revenue" });
+  expect(await within(revenue).findByText(/^999%\+ of target KES 8,000\.14/)).toBeInTheDocument();
+  expect(within(revenue).queryByText(/1249977794/)).not.toBeInTheDocument();
+});

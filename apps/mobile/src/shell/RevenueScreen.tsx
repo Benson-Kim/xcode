@@ -3,7 +3,7 @@ import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView,
 import { useNetworkState } from "expo-network";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { OfflineError, SessionEndedError } from "../lib/api";
-import { currencyCode, money } from "../lib/format";
+import { currencyCode, money, percentText } from "../lib/format";
 import type { StoredPerson } from "../lib/storage";
 import { dayLabel, longDayLabel, rangeLabel, shiftDate, shortDayLabel, weekHolding } from "../revenue/dates";
 import { queueCounts, type NewCapture, type RevenueQueue } from "../revenue/queue";
@@ -319,7 +319,7 @@ export function RevenueScreen({
               <Text weight="bold" style={{ fontSize: 14, color: colors.navy }}>
                 {money(week.totalAmount)}
               </Text>
-              {week.totalExpected > 0 ? ` of ${money(week.totalExpected)} expected to date${week.percent === null ? "" : `, ${week.percent}%`}` : " so far"}
+              {week.totalExpected > 0 ? ` of ${money(week.totalExpected)} expected to date${week.percent === null ? "" : `, ${percentText(week.percent)}`}` : " so far"}
             </Text>
           )}
         </>
@@ -472,7 +472,7 @@ const DayRow = memo(function DayRow({
 
 const WeekRow = memo(function WeekRow({ vehicle, first, last, onOpen }: { vehicle: RevenueVehicle; first: boolean; last: boolean; onOpen: (vehicleId: string) => void }) {
   const { colors } = useTheme();
-  const share = vehicle.percent === null ? "" : `${vehicle.percent}% of ${money(vehicle.totalExpected)}`;
+  const share = vehicle.percent === null ? "" : `${percentText(vehicle.percent)} of ${money(vehicle.totalExpected)}`;
   return (
     <Pressable
       accessibilityRole="button"

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { apiGet, SessionEndedError } from "../lib/api";
-import { money } from "../lib/format";
+import { money, percentText } from "../lib/format";
 import { dayLabel, isDate, rangeLabel, shiftDate } from "../revenue/dates";
 import type { StoredPerson } from "../lib/storage";
 import type { RevenueDashboard } from "../revenue/types";
@@ -41,7 +41,7 @@ function revenueFigures(permission: string, dashboard: RevenueDashboard, period:
     if (revenue === null) return null;
     const soFar = period !== "month" && capturedToday !== null && vehiclesToday ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.` : "";
     if (percent === null || expected === null) return { value: revenue ? money(revenue) : undefined, note: `No weekly target applies in this period${soFar}` };
-    return { value: money(revenue), bar: percent, note: `${percent}% of target ${money(expected)}, from each vehicle’s weekly target${soFar}` };
+    return { value: money(revenue), bar: percent, note: `${percentText(percent)} of target ${money(expected)}, from each vehicle’s weekly target${soFar}` };
   }
   if (permission === "dash.gaps") {
     if (missingDays === null) return null;

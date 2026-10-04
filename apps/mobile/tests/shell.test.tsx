@@ -162,3 +162,10 @@ it("renews an expired access token once and retries", async () => {
   expect(within(access.parent!.parent!).queryByText("Loading")).toBeNull();
   expect(storedText()).toContain("refresh-4");
 });
+
+it("caps the revenue percent at 999% and reads 999%+ beyond it", async () => {
+  // A vehicle with a tiny target and a huge record: the stored and API figure is untouched, only the display is capped.
+  await unlockAs(people.owner, "0733520614", { revenue: 100000009219, expected: 8000.14, percent: 1249977794 } as never);
+  expect(await within(cardOf("Revenue")).findByText(/^999%\+ of target KES 8,000\.14/)).toBeTruthy();
+  expect(screen.queryByText(/1249977794/)).toBeNull();
+});

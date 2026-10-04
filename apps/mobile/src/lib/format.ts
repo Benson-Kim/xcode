@@ -45,3 +45,12 @@ export function money(amount: number) {
   });
   return `${formats.currency} ${number}`;
 }
+
+// The most a share of a target shows. A vehicle with a tiny target and a large record can reach millions of percent, which tells no one anything.
+// Only the display is capped: the stored and API values stay as they are.
+export const MAX_PERCENT_SHOWN = 999;
+
+// "83%", and "999%+" for anything above the cap.
+export function percentText(percent: number) {
+  return percent > MAX_PERCENT_SHOWN ? `${MAX_PERCENT_SHOWN}%+` : `${percent}%`;
+}
