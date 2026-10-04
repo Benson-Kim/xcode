@@ -43,7 +43,7 @@ const item = {
 };
 
 // Saved before expense items: an old cost type and a daily schedule.
-const legacy = { ...item, id: "legacy-1", name: "Stage fees", category: 1, frequency: 1, day: null, expenseItemId: null, expenseItemName: null, bucket: null };
+const legacy = { ...item, id: "legacy-1", name: "Stage fees", frequency: 1, day: null, expenseItemId: null, expenseItemName: null, bucket: null };
 
 function mockFetch(
   handler: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>,
@@ -74,7 +74,7 @@ it("reads recurring items with the reference summary and hides Add without manag
   // A view-only user has no vehicle access: every vehicle endpoint is forbidden.
   const fetchMock = mockFetch(async (input) => {
     if (String(input).endsWith("/recurring?page=1&pageSize=25"))
-      return listResponse([{ ...legacy, name: "Loan repayment", category: 4, amount: 1000, start: "2026-09-27", allocations: [{ vehicleId: vehicle.id, amount: 1000, registration: vehicle.registration }] }]);
+      return listResponse([{ ...legacy, name: "Loan repayment", amount: 1000, start: "2026-09-27", allocations: [{ vehicleId: vehicle.id, amount: 1000, registration: vehicle.registration }] }]);
     return new Response(JSON.stringify({ title: "Not permitted in this organization or data scope." }), { status: 403 });
   });
 
@@ -83,7 +83,7 @@ it("reads recurring items with the reference summary and hides Add without manag
   expect(await screen.findByRole("button", { name: "Loan repayment" })).toBeInTheDocument();
   expect(screen.getByText("About KES 30,400 a month")).toBeInTheDocument();
   expect(screen.getByText("Every day")).toBeInTheDocument();
-  // An old cost type counts in its bucket (Fixed commitments is a recurring charge); the old name is not shown.
+  // A cost saved without a bucket counts as a recurring charge, and nothing shows the retired cost types.
   expect(screen.getByText("Recurring charges")).toBeInTheDocument();
   expect(screen.queryByText("Fixed commitments")).not.toBeInTheDocument();
   expect(screen.getByText("1 vehicle")).toBeInTheDocument();
@@ -153,7 +153,6 @@ it("creates a yearly cost for an expense item, starting on the business date", a
   expect(sentBody(fetchMock)).toEqual({
     name: "Insurance",
     kind: 1,
-    category: null,
     amount: 117600,
     frequency: 4,
     day: 14,
@@ -183,7 +182,7 @@ it("keeps savings to a free name, weekly or monthly", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  expect(sentBody(fetchMock)).toMatchObject({ name: "Owner savings", kind: 2, category: null, expenseItemId: null, frequency: 3, month: null, note: null });
+  expect(sentBody(fetchMock)).toMatchObject({ name: "Owner savings", kind: 2, expenseItemId: null, frequency: 3, month: null, note: null });
 });
 
 it("refuses a start before the first of the business date's month, and a note over 200 characters", async () => {
@@ -239,7 +238,7 @@ it("shows a legacy daily cost read-only and asks for an item and a new frequency
   const fetchMock = mockFetch(async () => new Response(JSON.stringify({ id: legacy.id }), { status: 200 }));
   renderEditor({ item: legacy });
 
-  expect(screen.getByText(/Set up with the old cost type Running costs and a daily schedule, which are no longer offered/)).toBeInTheDocument();
+  expect(screen.getByText(/Saved before the rules it would follow today.*To save a change, choose an expense item and how often it posts\./)).toBeInTheDocument();
   expect(screen.getByText("Now every day, which is no longer offered.")).toBeInTheDocument();
   expect(screen.getByText(/Counted under Recurring charges in each vehicle report/)).toBeInTheDocument();
   expect(screen.getByLabelText("Expense item")).toHaveValue("");
@@ -255,7 +254,7 @@ it("shows a legacy daily cost read-only and asks for an item and a new frequency
   fireEvent.click(screen.getByRole("radio", { name: "Every month" }));
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`/api/setup/recurring/${legacy.id}`, expect.objectContaining({ method: "PUT" })));
-  expect(sentBody(fetchMock)).toMatchObject({ expenseItemId: "loan", category: null, frequency: 3, day: 1, lastDay: false });
+  expect(sentBody(fetchMock)).toMatchObject({ expenseItemId: "loan", frequency: 3, day: 1, lastDay: false });
 });
 
 it("requires a second click and a typed reason before stopping a scheduled item", async () => {

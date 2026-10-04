@@ -97,8 +97,8 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
     {
         if (input.Kind != RecurringKind.Cost)
         {
-            if (input.ExpenseItemId is not null || input.Category is not null)
-                throw new ArgumentException("Savings must not have an expense item or cost category.");
+            if (input.ExpenseItemId is not null)
+                throw new ArgumentException("Savings must not have an expense item.");
             return input.Definition(input.Name, null);
         }
         var expense = input.ExpenseItemId is { } expenseItemId ? await repository.ActiveExpenseItem(expenseItemId, actor.Today, ct) : null;
@@ -127,7 +127,7 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
     }
 
     private static bool Same(RecurringVersion version, RecurringDefinition definition) =>
-        version.Name == definition.Name.Trim() && version.Kind == definition.Kind && version.Category == definition.Category &&
+        version.Name == definition.Name.Trim() && version.Kind == definition.Kind &&
         version.Amount == definition.Amount && version.Frequency == definition.Schedule.Frequency && version.Day == definition.Schedule.Day &&
         version.LastDay == definition.Schedule.LastDay && version.Month == definition.Schedule.Month && version.Start == definition.Start &&
         version.End == definition.End && version.ExpenseItemId == definition.ExpenseItemId && version.Bucket == definition.Bucket &&
@@ -148,7 +148,6 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
             v.EffectiveFrom,
             v.Name,
             v.Kind,
-            v.Category,
             v.Amount,
             v.Frequency,
             v.Day,

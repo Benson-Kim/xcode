@@ -44,7 +44,6 @@ import type { ExpenseBucket, ExpenseItemOption } from "../lib/types";
 import {
   costBucket,
   expenseBucketNames,
-  legacyCostTypeNames,
   type RecurringItem,
   type VehicleOption,
 } from "./setup/shared";
@@ -210,11 +209,10 @@ export function RecurringEditor({
     ).entries(),
   ];
 
-  // Items saved before expense items keep their old cost type and daily schedule until someone changes them.
-  const legacyCategory = Boolean(item?.kind === 1 && !item.expenseItemId);
-  const legacyCategoryName = legacyCostTypeNames[item?.category || 4];
-  // Until an expense item is chosen, an old row keeps counting in its old type's bucket.
-  const legacyBucket = item && legacyCategory ? costBucket(item) : null;
+  // Items saved before expense items, or on the daily schedule, keep posting until someone changes them.
+  const noExpenseItem = Boolean(item?.kind === 1 && !item.expenseItemId);
+  // Until an expense item is chosen, such a row keeps counting in the bucket it was saved under.
+  const savedBucket = item && noExpenseItem ? costBucket(item) : null;
   const legacyDaily = item?.frequency === 1;
   const itemChoices: ItemChoice[] = (expenseItems ?? []).map((option) => ({
     ...option,
@@ -247,8 +245,8 @@ export function RecurringEditor({
   ];
   const countedAs = picked?.bucket
     ? expenseBucketNames[picked.bucket]
-    : legacyBucket && !expenseItemId
-      ? expenseBucketNames[legacyBucket]
+    : savedBucket && !expenseItemId
+      ? expenseBucketNames[savedBucket]
       : undefined;
 
   // A vehicle not in the fleet today (left, or not joined yet) keeps its share, read-only: it stays in the total but
@@ -408,7 +406,6 @@ export function RecurringEditor({
             // A cost takes its name and bucket from its expense item on the server.
             name: title,
             kind,
-            category: null,
             amount: total,
             frequency,
             day: schedule.day,
@@ -481,13 +478,9 @@ export function RecurringEditor({
     }
   }
 
-  // What an item saved before expense items still uses, shown as read-only labels.
-  const legacyUses = [
-    legacyCategory && `the old cost type ${legacyCategoryName}`,
-    legacyDaily && "a daily schedule",
-  ].filter(Boolean);
+  // What an item saved under the old rules must be given before any change to it can be saved.
   const legacyNeeds = [
-    legacyCategory && "an expense item",
+    noExpenseItem && "an expense item",
     legacyDaily && "how often it posts",
   ].filter(Boolean);
   const dayOptions = Array.from({ length: 28 }, (_, index) => index + 1);
@@ -533,11 +526,10 @@ export function RecurringEditor({
             change the schedule, or cancel the stop, before then.
           </Note>
         )}
-        {legacyUses.length > 0 && !stopped && (
+        {legacyNeeds.length > 0 && !stopped && (
           <Note tone="info">
-            Set up with {legacyUses.join(" and ")}, which{" "}
-            {legacyUses.length > 1 ? "are" : "is"} no longer offered. It keeps
-            posting as it is.
+            Saved before the rules it would follow today, and still posting as
+            it is.
             {canEdit ? ` To save a change, choose ${legacyNeeds.join(" and ")}.` : ""}
           </Note>
         )}
@@ -576,8 +568,8 @@ export function RecurringEditor({
                 hint={
                   picked
                     ? `${picked.categoryName ? `${picked.categoryName}. ` : ""}${countedAs ? `Counts as ${countedAs}.` : ""}`
-                    : legacyCategory && !expenseItemId
-                      ? `Was the old cost type ${legacyCategoryName}.`
+                    : noExpenseItem && !expenseItemId
+                      ? `Saved before expense items${countedAs ? `, counting as ${countedAs}` : ""}. Choose the one it is for.`
                       : "Items come from Expense categories."
                 }
               >

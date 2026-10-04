@@ -12,7 +12,7 @@ public sealed class DueDateGeneratorTests
     private static readonly DateOnly Origin = new(2027, 11, 1);
 
     private static RecurringDefinition Definition(RecurringSchedule schedule, DateOnly start, DateOnly? end = null, decimal amount = 100m) =>
-        new("Item", RecurringKind.Cost, null, amount, schedule, start, end, [new VehicleShare(Vehicle, amount)], Bucket: ExpenseBucket.RecurringCharges);
+        new("Item", RecurringKind.Cost, amount, schedule, start, end, [new VehicleShare(Vehicle, amount)], Bucket: ExpenseBucket.RecurringCharges);
 
     private static RecurringItem Item(RecurringSchedule schedule, DateOnly start, DateOnly? end = null) =>
         new(Organization, Definition(schedule, start, end));

@@ -74,7 +74,7 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         var theirs = await Id(await owner.PostAsJsonAsync("/setup/vehicles", new SaveVehicle(south, "KDB 111A", new DateOnly(2026, 1, 1), 15000m, "Add")));
         var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
         var items = new Dictionary<string, Guid> { ["Office rent"] = await ExpenseItemTestData.Id(owner, "Office rent"), ["Insurance"] = await ExpenseItemTestData.Id(owner, "Insurance") };
-        SaveRecurring Cost(string name, params VehicleShare[] shares) => new(name, RecurringKind.Cost, null,
+        SaveRecurring Cost(string name, params VehicleShare[] shares) => new(name, RecurringKind.Cost,
             shares.Sum(x => x.Amount), RecurrenceFrequency.Monthly, 1, false, today, null, [.. shares], "Add " + name, items[name]);
         await Id(await owner.PostAsJsonAsync("/setup/recurring", Cost("Office rent", new VehicleShare(mine, 500m), new VehicleShare(theirs, 500m))));
         await Id(await owner.PostAsJsonAsync("/setup/recurring", Cost("Insurance", new VehicleShare(mine, 900m))));

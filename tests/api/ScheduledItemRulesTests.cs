@@ -19,11 +19,11 @@ public sealed class ScheduledItemRulesTests : IDisposable
 
     private SaveRecurring Cost(Guid? item, RecurrenceFrequency frequency, int? day, bool lastDay = false, int? month = null,
         DateOnly? start = null, string? note = null) =>
-        new(null, RecurringKind.Cost, null, 500m, frequency, day, lastDay, start ?? Today, null, [new VehicleShare(vehicle, 500m)],
+        new(null, RecurringKind.Cost, 500m, frequency, day, lastDay, start ?? Today, null, [new VehicleShare(vehicle, 500m)],
             "Schedule it", item, note, month);
 
     private SaveRecurring Saving(RecurrenceFrequency frequency, int? day, bool lastDay = false, int? month = null) =>
-        new("Owner savings", RecurringKind.Savings, null, 500m, frequency, day, lastDay, Today, null, [new VehicleShare(vehicle, 500m)],
+        new("Owner savings", RecurringKind.Savings, 500m, frequency, day, lastDay, Today, null, [new VehicleShare(vehicle, 500m)],
             "Set it aside", null, null, month);
 
     private async Task Setup()
@@ -89,7 +89,6 @@ public sealed class ScheduledItemRulesTests : IDisposable
             Cost(loan.Id, RecurrenceFrequency.Monthly, 5),
             Cost(options.Single(x => x.Name == "Spares").Id, RecurrenceFrequency.Monthly, 5, note: new string('n', 201)),
             Saving(RecurrenceFrequency.Monthly, 5) with { ExpenseItemId = towing.Id },
-            Saving(RecurrenceFrequency.Monthly, 5) with { Category = CostCategory.FixedCommitments },
         })
             Assert.Equal(HttpStatusCode.BadRequest, (await Create(refused)).StatusCode);
 
@@ -130,14 +129,15 @@ public sealed class ScheduledItemRulesTests : IDisposable
     public async Task LegacyDailyVersionsKeepPostingAndOnlyNewRevisionsFollowTheNewRules()
     {
         await Setup();
-        // A Phase 1 item, saved daily under an old category before the rules changed.
+        // A Phase 1 item, saved daily before the rules changed.
         var legacy = Guid.Empty;
         await app.WithDb(async db =>
         {
             db.Provisioning = true;
             var organizationId = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
-            var item = new RecurringItem(organizationId, new RecurringDefinition("Fuel", RecurringKind.Cost, CostCategory.RunningCosts, 100m,
-                new RecurringSchedule(RecurrenceFrequency.Daily), new DateOnly(2026, 1, 1), null, [new VehicleShare(vehicle, 100m)]));
+            var item = new RecurringItem(organizationId, new RecurringDefinition("Fuel", RecurringKind.Cost, 100m,
+                new RecurringSchedule(RecurrenceFrequency.Daily), new DateOnly(2026, 1, 1), null, [new VehicleShare(vehicle, 100m)],
+                Bucket: ExpenseBucket.RecurringCharges));
             db.Add(item);
             await db.SaveChangesAsync();
             legacy = item.Id;
@@ -145,7 +145,7 @@ public sealed class ScheduledItemRulesTests : IDisposable
 
         var before = await owner.GetFromJsonAsync<VehicleReport>($"/setup/vehicles/{vehicle}/report?from=2026-03-01&through=2026-03-14");
         Assert.Equal(14, before!.Postings.Count);
-        Assert.All(before.Postings, p => Assert.Equal(("Fuel", CostCategory.RunningCosts, ExpenseBucket.RecurringCharges), (p.Name, p.Category!.Value, p.Bucket!.Value)));
+        Assert.All(before.Postings, p => Assert.Equal(("Fuel", ExpenseBucket.RecurringCharges), (p.Name, p.Bucket!.Value)));
 
         var parking = await ExpenseItemTestData.Id(owner, "Parking");
         var start = new DateOnly(2026, 1, 1);
@@ -157,35 +157,36 @@ public sealed class ScheduledItemRulesTests : IDisposable
         Assert.Equal(before.Postings, after!.Postings.Take(14));
         var revised = after.Postings[14];
         Assert.Equal((Today, "Parking", 500m, ExpenseBucket.RecurringCharges), (revised.Date, revised.Name, revised.Amount, revised.Bucket!.Value));
-        Assert.Null(revised.Category);
 
         Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/recurring/{legacy}/stop", new StopRecurring(true, " "))).StatusCode);
     }
 
-    // Every cost posting carries a bucket, so clients can group by bucket alone. A legacy version whose stored bucket is
-    // missing (a row written before the backfill, or restored without it) still reports under the A2 mapping.
+    // Every cost posting carries a bucket, so clients can group by bucket alone. A version whose stored bucket is
+    // missing (a row restored without it) counts as a recurring charge rather than dropping out of money out.
     [Fact]
-    public async Task LegacyCostsWithoutAStoredBucketStillReportUnderTheirAssumedBucket()
+    public async Task CostsWithoutAStoredBucketStillReportAsRecurringCharges()
     {
         await Setup();
         await app.WithDb(async db =>
         {
             db.Provisioning = true;
             var organizationId = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
-            RecurringItem Legacy(string name, CostCategory category) => new(organizationId, new RecurringDefinition(name, RecurringKind.Cost, category, 100m,
-                new RecurringSchedule(RecurrenceFrequency.Weekly, (int)Today.DayOfWeek), new DateOnly(2026, 3, 1), null, [new VehicleShare(vehicle, 100m)]));
-            db.AddRange(Legacy("Tyres", CostCategory.RepairsAndUpkeep), Legacy("Fuel", CostCategory.RunningCosts));
+            RecurringItem Bucketless(string name, ExpenseBucket bucket) => new(organizationId, new RecurringDefinition(name, RecurringKind.Cost, 100m,
+                new RecurringSchedule(RecurrenceFrequency.Weekly, (int)Today.DayOfWeek), new DateOnly(2026, 3, 1), null, [new VehicleShare(vehicle, 100m)],
+                Bucket: bucket));
+            db.AddRange(Bucketless("Tyres", ExpenseBucket.RepairsAndMaintenance), Bucketless("Fuel", ExpenseBucket.RecurringCharges));
             await db.SaveChangesAsync();
             await db.Database.ExecuteSqlRawAsync("UPDATE \"RecurringVersion\" SET \"Bucket\" = NULL");
         });
         (await Create(Saving(RecurrenceFrequency.Weekly, (int)Today.DayOfWeek))).EnsureSuccessStatusCode();
 
         var report = await owner.GetFromJsonAsync<VehicleReport>($"/setup/vehicles/{vehicle}/report?from={Today:yyyy-MM-dd}&through={Today:yyyy-MM-dd}");
-        Assert.Equal(ExpenseBucket.RepairsAndMaintenance, report!.Postings.Single(p => p.Name == "Tyres").Bucket);
+        Assert.Equal(ExpenseBucket.RecurringCharges, report!.Postings.Single(p => p.Name == "Tyres").Bucket);
         Assert.Equal(ExpenseBucket.RecurringCharges, report.Postings.Single(p => p.Name == "Fuel").Bucket);
         Assert.Null(report.Postings.Single(p => p.Kind == RecurringKind.Savings).Bucket);
+        // The list says the same as the report: a cost without a stored bucket is a recurring charge there too.
         var listed = (await owner.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items;
-        Assert.Equal(ExpenseBucket.RepairsAndMaintenance, listed.Single(x => x.Name == "Tyres").Bucket);
+        Assert.Equal(ExpenseBucket.RecurringCharges, listed.Single(x => x.Name == "Tyres").Bucket);
     }
 
     [Theory]
@@ -206,13 +207,16 @@ public sealed class ScheduledItemRulesTests : IDisposable
         Assert.Throws<ArgumentException>(() => new RecurringSchedule(RecurrenceFrequency.Weekly, 1, month: 2));
     }
 
+    // Savings are not money out, so they report under no bucket at all; a cost's bucket is the one stored with it,
+    // and recurring charges when none was stored.
     [Theory]
-    [InlineData(CostCategory.RepairsAndUpkeep, ExpenseBucket.RepairsAndMaintenance)]
-    [InlineData(CostCategory.RunningCosts, ExpenseBucket.RecurringCharges)]
-    [InlineData(CostCategory.CrewCosts, ExpenseBucket.RecurringCharges)]
-    [InlineData(CostCategory.FixedCommitments, ExpenseBucket.RecurringCharges)]
-    public void LegacyCategoriesReportUnderTheirAssumedBucket(CostCategory category, ExpenseBucket bucket) =>
-        Assert.Equal(bucket, ExpenseBuckets.FromLegacy(category));
+    [InlineData(RecurringKind.Cost, ExpenseBucket.RepairsAndMaintenance, ExpenseBucket.RepairsAndMaintenance)]
+    [InlineData(RecurringKind.Cost, ExpenseBucket.LoanRepayments, ExpenseBucket.LoanRepayments)]
+    [InlineData(RecurringKind.Cost, null, ExpenseBucket.RecurringCharges)]
+    [InlineData(RecurringKind.Savings, ExpenseBucket.RecurringCharges, null)]
+    [InlineData(RecurringKind.Savings, null, null)]
+    public void OnlyCostsReportUnderABucket(RecurringKind kind, ExpenseBucket? stored, ExpenseBucket? reported) =>
+        Assert.Equal(reported, ExpenseBuckets.Of(kind, stored));
 
     private static async Task<Guid> Id(HttpResponseMessage response)
     {

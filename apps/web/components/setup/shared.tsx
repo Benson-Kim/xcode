@@ -34,12 +34,11 @@ export type HistoryRow = {
 };
 
 // A scheduled expense or saving. Frequency: 1 every day (legacy, read only), 2 weekly, 3 monthly, 4 yearly on `month`.
-// A cost picks an expense item (its bucket comes from the item's category); `category` is only set on legacy rows.
+// A cost picks an expense item, and its bucket comes from that item's category.
 export type RecurringItem = {
   id: string;
   name: string;
   kind: number;
-  category?: number | null;
   // The saved total of every share, including vehicles not in the fleet today; activeAmount is what posts now.
   amount: number;
   activeAmount?: number;
@@ -59,14 +58,13 @@ export type RecurringItem = {
   month?: number | null;
 };
 
-// One due date of a scheduled item on a vehicle. A cost carries its bucket; `category` is only set on old rows.
+// One due date of a scheduled item on a vehicle. A cost carries its bucket; a saving has none.
 export type Posting = {
   itemId: string;
   versionId: string;
   date: string;
   name: string;
   kind: number;
-  category?: number | null;
   amount: number;
   bucket?: ExpenseBucket | null;
 };
@@ -95,17 +93,9 @@ export const expenseBucketNames: Record<ExpenseBucket, string> = {
   3: "Loan repayments",
 };
 
-// The bucket a cost counts in. A row saved before expense items has only its old cost type, mapped as in A2:
-// Repairs and upkeep counts as Repairs and maintenance, every other type as Recurring charges. Savings have none.
-export function costBucket(row: { kind: number; bucket?: ExpenseBucket | null; category?: number | null }): ExpenseBucket | null {
+// The bucket a cost counts in: every cost reports under one, and a row saved without one counts as a recurring
+// charge, which is how the API reports it too. Savings are not money out and report under none.
+export function costBucket(row: { kind: number; bucket?: ExpenseBucket | null }): ExpenseBucket | null {
   if (row.kind !== 1) return null;
-  return row.bucket ?? (row.category === 2 ? 1 : 2);
+  return row.bucket ?? 2;
 }
-
-// The cost types used before expense items, only to tell someone what an old row was set up with.
-export const legacyCostTypeNames: Record<number, string> = {
-  1: "Running costs",
-  2: "Repairs and upkeep",
-  3: "Crew costs",
-  4: "Fixed commitments",
-};

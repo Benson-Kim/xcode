@@ -16,14 +16,6 @@ public enum RecurringKind
 }
 
 
-public enum CostCategory
-{
-     RunningCosts = 1,
-     RepairsAndUpkeep = 2,
-     CrewCosts = 3,
-     FixedCommitments = 4
-}
-
 public sealed record RecurringSchedule
 {
      public RecurrenceFrequency Frequency { get; }

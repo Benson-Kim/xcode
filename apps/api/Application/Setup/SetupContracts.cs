@@ -23,12 +23,12 @@ public sealed record SaveVehicle(Guid CompanyId, string Registration, DateOnly J
 public sealed record VehicleLifecycleRequest(DateOnly LeftOn, string? Reason = null);
 // ReturnedOn defaults to the business date; the days from the leave date up to it are recorded as away (D4).
 public sealed record VehicleRestoreRequest(string? Reason = null, DateOnly? ReturnedOn = null);
-// Name is for savings only: a cost is named after its expense item. Category is ignored (Phase 1 rows keep theirs).
-public sealed record SaveRecurring(string? Name, RecurringKind Kind, CostCategory? Category, decimal Amount,
+// Name is for savings only: a cost is named after its expense item.
+public sealed record SaveRecurring(string? Name, RecurringKind Kind, decimal Amount,
     RecurrenceFrequency Frequency, int? Day, bool LastDay, DateOnly Start, DateOnly? End, List<VehicleShare> Allocations, string? Reason = null,
     Guid? ExpenseItemId = null, string? Note = null, int? Month = null)
 {
-    public RecurringDefinition Definition(string? name, ExpenseBucket? bucket) => new(name!, Kind, null, Amount,
+    public RecurringDefinition Definition(string? name, ExpenseBucket? bucket) => new(name!, Kind, Amount,
         new(Frequency, Day, LastDay, Month), Start, End, Allocations, ExpenseItemId, bucket, string.IsNullOrWhiteSpace(Note) ? null : Note.Trim());
 }
 public sealed record StopRecurring(bool Confirmed, string Reason);
@@ -36,14 +36,14 @@ public sealed record StopRecurring(bool Confirmed, string Reason);
 // viewer's share, and only someone who can see every vehicle on it may change it.
 // Amount is always the sum of Allocations, retired vehicles included; ActiveAmount is the part that still posts.
 // ExpenseItemName is the item's current name; Name is the name saved on this version.
-public sealed record RecurringDto(Guid Id, Guid VersionId, int Revision, string Name, RecurringKind Kind, CostCategory? Category,
+public sealed record RecurringDto(Guid Id, Guid VersionId, int Revision, string Name, RecurringKind Kind,
     decimal Amount, RecurrenceFrequency Frequency, int? Day, bool LastDay, DateOnly Start, DateOnly? End, DateOnly? StoppedFrom,
     IReadOnlyList<AllocationDto> Allocations, bool Partial = false, Guid? ExpenseItemId = null, string? ExpenseItemName = null,
     ExpenseBucket? Bucket = null, string? Note = null, int? Month = null, decimal ActiveAmount = 0);
 public sealed record AllocationDto(Guid VehicleId, decimal Amount, string? Registration, bool Active = true);
 // What a recurring-item editor needs to pick vehicles, without the vehicle-management view.
 public sealed record VehicleOption(Guid Id, Guid CompanyId, string CompanyName, string Registration, bool Active = true);
-public sealed record PostingDto(Guid ItemId, Guid VersionId, DateOnly Date, string Name, RecurringKind Kind, CostCategory? Category, decimal Amount,
+public sealed record PostingDto(Guid ItemId, Guid VersionId, DateOnly Date, string Name, RecurringKind Kind, decimal Amount,
     ExpenseBucket? Bucket = null);
 // Contract C6: money in against the target, money out in its three buckets, and what is left before and after savings.
 // MoneyOut is the three buckets and nothing else (investment never counts); Costs repeats it for Phase 1 clients.

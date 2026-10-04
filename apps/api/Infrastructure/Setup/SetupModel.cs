@@ -98,12 +98,10 @@ public sealed partial class AuthDb
 
           model.Entity<RecurrenceFrequencyLookup>().HasData(Enum.GetValues<RecurrenceFrequency>().Select(x => new RecurrenceFrequencyLookup { Id = x, Name = x.ToString() }));
           model.Entity<RecurringKindLookup>().HasData(Enum.GetValues<RecurringKind>().Select(x => new RecurringKindLookup { Id = x, Name = x.ToString() }));
-          model.Entity<CostCategoryLookup>().HasData(Enum.GetValues<CostCategory>().Select(x => new CostCategoryLookup { Id = x, Name = x.ToString() }));
           model.Entity<ExpenseBucketLookup>().HasData(Enum.GetValues<ExpenseBucket>().Select(x => new ExpenseBucketLookup { Id = x, Name = x.ToString() }));
 
           version.HasOne<RecurrenceFrequencyLookup>().WithMany().HasForeignKey(x => x.Frequency).OnDelete(DeleteBehavior.Restrict);
           version.HasOne<RecurringKindLookup>().WithMany().HasForeignKey(x => x.Kind).OnDelete(DeleteBehavior.Restrict);
-          version.HasOne<CostCategoryLookup>().WithMany().HasForeignKey(x => x.Category).OnDelete(DeleteBehavior.Restrict);
           version.HasOne<ExpenseBucketLookup>().WithMany().HasForeignKey(x => x.Bucket).OnDelete(DeleteBehavior.Restrict);
           expenseCategory.HasOne<ExpenseBucketLookup>().WithMany().HasForeignKey(x => x.Bucket).OnDelete(DeleteBehavior.Restrict);
 

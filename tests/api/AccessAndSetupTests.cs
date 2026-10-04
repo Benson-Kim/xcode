@@ -108,7 +108,7 @@ public sealed class AccessAndSetupTests : IDisposable
         var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
 
         using var recurring = await owner.PostAsJsonAsync("/setup/recurring",
-            new SaveRecurring("Retirement test", RecurringKind.Cost, null, 900m,
+            new SaveRecurring("Retirement test", RecurringKind.Cost, 900m,
                 RecurrenceFrequency.Weekly, (int)today.DayOfWeek, false, today, null,
                 [new VehicleShare(vehicleId, 900m)], "Add retirement test", await ExpenseItemTestData.Id(owner, "Parking")));
         Assert.Equal(HttpStatusCode.OK, recurring.StatusCode);
@@ -351,7 +351,7 @@ public sealed class AccessAndSetupTests : IDisposable
         using var owner = await app.SignIn(Owner);
         var (_, vehicleId) = await AddVehicle(owner);
         var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
-        (await owner.PostAsJsonAsync("/setup/recurring", new SaveRecurring("Insurance", RecurringKind.Cost, null, 900m,
+        (await owner.PostAsJsonAsync("/setup/recurring", new SaveRecurring("Insurance", RecurringKind.Cost, 900m,
             RecurrenceFrequency.Monthly, 1, false, today, null, [new VehicleShare(vehicleId, 900m)], "Add insurance",
             await ExpenseItemTestData.Id(owner, "Insurance")))).EnsureSuccessStatusCode();
 

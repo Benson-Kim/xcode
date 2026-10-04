@@ -33,13 +33,13 @@ const march: VehicleReport = {
   afterSavings: 27850,
   costs: 14650,
   postings: [
-    { itemId: "tyres", versionId: "v3", date: "2026-03-01", name: "Tyres", kind: 1, category: 2, amount: 100, bucket: 1 },
-    // A Phase 1 row from a server that sent no bucket: its old category decides (assumption A2).
-    { itemId: "lunch", versionId: "v4", date: "2026-03-02", name: "Crew lunch", kind: 1, category: 3, amount: 50, bucket: null },
-    { itemId: "savings", versionId: "v6", date: "2026-03-06", name: "Owner savings", kind: 2, category: null, amount: 1000, bucket: null },
-    { itemId: "service", versionId: "v1", date: "2026-03-10", name: "Service", kind: 1, category: null, amount: 2000, bucket: 1 },
-    { itemId: "service", versionId: "v2", date: "2026-03-25", name: "Service", kind: 1, category: null, amount: 2500, bucket: 1 },
-    { itemId: "loan", versionId: "v5", date: "2026-03-31", name: "Loan repayment", kind: 1, category: null, amount: 10000, bucket: 3 },
+    { itemId: "tyres", versionId: "v3", date: "2026-03-01", name: "Tyres", kind: 1, amount: 100, bucket: 1 },
+    // A cost saved without a bucket counts as a recurring charge, as the API reports it.
+    { itemId: "lunch", versionId: "v4", date: "2026-03-02", name: "Crew lunch", kind: 1, amount: 50, bucket: null },
+    { itemId: "savings", versionId: "v6", date: "2026-03-06", name: "Owner savings", kind: 2, amount: 1000, bucket: null },
+    { itemId: "service", versionId: "v1", date: "2026-03-10", name: "Service", kind: 1, amount: 2000, bucket: 1 },
+    { itemId: "service", versionId: "v2", date: "2026-03-25", name: "Service", kind: 1, amount: 2500, bucket: 1 },
+    { itemId: "loan", versionId: "v5", date: "2026-03-31", name: "Loan repayment", kind: 1, amount: 10000, bucket: 3 },
   ],
 };
 
@@ -72,7 +72,7 @@ it("shows money in, the target, the three buckets, money out, net and savings in
 
   expect(fetchMock).toHaveBeenCalledWith("/api/setup/vehicles/vehicle-1/report?period=month", expect.anything());
   expect(screen.getByRole("heading", { name: "This month, 1 to 31 Mar 2026" })).toBeInTheDocument();
-  expect(screen.getByText("Money in and money out, counted on the day it moved. Fuel and crew pay are not tracked.")).toBeInTheDocument();
+  expect(screen.getByText("Money in and money out, counted on the day it moved. Fuel and crew pay are not tracked; revenue is recorded net of them.")).toBeInTheDocument();
   expect(stats()).toEqual([
     ["Money in", "KES 43,500"],
     ["Target", "KES 45,000"],
@@ -119,8 +119,8 @@ it("keeps a revision that moved an item to another bucket on its own line, not u
   serve({
     ...march,
     postings: [
-      { itemId: "van", versionId: "v1", date: "2026-03-05", name: "Repair", kind: 1, category: null, amount: 3000, bucket: 1 },
-      { itemId: "van", versionId: "v2", date: "2026-03-20", name: "Loan", kind: 1, category: null, amount: 8000, bucket: 3 },
+      { itemId: "van", versionId: "v1", date: "2026-03-05", name: "Repair", kind: 1, amount: 3000, bucket: 1 },
+      { itemId: "van", versionId: "v2", date: "2026-03-20", name: "Loan", kind: 1, amount: 8000, bucket: 3 },
     ],
   });
   await openReport();

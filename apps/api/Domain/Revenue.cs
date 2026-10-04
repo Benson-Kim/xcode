@@ -16,6 +16,8 @@ public sealed record RevenueEntry(decimal? Amount, RevenueNoEarningsReason? Reas
     {
         if (Amount is not null)
         {
+            // A day's figure has no upper limit of its own: the only bound is what the column can hold. A mistyped
+            // figure is corrected by someone who may change a past day, which is the check that belongs here.
             SetupValue.Money(Amount.Value);
             if (Reason is not null || !string.IsNullOrWhiteSpace(Note))
                 throw new ArgumentException("Revenue amount cannot have a no-earnings reason.");

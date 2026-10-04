@@ -1,6 +1,7 @@
 namespace Auth.Domain.Setup;
 
-// Money out is tracked in these three buckets only. Fuel and crew pay are not tracked anywhere.
+// Money out is tracked in these three buckets only. Fuel and crew pay are not tracked anywhere: the crew settle
+// both out of the day's takings, so the revenue recorded is already net of them.
 public enum ExpenseBucket
 {
      RepairsAndMaintenance = 1,
@@ -10,15 +11,10 @@ public enum ExpenseBucket
 
 public static class ExpenseBuckets
 {
-     // Assumption A2: the four Phase 1 categories map to buckets for reporting. The migration backfills stored
-     // versions with the same mapping.
-     public static ExpenseBucket FromLegacy(CostCategory category) =>
-          category == CostCategory.RepairsAndUpkeep ? ExpenseBucket.RepairsAndMaintenance : ExpenseBucket.RecurringCharges;
-
-     // The bucket a version reports under: the stored one, or for a cost stored without one, its legacy category's.
-     // Savings are not money out and have none.
-     public static ExpenseBucket? Of(RecurringKind kind, CostCategory? category, ExpenseBucket? stored) =>
-          kind != RecurringKind.Cost ? null : stored ?? (category is { } legacy ? FromLegacy(legacy) : null);
+     // The bucket a version reports under, and the only rule for it: the one stored with the version, or recurring
+     // charges when a row carries none, so no cost drops out of money out. Savings are not money out and have none.
+     public static ExpenseBucket? Of(RecurringKind kind, ExpenseBucket? stored) =>
+          kind != RecurringKind.Cost ? null : stored ?? ExpenseBucket.RecurringCharges;
 
      public static string Label(ExpenseBucket bucket) => bucket switch
      {

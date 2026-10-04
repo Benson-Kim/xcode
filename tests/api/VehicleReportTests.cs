@@ -49,18 +49,17 @@ public sealed class VehicleReportTests : IDisposable
             item.Stop(new DateOnly(2026, 3, 23));
             return item;
         });
-        // Phase 1 versions: an old category, and in one case no stored bucket at all (assumption A2 maps both).
-        var tyres = await Save(organization => new RecurringItem(organization, new RecurringDefinition("Tyres", RecurringKind.Cost,
-            CostCategory.RepairsAndUpkeep, 200m, Weekly(0), Start, null, [new(vehicle, 100m), new(other, 100m)])));
-        await app.WithDb(db => db.Set<RecurringVersion>().IgnoreQueryFilters().Where(v => v.ItemId == tyres)
-            .ExecuteUpdateAsync(s => s.SetProperty(v => v.Bucket, (ExpenseBucket?)null)));
+        // A cost shared between two vehicles: this vehicle's report shows its share alone, under the item's bucket.
+        await Save(organization => new RecurringItem(organization, new RecurringDefinition("Tyres", RecurringKind.Cost,
+            200m, Weekly(0), Start, null, [new(vehicle, 100m), new(other, 100m)], Bucket: ExpenseBucket.RepairsAndMaintenance)));
         await Save(organization => new RecurringItem(organization, new RecurringDefinition("Crew lunch", RecurringKind.Cost,
-            CostCategory.CrewCosts, 50m, new RecurringSchedule(RecurrenceFrequency.Daily), Start, new DateOnly(2026, 3, 5), [new(vehicle, 50m)])));
+            50m, new RecurringSchedule(RecurrenceFrequency.Daily), Start, new DateOnly(2026, 3, 5), [new(vehicle, 50m)],
+            Bucket: ExpenseBucket.RecurringCharges)));
         await Save(organization => new RecurringItem(organization, Cost("Loan repayment",
             new RecurringSchedule(RecurrenceFrequency.Monthly, null, lastDay: true), ExpenseBucket.LoanRepayments, [new(vehicle, 10000m)])));
         await Save(organization => new RecurringItem(organization, Cost("Insurance",
             new RecurringSchedule(RecurrenceFrequency.Yearly, 15, month: 3), ExpenseBucket.RecurringCharges, [new(vehicle, 6000m)])));
-        await Save(organization => new RecurringItem(organization, new RecurringDefinition("Owner savings", RecurringKind.Savings, null,
+        await Save(organization => new RecurringItem(organization, new RecurringDefinition("Owner savings", RecurringKind.Savings,
             1000m, Weekly(5), Start, null, [new(vehicle, 1000m)])));
         // Only the other vehicle's.
         await Save(organization => new RecurringItem(organization, Cost("Stage fee", Weekly(1), ExpenseBucket.RecurringCharges, [new(other, 999m)])));
@@ -97,7 +96,7 @@ public sealed class VehicleReportTests : IDisposable
         Assert.Equal([(15, 6000m)], posted["Insurance"]);
         Assert.Equal([6, 13, 20, 27], posted["Owner savings"].Select(x => x.Day));
         Assert.False(posted.ContainsKey("Stage fee"));
-        Assert.All(march.Postings.Where(p => p.Name == "Tyres"), p => Assert.Equal((CostCategory.RepairsAndUpkeep, ExpenseBucket.RepairsAndMaintenance), (p.Category!.Value, p.Bucket!.Value)));
+        Assert.All(march.Postings.Where(p => p.Name == "Tyres"), p => Assert.Equal(ExpenseBucket.RepairsAndMaintenance, p.Bucket));
         Assert.All(march.Postings.Where(p => p.Name == "Crew lunch"), p => Assert.Equal(ExpenseBucket.RecurringCharges, p.Bucket));
 
         // Once today is captured, its target counts too, exactly as the revenue week counts it.
@@ -118,7 +117,7 @@ public sealed class VehicleReportTests : IDisposable
         var report = await owner.GetFromJsonAsync<JsonElement>($"/setup/vehicles/{vehicle}/report?period=month");
         Assert.Equal(["vehicleId", "from", "through", "moneyIn", "target", "repairs", "charges", "loans", "moneyOut", "net", "savings", "afterSavings", "costs", "postings"],
             report.EnumerateObject().Select(x => x.Name));
-        Assert.Equal(["itemId", "versionId", "date", "name", "kind", "category", "amount", "bucket"],
+        Assert.Equal(["itemId", "versionId", "date", "name", "kind", "amount", "bucket"],
             report.GetProperty("postings")[0].EnumerateObject().Select(x => x.Name));
     }
 
@@ -218,8 +217,8 @@ public sealed class VehicleReportTests : IDisposable
         Assert.Equal((one.Reads, one.Rows + 1), shared);
         // Forty more daily items: many more postings, the same queries, and one row per version.
         for (var i = 0; i < 40; i++)
-            await Save(organization => new RecurringItem(organization, new RecurringDefinition($"Daily {i}", RecurringKind.Cost, CostCategory.RunningCosts,
-                10m, new RecurringSchedule(RecurrenceFrequency.Daily), Start, null, [new(vehicle, 10m)])));
+            await Save(organization => new RecurringItem(organization, new RecurringDefinition($"Daily {i}", RecurringKind.Cost,
+                10m, new RecurringSchedule(RecurrenceFrequency.Daily), Start, null, [new(vehicle, 10m)], Bucket: ExpenseBucket.RecurringCharges)));
         var many = await Measure();
         Assert.Equal((one.Reads, one.Rows + 41), many);
     }
@@ -228,7 +227,7 @@ public sealed class VehicleReportTests : IDisposable
     private static RecurringSchedule Monthly(int day) => new(RecurrenceFrequency.Monthly, day);
 
     private static RecurringDefinition Cost(string name, RecurringSchedule schedule, ExpenseBucket bucket, IReadOnlyList<VehicleShare> shares) =>
-        new(name, RecurringKind.Cost, null, shares.Sum(s => s.Amount), schedule, Start, null, shares, Bucket: bucket);
+        new(name, RecurringKind.Cost, shares.Sum(s => s.Amount), schedule, Start, null, shares, Bucket: bucket);
 
     private static async Task<VehicleReport> Report(HttpClient client, Guid vehicle, string query) =>
         (await client.GetFromJsonAsync<VehicleReport>($"/setup/vehicles/{vehicle}/report?{query}"))!;

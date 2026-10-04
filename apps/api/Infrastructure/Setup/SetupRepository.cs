@@ -187,7 +187,6 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 v.Revision,
                 v.Name,
                 v.Kind,
-                v.Category,
                 v.Frequency,
                 v.Day,
                 v.LastDay,
@@ -221,10 +220,10 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             }).ToList();
             // The total is what was saved for the shares listed (the viewer's share when partial), retired vehicles included,
             // so it always balances against them; ActiveAmount is the part that still posts.
-            return new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
+            return new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind,
                 allocations.Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
                 allocations, v.Allocations.Count != v.AllocationCount, v.ExpenseItemId, v.ExpenseItemName,
-                ExpenseBuckets.Of(v.Kind, v.Category, v.Bucket), v.Note, v.Month, allocations.Where(a => a.Active).Sum(a => a.Amount));
+                ExpenseBuckets.Of(v.Kind, v.Bucket), v.Note, v.Month, allocations.Where(a => a.Active).Sum(a => a.Amount));
         }).ToList(), page, pageSize, total);
     }
 
@@ -256,7 +255,7 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 .Select(due => (Due: due, Share: due.Version.Allocations.SingleOrDefault(a => a.VehicleId == vehicle.Id)))
                 .Where(x => x.Share is not null)
                 .Select(x => new PostingDto(item.Id, x.Due.Version.Id, x.Due.Date, x.Due.Version.Name, x.Due.Version.Kind,
-                    x.Due.Version.Category, x.Share!.Amount, x.Due.Version.ReportedBucket())))
+                    x.Share!.Amount, x.Due.Version.ReportedBucket())))
             .OrderBy(p => p.Date).ThenBy(p => p.Name, StringComparer.Ordinal).ThenBy(p => p.ItemId)
             .ToList();
 

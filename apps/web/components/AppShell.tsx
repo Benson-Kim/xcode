@@ -630,7 +630,7 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
       };
     }),
     unavailable("dash.net", "Net contribution", `Revenue less all costs. ${label}`, "Needs cost totals, which are not connected yet."),
-    unavailable("dash.costs", "Money out", `${label}. Fuel and crew pay are not tracked.`, "Cost totals are not connected yet."),
+    unavailable("dash.costs", "Money out", `${label}. Fuel and crew pay are not tracked; revenue is recorded net of them.`, "Cost totals are not connected yet."),
     revenueCard(
       {
         permission: "dash.gaps",

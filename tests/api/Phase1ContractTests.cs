@@ -441,7 +441,8 @@ public sealed class Phase1WebSettingsContractTests : IDisposable
         return (company, vehicle);
     }
 
-    // RecurringEditor.save as develop sends it.
+    // RecurringEditor.save as develop sends it. The retired category goes on being sent on purpose: a body from the
+    // old web must still be read, and the field is now ignored rather than refused.
     private object Recurring(string vehicle, string name, int kind, int? category, int frequency, int? day, decimal amount, string reason) => new
     {
         name, kind, category, amount, frequency, day, lastDay = false, start = Phase1.Date(Today), end = (string?)null,
@@ -519,7 +520,8 @@ public sealed class Phase1WebSettingsContractTests : IDisposable
                 Phase1.Has(item, name, J.Str);
             foreach (var name in new[] { "kind", "amount", "frequency" })
                 Phase1.Has(item, name, J.Num);
-            Phase1.Has(item, "category", J.Num, J.Null);
+            // The retired category is gone from the answer; the bucket of the cost's expense item took its place.
+            Phase1.Has(item, "bucket", J.Num, J.Null);
             Phase1.Has(item, "day", J.Num, J.Null);
             Phase1.Has(item, "lastDay", J.Bool);
             Phase1.Has(item, "end", J.Str, J.Null);
@@ -548,7 +550,7 @@ public sealed class Phase1WebSettingsContractTests : IDisposable
                 foreach (var name in new[] { "itemId", "versionId", "date", "name" })
                     Phase1.Has(posting, name, J.Str);
                 Phase1.Has(posting, "kind", J.Num);
-                Phase1.Has(posting, "category", J.Num, J.Null);
+                Phase1.Has(posting, "bucket", J.Num, J.Null);
                 Phase1.Has(posting, "amount", J.Num);
             }
         }

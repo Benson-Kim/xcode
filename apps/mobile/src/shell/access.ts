@@ -80,7 +80,7 @@ export const DASHBOARD_CARDS: {
   { permission: "dash.float", title: "My petty cash float", sub: "Cash in hand now", unavailable: "Petty cash is not connected yet." },
   { permission: "dash.revenue", title: "Revenue", sub: "{period}" },
   { permission: "dash.net", title: "Net contribution", sub: "Revenue less all costs. {period}", unavailable: "Needs cost totals, which are not connected yet." },
-  { permission: "dash.costs", title: "Money out", sub: "{period}. Fuel and crew pay are not tracked.", unavailable: "Cost totals are not connected yet." },
+  { permission: "dash.costs", title: "Money out", sub: "{period}. Fuel and crew pay are not tracked; revenue is recorded net of them.", unavailable: "Cost totals are not connected yet." },
   { permission: "dash.gaps", title: "Missing revenue days", period: "month", action: "Fill the gaps", tab: "revenue", actionNeeds: ["revenue.capture", "revenue.correct"] },
   { permission: "dash.pettycash", title: "Petty cash to approve", sub: "All managers", unavailable: "Petty cash is not connected yet." },
   { permission: "dash.commitments", title: "Yearly items due", sub: "Next 30 days", unavailable: "Yearly items are not connected yet." },

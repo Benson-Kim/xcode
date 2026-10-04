@@ -110,7 +110,8 @@ public sealed class DomainRuleTests
     }
 
     private static RecurringDefinition Daily(DateOnly start, decimal amount = 100m) =>
-        new("Insurance", RecurringKind.Cost, CostCategory.FixedCommitments, amount, new RecurringSchedule(RecurrenceFrequency.Daily), start, null, [new VehicleShare(Vehicle, amount)]);
+        new("Insurance", RecurringKind.Cost, amount, new RecurringSchedule(RecurrenceFrequency.Daily), start, null, [new VehicleShare(Vehicle, amount)],
+            Bucket: ExpenseBucket.RecurringCharges);
 
     [Fact]
     public void PostponingAPendingItemStopsTheOldScheduleAndKeepsItEditable()

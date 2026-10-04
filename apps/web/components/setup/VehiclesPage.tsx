@@ -608,7 +608,7 @@ function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
     <Card>
       <CardHeader
         title={`${period === "week" ? "This week" : "This month"}${data ? `, ${formatDateRange(data.from, data.through)}` : ""}`}
-        description="Money in and money out, counted on the day it moved. Fuel and crew pay are not tracked."
+        description="Money in and money out, counted on the day it moved. Fuel and crew pay are not tracked; revenue is recorded net of them."
       />
       <SegmentedControl
         label="Report period"
