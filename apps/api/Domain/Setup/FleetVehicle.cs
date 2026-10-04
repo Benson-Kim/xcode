@@ -12,6 +12,7 @@ public sealed record VehicleRegistration
           Value = compact[..3] + " " + compact[3..];
      }
 }
+
 public sealed class FleetVehicle : IOrganizationEntity
 {
      Guid IOrganizationEntity.OrganizationId
@@ -25,11 +26,14 @@ public sealed class FleetVehicle : IOrganizationEntity
      public Guid CompanyId { get; private set; }
      public string Registration { get; private set; } = "";
      public DateOnly JoinedOn { get; private set; }
+     public DateOnly? LeftOn { get; private set; }
      public List<VehicleTarget> Targets { get; private set; } = [];
+
      public FleetVehicle(Guid organizationId, Guid companyId, VehicleRegistration registration, DateOnly joinedOn, decimal weeklyTarget)
      {
           if (organizationId == Guid.Empty || companyId == Guid.Empty)
                throw new ArgumentException("Organization and company are required.");
+          if (joinedOn == default) throw new ArgumentException("Join date is required.");
           OrganizationId = organizationId;
           CompanyId = companyId;
           Registration = registration.Value;
@@ -37,10 +41,20 @@ public sealed class FleetVehicle : IOrganizationEntity
           Targets.Add(new(organizationId, Id, joinedOn, SetupValue.Money(weeklyTarget), 1));
      }
 
+     public bool ActiveOn(DateOnly date) => ActiveOn(JoinedOn, LeftOn, date);
+
+     // The one rule for "active": joined by the date and not yet left. Queries spell it out as
+     // JoinedOn <= date && (LeftOn == null || LeftOn > date).
+     public static bool ActiveOn(DateOnly joinedOn, DateOnly? leftOn, DateOnly date) => date >= joinedOn && (leftOn is null || date < leftOn);
+
      public bool Update(Guid companyId, DateOnly joinedOn, decimal weeklyTarget, DateOnly today)
      {
           if (companyId == Guid.Empty)
                throw new ArgumentException("Company is required.");
+          if (joinedOn == default || joinedOn > today)
+               throw new ArgumentException("A vehicle cannot join after the business date.");
+          if (LeftOn is not null)
+               throw new ArgumentException("Retired vehicles must be restored before they can be edited.");
           SetupValue.Money(weeklyTarget);
           var changed = CompanyId != companyId || JoinedOn != joinedOn;
           var previousJoin = JoinedOn;
@@ -51,20 +65,41 @@ public sealed class FleetVehicle : IOrganizationEntity
           if (joinedOn < previousJoin && Targets.All(t => t.EffectiveFrom > joinedOn))
                Targets.Add(new(OrganizationId, Id, joinedOn, targetAtPreviousJoin, Targets.Max(t => t.Revision) + 1));
           // Append even for repeated edits today: history is never overwritten.
-          if (TargetOn(today < joinedOn ? joinedOn : today) != weeklyTarget)
+          var effectiveToday = today < joinedOn ? joinedOn : today;
+          if (TargetOn(effectiveToday) != weeklyTarget)
           {
-               Targets.Add(new(OrganizationId, Id, today < joinedOn ? joinedOn : today, weeklyTarget, Targets.Max(t => t.Revision) + 1));
+               Targets.Add(new(OrganizationId, Id, effectiveToday, weeklyTarget, Targets.Max(t => t.Revision) + 1));
                changed = true;
           }
           return changed;
      }
-     public decimal TargetOn(DateOnly date) => date < JoinedOn ? 0 : Targets
+
+     public bool Retire(DateOnly leftOn, DateOnly today)
+     {
+          if (leftOn == default || leftOn > today || leftOn < JoinedOn)
+               throw new ArgumentException("A vehicle's leave date must be from its join date through the business date.");
+          if (LeftOn is not null)
+          {
+               if (LeftOn != leftOn) throw new ArgumentException("The vehicle is already retired.");
+               return false;
+          }
+          LeftOn = leftOn;
+          return true;
+     }
+
+     public bool Restore()
+     {
+          if (LeftOn is null) return false;
+          LeftOn = null;
+          return true;
+     }
+
+     public decimal TargetOn(DateOnly date) => !ActiveOn(date) ? 0 : Targets
          .Where(t => t.EffectiveFrom <= date)
          .OrderByDescending(t => t.EffectiveFrom)
          .ThenByDescending(t => t.Revision)
          .Select(t => t.WeeklyAmount)
          .FirstOrDefault();
-
 }
 
 public sealed class VehicleTarget : IOrganizationEntity
@@ -83,5 +118,4 @@ public sealed class VehicleTarget : IOrganizationEntity
      public int Revision { get; private set; }
      internal VehicleTarget(Guid organizationId, Guid vehicleId, DateOnly from, decimal amount, int revision)
          => (OrganizationId, VehicleId, EffectiveFrom, WeeklyAmount, Revision) = (organizationId, vehicleId, from, amount, revision);
-
 }

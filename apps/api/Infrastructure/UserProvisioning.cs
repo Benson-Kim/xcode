@@ -31,6 +31,9 @@ public static class UserProvisioning
             if (await db.Users.AnyAsync(u => u.PhoneNumber == phone && u.Email != email, ct))
                 throw new ArgumentException("That mobile number already belongs to someone else.");
             var user = await db.Users.SingleOrDefaultAsync(u => u.Email == email, ct);
+            var wasExisting = user is not null;
+            var oldPhone = user?.PhoneNumber;
+            var oldStatus = user?.Status;
             if (user is null)
             {
                 user = new User { Email = email };
@@ -41,6 +44,7 @@ public static class UserProvisioning
 
             var (first, last) = NameFrom(email);
             var membership = await db.Memberships.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.OrganizationId == organization.Id && x.UserId == user.Id, ct);
+            var membershipWasInactive = membership is { Active: false };
             if (membership is null)
                 db.Memberships.Add(new OrganizationMembership { OrganizationId = organization.Id, UserId = user.Id, FirstName = request.FirstName?.Trim() ?? first, LastName = request.LastName?.Trim() ?? last });
             else
@@ -52,10 +56,23 @@ public static class UserProvisioning
 
             // An existing role is only replaced when the operator names one explicitly.
             var roleLink = await db.PersonRoles.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.OrganizationId == organization.Id && x.UserId == user.Id, ct);
+            var previousRoleId = roleLink?.RoleId;
             var roleName = request.Role ?? (roleLink is null ? DefaultRole : roles.Single(x => x.Id == roleLink.RoleId).Name);
             var role = roles.Single(x => x.Name.Equals(roleName, StringComparison.OrdinalIgnoreCase));
             if (roleLink is not null && roleLink.RoleId != role.Id) { db.PersonRoles.Remove(roleLink); roleLink = null; }
             if (roleLink is null) db.PersonRoles.Add(new PersonRole { OrganizationId = organization.Id, UserId = user.Id, RoleId = role.Id });
+
+            // Operator backfills can change the account's identity, membership or role. Invalidate every
+            // previously issued credential so those changes take effect on all devices.
+            if (wasExisting &&
+                (oldPhone != phone || oldStatus != UserStatus.Active || membershipWasInactive || previousRoleId != role.Id))
+            {
+                user.SecurityVersion++;
+                foreach (var device in await db.TrustedDevices.IgnoreQueryFilters().Where(x => x.UserId == user.Id).ToListAsync(ct))
+                    device.Revoked = true;
+                foreach (var token in await db.RefreshTokens.IgnoreQueryFilters().Where(x => x.UserId == user.Id).ToListAsync(ct))
+                    token.Revoked = true;
+            }
 
             if (role.Name is "Owner" or "Office admin" && !await db.SetupDataScopes.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organization.Id && x.UserId == user.Id, ct))
                 db.SetupDataScopes.Add(new SetupDataScope { OrganizationId = organization.Id, UserId = user.Id, AllCompanies = true });
@@ -80,7 +97,8 @@ public static class UserProvisioning
         return organization;
     }
 
-    // Adds missing catalog roles and any missing default grants; never removes an organization's grants.
+    // Adds missing catalog roles. A role's permissions live only in PermissionCatalog, so no RolePermission rows are
+    // written; rows left by older versions are ignored (the table is kept until it is dropped).
     public static async Task<List<Role>> EnsureRoles(AuthDb db, Guid organizationId, CancellationToken ct)
     {
         var roles = await db.Roles.IgnoreQueryFilters().Where(x => x.OrganizationId == organizationId).ToListAsync(ct);
@@ -90,11 +108,6 @@ public static class UserProvisioning
                 var role = new Role { OrganizationId = organizationId, Name = roleName };
                 db.Roles.Add(role); roles.Add(role);
             }
-        foreach (var role in roles)
-        {
-            var existing = await db.RolePermissions.IgnoreQueryFilters().Where(x => x.OrganizationId == organizationId && x.RoleId == role.Id).Select(x => x.Permission).ToListAsync(ct);
-            db.RolePermissions.AddRange(PermissionCatalog.DefaultsFor(role.Name).Where(x => !existing.Contains(x)).Select(role.Grant));
-        }
         return roles;
     }
 

@@ -1,4 +1,3 @@
-
 namespace Auth.Domain.Setup;
 
 public sealed class PsvCompany : IOrganizationEntity
@@ -13,6 +12,10 @@ public sealed class PsvCompany : IOrganizationEntity
      public Guid OrganizationId { get; private set; }
      public string Name { get; private set; } = "";
      public string NormalizedName { get; private set; } = "";
+     public DateOnly? ArchivedOn { get; private set; }
+
+     public bool ActiveOn(DateOnly date) => ArchivedOn is null || ArchivedOn > date;
+
      public PsvCompany(Guid organizationId, string name)
      {
           if (organizationId == Guid.Empty)
@@ -20,6 +23,7 @@ public sealed class PsvCompany : IOrganizationEntity
           OrganizationId = organizationId;
           Rename(name);
      }
+
      public bool Rename(string name)
      {
           var value = SetupValue.Name(name);
@@ -28,15 +32,34 @@ public sealed class PsvCompany : IOrganizationEntity
           NormalizedName = value.ToUpperInvariant();
           return true;
      }
+
+     public bool Archive(DateOnly date)
+     {
+          if (date == default) throw new ArgumentException("Archive date is required.");
+          if (ArchivedOn is not null)
+          {
+               if (ArchivedOn != date) throw new ArgumentException("The company is already archived.");
+               return false;
+          }
+          ArchivedOn = date;
+          return true;
+     }
+
+     public bool Restore()
+     {
+          if (ArchivedOn is null) return false;
+          ArchivedOn = null;
+          return true;
+     }
 }
 
 public static class SetupValue
 {
-     public static string Name(string? value)
+     public static string Name(string? value, int maxLength = 160)
      {
           value = value?.Trim();
-          if (string.IsNullOrWhiteSpace(value) || value.Length > 160)
-               throw new ArgumentException("Name must contain 1-160 characters.");
+          if (string.IsNullOrWhiteSpace(value) || value.Length > maxLength)
+               throw new ArgumentException($"Name must contain 1-{maxLength} characters.");
 
           return value;
      }

@@ -6,6 +6,7 @@ import { defaultTheme, mix, type Theme } from "./ui";
 export type Appearance = {
   organizationName: string;
   settingsVersion: number;
+  businessDate?: string;
   branding: {
     displayName: string;
     logoAlt: string;

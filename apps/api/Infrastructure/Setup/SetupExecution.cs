@@ -9,12 +9,13 @@ namespace Auth.Infrastructure.Setup;
 
 public sealed class SetupExecution(IOrganizationContext context, IOrganizationRepository organizations, IUnitOfWork unitOfWork, AuthDb db, IClock clock) : ISetupExecution
 {
+     // Same authorization as a write, but no serializable transaction and no SaveChanges.
      public Task<T> Read<T>(string permission, Func<SetupActor, Task<T>> query, CancellationToken ct)
-         => new Invocation<T>(context, organizations, unitOfWork, permission, async ()
+         => new Invocation<T>(context, organizations, unitOfWork, permission, true, async ()
          => await query(await Actor(ct))).Run(true, ct);
 
      public Task<T> Write<T>(string permission, Func<SetupActor, Task<T>> command, CancellationToken ct)
-         => new Invocation<T>(context, organizations, unitOfWork, permission, async ()
+         => new Invocation<T>(context, organizations, unitOfWork, permission, false, async ()
          => await command(await Actor(ct))).Run(true, ct);
 
      private async Task<SetupActor> Actor(CancellationToken ct)
@@ -41,14 +42,21 @@ public sealed class SetupExecution(IOrganizationContext context, IOrganizationRe
                .AsNoTracking()
                .Select(x => x.TimeZone)
                .SingleOrDefaultAsync(ct) ?? "Africa/Nairobi";
-          var today = DateOnly
+          var calendarDate = DateOnly
                .FromDateTime(TimeZoneInfo.ConvertTime(clock.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone)).DateTime);
+          var businessDate = await db.Organizations
+               .AsNoTracking()
+               .Select(x => x.BusinessDate)
+               .SingleAsync(ct);
+          // All setup calculations use the organization's accounting date, never a browser or user-local date.
+          var today = businessDate ?? calendarDate;
 
           return new(context.OrganizationId, context.ActorId, today, scope?.AllCompanies == true, companies, vehicles, context.CorrelationId);
      }
 
-     private sealed class Invocation<T>(IOrganizationContext context, IOrganizationRepository repository, IUnitOfWork unitOfWork, string permission, Func<Task<T>> execute) : OrganizationUseCase<bool, T>(context, repository, unitOfWork)
+     private sealed class Invocation<T>(IOrganizationContext context, IOrganizationRepository repository, IUnitOfWork unitOfWork, string permission, bool readOnly, Func<Task<T>> execute) : OrganizationUseCase<bool, T>(context, repository, unitOfWork)
      {
+          protected override bool ReadOnly => readOnly;
           protected override string RequiredPermission => permission;
           protected override void Validate(bool request) { }
           protected override Task<T> Execute(bool request, CancellationToken ct) => execute();

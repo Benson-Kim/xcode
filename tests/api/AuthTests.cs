@@ -16,10 +16,13 @@ public sealed class AuthTests : IDisposable
     private readonly HttpClient client;
     private const string Address = "person@example.com";
     public AuthTests() => client = app.CreateClient();
+    private VerificationMailer Mailer => app.Services.GetRequiredService<VerificationMailer>();
     private AuthRequest Request(string phoneNumber = "+254712345678", string pin = "5826", string device = "phone", string code = "", string refresh = "") => new(PhoneNumber: phoneNumber, Pin: pin, DeviceId: device, Code: code, RefreshToken: refresh);
     private async Task<(HttpStatusCode Status, AuthResponse Body)> Post(string path, AuthRequest? request = null)
     {
         var response = await client.PostAsJsonAsync("/auth/" + path, request ?? Request());
+        // Setup and reset codes go out after the reply; wait for them so the test sees what the person received.
+        await Mailer.Idle();
         var body = await response.Content.ReadFromJsonAsync<AuthResponse>();
         Assert.NotNull(body);
         return (response.StatusCode, body);
@@ -27,6 +30,110 @@ public sealed class AuthTests : IDisposable
     private async Task Pause(string path = "sign-in")
     {
         for (var i = 0; i < 5; i++) Assert.Equal(HttpStatusCode.Unauthorized, (await Post(path, Request(pin: "9998"))).Status);
+    }
+    // Everything a caller can see of a response, to compare two byte for byte.
+    private async Task<string> Seen(string path, AuthRequest request)
+    {
+        using var response = await client.PostAsJsonAsync("/auth/" + path, request);
+        await Mailer.Idle();
+        var headers = string.Join("; ", response.Headers.Concat(response.Content.Headers)
+            .Where(x => x.Key is not ("Date" or "Content-Length")).OrderBy(x => x.Key).Select(x => $"{x.Key}={string.Join(",", x.Value)}"));
+        return $"{(int)response.StatusCode} {headers} {await response.Content.ReadAsStringAsync()}";
+    }
+    private const string Unknown = "+254700000000";
+    // Out-of-range values an earlier version could store (a lockout after one try, a day-long pause), written past the
+    // database's own checks.
+    private Task StoreOutOfRangePolicy() => app.WithDb(db => db.Database.ExecuteSqlRawAsync(
+        "PRAGMA ignore_check_constraints = 1; " +
+        "UPDATE \"SecurityPolicies\" SET \"LockoutThreshold\" = 1, \"LockoutMinutes\" = 1440, \"AccessTokenMinutes\" = 120, \"RefreshTokenDays\" = 365; " +
+        "PRAGMA ignore_check_constraints = 0;"));
+
+    [Fact]
+    public async Task APauseLooksLikeAnUnknownNumberExceptOnATrustedDevice()
+    {
+        await app.Seed();
+        await Pause();
+
+        // On a device this account has not trusted, a paused account answers exactly like a number with no account,
+        // whatever PIN is tried, on sign-in and unlock alike.
+        foreach (var path in new[] { "sign-in", "unlock" })
+            foreach (var pin in new[] { "5826", "9998" })
+                Assert.Equal(await Seen(path, Request(phoneNumber: Unknown, pin: pin, device: "stranger")), await Seen(path, Request(pin: pin, device: "stranger")));
+        await app.WithDb(async db => Assert.Equal(5, (await db.Users.SingleAsync()).FailedAttempts));
+
+        // The phone the person already trusts keeps showing the timer (Phase 1 phones depend on it).
+        var trusted = await Post("sign-in");
+        Assert.Equal((HttpStatusCode)423, trusted.Status);
+        Assert.Equal("paused", trusted.Body.Status);
+        Assert.Equal(900, trusted.Body.RetryAfterSeconds);
+        Assert.Equal((HttpStatusCode)423, (await Post("unlock")).Status);
+    }
+
+    [Fact]
+    public async Task ANumberThatIsNotAPhoneNumberReachesNoAccount()
+    {
+        // Accounts made before phone sign-in have no number yet. Input that is not a phone number normalizes to
+        // nothing, and must not reach them.
+        await app.WithDb(async db =>
+        {
+            await db.Database.EnsureCreatedAsync();
+            await AuthFactory.AddOrganization(db);
+            db.Users.Add(new User { Email = "legacy.one@example.com" });
+            await db.SaveChangesAsync();
+        });
+        Assert.Equal(await Seen("setup-pin/request", Request(phoneNumber: Unknown)), await Seen("setup-pin/request", Request(phoneNumber: "not a number")));
+        Assert.Equal(0, app.Email.Count);
+
+        // With two such accounts the lookup used to fail with a 500.
+        await app.WithDb(async db => { db.Users.Add(new User { Email = "legacy.two@example.com" }); await db.SaveChangesAsync(); });
+        foreach (var path in new[] { "sign-in", "setup-pin/request", "setup-pin/verify", "setup-pin/complete", "verify-device" })
+            Assert.Equal(await Seen(path, Request(phoneNumber: Unknown, pin: "6942")), await Seen(path, Request(phoneNumber: "not a number", pin: "6942")));
+        Assert.Equal(0, app.Email.Count);
+    }
+
+    [Fact]
+    public async Task ACodeRequestDoesNotWaitForTheMailServer()
+    {
+        // Only a real account's request sends an email, so waiting for the mail server would tell callers which
+        // numbers have accounts. The reply goes first; the code follows.
+        await app.Seed();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        app.Email.BeforeSend = _ => release.Task;
+        try
+        {
+            var request = client.PostAsJsonAsync("/auth/pin-reset/request", Request());
+            Assert.Same(request, await Task.WhenAny(request, Task.Delay(TimeSpan.FromSeconds(20))));
+            Assert.Equal(HttpStatusCode.Accepted, (await request).StatusCode);
+            Assert.Equal(0, app.Email.Count);
+        }
+        finally { release.TrySetResult(); }
+        for (var wait = 0; app.Email.Count == 0 && wait < 200; wait++) await Task.Delay(50);
+        Assert.Equal(1, app.Email.Count);
+        Assert.Equal(HttpStatusCode.OK, (await Post("pin-reset/complete", Request(pin: "6942", code: app.Email.Codes[Address]))).Status);
+    }
+
+    [Fact]
+    public async Task AStoredPolicyOutsideTheBoundsIsEnforcedWithinThem()
+    {
+        await app.Seed();
+        await StoreOutOfRangePolicy();
+
+        // Access tokens last at most 15 minutes and refresh tokens at most 90 days.
+        var signedIn = await Post("sign-in");
+        var jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(signedIn.Body.AccessToken);
+        Assert.Equal(TimeSpan.FromMinutes(15), jwt.ValidTo - jwt.ValidFrom);
+        await app.WithDb(async db => Assert.Equal(app.Clock.UtcNow.AddDays(90), (await db.RefreshTokens.SingleAsync()).ExpiresAt));
+
+        // One wrong PIN no longer pauses the account: it takes at least three.
+        await Post("sign-in", Request(pin: "9998"));
+        await app.WithDb(async db => Assert.Null((await db.Users.SingleAsync()).PausedUntil));
+        await Post("sign-in", Request(pin: "9998"));
+        await Post("sign-in", Request(pin: "9998"));
+
+        // And the pause lasts at most an hour, not a day.
+        var paused = await Post("sign-in");
+        Assert.Equal((HttpStatusCode)423, paused.Status);
+        Assert.Equal(3600, paused.Body.RetryAfterSeconds);
     }
     [Fact]
     public async Task AUTH01_TrustedSignInIssuesTokens_And_OPEN05_ResetsFailures()
@@ -137,6 +244,28 @@ public sealed class AuthTests : IDisposable
         await Post("pin-reset/request");
         Assert.Equal(HttpStatusCode.BadRequest, (await Post("pin-reset/complete", Request(pin: pin, code: app.Email.Codes[Address]))).Status);
         await app.WithDb(async db => Assert.Null((await db.Users.SingleAsync()).PinHash));
+    }
+    [Fact]
+    public async Task PinResetCannotCreateTheFirstPin()
+    {
+        await app.Seed(withPin: false);
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        Assert.Empty(app.Email.Codes);
+
+        var result = await Post("pin-reset/complete", Request(pin: "6942", code: "000000"));
+        Assert.Equal(HttpStatusCode.Unauthorized, result.Status);
+        await app.WithDb(async db => Assert.Null((await db.Users.SingleAsync()).PinHash));
+    }
+    [Fact]
+    public async Task DeviceCannotRevokeAnotherDevice()
+    {
+        await app.Seed();
+        var signedIn = await Post("sign-in");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", signedIn.Body.AccessToken);
+
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.PostAsJsonAsync("/auth/devices/another-device/revoke", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Post("refresh", Request(refresh: signedIn.Body.RefreshToken!))).Status);
     }
     [Fact]
     public async Task AUTH12_RemovedUserCannotSignInRefreshOrUseAccessToken()
@@ -283,6 +412,139 @@ public sealed class AuthTests : IDisposable
         Assert.Equal(6, tooShort.Body.MinimumPinLength);
         Assert.Equal(HttpStatusCode.OK, (await Post("pin-reset/complete", Request(pin: "694213", code: code))).Status);
     }
+    [Fact]
+    public async Task ReprovisioningAnExistingAccountRevokesItsOldSession()
+    {
+        await app.Seed();
+        var signedIn = await Post("sign-in");
+
+        // Repeating the same provisioning changes nothing, so the session is kept (provisioning is idempotent).
+        await app.WithDb(async db =>
+            await UserProvisioning.Provision(db, new(Address, "0712345678", "Revenue clerk")));
+        var kept = await Post("refresh", Request(refresh: signedIn.Body.RefreshToken!));
+        Assert.Equal(HttpStatusCode.OK, kept.Status);
+
+        // A new role must take effect on every device, so every earlier credential is revoked.
+        await app.WithDb(async db =>
+            await UserProvisioning.Provision(db, new(Address, "0712345678", "Fleet manager")));
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await Post("refresh", Request(refresh: kept.Body.RefreshToken!))).Status);
+    }
+
+    [Fact]
+    public async Task AnEmailResetLiftsTheLongestPause()
+    {
+        await app.Seed();
+        // Addendum 1: at least three tries, a pause of at most one hour, and a reset by email still lifts it.
+        await Assert.ThrowsAsync<ArgumentException>(() => app.Policy(p => p.LockoutThreshold = 2));
+        await Assert.ThrowsAsync<ArgumentException>(() => app.Policy(p => p.LockoutMinutes = 61));
+        await app.Policy(p => { p.LockoutThreshold = 3; p.LockoutMinutes = 60; });
+
+        for (var i = 0; i < 3; i++) Assert.Equal(HttpStatusCode.Unauthorized, (await Post("sign-in", Request(pin: "9998"))).Status);
+        var paused = await Post("sign-in");
+        Assert.Equal((HttpStatusCode)423, paused.Status);
+        Assert.Equal(3600, paused.Body.RetryAfterSeconds);
+
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        Assert.Equal(HttpStatusCode.OK, (await Post("pin-reset/complete", Request(pin: "6942", code: app.Email.Codes[Address]))).Status);
+        Assert.Equal(HttpStatusCode.OK, (await Post("sign-in", Request(pin: "6942"))).Status);
+    }
+
+    [Fact]
+    public async Task AFailedCommitSendsNoEmail()
+    {
+        await app.Seed(trusted: false);
+        app.Database.FailNextCommit = true;
+
+        using var response = await client.PostAsJsonAsync("/auth/sign-in", Request());
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(0, app.Email.Count);
+        await app.WithDb(async db => Assert.Empty(await db.VerificationCodes.ToListAsync()));
+    }
+
+    [Fact]
+    public async Task ASlowEmailDoesNotHoldUpOtherSignIns()
+    {
+        await app.SeedDemo();
+        const string owner = "antony.maina@shamayah.co.ke";
+        var sending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        app.Email.BeforeSend = email =>
+        {
+            if (email != owner) return Task.CompletedTask;
+            sending.TrySetResult();
+            return release.Task;
+        };
+        try
+        {
+            // The Owner signs in on a new device and the mail server stalls on their code.
+            var slow = client.PostAsJsonAsync("/auth/sign-in", new AuthRequest(PhoneNumber: "0733520614", Pin: "4826", DeviceId: "owner-phone"));
+            await sending.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Meanwhile the clerk's sign-in completes.
+            using var other = app.CreateClient();
+            var clerk = other.PostAsJsonAsync("/auth/sign-in", new AuthRequest(PhoneNumber: "0712345678", Pin: "2580", DeviceId: "clerk-phone"));
+            Assert.Same(clerk, await Task.WhenAny(clerk, Task.Delay(TimeSpan.FromSeconds(20))));
+            Assert.Equal(HttpStatusCode.Accepted, (await clerk).StatusCode);
+            Assert.False(slow.IsCompleted);
+
+            release.SetResult();
+            Assert.Equal(HttpStatusCode.Accepted, (await slow).StatusCode);
+            Assert.True(app.Email.Codes.ContainsKey(owner));
+        }
+        finally { release.TrySetResult(); }
+    }
+
+    // Anyone can call these with any number, so a failed delivery must look exactly like a request for a number with
+    // no account: the same 202 check_email. The failure is logged and the code withdrawn, so a retry sends a new one.
+    [Theory]
+    [InlineData("setup-pin/request", false)]
+    [InlineData("pin-reset/request", true)]
+    public async Task ACodeRequestWhoseEmailFailsLooksLikeAnyOtherRequest(string path, bool withPin)
+    {
+        await app.Seed(withPin: withPin, trusted: false);
+        var noAccount = await Post(path, Request(phoneNumber: "+254700000000"));
+        app.Email.BeforeSend = _ => throw new System.Net.Mail.SmtpException("Mail server unavailable");
+
+        var failed = await Post(path);
+        Assert.Equal(noAccount, failed);
+        Assert.Equal(HttpStatusCode.Accepted, failed.Status);
+        Assert.Equal(new AuthResponse("check_email"), failed.Body);
+        await app.WithDb(async db => Assert.True((await db.VerificationCodes.SingleAsync()).Consumed));
+        var logged = Assert.Single(app.Logs.Errors, x => x.Category == typeof(VerificationMailer).FullName);
+        Assert.IsType<Guid>(logged.Values["UserId"]);
+        Assert.False(string.IsNullOrEmpty(logged.Values["CorrelationId"]?.ToString()));
+
+        app.Email.BeforeSend = null;
+        Assert.Equal(HttpStatusCode.Accepted, (await Post(path)).Status);
+        Assert.Equal(1, app.Email.Count);
+    }
+
+    [Fact]
+    public async Task AnUndeliveredCodeIsWithdrawnSoARetryCanSendAnother()
+    {
+        await app.Seed(trusted: false);
+        app.Email.BeforeSend = _ => throw new System.Net.Mail.SmtpException("Mail server unavailable");
+
+        // The caller has already proven they know the PIN, so saying the service is unavailable reveals nothing.
+        var failed = await Post("sign-in");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, failed.Status);
+        Assert.Equal(new AuthResponse("service_unavailable"), failed.Body);
+        await app.WithDb(async db => Assert.True((await db.VerificationCodes.SingleAsync()).Consumed));
+        var logged = Assert.Single(app.Logs.Errors, x => x.Category == typeof(VerificationMailer).FullName);
+        Assert.False(string.IsNullOrEmpty(logged.Values["CorrelationId"]?.ToString()));
+
+        // The one-minute resend cooldown ignores codes that never went out, so a retry right away sends a new one.
+        app.Email.BeforeSend = null;
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("sign-in")).Status);
+        Assert.Equal(HttpStatusCode.OK, (await Post("verify-device", Request(code: app.Email.Codes[Address]))).Status);
+        // A delivered code still starts the cooldown.
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        Assert.Equal(2, app.Email.Count);
+    }
+
     [Fact]
     public async Task ProvisionedPeopleCanSetAPinAndSignIn_AndReprovisioningKeepsTheirRole()
     {

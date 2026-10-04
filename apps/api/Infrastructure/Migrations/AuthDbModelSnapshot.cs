@@ -72,6 +72,9 @@ namespace Auth.Api.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateOnly?>("BusinessDate")
+                        .HasColumnType("date");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -257,6 +260,10 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
+                    b.HasIndex(new[] { "UserId" }, "IX_Memberships_UserId_Active")
+                        .IsUnique()
+                        .HasFilter("[Active] = 1");
+
                     b.ToTable("Memberships");
                 });
 
@@ -297,7 +304,24 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasKey("OrganizationId");
 
-                    b.ToTable("SecurityPolicies");
+                    b.ToTable("SecurityPolicies", t =>
+                        {
+                            t.HasCheckConstraint("CK_SecurityPolicies_AccessTokenMinutes", "[AccessTokenMinutes] BETWEEN 1 AND 15");
+
+                            t.HasCheckConstraint("CK_SecurityPolicies_IdleUnlockSeconds", "[IdleUnlockSeconds] BETWEEN 30 AND 3600");
+
+                            t.HasCheckConstraint("CK_SecurityPolicies_LockoutMinutes", "[LockoutMinutes] BETWEEN 1 AND 60");
+
+                            t.HasCheckConstraint("CK_SecurityPolicies_LockoutThreshold", "[LockoutThreshold] BETWEEN 3 AND 10");
+
+                            t.HasCheckConstraint("CK_SecurityPolicies_PasswordHistory", "[PasswordHistory] BETWEEN 0 AND 24");
+
+                            t.HasCheckConstraint("CK_SecurityPolicies_PasswordMinLength", "[PasswordMinLength] BETWEEN 12 AND 128");
+
+                            t.HasCheckConstraint("CK_SecurityPolicies_PinLength", "[PinLength] BETWEEN 4 AND 8");
+
+                            t.HasCheckConstraint("CK_SecurityPolicies_RefreshTokenDays", "[RefreshTokenDays] BETWEEN 1 AND 90");
+                        });
                 });
 
             modelBuilder.Entity("Auth.Domain.PersonPermissionOverride", b =>
@@ -334,6 +358,9 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.HasKey("OrganizationId", "UserId", "RoleId");
 
                     b.HasIndex("OrganizationId", "RoleId");
+
+                    b.HasIndex("OrganizationId", "UserId")
+                        .IsUnique();
 
                     b.ToTable("PersonRoles");
                 });
@@ -447,6 +474,103 @@ namespace Auth.Api.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Auth.Domain.Setup.ExpenseBucketLookup", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ExpenseBucketLookup");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Name = "RepairsAndMaintenance"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Name = "RecurringCharges"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Name = "LoanRepayments"
+                        });
+                });
+
+            modelBuilder.Entity("Auth.Domain.Setup.ExpenseCategory", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Bucket")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateOnly?>("StoppedOn")
+                        .HasColumnType("date");
+
+                    b.HasKey("OrganizationId", "Id");
+
+                    b.HasIndex("Bucket");
+
+                    b.HasIndex("OrganizationId", "NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("ExpenseCategory");
+                });
+
+            modelBuilder.Entity("Auth.Domain.Setup.ExpenseItem", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateOnly?>("StoppedOn")
+                        .HasColumnType("date");
+
+                    b.HasKey("OrganizationId", "Id");
+
+                    b.HasIndex("OrganizationId", "CategoryId", "NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("ExpenseItem");
+                });
+
             modelBuilder.Entity("Auth.Domain.Setup.FleetVehicle", b =>
                 {
                     b.Property<Guid>("OrganizationId")
@@ -459,6 +583,9 @@ namespace Auth.Api.Infrastructure.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateOnly>("JoinedOn")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("LeftOn")
                         .HasColumnType("date");
 
                     b.Property<string>("Registration")
@@ -540,6 +667,9 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateOnly?>("ArchivedOn")
+                        .HasColumnType("date");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(160)
@@ -586,6 +716,11 @@ namespace Auth.Api.Infrastructure.Migrations
                         {
                             Id = 3,
                             Name = "Monthly"
+                        },
+                        new
+                        {
+                            Id = 4,
+                            Name = "Yearly"
                         });
                 });
 
@@ -671,6 +806,9 @@ namespace Auth.Api.Infrastructure.Migrations
                         .HasPrecision(14, 2)
                         .HasColumnType("decimal(14,2)");
 
+                    b.Property<int?>("Bucket")
+                        .HasColumnType("int");
+
                     b.Property<int?>("Category")
                         .HasColumnType("int");
 
@@ -682,6 +820,9 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.Property<DateOnly?>("End")
                         .HasColumnType("date");
+
+                    b.Property<Guid?>("ExpenseItemId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("Frequency")
                         .HasColumnType("int");
@@ -695,10 +836,17 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.Property<bool>("LastDay")
                         .HasColumnType("bit");
 
+                    b.Property<int?>("Month")
+                        .HasColumnType("int");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(160)
                         .HasColumnType("nvarchar(160)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<int>("Revision")
                         .HasColumnType("int");
@@ -708,11 +856,15 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasKey("OrganizationId", "Id");
 
+                    b.HasIndex("Bucket");
+
                     b.HasIndex("Category");
 
                     b.HasIndex("Frequency");
 
                     b.HasIndex("Kind");
+
+                    b.HasIndex("OrganizationId", "ExpenseItemId");
 
                     b.HasIndex("OrganizationId", "ItemId", "Revision")
                         .IsUnique();
@@ -770,6 +922,44 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.HasIndex("OrganizationId", "VehicleId");
 
                     b.ToTable("SetupVehicleScopes");
+                });
+
+            modelBuilder.Entity("Auth.Domain.Setup.VehicleInvestment", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("decimal(14,2)");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("nvarchar(160)");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("RecordedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("OrganizationId", "Id");
+
+                    b.HasIndex("OrganizationId", "RecordedBy");
+
+                    b.HasIndex("OrganizationId", "VehicleId", "Date");
+
+                    b.ToTable("VehicleInvestment");
                 });
 
             modelBuilder.Entity("Auth.Domain.Setup.VehicleTarget", b =>
@@ -1080,6 +1270,36 @@ namespace Auth.Api.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Auth.Domain.Setup.ExpenseCategory", b =>
+                {
+                    b.HasOne("Auth.Domain.Setup.ExpenseBucketLookup", null)
+                        .WithMany()
+                        .HasForeignKey("Bucket")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Auth.Domain.Setup.ExpenseItem", b =>
+                {
+                    b.HasOne("Auth.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Domain.Setup.ExpenseCategory", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Auth.Domain.Setup.FleetVehicle", b =>
                 {
                     b.HasOne("Auth.Domain.Organization", null)
@@ -1151,6 +1371,11 @@ namespace Auth.Api.Infrastructure.Migrations
 
             modelBuilder.Entity("Auth.Domain.Setup.RecurringVersion", b =>
                 {
+                    b.HasOne("Auth.Domain.Setup.ExpenseBucketLookup", null)
+                        .WithMany()
+                        .HasForeignKey("Bucket")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Auth.Domain.Setup.CostCategoryLookup", null)
                         .WithMany()
                         .HasForeignKey("Category")
@@ -1173,6 +1398,11 @@ namespace Auth.Api.Infrastructure.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("Auth.Domain.Setup.ExpenseItem", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ExpenseItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Auth.Domain.Setup.RecurringItem", null)
                         .WithMany("Versions")
@@ -1228,6 +1458,27 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.HasOne("Auth.Domain.OrganizationMembership", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Domain.Setup.FleetVehicle", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "VehicleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Auth.Domain.Setup.VehicleInvestment", b =>
+                {
+                    b.HasOne("Auth.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Domain.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "RecordedBy")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { readLimitedBody } from "../../body";
 
 const allowedMethods = new Set(["GET", "POST", "PUT", "DELETE"]);
 
@@ -48,11 +49,19 @@ async function proxy(
 
   const { path } = await context.params;
   // Each segment is one plain name or id: "..", "." or an encoded slash must never reach the API as a path step.
-  if (path.some((segment) => segment === "" || segment === "." || segment === ".." || /[/\\]/.test(segment)))
+  if (
+    path.some(
+      (segment) =>
+        segment === "" ||
+        segment === "." ||
+        segment === ".." ||
+        /[/\\]/.test(segment),
+    )
+  )
     return NextResponse.json({ status: "invalid_request" }, { status: 404 });
   const operation = path.map(encodeURIComponent).join("/");
   if (
-    !/^(companies|vehicles|recurring|history|preferences|appearance|organization\/logo|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy)|access\/(catalog|roles|scope-options)|people)(\/[^/]+)*$/.test(
+    !/^(companies|vehicles|recurring|revenue|expense-categories|expense-items|investment|history|preferences|appearance|organization\/logo|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy|businessDate)|access\/(catalog|me|roles|scope-options)|people)(\/[^/]+)*$/.test(
       operation,
     )
   )
@@ -66,7 +75,9 @@ async function proxy(
       { status: 401 },
     );
 
-  const body = method === "GET" || method === "DELETE" ? undefined : await request.text();
+  const body = method === "GET" || method === "DELETE" ? undefined : await readLimitedBody(request);
+  if (body === null)
+    return NextResponse.json({ status: "payload_too_large" }, { status: 413 });
   try {
     const response = await fetch(
       `${process.env.API_URL || "http://localhost:5000"}/setup/${operation}${request.nextUrl.search}`,
