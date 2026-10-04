@@ -81,6 +81,27 @@ it("limits a person to chosen vehicles and sends the role's own defaults", async
   });
 });
 
+it("ticking a permission ticks what it needs, wherever it sits in the catalogue", async () => {
+  await openNewPerson(true);
+
+  // Unticking the one it needs takes the dependent with it, and says so.
+  fireEvent.click(screen.getByLabelText("View revenue records"));
+  expect(screen.getByLabelText("Capture revenue")).not.toBeChecked();
+  expect(screen.getByText(/Also unticked, because it needs this: Capture revenue/)).toBeInTheDocument();
+
+  // Ticking the dependent again brings back what it needs. "Capture revenue" is not the first permission in
+  // the catalogue, which is the case that used to be missed.
+  fireEvent.click(screen.getByLabelText("Capture revenue"));
+  expect(screen.getByLabelText("View revenue records")).toBeChecked();
+  expect(screen.getByText(/Also ticked, because it is needed: View revenue records/)).toBeInTheDocument();
+
+  fireEvent.click(await screen.findByLabelText("KDA 482M"));
+  fireEvent.click(screen.getByRole("button", { name: "Save person" }));
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/setup/people", expect.objectContaining({ method: "POST" })));
+  const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "POST")!;
+  expect(JSON.parse(String(post[1]!.body)).permissions).toEqual(expect.arrayContaining(["revenue.view", "revenue.capture"]));
+});
+
 it("offers companies when the scope is chosen companies", async () => {
   await openNewPerson(true);
   fireEvent.click(screen.getByRole("radio", { name: "Chosen companies" }));

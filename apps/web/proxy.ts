@@ -11,9 +11,11 @@ export function proxy(request: NextRequest) {
   const policy = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
-    "style-src 'self' 'unsafe-inline'",
+    // Google Fonts serves the brand face: the stylesheet is a style source, the font files a font source.
+    // Nothing else is fetched from off-origin, and a blocked stylesheet would silently fall back to Segoe UI.
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "img-src 'self' data: blob:",
-    "font-src 'self'",
+    "font-src 'self' https://fonts.gstatic.com",
     "connect-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",

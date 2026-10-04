@@ -301,8 +301,10 @@ function withNeeds(selected: string[], key: string, all: Permission[]) {
   const next = new Set([...selected, key]);
   const pending = [key];
   while (pending.length) {
-    for (const need of all.find((item) => item.key === pending.pop())?.needs ??
-      []) {
+    // Taken off the list before the search, not inside it: find() would call the test once per permission
+    // and pop a fresh key each time, so it only ever matched one that happens to be listed first.
+    const current = pending.pop();
+    for (const need of all.find((item) => item.key === current)?.needs ?? []) {
       if (next.has(need)) continue;
       next.add(need);
       pending.push(need);
