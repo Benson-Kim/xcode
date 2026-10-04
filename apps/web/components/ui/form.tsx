@@ -92,7 +92,9 @@ const DENSITY = {
   compact: "h-11 text-[15px]",
 } as const;
 
-// `inline` sizes the control to its content (in a toolbar) instead of filling its column.
+// `inline` sizes the control to its content (in a toolbar) instead of filling its column. It still may not
+// outgrow the toolbar: a select is as wide as its longest option, and one long company name would otherwise
+// push the page sideways.
 export function TextInput({
   density = "standard",
   inline = false,
@@ -108,7 +110,7 @@ export function TextInput({
       className={cn(
         CONTROL,
         DENSITY[density],
-        inline ? "w-auto" : "w-full",
+        inline ? "w-auto min-w-0 max-w-full" : "w-full",
         className,
       )}
     />
@@ -130,7 +132,7 @@ export function SelectInput({
       className={cn(
         CONTROL,
         DENSITY[density],
-        inline ? "w-auto" : "w-full",
+        inline ? "w-auto min-w-0 max-w-full" : "w-full",
         className,
       )}
     />

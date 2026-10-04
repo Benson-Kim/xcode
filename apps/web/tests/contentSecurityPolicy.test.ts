@@ -31,7 +31,6 @@ it("locks the page down to its own origin", () => {
   vi.stubEnv("NODE_ENV", "production");
   const { directives } = run();
   expect(directives["default-src"]).toBe("'self'");
-  expect(directives["style-src"]).toBe("'self' 'unsafe-inline'");
   expect(directives["img-src"]).toBe("'self' data: blob:");
   expect(directives["connect-src"]).toBe("'self'");
   expect(directives["object-src"]).toBe("'none'");
@@ -39,6 +38,14 @@ it("locks the page down to its own origin", () => {
   expect(directives["form-action"]).toBe("'self'");
   expect(directives["frame-ancestors"]).toBe("'none'");
   expect(directives["script-src"]).toContain("'strict-dynamic'");
+});
+
+it("lets the brand font through, and nothing else off-origin", () => {
+  const { directives } = run();
+  expect(directives["style-src"]).toBe("'self' 'unsafe-inline' https://fonts.googleapis.com");
+  expect(directives["font-src"]).toBe("'self' https://fonts.gstatic.com");
+  expect(directives["connect-src"]).toBe("'self'");
+  expect(directives["default-src"]).toBe("'self'");
 });
 
 it("allows eval only while developing, and upgrades to https only in production", () => {
