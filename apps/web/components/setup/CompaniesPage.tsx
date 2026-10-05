@@ -3,29 +3,18 @@
 import { useState } from "react";
 import { apiRequest } from "../../lib/data";
 import { useStreamedList } from "../../lib/data";
-import {
-  Banner,
-  Button,
-  DataTable,
-  Field,
-  PageHeader,
-  RowButton,
-  TextInput,
-  Toolbar,
-  Td,
-  Tr,
-  useToast,
-} from "../ui";
+import { Banner, Button, DataTable, Field, PageHeader, RowButton, TextInput, Toolbar, Td, Tr, useToast } from "../ui";
+import { formatDateOnly } from "../recurringPresentation";
 import type { Company } from "./shared";
+
+// Whether the company carries an archive date, even one still ahead of the business date. Older rows had none, so inactive counts too.
+const archivedOnRecord = (company: Company) => Boolean(company.archivedOn) || company.active === false;
 
 export function CompaniesPage() {
   const [name, setName] = useState("");
   const [addError, setAddError] = useState("");
-  const [renaming, setRenaming] = useState<{
-    id: string;
-    name: string;
-    error: string;
-  } | null>(null);
+  // Changes carry no typed reason: the server writes one for the change log.
+  const [renaming, setRenaming] = useState<{ id: string; name: string; error: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const companies = useStreamedList<Company>("setup/companies");
@@ -46,10 +35,7 @@ export function CompaniesPage() {
     try {
       await apiRequest("setup/companies", {
         method: "POST",
-        body: JSON.stringify({
-          name: trimmed,
-          reason: `Added PSV company ${trimmed}`,
-        }),
+        body: JSON.stringify({ name: trimmed }),
       });
       setName("");
       setAddError("");
@@ -83,10 +69,7 @@ export function CompaniesPage() {
     try {
       await apiRequest(`setup/companies/${company.id}`, {
         method: "PUT",
-        body: JSON.stringify({
-          name: trimmed,
-          reason: `Renamed ${company.name} to ${trimmed}`,
-        }),
+        body: JSON.stringify({ name: trimmed }),
       });
       setRenaming(null);
       toast(`Company renamed to ${trimmed}.`);
@@ -98,13 +81,27 @@ export function CompaniesPage() {
     }
   }
 
+  // The stored archive date decides, not `active`: that follows the business date, so an archive dated ahead of it is cancelled by restoring.
+  async function setArchived(company: Company, archived: boolean) {
+    setBusy(true);
+    try {
+      await apiRequest(`setup/companies/${company.id}/${archived ? "archive" : "restore"}`, {
+        method: "POST",
+        body: "{}",
+      });
+      toast(archived ? `${company.name} archived.` : `${company.name} restored.`);
+      companies.reload();
+    } catch (value) {
+      setAddError((value as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section>
-      <PageHeader
-        title="PSV companies"
-        description="Every vehicle belongs to one company."
-      />
-      {companies.error && <Banner className="mt-5">{companies.error}</Banner>}
+      <PageHeader title="PSV companies" description="Every vehicle belongs to one company. Archive a company after its vehicles have left the fleet." />
+      {(companies.error || addError) && <Banner className="mt-5">{companies.error || addError}</Banner>}
       <Toolbar align="start">
         <Field
           id="new-company"
@@ -129,11 +126,7 @@ export function CompaniesPage() {
         </Button>
       </Toolbar>
       <DataTable
-        columns={[
-          { label: "Company" },
-          { label: "Vehicles", numeric: true },
-          { label: "Actions", hidden: true },
-        ]}
+        columns={[{ label: "Company" }, { label: "Status" }, { label: "Vehicles", numeric: true }, { label: "Actions", hidden: true }]}
         loading={companies.loading}
         pendingRows={companies.pendingRows}
         loadingLabel="Loading companies"
@@ -143,7 +136,7 @@ export function CompaniesPage() {
         {rows.map((company) =>
           renaming?.id === company.id ? (
             <Tr key={company.id}>
-              <Td colSpan={3}>
+              <Td colSpan={4}>
                 <div className="flex flex-wrap items-start gap-3">
                   <Field
                     id={`rename-${company.id}`}
@@ -189,22 +182,22 @@ export function CompaniesPage() {
               <Td label="Company">
                 <strong>{company.name}</strong>
               </Td>
-              <Td label="Vehicles" numeric>
-                {company.vehicleCount}
-              </Td>
+              <Td label="Status">{company.active === false ? "Archived" : company.archivedOn ? `Archives on ${formatDateOnly(company.archivedOn)}` : "Active"}</Td>
+              <Td label="Vehicles" numeric>{company.vehicleCount}</Td>
               <Td>
-                <RowButton
-                  onClick={() =>
-                    setRenaming({
-                      id: company.id,
-                      name: company.name,
-                      error: "",
-                    })
-                  }
-                  aria-label={`Rename ${company.name}`}
+                {company.active !== false && (
+                  <RowButton onClick={() => setRenaming({ id: company.id, name: company.name, error: "" })} aria-label={`Rename ${company.name}`}>
+                    Rename
+                  </RowButton>
+                )}
+                <Button
+                  tone="outline"
+                  disabled={busy}
+                  aria-label={`${archivedOnRecord(company) ? "Restore" : "Archive"} ${company.name}`}
+                  onClick={() => void setArchived(company, !archivedOnRecord(company))}
                 >
-                  Rename
-                </RowButton>
+                  {archivedOnRecord(company) ? "Restore" : "Archive"}
+                </Button>
               </Td>
             </Tr>
           ),

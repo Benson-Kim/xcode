@@ -37,6 +37,29 @@ public sealed partial class AuthDb
           version.Property(x => x.Amount).HasPrecision(14, 2);
           version.HasIndex(x => new { x.OrganizationId, x.ItemId, x.Revision }).IsUnique();
           version.HasOne<RecurringItem>().WithMany(x => x.Versions).HasForeignKey(x => new { x.OrganizationId, x.ItemId }).OnDelete(DeleteBehavior.Restrict);
+          version.Property(x => x.Note).HasMaxLength(RecurringDefinition.NoteLength);
+
+          var expenseCategory = model.Entity<ExpenseCategory>();
+          expenseCategory.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(expenseCategory);
+          expenseCategory.Property(x => x.Name).HasMaxLength(ExpenseCategory.NameLength);
+          expenseCategory.Property(x => x.NormalizedName).HasMaxLength(ExpenseCategory.NameLength);
+          expenseCategory.HasIndex(x => new { x.OrganizationId, x.NormalizedName }).IsUnique();
+
+          var expenseItem = model.Entity<ExpenseItem>();
+          expenseItem.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(expenseItem);
+          expenseItem.Property(x => x.Name).HasMaxLength(ExpenseCategory.NameLength);
+          expenseItem.Property(x => x.NormalizedName).HasMaxLength(ExpenseCategory.NameLength);
+          expenseItem.HasIndex(x => new { x.OrganizationId, x.CategoryId, x.NormalizedName }).IsUnique();
+          expenseItem.HasOne<ExpenseCategory>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CategoryId }).OnDelete(DeleteBehavior.Restrict);
+          version.HasOne<ExpenseItem>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ExpenseItemId }).OnDelete(DeleteBehavior.Restrict);
+
+          var investment = model.Entity<VehicleInvestment>();
+          investment.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(investment);
+          investment.Property(x => x.Description).HasMaxLength(VehicleInvestment.DescriptionLength);
+          investment.Property(x => x.Amount).HasPrecision(14, 2);
+          investment.HasIndex(x => new { x.OrganizationId, x.VehicleId, x.Date });
+          investment.HasOne<FleetVehicle>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.VehicleId }).OnDelete(DeleteBehavior.Restrict);
+          investment.HasOne<OrganizationMembership>().WithMany().HasForeignKey(x => new { x.OrganizationId, UserId = x.RecordedBy }).OnDelete(DeleteBehavior.Restrict);
 
           var allocation = model.Entity<RecurringAllocation>();
           allocation.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(allocation);
@@ -70,10 +93,13 @@ public sealed partial class AuthDb
           model.Entity<RecurrenceFrequencyLookup>().HasData(Enum.GetValues<RecurrenceFrequency>().Select(x => new RecurrenceFrequencyLookup { Id = x, Name = x.ToString() }));
           model.Entity<RecurringKindLookup>().HasData(Enum.GetValues<RecurringKind>().Select(x => new RecurringKindLookup { Id = x, Name = x.ToString() }));
           model.Entity<CostCategoryLookup>().HasData(Enum.GetValues<CostCategory>().Select(x => new CostCategoryLookup { Id = x, Name = x.ToString() }));
+          model.Entity<ExpenseBucketLookup>().HasData(Enum.GetValues<ExpenseBucket>().Select(x => new ExpenseBucketLookup { Id = x, Name = x.ToString() }));
 
           version.HasOne<RecurrenceFrequencyLookup>().WithMany().HasForeignKey(x => x.Frequency).OnDelete(DeleteBehavior.Restrict);
           version.HasOne<RecurringKindLookup>().WithMany().HasForeignKey(x => x.Kind).OnDelete(DeleteBehavior.Restrict);
           version.HasOne<CostCategoryLookup>().WithMany().HasForeignKey(x => x.Category).OnDelete(DeleteBehavior.Restrict);
+          version.HasOne<ExpenseBucketLookup>().WithMany().HasForeignKey(x => x.Bucket).OnDelete(DeleteBehavior.Restrict);
+          expenseCategory.HasOne<ExpenseBucketLookup>().WithMany().HasForeignKey(x => x.Bucket).OnDelete(DeleteBehavior.Restrict);
 
      }
 
@@ -83,7 +109,7 @@ public sealed partial class AuthDb
           {
                if (entry.Entity is OrganizationSettingsVersion or VehicleTarget or RecurringVersion or RecurringAllocation)
                     throw new InvalidOperationException("Setup versions and allocations are append-only.");
-               if (entry.Entity is PsvCompany or FleetVehicle or RecurringItem && entry.State == EntityState.Deleted)
+               if (entry.Entity is PsvCompany or FleetVehicle or RecurringItem or ExpenseCategory or ExpenseItem && entry.State == EntityState.Deleted)
                     throw new InvalidOperationException("Setup records cannot be deleted.");
                if (entry.Entity is FleetVehicle && entry.Property(nameof(FleetVehicle.Registration)).IsModified)
                     throw new InvalidOperationException("Registration cannot change.");

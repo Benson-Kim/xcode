@@ -29,7 +29,9 @@ export function DataTable({
   return (
     <div
       className={cn(
-        "mt-4 overflow-hidden rounded-[14px] border border-card-line bg-white",
+        // A table wider than the card scrolls inside it: clipping would put the last columns, and the row
+        // actions in them, out of reach with no way to get at them.
+        "mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-white",
         className,
       )}
     >
@@ -111,7 +113,8 @@ export function Td({
       {...props}
       data-label={label}
       className={cn(
-        "border-b border-divider px-4 py-3 align-top text-[15px]",
+        // A long name with nothing to break on wraps rather than widening its column past the card.
+        "border-b border-divider px-4 py-3 align-top text-[15px] [overflow-wrap:anywhere]",
         "max-[720px]:block max-[720px]:w-full max-[720px]:border-0 max-[720px]:py-1",
         label &&
           "max-[720px]:before:block max-[720px]:before:text-xs max-[720px]:before:text-grey max-[720px]:before:content-[attr(data-label)]",

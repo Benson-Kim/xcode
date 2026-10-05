@@ -81,11 +81,30 @@ public sealed class Organization
      public Guid Id { get; set; } = Guid.NewGuid();
      public string Slug { get; set; } = "";
      public string Name { get; set; } = "";
+     // Null follows the organization time zone. A value is an explicit, audited accounting date.
+     public DateOnly? BusinessDate { get; private set; }
      public long SettingsVersion { get; private set; } = 1;
      public void SettingsChanged() => SettingsVersion++;
-     public void ChangeTimeZone(OrganizationLocalization localization, TimeZoneId timeZone)
+     public DateOnly ResolveBusinessDate(DateOnly organizationCalendarDate) => BusinessDate ?? organizationCalendarDate;
+     public bool ChangeBusinessDate(DateOnly? businessDate, DateOnly organizationCalendarDate)
+     {
+          if (businessDate is { } date && (date == default || date > organizationCalendarDate))
+               throw new ArgumentException("The business date cannot be in the future.");
+          if (BusinessDate == businessDate) return false;
+          BusinessDate = businessDate;
+          return true;
+     }
+     // The time zone sets the organization's calendar date, the latest a held business date may be. Anything that moves
+     // that date must leave a held business date on or before it.
+     public void EnsureBusinessDateWithin(DateOnly organizationCalendarDate)
+     {
+          if (BusinessDate > organizationCalendarDate)
+               throw new ArgumentException("The held business date would be in the future in that time zone. Change the business date first.");
+     }
+     public void ChangeTimeZone(OrganizationLocalization localization, TimeZoneId timeZone, DateOnly calendarDateInThatZone)
      {
           if (localization.OrganizationId != Id) throw new InvalidOperationException("Organization mismatch");
+          EnsureBusinessDateWithin(calendarDateInThatZone);
           localization.TimeZone = timeZone.Value;
           SettingsChanged();
      }
@@ -142,6 +161,20 @@ public sealed class OrganizationLocalization : IOrganizationEntity
           _ = new TimeZoneId(TimeZone);
           if (DatePattern is not ("short" or "medium" or "long") || FirstDayOfWeek is < 0 or > 6 || WeekNumbering is not ("iso8601" or "local") || !Regex.IsMatch(Currency ?? "", "^[A-Z]{3}$") || NumberDecimals is < 0 or > 6)
                throw new ArgumentException("Invalid format settings");
+     }
+
+     // The override rules hold when a preference is written, not only when it is read, so a value the
+     // organization forbids is never stored and cannot switch on later when the rule is relaxed.
+     public void EnsureAllowed(UserPreference preference)
+     {
+          if (!AllowLocaleOverride && preference.Locale is not null)
+               throw new ArgumentException("Your organization does not allow a personal locale.");
+          if (!AllowTimeZoneOverride && preference.TimeZone is not null)
+               throw new ArgumentException("Your organization does not allow a personal time zone.");
+          if (!AllowHour12Override && preference.Hour12 is not null)
+               throw new ArgumentException("Your organization does not allow a personal clock format.");
+          if (!AllowThemeOverride && preference.ThemeMode is not null)
+               throw new ArgumentException("Your organization does not allow a personal theme.");
      }
 }
 
@@ -254,6 +287,8 @@ public sealed class OrganizationSecurityPolicy : IOrganizationEntity
      public bool AllowPinSignIn { get; set; } = true;
      public void Validate()
      {
+          if (!AllowPinSignIn)
+               throw new ArgumentException("PIN sign-in cannot be disabled.");
           if (PasswordMinLength is < 12 or > 128 || PasswordHistory is < 0 or > 24 || PinLength is < 4 or > 8 || LockoutThreshold is < 3 or > 10 || LockoutMinutes is < 1 or > 60 || AccessTokenMinutes is < 1 or > 15 || RefreshTokenDays is < 1 or > 90 || IdleUnlockSeconds is < 30 or > 3600)
                throw new ArgumentException("Invalid security policy.");
      }

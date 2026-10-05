@@ -81,6 +81,27 @@ it("limits a person to chosen vehicles and sends the role's own defaults", async
   });
 });
 
+it("ticking a permission ticks what it needs, wherever it sits in the catalogue", async () => {
+  await openNewPerson(true);
+
+  // Unticking the one it needs takes the dependent with it, and says so.
+  fireEvent.click(screen.getByLabelText("View revenue records"));
+  expect(screen.getByLabelText("Capture revenue")).not.toBeChecked();
+  expect(screen.getByText(/Also unticked, because it needs this: Capture revenue/)).toBeInTheDocument();
+
+  // Ticking the dependent again brings back what it needs. "Capture revenue" is not the first permission in
+  // the catalogue, which is the case that used to be missed.
+  fireEvent.click(screen.getByLabelText("Capture revenue"));
+  expect(screen.getByLabelText("View revenue records")).toBeChecked();
+  expect(screen.getByText(/Also ticked, because it is needed: View revenue records/)).toBeInTheDocument();
+
+  fireEvent.click(await screen.findByLabelText("KDA 482M"));
+  fireEvent.click(screen.getByRole("button", { name: "Save person" }));
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/setup/people", expect.objectContaining({ method: "POST" })));
+  const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "POST")!;
+  expect(JSON.parse(String(post[1]!.body)).permissions).toEqual(expect.arrayContaining(["revenue.view", "revenue.capture"]));
+});
+
 it("offers companies when the scope is chosen companies", async () => {
   await openNewPerson(true);
   fireEvent.click(screen.getByRole("radio", { name: "Chosen companies" }));
@@ -96,6 +117,24 @@ it("offers companies when the scope is chosen companies", async () => {
     vehicleIds: [],
     permissions: expect.arrayContaining(["reports.view"]),
   });
+});
+
+it("says why the server refused to save a person", async () => {
+  const detail = "You can only give access to the companies you can see yourself.";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Response(JSON.stringify({ title: "Not permitted in this organization or data scope.", status: 403, detail }), { status: 403 })
+        : new Response(JSON.stringify(responses[input]), { status: 200 }),
+    ),
+  );
+  await openNewPerson(false);
+  fireEvent.click(await screen.findByLabelText("KDA 482M"));
+  fireEvent.click(screen.getByRole("button", { name: "Save person" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(detail);
+  expect(screen.queryByText("Not permitted in this organization or data scope.")).not.toBeInTheDocument();
 });
 
 it("offers only roles whose defaults the editor can grant", async () => {

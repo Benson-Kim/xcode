@@ -71,6 +71,7 @@ it("shows saved brand changes straight away by refreshing the app's appearance",
   await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
   const put = fetcher.mock.calls.find(([input]) => input.endsWith("/branding"))!;
   expect(JSON.parse(String(put[1]!.body)).value).toMatchObject({ displayName: "North Star", primary: "#0B5CAD" });
+  expect(JSON.parse(String(put[1]!.body))).not.toHaveProperty("reason");
 });
 
 it("uploads a logo from the settings page and shows it at once", async () => {
@@ -82,6 +83,7 @@ it("uploads a logo from the settings page and shows it at once", async () => {
   await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
   const put = fetcher.mock.calls.find(([path]) => path.endsWith("/organization/logo"))!;
   expect(put[1]!.method).toBe("PUT");
+  expect(Object.keys(JSON.parse(String(put[1]!.body)))).toEqual(["dataUrl"]);
   expect(JSON.parse(String(put[1]!.body)).dataUrl).toMatch(/^data:image\/png;base64,/);
   expect(await screen.findByRole("status")).toHaveTextContent("Logo updated.");
 

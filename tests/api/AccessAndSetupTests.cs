@@ -100,6 +100,72 @@ public sealed class AccessAndSetupTests : IDisposable
     }
 
     [Fact]
+    public async Task RetiringVehiclesStopsPostingAndAllowsCompanyArchiving()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var (companyId, vehicleId) = await AddVehicle(owner);
+        var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+
+        using var recurring = await owner.PostAsJsonAsync("/setup/recurring",
+            new SaveRecurring("Retirement test", RecurringKind.Cost, null, 900m,
+                RecurrenceFrequency.Weekly, (int)today.DayOfWeek, false, today, null,
+                [new VehicleShare(vehicleId, 900m)], "Add retirement test", await ExpenseItemTestData.Id(owner, "Parking")));
+        Assert.Equal(HttpStatusCode.OK, recurring.StatusCode);
+
+        using var retire = await owner.PostAsJsonAsync($"/setup/vehicles/{vehicleId}/retire",
+            new { leftOn = today.ToString("yyyy-MM-dd"), reason = "Vehicle left the fleet" });
+        Assert.Equal(HttpStatusCode.OK, retire.StatusCode);
+
+        var vehicles = await owner.GetFromJsonAsync<Page<VehicleDto>>("/setup/vehicles");
+        var vehicle = Assert.Single(vehicles!.Items, item => item.Id == vehicleId);
+        Assert.False(vehicle.Active);
+        Assert.Equal(today, vehicle.LeftOn);
+        Assert.Equal(0m, vehicle.WeeklyTarget);
+        Assert.Equal(0, vehicle.RecurringItems);
+
+        var options = await owner.GetFromJsonAsync<List<VehicleOption>>("/setup/recurring/vehicle-options");
+        Assert.DoesNotContain(options!, item => item.Id == vehicleId);
+
+        using var archive = await owner.PostAsJsonAsync($"/setup/companies/{companyId}/archive",
+            new { reason = "All vehicles left the fleet" });
+        Assert.Equal(HttpStatusCode.OK, archive.StatusCode);
+        var companies = await owner.GetFromJsonAsync<Page<CompanyDto>>("/setup/companies");
+        Assert.False(Assert.Single(companies!.Items, item => item.Id == companyId).Active);
+
+        using var restoreCompany = await owner.PostAsJsonAsync($"/setup/companies/{companyId}/restore",
+            new { reason = "Company returned to service" });
+        Assert.Equal(HttpStatusCode.OK, restoreCompany.StatusCode);
+        using var restoreVehicle = await owner.PostAsJsonAsync($"/setup/vehicles/{vehicleId}/restore",
+            new { reason = "Vehicle returned to service" });
+        Assert.Equal(HttpStatusCode.OK, restoreVehicle.StatusCode);
+    }
+
+    [Fact]
+    public async Task AnArchiveOnAnotherDateIsRefusedAndRestoreCancelsAScheduledArchive()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var company = (await (await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("Lifecycle Line", "Add Lifecycle Line")))
+            .Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        (await owner.PostAsJsonAsync($"/setup/companies/{company}/archive", new { })).EnsureSuccessStatusCode();
+
+        // The business date moves back, so the archive is now scheduled and the company still counts as active.
+        app.Clock.Advance(TimeSpan.FromDays(-3));
+        var row = (await owner.GetFromJsonAsync<Page<CompanyDto>>("/setup/companies"))!.Items.Single(x => x.Id == company);
+        Assert.True(row.Active);
+        Assert.NotNull(row.ArchivedOn);
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/companies/{company}/archive", new { })).StatusCode);
+        (await owner.PostAsJsonAsync($"/setup/companies/{company}/restore", new { })).EnsureSuccessStatusCode();
+        Assert.Null((await owner.GetFromJsonAsync<Page<CompanyDto>>("/setup/companies"))!.Items.Single(x => x.Id == company).ArchivedOn);
+
+        // Archived earlier and the date moved on: archiving again says so instead of pretending it worked.
+        (await owner.PostAsJsonAsync($"/setup/companies/{company}/archive", new { })).EnsureSuccessStatusCode();
+        app.Clock.Advance(TimeSpan.FromDays(5));
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/companies/{company}/archive", new { })).StatusCode);
+    }
+
+    [Fact]
     public async Task RoleDefaultsComeOnlyFromTheCatalog()
     {
         await app.SeedDemo();
@@ -285,8 +351,9 @@ public sealed class AccessAndSetupTests : IDisposable
         using var owner = await app.SignIn(Owner);
         var (_, vehicleId) = await AddVehicle(owner);
         var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
-        (await owner.PostAsJsonAsync("/setup/recurring", new SaveRecurring("Insurance", RecurringKind.Cost, CostCategory.FixedCommitments, 900m,
-            RecurrenceFrequency.Monthly, 1, false, today, null, [new VehicleShare(vehicleId, 900m)], "Add insurance"))).EnsureSuccessStatusCode();
+        (await owner.PostAsJsonAsync("/setup/recurring", new SaveRecurring("Insurance", RecurringKind.Cost, null, 900m,
+            RecurrenceFrequency.Monthly, 1, false, today, null, [new VehicleShare(vehicleId, 900m)], "Add insurance",
+            await ExpenseItemTestData.Id(owner, "Insurance")))).EnsureSuccessStatusCode();
 
         await app.WithDb(async db =>
         {
@@ -345,8 +412,9 @@ public sealed class AccessAndSetupTests : IDisposable
         using var owner = await app.SignIn(Owner);
         using var invalid = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy", new { value = new { lockoutThreshold = 99 }, reason = "Tighten lockout" });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        // Contract C7: a blank reason is replaced by the automatic one.
         using var noReason = await owner.PutAsJsonAsync("/setup/organization/settings/securityPolicy", new { value = new { lockoutThreshold = 3 }, reason = " " });
-        Assert.Equal(HttpStatusCode.BadRequest, noReason.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, noReason.StatusCode);
     }
 
     [Fact]

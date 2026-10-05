@@ -27,6 +27,22 @@ public sealed class DomainRuleTests
         Assert.Equal(expected, PhoneNumber.Normalize(input));
 
     [Fact]
+    public void StoppingSomethingAlreadyStoppedOnAnotherDateIsRefusedAndRestoreCancelsIt()
+    {
+        var category = new ExpenseCategory(Organization, "Road costs", ExpenseBucket.RecurringCharges);
+        var item = new ExpenseItem(category, "Tolls");
+        Assert.True(category.Stop(Today));
+        Assert.False(category.Stop(Today));
+        Assert.Throws<ArgumentException>(() => category.Stop(Today.AddDays(-2)));
+        Assert.True(category.Restore());
+        Assert.True(item.Stop(Today));
+        Assert.False(item.Stop(Today));
+        Assert.Throws<ArgumentException>(() => item.Stop(Today.AddDays(1)));
+        Assert.True(item.Restore());
+        Assert.Null(item.StoppedOn);
+    }
+
+    [Fact]
     public void PermissionDependenciesAreTransitiveAndDenyingARequiredPermissionRemovesDependents()
     {
         var resolver = new EffectivePermissionResolver();
@@ -119,6 +135,42 @@ public sealed class DomainRuleTests
 
         Assert.NotNull(item.DueOn(Today.AddDays(-3)));
         Assert.NotNull(item.DueOn(Today.AddDays(5)));
+    }
+
+    [Fact]
+    public void BusinessDateCannotMoveIntoTheFutureAndCanFollowTheOrganizationClock()
+    {
+        var organization = new Organization { Slug = "fleet", Name = "Fleet" };
+        Assert.True(organization.ChangeBusinessDate(Today.AddDays(-2), Today));
+        Assert.Equal(Today.AddDays(-2), organization.BusinessDate);
+        Assert.Throws<ArgumentException>(() => organization.ChangeBusinessDate(Today.AddDays(1), Today));
+        Assert.True(organization.ChangeBusinessDate(null, Today));
+        Assert.Null(organization.BusinessDate);
+    }
+
+    [Fact]
+    public void LeavingTheFleetEndsTargetsUntilTheVehicleIsRestored()
+    {
+        var company = Guid.NewGuid();
+        var vehicle = new FleetVehicle(Organization, company, new VehicleRegistration("KDA 482M"), Today.AddDays(-10), 7000m);
+
+        Assert.True(vehicle.Retire(Today, Today));
+        Assert.Equal(0m, vehicle.TargetOn(Today));
+        Assert.False(vehicle.ActiveOn(Today));
+        Assert.True(vehicle.Restore());
+        Assert.Equal(7000m, vehicle.TargetOn(Today));
+        Assert.True(vehicle.ActiveOn(Today));
+    }
+
+    [Fact]
+    public void ACompanyCanBeArchivedAndRestoredWithoutDeletingItsIdentity()
+    {
+        var company = new PsvCompany(Organization, "North Star");
+        Assert.True(company.Archive(Today));
+        Assert.False(company.ActiveOn(Today));
+        Assert.True(company.Restore());
+        Assert.True(company.ActiveOn(Today));
+        Assert.Equal("North Star", company.Name);
     }
 
     [Fact]

@@ -1,13 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { useAppearance } from "../lib/appearance";
 import { apiRequest } from "../lib/data";
 import {
+  firstOfMonth,
   formatDateOnly,
+  monthNames,
+  ordinal,
   recurringFrequency,
   recurringMonthlyEstimate,
   recurringNextPostings,
-  todayDateOnly,
 } from "./recurringPresentation";
 import {
   BalancePanel,
@@ -19,7 +22,6 @@ import {
   ChipGroup,
   Choice,
   ChoiceField,
-  ChoiceGroup,
   CurrencyInput,
   ErrorSummary,
   ErrorText,
@@ -38,8 +40,11 @@ import {
   useToast,
 } from "./ui";
 import { kes, plural } from "../lib/format";
+import type { ExpenseBucket, ExpenseItemOption } from "../lib/types";
 import {
-  recurringCategoryNames,
+  costBucket,
+  expenseBucketNames,
+  legacyCostTypeNames,
   type RecurringItem,
   type VehicleOption,
 } from "./setup/shared";
@@ -47,24 +52,49 @@ import {
 type Props = {
   item?: RecurringItem;
   vehicles: VehicleOption[];
+  // The active expense items a cost can pick (GET expense-items/options). Undefined while they load, or when only viewing.
+  expenseItems?: ExpenseItemOption[];
   onCancel: () => void;
   onSaved: () => Promise<void> | void;
   canEdit?: boolean;
   preselectVehicle?: string;
   // The vehicle picker's list is still loading; the rest of the form is usable meanwhile.
   vehiclesLoading?: boolean;
+  // Why a picker's list could not be loaded.
+  loadError?: string;
 };
 
 type Errors = Partial<
-  Record<"name" | "amount" | "start" | "end" | "allocations", string>
+  Record<
+    | "expenseItem"
+    | "name"
+    | "note"
+    | "amount"
+    | "frequency"
+    | "start"
+    | "end"
+    | "allocations",
+    string
+  >
 >;
 
-const presets = [
-  { name: "Loan repayment", kind: 1, category: 4, frequency: 3 },
-  { name: "Insurance", kind: 1, category: 4, frequency: 3 },
-  { name: "SACCO fee", kind: 1, category: 4, frequency: 3 },
-  { name: "Stage fees", kind: 1, category: 1, frequency: 1 },
-  { name: "Savings", kind: 2, category: 4, frequency: 2 },
+// An expense item in the picker. `off` marks the item a saved cost uses once it is no longer active.
+type ItemChoice = {
+  id: string;
+  name: string;
+  categoryId: string;
+  categoryName: string;
+  bucket: ExpenseBucket | null;
+  off: boolean;
+};
+
+const NOTE_LIMIT = 200;
+
+// Every day (1) stays only on items saved before; savings post every week or every month.
+const frequencies = [
+  { value: 2, label: "Every week" },
+  { value: 3, label: "Every month" },
+  { value: 4, label: "Every year" },
 ];
 
 const weekdays = [
@@ -96,44 +126,51 @@ function formatShare(amount: number) {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
 }
 
-function ordinal(value: number) {
-  const lastTwo = value % 100;
-  const suffix =
-    lastTwo >= 11 && lastTwo <= 13
-      ? "th"
-      : ["th", "st", "nd", "rd"][value % 10] || "th";
-  return `${value}${suffix}`;
-}
-
 export function RecurringEditor({
   item,
   vehicles,
+  expenseItems,
   onCancel,
   onSaved,
   canEdit = true,
   preselectVehicle,
   vehiclesLoading = false,
+  loadError,
 }: Props) {
   const toast = useToast();
+  const { appearance } = useAppearance();
+  // "Today" is always the organization's business date, never the computer clock. It is undefined until the
+  // appearance has loaded, and a new item's start date defaults to it as soon as it arrives.
+  const today = appearance?.businessDate;
+  const earliestStart = today ? firstOfMonth(today) : undefined;
   const isNew = !item;
-  const [name, setName] = useState(item?.name || "");
   const [kind, setKind] = useState(item?.kind || 1);
-  const [category, setCategory] = useState(item?.category || 4);
-  const [amount, setAmount] = useState(item?.amount ? String(item.amount) : "");
+  const [expenseItemId, setExpenseItemId] = useState(item?.expenseItemId ?? "");
+  const [name, setName] = useState(item?.kind === 2 ? item.name : "");
+  const [note, setNote] = useState(item?.note ?? "");
+  // The saved total is the sum of every share, including those of vehicles not in the fleet today, so an existing
+  // item always opens balanced.
+  const [amount, setAmount] = useState(
+    item ? formatShare(item.allocations.reduce((sum, allocation) => sum + allocation.amount, 0)) : "",
+  );
   const [frequency, setFrequency] = useState(item?.frequency || 3);
   const [weekday, setWeekday] = useState(
     String(item?.frequency === 2 ? (item.day ?? 6) : 6),
   );
   const [monthDay, setMonthDay] = useState(
-    item?.frequency === 3
+    item?.frequency === 3 || item?.frequency === 4
       ? item.lastDay
         ? "last"
         : String(item.day ?? 1)
       : "1",
   );
-  const [start, setStart] = useState(item?.start || todayDateOnly());
+  const [month, setMonth] = useState(String(item?.month ?? 1));
+  const [startInput, setStart] = useState<string | null>(item?.start ?? null);
+  const start = startInput ?? today ?? "";
   const [end, setEnd] = useState(item?.end || "");
   const [noEnd, setNoEnd] = useState(!item?.end);
+  // Only stopping asks for a typed reason; the server writes the reason for adding or changing an item.
+  const [stopReason, setStopReason] = useState("");
   const initialSelection =
     item?.allocations.map((allocation) => allocation.vehicleId) ||
     (preselectVehicle ? [preselectVehicle] : []);
@@ -161,9 +198,9 @@ export function RecurringEditor({
   const difference =
     Math.round(total * 100) - Math.round(allocationTotal * 100);
   const isBalanced = selected.length > 0 && total > 0 && difference === 0;
-  const today = todayDateOnly();
-  const stopped = Boolean(item?.stoppedFrom);
-  const startLocked = Boolean(item && item.start < today);
+  const stopped = Boolean(item?.stoppedFrom && (!today || item.stoppedFrom <= today));
+  const futureStop = item?.stoppedFrom && today && item.stoppedFrom > today ? item.stoppedFrom : null;
+  const startLocked = Boolean(item && (!today || item.start < today));
   const disabled = !canEdit || stopped || busy;
   const companies = [
     ...new Map(
@@ -171,20 +208,101 @@ export function RecurringEditor({
     ).entries(),
   ];
 
+  // Items saved before expense items keep their old cost type and daily schedule until someone changes them.
+  const legacyCategory = Boolean(item?.kind === 1 && !item.expenseItemId);
+  const legacyCategoryName = legacyCostTypeNames[item?.category || 4];
+  // Until an expense item is chosen, an old row keeps counting in its old type's bucket.
+  const legacyBucket = item && legacyCategory ? costBucket(item) : null;
+  const legacyDaily = item?.frequency === 1;
+  const itemChoices: ItemChoice[] = (expenseItems ?? []).map((option) => ({
+    ...option,
+    off: false,
+  }));
+  if (
+    item?.expenseItemId &&
+    !itemChoices.some((choice) => choice.id === item.expenseItemId)
+  )
+    itemChoices.unshift({
+      id: item.expenseItemId,
+      name: item.expenseItemName || item.name,
+      categoryId: "",
+      categoryName: "",
+      bucket: item.bucket ?? null,
+      off: expenseItems !== undefined,
+    });
+  const picked = itemChoices.find((choice) => choice.id === expenseItemId);
+  const itemGroups = [
+    ...itemChoices
+      .reduce(
+        (groups, choice) =>
+          groups.set(choice.categoryId, [
+            ...(groups.get(choice.categoryId) ?? []),
+            choice,
+          ]),
+        new Map<string, ItemChoice[]>(),
+      )
+      .values(),
+  ];
+  const countedAs = picked?.bucket
+    ? expenseBucketNames[picked.bucket]
+    : legacyBucket && !expenseItemId
+      ? expenseBucketNames[legacyBucket]
+      : undefined;
+
+  // A vehicle not in the fleet today (left, or not joined yet) keeps its share, read-only: it stays in the total but
+  // does not post.
+  const inFleet = (vehicleId: string) =>
+    vehicles.find((vehicle) => vehicle.id === vehicleId)?.active !== false;
+  const outOfFleetShares = (vehicleIds: string[]) =>
+    Object.fromEntries(
+      vehicleIds
+        .filter((vehicleId) => !inFleet(vehicleId))
+        .map((vehicleId) => [vehicleId, shares[vehicleId] ?? "0"]),
+    );
+  // Splits what is left after the shares of vehicles not in the fleet across the vehicles that are.
+  function splitAcrossFleet(amountTotal: number, vehicleIds: string[]) {
+    const kept = outOfFleetShares(vehicleIds);
+    const keptTotal = Object.values(kept).reduce((sum, share) => sum + (Number(share) || 0), 0);
+    return {
+      ...kept,
+      ...splitAmountEvenly(Math.max(0, amountTotal - keptTotal), vehicleIds.filter(inFleet)),
+    };
+  }
+
   function updateAmount(value: string) {
     setAmount(value);
     setSplitNotice("");
     if (!manualAllocations)
-      setShares(splitAmountEvenly(Number(value) || 0, selected));
+      setShares(splitAcrossFleet(Number(value) || 0, selected));
+  }
+
+  function updateKind(value: number) {
+    setKind(value);
+    // Savings are set aside every week or every month, never yearly.
+    if (value === 2 && frequency === 4) setFrequency(3);
   }
 
   function updateSelection(vehicleId: string, checked: boolean) {
+    const vehicle = vehicles.find((candidate) => candidate.id === vehicleId);
+    if (checked && vehicle?.active === false) return;
     const next = checked
       ? [...new Set([...selected, vehicleId])]
       : selected.filter((id) => id !== vehicleId);
     setSelected(next);
     setSplitNotice("");
-    if (!manualAllocations) setShares(splitAmountEvenly(total, next));
+    if (!checked && vehicle?.active === false) {
+      // Removing the share of a vehicle not in the fleet also takes it off the amount, so the form stays balanced.
+      const share = Number(shares[vehicleId]) || 0;
+      setAmount(formatShare(Math.max(0, total - share)));
+      setShares((current) => {
+        const nextShares = { ...current };
+        delete nextShares[vehicleId];
+        return nextShares;
+      });
+      setSplitNotice(`Took ${vehicle.registration}'s ${kes(share)} share off the amount.`);
+      return;
+    }
+    if (!manualAllocations) setShares(splitAcrossFleet(total, next));
     else
       setShares((current) => {
         const nextShares = { ...current };
@@ -199,60 +317,73 @@ export function RecurringEditor({
       ...new Set([
         ...selected,
         ...vehicles
-          .filter((vehicle) => vehicle.companyId === companyId)
+          .filter((vehicle) => vehicle.companyId === companyId && vehicle.active !== false)
           .map((vehicle) => vehicle.id),
       ]),
     ];
     setSelected(next);
     setSplitNotice("");
     setManualAllocations(false);
-    setShares(splitAmountEvenly(total, next));
+    setShares(splitAcrossFleet(total, next));
   }
 
+  const vehicleName = (vehicleId: string) =>
+    vehicles.find((vehicle) => vehicle.id === vehicleId)?.registration ?? "A vehicle";
+  const postingIds = selected.filter(inFleet);
+  const outOfFleetIds = selected.filter((vehicleId) => !inFleet(vehicleId));
+  // What posts on each due date: the shares of the vehicles still in the fleet.
+  const postingTotal = postingIds.reduce(
+    (sum, vehicleId) => sum + (Number(shares[vehicleId]) || 0),
+    0,
+  );
+
   function splitEqually() {
-    if (!total || !selected.length) return;
+    if (!total || !postingIds.length) return;
+    const shared = splitAcrossFleet(total, selected);
     setManualAllocations(false);
-    setShares(splitAmountEvenly(total, selected));
+    setShares(shared);
+    const split = postingIds.reduce((sum, vehicleId) => sum + (Number(shared[vehicleId]) || 0), 0);
     setSplitNotice(
-      `Split ${kes(total)} equally across ${plural(selected.length, "vehicle", "vehicles")}.`,
+      `Split ${kes(split)} equally across ${plural(postingIds.length, "vehicle", "vehicles")}.`,
     );
   }
 
-  function applyPreset(preset: (typeof presets)[number]) {
-    setName(preset.name);
-    setKind(preset.kind);
-    setCategory(preset.category);
-    setFrequency(preset.frequency);
-    if (preset.frequency === 2) setWeekday("6");
-    if (preset.frequency === 3) setMonthDay("1");
-  }
-
   const periodIsValid = noEnd || Boolean(end && end >= start);
+  const lastDay = (frequency === 3 || frequency === 4) && monthDay === "last";
   const schedule = {
     frequency,
     day:
-      frequency === 1
-        ? null
-        : frequency === 2
-          ? Number(weekday)
-          : monthDay === "last"
-            ? null
-            : Number(monthDay),
-    lastDay: frequency === 3 && monthDay === "last",
+      frequency === 2
+        ? Number(weekday)
+        : frequency === 1 || lastDay
+          ? null
+          : Number(monthDay),
+    lastDay,
+    month: frequency === 4 ? Number(month) : null,
     start,
     end: noEnd ? null : end || null,
   };
   const previewDates =
-    total > 0 && selected.length && periodIsValid
+    today && postingTotal > 0 && postingIds.length && periodIsValid
       ? recurringNextPostings(schedule, today, 5)
       : [];
+  const title = kind === 1 ? picked?.name || item?.name || "" : name.trim();
 
   async function save() {
     if (disabled) return;
     const next: Errors = {};
-    if (!name.trim()) next.name = "Enter a name.";
+    if (kind === 1 && !picked) next.expenseItem = "Choose the expense item.";
+    else if (kind === 1 && picked?.off)
+      next.expenseItem = "This item is turned off. Choose another expense item.";
+    if (kind === 2 && !name.trim()) next.name = "Enter a name.";
+    if (note.trim().length > NOTE_LIMIT)
+      next.note = `Keep the note to ${NOTE_LIMIT} characters.`;
     if (total <= 0) next.amount = "Enter the amount in KES.";
+    if (frequency === 1)
+      next.frequency = "Every day is no longer offered. Choose how often it posts.";
     if (!start) next.start = "Enter the start date.";
+    else if (earliestStart && start < earliestStart && (isNew || start !== item.start))
+      next.start = `Start on or after ${formatDateOnly(earliestStart)}. Anything earlier is a one-off expense, not a schedule.`;
     if (!noEnd && (!end || end < start))
       next.end = "The end date must be on or after the start date.";
     if (!selected.length) next.allocations = "Tick at least one vehicle.";
@@ -272,9 +403,10 @@ export function RecurringEditor({
         {
           method: isNew ? "POST" : "PUT",
           body: JSON.stringify({
-            name: name.trim(),
+            // A cost takes its name and bucket from its expense item on the server.
+            name: title,
             kind,
-            category: kind === 1 ? category : null,
+            category: null,
             amount: total,
             frequency,
             day: schedule.day,
@@ -282,16 +414,16 @@ export function RecurringEditor({
             start,
             end: noEnd ? null : end,
             allocations,
-            reason: isNew
-              ? `Added recurring item ${name.trim()}`
-              : `Updated recurring item ${name.trim()}`,
+            expenseItemId: kind === 1 ? expenseItemId : null,
+            note: note.trim() || null,
+            month: schedule.month,
           }),
         },
       );
       toast(
         isNew
-          ? `${name.trim()} added. It now posts to ${plural(allocations.length, "vehicle", "vehicles")}.`
-          : `Changes saved for ${name.trim()}.`,
+          ? `${title} added. It now posts to ${plural(allocations.length, "vehicle", "vehicles")}.`
+          : `Changes saved for ${title}.`,
       );
       await onSaved();
     } catch (value) {
@@ -304,13 +436,17 @@ export function RecurringEditor({
   async function stop() {
     if (!item || disabled) return;
     if (!confirmStop) return setConfirmStop(true);
+    if (!stopReason.trim()) {
+      setSaveError("Give a reason for stopping this item.");
+      return;
+    }
     setBusy(true);
     try {
       await apiRequest(`setup/recurring/${item.id}/stop`, {
         method: "POST",
         body: JSON.stringify({
           confirmed: true,
-          reason: "Stopped recurring item",
+          reason: stopReason.trim(),
         }),
       });
       toast(`${item.name} stopped.`);
@@ -323,19 +459,50 @@ export function RecurringEditor({
     }
   }
 
+  // A stop dated after the business date has not taken effect, so it can be cancelled and the item keeps posting
+  // (D16). Cancelling is not one of the places that ask for a typed reason, so the server writes its own.
+  async function cancelStop() {
+    if (!item || !canEdit || busy) return;
+    setBusy(true);
+    try {
+      await apiRequest(`setup/recurring/${item.id}/restore`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      toast(`The stop of ${item.name} was cancelled.`);
+      await onSaved();
+    } catch (value) {
+      setSaveError((value as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // What an item saved before expense items still uses, shown as read-only labels.
+  const legacyUses = [
+    legacyCategory && `the old cost type ${legacyCategoryName}`,
+    legacyDaily && "a daily schedule",
+  ].filter(Boolean);
+  const legacyNeeds = [
+    legacyCategory && "an expense item",
+    legacyDaily && "how often it posts",
+  ].filter(Boolean);
+  const dayOptions = Array.from({ length: 28 }, (_, index) => index + 1);
+
   return (
     <section>
       <PageHeader
-        title={isNew ? "Add recurring cost or saving" : item.name}
+        title={isNew ? "Add scheduled expense or saving" : item.name}
         description={
           isNew
-            ? "It posts to the vehicles you choose on every due date in its period."
-            : recurringFrequency(item)
+            ? "It posts to the vehicles you choose on every due date."
+            : `${recurringFrequency(item)}${item.note ? `. ${item.note}` : ""}`
         }
       />
       <FormLayout>
         <ErrorSummary count={Object.keys(errors).length} />
         {saveError && <Banner>{saveError}</Banner>}
+        {loadError && <Banner>{loadError}</Banner>}
         {!canEdit &&
           (item?.partial ? (
             <Note>
@@ -345,7 +512,7 @@ export function RecurringEditor({
           ) : (
             <Note>You can view this item but not change it.</Note>
           ))}
-        {item && startLocked && !stopped && (
+        {item && startLocked && !stopped && today && (
           <Note tone="info">
             Changes apply from {formatDateOnly(today)}. Postings before that
             stay as they were.
@@ -357,33 +524,30 @@ export function RecurringEditor({
             {formatDateOnly(item!.stoppedFrom!)}.
           </Note>
         )}
+        {futureStop && (
+          <Note tone="info">
+            Scheduled to stop on {formatDateOnly(futureStop)}. You can still
+            change the schedule, or cancel the stop, before then.
+          </Note>
+        )}
+        {legacyUses.length > 0 && !stopped && (
+          <Note tone="info">
+            Set up with {legacyUses.join(" and ")}, which{" "}
+            {legacyUses.length > 1 ? "are" : "is"} no longer offered. It keeps
+            posting as it is.
+            {canEdit ? ` To save a change, choose ${legacyNeeds.join(" and ")}.` : ""}
+          </Note>
+        )}
 
         <Card density="form">
-          <CardHeader title="What it is" />
-          {isNew && canEdit && (
-            <ChipGroup aria-label="Quick picks">
-              {presets.map((preset) => (
-                <Chip key={preset.name} onClick={() => applyPreset(preset)}>
-                  {preset.name}
-                </Chip>
-              ))}
-            </ChipGroup>
-          )}
+          <CardHeader title="What and how often" />
           <Grid2>
-            <Field id="recurring-name" label="Name" error={errors.name}>
-              <TextInput
-                value={name}
-                placeholder="For example Loan repayment"
-                disabled={disabled}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </Field>
             <ChoiceField
               label="Type"
               hint={
                 kind === 2
-                  ? "Savings are set aside, not counted as a cost."
-                  : "Costs reduce net contribution."
+                  ? "Set aside each week or month, not counted as money out."
+                  : "Money out on the day it is paid."
               }
             >
               {[
@@ -397,27 +561,76 @@ export function RecurringEditor({
                   label={option.label}
                   checked={kind === option.value}
                   disabled={disabled}
-                  onChange={() => setKind(option.value)}
+                  onChange={() => updateKind(option.value)}
                 />
               ))}
             </ChoiceField>
-            {kind === 1 && (
-              <Field id="recurring-category" label="Cost type">
+            {kind === 1 ? (
+              <Field
+                id="recurring-item"
+                label="Expense item"
+                error={errors.expenseItem}
+                hint={
+                  picked
+                    ? `${picked.categoryName ? `${picked.categoryName}. ` : ""}${countedAs ? `Counts as ${countedAs}.` : ""}`
+                    : legacyCategory && !expenseItemId
+                      ? `Was the old cost type ${legacyCategoryName}.`
+                      : "Items come from Expense categories."
+                }
+              >
                 <SelectInput
-                  value={category}
+                  value={expenseItemId}
                   disabled={disabled}
-                  onChange={(event) => setCategory(Number(event.target.value))}
+                  onChange={(event) => setExpenseItemId(event.target.value)}
                 >
-                  {Object.entries(recurringCategoryNames).map(
-                    ([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
+                  <option value="">
+                    {canEdit && expenseItems === undefined && !picked
+                      ? "Loading expense items"
+                      : "Choose an item"}
+                  </option>
+                  {itemGroups.map((group) =>
+                    group[0].categoryName ? (
+                      <optgroup key={group[0].categoryId} label={group[0].categoryName}>
+                        {group.map((choice) => (
+                          <option key={choice.id} value={choice.id}>
+                            {choice.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : (
+                      group.map((choice) => (
+                        <option key={choice.id} value={choice.id}>
+                          {choice.off ? `${choice.name} (turned off)` : choice.name}
+                        </option>
+                      ))
                     ),
                   )}
                 </SelectInput>
               </Field>
+            ) : (
+              <Field id="recurring-name" label="Name" error={errors.name}>
+                <TextInput
+                  value={name}
+                  placeholder="For example Owner savings"
+                  disabled={disabled}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </Field>
             )}
+            <Field
+              id="recurring-note"
+              label="Note"
+              error={errors.note}
+              hint={`Optional. Up to ${NOTE_LIMIT} characters.`}
+            >
+              <TextInput
+                value={note}
+                maxLength={NOTE_LIMIT}
+                placeholder="For example Zuri Genesis fleet"
+                disabled={disabled}
+                onChange={(event) => setNote(event.target.value)}
+              />
+            </Field>
             <Field
               id="recurring-amount"
               label="Amount each time"
@@ -431,68 +644,86 @@ export function RecurringEditor({
                 onChange={(event) => updateAmount(event.target.value)}
               />
             </Field>
-          </Grid2>
-        </Card>
-
-        <Card density="form">
-          <CardHeader title="How often" />
-          <ChoiceGroup role="radiogroup" label="How often">
-            {[
-              { value: 1, label: "Every day" },
-              { value: 2, label: "Every week" },
-              { value: 3, label: "Every month" },
-            ].map((option) => (
-              <Choice
-                key={option.value}
-                type="radio"
-                name="recurring-frequency"
-                label={option.label}
-                checked={frequency === option.value}
-                disabled={disabled}
-                onChange={() => setFrequency(option.value)}
-              />
-            ))}
-          </ChoiceGroup>
-          {frequency !== 1 && (
-            <Grid2>
-              {frequency === 2 ? (
-                <Field id="recurring-weekday" label="On">
-                  <SelectInput
-                    value={weekday}
+            <ChoiceField
+              label="How often"
+              error={errors.frequency}
+              hint={
+                frequency === 1
+                  ? "Now every day, which is no longer offered."
+                  : kind === 2
+                    ? "Savings are set aside every week or every month."
+                    : undefined
+              }
+            >
+              {frequencies
+                .filter((option) => kind === 1 || option.value !== 4)
+                .map((option) => (
+                  <Choice
+                    key={option.value}
+                    type="radio"
+                    name="recurring-frequency"
+                    label={option.label}
+                    checked={frequency === option.value}
                     disabled={disabled}
-                    onChange={(event) => setWeekday(event.target.value)}
-                  >
-                    {weekdays.map((day) => (
-                      <option key={day.value} value={day.value}>
-                        {day.label}
-                      </option>
-                    ))}
-                  </SelectInput>
-                </Field>
-              ) : (
-                <Field
-                  id="recurring-monthday"
-                  label="On"
-                  hint="For the 29th to the 31st, choose the last day so short months are covered."
+                    onChange={() => setFrequency(option.value)}
+                  />
+                ))}
+            </ChoiceField>
+            {frequency === 2 && (
+              <Field id="recurring-weekday" label="On">
+                <SelectInput
+                  value={weekday}
+                  disabled={disabled}
+                  onChange={(event) => setWeekday(event.target.value)}
                 >
-                  <SelectInput
-                    value={monthDay}
-                    disabled={disabled}
-                    onChange={(event) => setMonthDay(event.target.value)}
-                  >
-                    {Array.from({ length: 28 }, (_, index) => index + 1).map(
-                      (value) => (
-                        <option key={value} value={value}>
-                          The {ordinal(value)}
-                        </option>
-                      ),
-                    )}
-                    <option value="last">The last day</option>
-                  </SelectInput>
-                </Field>
-              )}
-            </Grid2>
-          )}
+                  {weekdays.map((day) => (
+                    <option key={day.value} value={day.value}>
+                      {day.label}
+                    </option>
+                  ))}
+                </SelectInput>
+              </Field>
+            )}
+            {frequency === 4 && (
+              <Field id="recurring-month" label="Month">
+                <SelectInput
+                  value={month}
+                  disabled={disabled}
+                  onChange={(event) => setMonth(event.target.value)}
+                >
+                  {monthNames.map((label, index) => (
+                    <option key={label} value={index + 1}>
+                      {label}
+                    </option>
+                  ))}
+                </SelectInput>
+              </Field>
+            )}
+            {(frequency === 3 || frequency === 4) && (
+              <Field
+                id="recurring-monthday"
+                label="On"
+                hint={
+                  frequency === 3
+                    ? "For the 29th to the 31st, choose the last day so short months are covered."
+                    : "The day it falls due each year."
+                }
+              >
+                <SelectInput
+                  value={monthDay}
+                  disabled={disabled}
+                  onChange={(event) => setMonthDay(event.target.value)}
+                >
+                  {dayOptions.map((value) => (
+                    <option key={value} value={value}>
+                      The {ordinal(value)}
+                    </option>
+                  ))}
+                  <option value="last">The last day</option>
+                </SelectInput>
+              </Field>
+            )}
+          </Grid2>
           <Grid2>
             <Field
               id="recurring-start"
@@ -501,12 +732,15 @@ export function RecurringEditor({
               hint={
                 startLocked
                   ? "Already running. Changes start today."
-                  : "A start date before today also adds the earlier postings to past reports."
+                  : earliestStart
+                    ? `On or after ${formatDateOnly(earliestStart)}. A start before today also adds the earlier postings.`
+                    : "A start before today also adds the earlier postings."
               }
             >
               <TextInput
                 type="date"
                 value={start}
+                min={startLocked ? undefined : earliestStart}
                 disabled={disabled || startLocked}
                 onChange={(event) => setStart(event.target.value)}
               />
@@ -569,7 +803,7 @@ export function RecurringEditor({
                 Clear
               </Chip>
               <Chip
-                disabled={!total || !selected.length}
+                disabled={!total || !postingIds.length}
                 onClick={splitEqually}
               >
                 Split equally
@@ -583,6 +817,14 @@ export function RecurringEditor({
               Enter the amount and select vehicles to enable Split equally.
             </Hint>
           ) : null}
+          {outOfFleetIds.length > 0 && (
+            <Hint>
+              {outOfFleetIds.length === 1
+                ? `${vehicleName(outOfFleetIds[0])} is not in the fleet today, so its share stays in the total but does not post.`
+                : `${outOfFleetIds.map(vehicleName).join(", ")} are not in the fleet today, so their shares stay in the total but do not post.`}
+              {!disabled && " Untick a vehicle to take its share off the amount."}
+            </Hint>
+          )}
           {vehiclesLoading && (
             <div role="status" aria-busy="true">
               <span className="sr-only">Loading vehicles</span>
@@ -602,9 +844,9 @@ export function RecurringEditor({
                         className="grid min-h-13 grid-cols-[minmax(0,1fr)_170px] items-center gap-3 border-t border-divider max-[720px]:grid-cols-[minmax(0,1fr)_140px]"
                       >
                         <Choice
-                          label={vehicle.registration}
+                          label={vehicle.active === false ? `${vehicle.registration} (not in the fleet today)` : vehicle.registration}
                           checked={selected.includes(vehicle.id)}
-                          disabled={disabled}
+                          disabled={disabled || (vehicle.active === false && !selected.includes(vehicle.id))}
                           onChange={(event) =>
                             updateSelection(vehicle.id, event.target.checked)
                           }
@@ -614,7 +856,7 @@ export function RecurringEditor({
                             density="compact"
                             aria-label={`Share for ${vehicle.registration}`}
                             value={shares[vehicle.id] ?? "0"}
-                            disabled={disabled}
+                            disabled={disabled || vehicle.active === false}
                             onChange={(event) => {
                               setSplitNotice("");
                               setManualAllocations(true);
@@ -658,16 +900,18 @@ export function RecurringEditor({
               <ol className="m-0 list-decimal pl-5">
                 {previewDates.map((date) => (
                   <li key={date} className="py-0.5 tabular-nums">
-                    {formatDateOnly(date)}: {kes(total)} across{" "}
-                    {plural(selected.length, "vehicle", "vehicles")}
+                    {formatDateOnly(date)}: {kes(postingTotal)} across{" "}
+                    {plural(postingIds.length, "vehicle", "vehicles")}
                   </li>
                 ))}
               </ol>
               <Hint>
-                About {kes(recurringMonthlyEstimate(total, frequency))} a month.{" "}
+                About {kes(recurringMonthlyEstimate(postingTotal, frequency))} a month.{" "}
                 {kind === 2
                   ? "Shown as savings in each vehicle report."
-                  : `Counted under ${recurringCategoryNames[category]} in each vehicle report.`}
+                  : countedAs
+                    ? `Counted under ${countedAs} in each vehicle report.`
+                    : "Counted as money out in each vehicle report."}
               </Hint>
             </>
           ) : (
@@ -676,7 +920,9 @@ export function RecurringEditor({
                 ? "Enter the amount and choose vehicles to see the postings."
                 : !periodIsValid
                   ? "The end date is before the start date."
-                  : "No postings from today in this period."}
+                  : !today
+                    ? "The postings show once the business date has loaded."
+                    : "No postings from today in this period."}
             </Hint>
           )}
         </Card>
@@ -695,10 +941,26 @@ export function RecurringEditor({
             {canEdit && !stopped ? "Cancel" : "Back"}
           </Button>
           <Spacer />
-          {item && canEdit && !stopped && (
-            <Button tone="danger" disabled={busy} onClick={() => void stop()}>
-              {confirmStop ? "Tap again to stop from today" : "Stop from today"}
+          {item && canEdit && !stopped && futureStop && (
+            <Button tone="outline" disabled={busy} onClick={() => void cancelStop()}>
+              Cancel stop
             </Button>
+          )}
+          {item && canEdit && !stopped && !futureStop && (
+            <>
+              {confirmStop && (
+                <TextInput
+                  aria-label="Reason for stopping"
+                  placeholder="Why is it stopping?"
+                  value={stopReason}
+                  disabled={busy}
+                  onChange={(event) => setStopReason(event.target.value)}
+                />
+              )}
+              <Button tone="danger" disabled={busy} onClick={() => void stop()}>
+                {confirmStop ? "Tap again to stop from today" : "Stop from today"}
+              </Button>
+            </>
           )}
         </FormActions>
       </FormLayout>
