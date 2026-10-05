@@ -28,6 +28,7 @@ builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddSingleton<EffectiveSettingsResolver>();
 builder.Services.AddSingleton<EffectivePermissionResolver>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddSingleton<VerificationMailer>();
 builder.Services.AddSetup();
 builder.Services.AddSingleton<SettingsSectionRegistry>();
 if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")) builder.Services.AddScoped<IEmailSender, LogEmailSender>();
@@ -71,7 +72,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 });
 builder.Services.AddAuthorization();
 builder.Services.AddProblemDetails();
+builder.Services.AddOpenApi(OpenApiDocumentation.Configure);
 var app = builder.Build();
+// Codes sent after their reply are still going out at shutdown; give them a moment rather than drop them.
+app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<VerificationMailer>().Idle().Wait(TimeSpan.FromSeconds(10)));
 app.UseExceptionHandler();
 app.UseCors();
 app.UseRateLimiter();
@@ -81,6 +85,9 @@ app.MapAuth();
 app.MapSetup();
 app.MapOrganization();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+// The API description (/openapi/v1.json) is for developers and contract tests only; production does not serve it.
+if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
+    app.MapOpenApi();
 if (!app.Environment.IsEnvironment("Testing"))
 {
     await using var scope = app.Services.CreateAsyncScope();

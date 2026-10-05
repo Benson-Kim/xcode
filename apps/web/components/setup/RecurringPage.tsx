@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+
 import { useResource, useStreamedList } from "../../lib/data";
 import { kes, plural } from "../../lib/format";
 import { Banner, Button, CellNote, DataTable, FormSkeleton, PageHeader, RowButton, SegmentedControl, Spacer, StatusBadge, Td, Toolbar, Tr } from "../ui";
@@ -19,11 +20,16 @@ export function RecurringPage({
   openItem?: string;
   newForVehicle?: string;
 }) {
-  const recurring = useStreamedList<RecurringItem>("setup/recurring");
-  // Viewing needs only commitments access: shares carry their registration. The vehicle picker is for editors.
-  const options = useResource<VehicleOption[]>(canManage ? "setup/recurring/vehicle-options" : null);
   const [filter, setFilter] = useState<Filter>("all");
-  const [editing, setEditing] = useState<string | null>(newForVehicle ? "new" : (openItem ?? null));
+  const [editing, setEditing] = useState<string | null>(
+    newForVehicle ? "new" : (openItem ?? null),
+  );
+  // Viewing needs only commitments access: shares carry their registration. The vehicle picker is for editors.
+  const options = useResource<VehicleOption[]>(
+    canManage ? "setup/recurring/vehicle-options" : null,
+  );
+
+  const recurring = useStreamedList<RecurringItem>("setup/recurring");
   const items = recurring.items;
 
   if (editing) {

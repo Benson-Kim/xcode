@@ -22,10 +22,19 @@ export function HistoryPage() {
   const rows = history.items;
   return (
     <section>
-      <PageHeader title="Change log" description="Who changed what in setup and organization settings." />
+      <PageHeader
+        title="Change log"
+        description="Who changed what in setup and organization settings."
+      />
+
       {history.error && <Banner className="mt-5">{history.error}</Banner>}
+
       <DataTable
-        columns={[{ label: "When" }, { label: "Who" }, { label: "What changed" }]}
+        columns={[
+          { label: "When" },
+          { label: "Who" },
+          { label: "What changed" },
+        ]}
         loading={history.loading}
         pendingRows={history.pendingRows}
         loadingLabel="Loading the change log"
@@ -37,8 +46,13 @@ export function HistoryPage() {
             <Td label="When" className="whitespace-nowrap">
               {formatDateTime(row.occurredAt)}
             </Td>
-            <Td label="Who">{row.actorName || "Someone no longer in the organization"}</Td>
-            <Td label="What changed" title={sections[row.section] ?? row.section}>
+            <Td label="Who">
+              {row.actorName || "Someone no longer in the organization"}
+            </Td>
+            <Td
+              label="What changed"
+              title={sections[row.section] ?? row.section}
+            >
               {row.reason}
             </Td>
           </Tr>

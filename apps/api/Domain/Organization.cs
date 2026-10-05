@@ -103,14 +103,20 @@ public sealed class OrganizationMembership : IOrganizationEntity
      public long Version { get; set; } = 1;
      public void Deactivate()
      {
+          if (!Active)
+               return;
           Active = false;
           Version++;
      }
      public void Reactivate()
      {
+          if (Active)
+               return;
           Active = true;
           Version++;
      }
+
+     public void AccessChanged() => Version++;
 }
 
 
@@ -248,7 +254,7 @@ public sealed class OrganizationSecurityPolicy : IOrganizationEntity
      public bool AllowPinSignIn { get; set; } = true;
      public void Validate()
      {
-          if (PasswordMinLength is < 12 or > 128 || PasswordHistory is < 0 or > 24 || PinLength is < 4 or > 8 || LockoutThreshold is < 1 or > 10 || LockoutMinutes is < 1 or > 1440 || AccessTokenMinutes is < 1 or > 15 || RefreshTokenDays is < 1 or > 90 || IdleUnlockSeconds is < 30 or > 3600)
+          if (PasswordMinLength is < 12 or > 128 || PasswordHistory is < 0 or > 24 || PinLength is < 4 or > 8 || LockoutThreshold is < 3 or > 10 || LockoutMinutes is < 1 or > 60 || AccessTokenMinutes is < 1 or > 15 || RefreshTokenDays is < 1 or > 90 || IdleUnlockSeconds is < 30 or > 3600)
                throw new ArgumentException("Invalid security policy.");
      }
 }

@@ -1,6 +1,7 @@
 using Auth.Application.Setup;
 using Auth.Domain;
 using Auth.Domain.Setup;
+using Auth.Infrastructure;
 using Xunit;
 
 namespace Auth.Tests;
@@ -24,6 +25,73 @@ public sealed class DomainRuleTests
     [InlineData("", "")]
     public void PhoneNumbersNormalizeToTheFullKenyanPrefix(string input, string expected) =>
         Assert.Equal(expected, PhoneNumber.Normalize(input));
+
+    [Fact]
+    public void PermissionDependenciesAreTransitiveAndDenyingARequiredPermissionRemovesDependents()
+    {
+        var resolver = new EffectivePermissionResolver();
+        var permission = resolver.Resolve(["dash.capture"], Array.Empty<PersonPermissionOverride>());
+
+        Assert.Contains("dash.capture", permission);
+        Assert.Contains("revenue.capture", permission);
+        Assert.Contains("revenue.view", permission);
+
+        var denied = resolver.Resolve(["dash.capture"],
+            [new PersonPermissionOverride { Permission = "revenue.view", Granted = false }]);
+
+        Assert.DoesNotContain("dash.capture", denied);
+        Assert.DoesNotContain("revenue.capture", denied);
+        Assert.DoesNotContain("revenue.view", denied);
+    }
+
+    [Fact]
+    public void SecurityPolicyRequiresThreeAttemptsAndCapsPauseAtOneHour()
+    {
+        var policy = new OrganizationSecurityPolicy { LockoutThreshold = 2 };
+        Assert.Throws<ArgumentException>(() => policy.Validate());
+
+        policy.LockoutThreshold = 3;
+        policy.LockoutMinutes = 61;
+        Assert.Throws<ArgumentException>(() => policy.Validate());
+
+        policy.LockoutMinutes = 60;
+        policy.Validate();
+    }
+
+    // The bounds the database checks and sign-in clamps to are exactly the ones a save validates.
+    [Fact]
+    public void SecurityPolicyBoundsAgreeWithValidation()
+    {
+        Assert.Equal(8, SecurityPolicyBounds.All.Count);
+        foreach (var bound in SecurityPolicyBounds.All)
+        {
+            var property = typeof(OrganizationSecurityPolicy).GetProperty(bound.Column)!;
+            OrganizationSecurityPolicy With(int value) { var policy = new OrganizationSecurityPolicy(); property.SetValue(policy, value); return policy; }
+            With(bound.Min).Validate();
+            With(bound.Max).Validate();
+            Assert.Throws<ArgumentException>(With(bound.Min - 1).Validate);
+            Assert.Throws<ArgumentException>(With(bound.Max + 1).Validate);
+            Assert.Equal(bound.Min, bound.Clamp(bound.Min - 1));
+            Assert.Equal(bound.Max, bound.Clamp(int.MaxValue));
+        }
+    }
+
+    // Addendum 1, section 2: at least three tries, and the pause is capped at one hour.
+    [Theory]
+    [InlineData(2, 15, false)]
+    [InlineData(3, 15, true)]
+    [InlineData(10, 15, true)]
+    [InlineData(11, 15, false)]
+    [InlineData(5, 0, false)]
+    [InlineData(5, 1, true)]
+    [InlineData(5, 60, true)]
+    [InlineData(5, 61, false)]
+    public void WrongPinPolicyBounds(int tries, int pauseMinutes, bool valid)
+    {
+        var policy = new OrganizationSecurityPolicy { LockoutThreshold = tries, LockoutMinutes = pauseMinutes };
+        if (valid) policy.Validate();
+        else Assert.Throws<ArgumentException>(policy.Validate);
+    }
 
     private static RecurringDefinition Daily(DateOnly start, decimal amount = 100m) =>
         new("Insurance", RecurringKind.Cost, CostCategory.FixedCommitments, amount, new RecurringSchedule(RecurrenceFrequency.Daily), start, null, [new VehicleShare(Vehicle, amount)]);
