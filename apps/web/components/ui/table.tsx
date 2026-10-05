@@ -12,6 +12,7 @@ export function DataTable({
   pendingRows = 0,
   isEmpty = false,
   emptyMessage,
+  failed = false,
   loadingLabel = "Loading",
   className,
   children,
@@ -22,6 +23,8 @@ export function DataTable({
   pendingRows?: number;
   isEmpty?: boolean;
   emptyMessage: ReactNode;
+  // The list could not be loaded (the page says why): an empty list then is not "nothing here yet".
+  failed?: boolean;
   loadingLabel?: string;
   className?: string;
   children?: ReactNode;
@@ -31,7 +34,7 @@ export function DataTable({
       className={cn(
         // A table wider than the card scrolls inside it: clipping would put the last columns, and the row
         // actions in them, out of reach with no way to get at them.
-        "mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-white",
+        "mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-surface",
         className,
       )}
     >
@@ -69,7 +72,7 @@ export function DataTable({
                 colSpan={columns.length}
                 className="px-4 py-6 text-center text-grey max-[720px]:block"
               >
-                {emptyMessage}
+                {failed ? "This list could not be loaded." : emptyMessage}
               </td>
             </tr>
           ) : (

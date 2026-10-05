@@ -27,6 +27,11 @@ public sealed class AuthService(AuthDb db, IClock clock, VerificationMailer mail
         var device = await db.TrustedDevices.SingleOrDefaultAsync(d => d.UserId == user.Id && d.DeviceId == deviceId);
         return device is { Revoked: false } && (device.TrustExpiresAt is null || clock.UtcNow < device.TrustExpiresAt);
     }
+    // The timer is shown only on a device this account already trusts (Phase 1 phones rely on it). Anywhere else a
+    // paused account answers exactly like a number with no account, or anyone could find which numbers exist.
+    private async Task<AuthResult> Paused(User user, string deviceId) => await Trusted(user, deviceId)
+        ? new(423, new("paused", RetryAfterSeconds: (int)Math.Ceiling((user.PausedUntil!.Value - clock.UtcNow).TotalSeconds)))
+        : AuthResult.Failure();
     private async Task Trust(User user, string deviceId)
     {
         var device = await db.TrustedDevices.SingleOrDefaultAsync(d => d.UserId == user.Id && d.DeviceId == deviceId);
@@ -199,25 +204,18 @@ public sealed class AuthService(AuthDb db, IClock clock, VerificationMailer mail
         if (user.PausedUntil is not null && clock.UtcNow >= user.PausedUntil)
             ClearPause(user);
 
-        // The timer is shown only on a device this account already trusts (Phase 1 phones rely on it). Anywhere else a
-        // paused account answers exactly like a number with no account, or anyone could find which numbers exist.
         if (user.PausedUntil > clock.UtcNow)
-            return await Trusted(user, request.DeviceId)
-                ? new(423,
-                    new("paused",
-                        RetryAfterSeconds: (int)Math.Ceiling(
-                            (user.PausedUntil.Value - clock.UtcNow).TotalSeconds)
-                        ))
-                : AuthResult.Failure();
+            return await Paused(user, request.DeviceId);
 
         if (!correct)
         {
             var policy = await Policy(user.Id);
             user.FailedAttempts++;
-            if (user.FailedAttempts >= policy.LockoutThreshold)
-                user.PausedUntil = clock.UtcNow.AddMinutes(policy.LockoutMinutes);
-
-            return AuthResult.Failure();
+            if (user.FailedAttempts < policy.LockoutThreshold)
+                return AuthResult.Failure();
+            // The wrong PIN that starts the pause already answers with it, so the timer shows now, not on the next try.
+            user.PausedUntil = clock.UtcNow.AddMinutes(policy.LockoutMinutes);
+            return await Paused(user, request.DeviceId);
         }
         if (!await Trusted(user, request.DeviceId))
         {

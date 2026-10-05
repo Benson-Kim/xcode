@@ -56,6 +56,17 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
     public Task<bool> HasActiveVehicles(Guid companyId, DateOnly today, CancellationToken ct) =>
         db.Set<FleetVehicle>().AnyAsync(v => v.CompanyId == companyId && (v.LeftOn == null || v.LeftOn > today), ct);
 
+    // One row back, not the records themselves: the earliest and latest day this vehicle has revenue for.
+    public async Task<(DateOnly First, DateOnly Last)?> RecordedRevenueDays(Guid vehicleId, CancellationToken ct)
+    {
+        var range = await db.Set<RevenueRecord>().AsNoTracking()
+            .Where(r => r.VehicleId == vehicleId)
+            .GroupBy(r => 1)
+            .Select(g => new { First = g.Min(r => r.BusinessDate), Last = g.Max(r => r.BusinessDate) })
+            .FirstOrDefaultAsync(ct);
+        return range is null ? null : (range.First, range.Last);
+    }
+
     public Task<bool> CompanyNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct)
         => db
         .Set<PsvCompany>()
@@ -77,7 +88,8 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 v.Registration,
                 v.JoinedOn,
                 v.LeftOn,
-                Targets = v.Targets.OrderBy(t => t.Revision).Select(t => new TargetDto(t.EffectiveFrom, t.WeeklyAmount, t.Revision)).ToList()
+                Targets = v.Targets.OrderBy(t => t.Revision).Select(t => new TargetDto(t.EffectiveFrom, t.WeeklyAmount, t.Revision)).ToList(),
+                Away = v.AwayPeriods.OrderBy(p => p.LeftOn).Select(p => new AwayPeriodDto(p.LeftOn, p.ReturnedOn)).ToList()
             })
             .ToListAsync(ct);
 
@@ -113,12 +125,13 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                     .FirstOrDefault()
                 : 0m;
             return new VehicleDto(v.Id, v.CompanyId, v.CompanyName, v.Registration, v.JoinedOn, v.LeftOn, active,
-                currentTarget, v.Targets, recurringItems.GetValueOrDefault(v.Id));
+                currentTarget, v.Targets, recurringItems.GetValueOrDefault(v.Id), v.Away);
         }).ToList(), page, pageSize, total);
     }
 
     public Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct) => VisibleVehicles(actor)
         .Include(v => v.Targets)
+        .Include(v => v.AwayPeriods)
         .SingleOrDefaultAsync(v => v.Id == id, ct);
 
     public async Task<IReadOnlyDictionary<Guid, FleetVehicle>> VehiclesById(SetupActor actor, IEnumerable<Guid> ids, CancellationToken ct)
@@ -174,7 +187,6 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 v.Revision,
                 v.Name,
                 v.Kind,
-                v.Category,
                 v.Frequency,
                 v.Day,
                 v.LastDay,
@@ -208,60 +220,129 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             }).ToList();
             // The total is what was saved for the shares listed (the viewer's share when partial), retired vehicles included,
             // so it always balances against them; ActiveAmount is the part that still posts.
-            return new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind, v.Category,
+            return new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind,
                 allocations.Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
                 allocations, v.Allocations.Count != v.AllocationCount, v.ExpenseItemId, v.ExpenseItemName,
-                ExpenseBuckets.Of(v.Kind, v.Category, v.Bucket), v.Note, v.Month, allocations.Where(a => a.Active).Sum(a => a.Amount));
+                ExpenseBuckets.Of(v.Kind, v.Bucket), v.Note, v.Month, allocations.Where(a => a.Active).Sum(a => a.Amount));
         }).ToList(), page, pageSize, total);
     }
 
     public Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct)
         => VisibleRecurring(actor).Include(i => i.Versions).ThenInclude(v => v.Allocations).SingleOrDefaultAsync(i => i.Id == id, ct);
 
-    public async Task<VehicleReport> Report(SetupActor actor, Guid vehicleId, DateOnly from, DateOnly through, CancellationToken ct)
+    public async Task<VehicleReport> Report(SetupActor actor, FleetVehicle vehicle, DateOnly from, DateOnly through, CancellationToken ct)
     {
-        // A bounded, deterministic projection of immutable schedule versions: due dates post automatically,
-        // without hard deletes or a request-path mutation. A materialized ledger can consume this same rule.
+        // Only the vehicle's own active days count (FleetVehicle.ActiveOn): from its join date up to the day it left.
+        // Days after the business date never count.
+        var first = from < vehicle.JoinedOn ? vehicle.JoinedOn : from;
+        var last = through < actor.Today ? through : actor.Today;
+        if (vehicle.LeftOn is { } left && left <= last) last = left.AddDays(-1);
+        // A bounded, deterministic projection of immutable schedule versions: due dates post automatically, without
+        // hard deletes or a request-path mutation. Only this vehicle's shares are loaded, one row per version however
+        // many vehicles an item is shared with, and each version's due dates are stepped (RecurringItem.DueBetween).
         var items = await db.Set<RecurringItem>().AsNoTracking()
-            .Where(i => i.Versions.Any(v => v.Allocations.Any(a => a.VehicleId == vehicleId)))
-            .Include(i => i.Versions).ThenInclude(v => v.Allocations).ToListAsync(ct);
-        var vehicle = await VisibleVehicles(actor).Where(v => v.Id == vehicleId)
-            .Select(v => new { v.JoinedOn, v.LeftOn }).SingleAsync(ct);
-        var postings = new List<PostingDto>();
+            .Where(i => i.Versions.Any(v => v.Allocations.Any(a => a.VehicleId == vehicle.Id)))
+            .Include(i => i.Versions).ThenInclude(v => v.Allocations.Where(a => a.VehicleId == vehicle.Id))
+            .ToListAsync(ct);
+        // Summed here: SQLite, used in tests, cannot sum decimals.
+        var records = await db.Set<RevenueRecord>().AsNoTracking()
+            .Where(r => r.VehicleId == vehicle.Id && r.BusinessDate >= first && r.BusinessDate <= last)
+            .Select(r => new { r.BusinessDate, r.Amount })
+            .ToListAsync(ct);
 
-        for (var day = from; day <= through; day = day.AddDays(1))
-        {
-            if (day < vehicle.JoinedOn || vehicle.LeftOn is not null && day >= vehicle.LeftOn) continue;
-            foreach (var item in items)
-            {
-                var version = item.DueOn(day);
-                var share = version?.Allocations.SingleOrDefault(a => a.VehicleId == vehicleId);
-                if (version is not null && share is not null) postings.Add(new(item.Id, version.Id, day, version.Name, version.Kind, version.Category, share.Amount,
-                    ExpenseBuckets.Of(version.Kind, version.Category, version.Bucket)));
-            }
-        }
-        return new(vehicleId, from, through, postings.Where(p => p.Kind == RecurringKind.Cost).Sum(p => p.Amount),
-            postings.Where(p => p.Kind == RecurringKind.Savings).Sum(p => p.Amount), postings);
+        var postings = items
+            .SelectMany(item => item.DueBetween(first, last)
+                .Select(due => (Due: due, Share: due.Version.Allocations.SingleOrDefault(a => a.VehicleId == vehicle.Id)))
+                .Where(x => x.Share is not null)
+                .Select(x => new PostingDto(item.Id, x.Due.Version.Id, x.Due.Date, x.Due.Version.Name, x.Due.Version.Kind,
+                    x.Share!.Amount, x.Due.Version.ReportedBucket())))
+            .OrderBy(p => p.Date).ThenBy(p => p.Name, StringComparer.Ordinal).ThenBy(p => p.ItemId)
+            .ToList();
+
+        // The revenue module's expected figure: the dated weekly target / 7 for each active day, where today counts
+        // only once it is captured. A day the vehicle was away has no target (FleetVehicle.TargetOn), so it is not
+        // expected here either (D4).
+        var moneyIn = records.Sum(r => r.Amount ?? 0m);
+        var captured = records.Select(r => r.BusinessDate).ToHashSet();
+        var target = 0m;
+        for (var day = first; day <= last; day = day.AddDays(1))
+            if (day < actor.Today || captured.Contains(day)) target += vehicle.TargetOn(day) / 7m;
+
+        decimal Bucket(ExpenseBucket bucket) => postings.Where(p => p.Kind == RecurringKind.Cost && p.Bucket == bucket).Sum(p => p.Amount);
+        var (repairs, charges, loans) = (Bucket(ExpenseBucket.RepairsAndMaintenance), Bucket(ExpenseBucket.RecurringCharges), Bucket(ExpenseBucket.LoanRepayments));
+        var savings = postings.Where(p => p.Kind == RecurringKind.Savings).Sum(p => p.Amount);
+        var moneyOut = repairs + charges + loans;
+        var net = moneyIn - moneyOut;
+        return new(vehicle.Id, from, through, moneyIn, decimal.Round(target, 2), repairs, charges, loans, moneyOut, net,
+            savings, net - savings, moneyOut, postings);
     }
 
-    public async Task<Page<HistoryEntry>> History(SetupActor actor, int page, int pageSize, CancellationToken ct)
+    public async Task<Page<HistoryEntry>> History(SetupActor actor, HistoryFilter filter, int page, int pageSize, CancellationToken ct)
     {
         var vehicles = VisibleVehicles(actor).Select(v => v.Id);
         var companies = VisibleCompanies(actor).Select(c => c.Id);
         var completeItems = db.Set<RecurringItem>().Where(i => !i.Versions.Any(v => v.Allocations.Any(a => !vehicles.Contains(a.VehicleId)))).Select(i => i.Id);
+        var revenueRecords = db.Set<RevenueRecord>().Where(r => vehicles.Contains(r.VehicleId)).Select(r => r.Id);
         // People changes follow the people list's own visibility rules.
         var people = PeopleVisibility.People(db, actor).Select(m => m.UserId);
+        // D11: people entries carry contact details and permissions, so the section needs permission to view
+        // people as well as to read the log. This holds for an organization-wide viewer too.
+        var seesPeople = actor.Permissions.Contains("people.view");
         // The expense catalog is organization-wide; investment changes are logged against their vehicle.
-        var query = db.Set<OrganizationSettingsVersion>().AsNoTracking().Where(v => actor.AllCompanies ||
+        var query = db.Set<OrganizationSettingsVersion>().AsNoTracking()
+            .Where(v => v.Section != "people" || seesPeople)
+            .Where(v => actor.AllCompanies ||
             (v.Section == "companies" && companies.Contains(v.EntityId)) || (v.Section == "vehicles" && vehicles.Contains(v.EntityId)) ||
             (v.Section == "recurring" && completeItems.Contains(v.EntityId)) || v.Section == "expenses" ||
-            (v.Section == "investment" && vehicles.Contains(v.EntityId)) || (v.Section == "people" && people.Contains(v.EntityId)));
+            (v.Section == "investment" && vehicles.Contains(v.EntityId)) || (v.Section == "people" && people.Contains(v.EntityId)) ||
+            (v.Section == "revenue" && revenueRecords.Contains(v.EntityId)));
+        query = await Narrow(query, filter, ct);
         var entries = await query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize).Take(pageSize)
             .Select(v => new HistoryEntry(v.Version, v.Section, v.EntityId, v.Reason, v.OccurredAt, v.ActorId,
                 db.Memberships.Where(m => m.UserId == v.ActorId).Select(m => m.FirstName + " " + m.LastName).FirstOrDefault() ?? "",
                 v.Before, v.After))
             .ToListAsync(ct);
         return new(actor.AllCompanies ? entries : await WithoutHiddenScope(actor, entries, ct), page, pageSize, await query.CountAsync(ct));
+    }
+
+    // The log narrowed to what the person asked for. It is applied before paging, so the count and Load more
+    // describe the filtered log and not the whole one. A day given here is a day in the organization's own
+    // calendar, so the window is built in its zone rather than in UTC, which would cut the day in the wrong place.
+    private async Task<IQueryable<OrganizationSettingsVersion>> Narrow(
+        IQueryable<OrganizationSettingsVersion> query, HistoryFilter filter, CancellationToken ct)
+    {
+        if (filter.Section is not null) query = query.Where(v => v.Section == filter.Section);
+        if (filter.From is not null || filter.To is not null)
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(
+                await db.Localizations.AsNoTracking().Select(x => x.TimeZone).SingleOrDefaultAsync(ct) ?? "Africa/Nairobi");
+            var midnight = (DateOnly day) =>
+            {
+                var local = day.ToDateTime(TimeOnly.MinValue);
+                return new DateTimeOffset(local, zone.GetUtcOffset(local));
+            };
+            // The window is worked out here, because a query can only carry the two values it compares against.
+            if (filter.From is not null)
+            {
+                var start = midnight(filter.From.Value);
+                query = query.Where(v => v.OccurredAt >= start);
+            }
+            // Through the end of the last day, which is midnight at the start of the day after it.
+            if (filter.To is not null)
+            {
+                var end = midnight(filter.To.Value.AddDays(1));
+                query = query.Where(v => v.OccurredAt < end);
+            }
+        }
+        if (filter.Text is not null)
+        {
+            // The reason or the person who did it: the two things a line shows. Matching is the database's own,
+            // which is case-insensitive under the collations XCODE runs on.
+            var pattern = $"%{filter.Text.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]")}%";
+            query = query.Where(v => EF.Functions.Like(v.Reason, pattern)
+                || db.Memberships.Any(m => m.UserId == v.ActorId && EF.Functions.Like(m.FirstName + " " + m.LastName, pattern)));
+        }
+        return query;
     }
 
     // A scoped viewer sees a person's scope only as far as their own reaches: the companies and vehicles outside it are

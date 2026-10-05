@@ -11,7 +11,12 @@ it("says why a change was refused when the server gives the reason", async () =>
   await expect(apiRequest("setup/people")).rejects.toThrow("Only an Owner may give the Owner role.");
 });
 
-it("falls back to the category when the server gives no reason", async () => {
+it("says a refusal without a reason in plain words", async () => {
   refuse({ title: "Not permitted in this organization or data scope.", status: 403 });
-  await expect(apiRequest("setup/people")).rejects.toThrow("Not permitted in this organization or data scope.");
+  await expect(apiRequest("setup/people")).rejects.toThrow("Your access does not include this. Ask your admin if you need it.");
+});
+
+it("falls back to the category for other failures without a reason", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ title: "Invalid security policy.", status: 400 }), { status: 400 })));
+  await expect(apiRequest("setup/organization/settings/securityPolicy")).rejects.toThrow("Invalid security policy.");
 });

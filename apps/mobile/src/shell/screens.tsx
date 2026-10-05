@@ -1,12 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { money } from "../lib/format";
+import { apiGet, SessionEndedError } from "../lib/api";
+import { money, percentText } from "../lib/format";
+import { dayLabel, isDate, rangeLabel, shiftDate } from "../revenue/dates";
 import type { StoredPerson } from "../lib/storage";
+import type { RevenueDashboard } from "../revenue/types";
 import { initials } from "../session";
 import { Banner, Button, Text, useTheme } from "../ui";
 import { VERSION } from "../auth/AuthLayout";
 import { DASHBOARD_CARDS, SETUP_LINKS, TABS, periodLabel, type Period, type PermissionGroup, type Tab } from "./access";
-import { Bullets, Card, CardAction, CardNote, CardValue, IconButton, LineSkeleton, ScreenTitle, SectionTitle, Segmented, WhoRow } from "./parts";
+import { Bullets, Card, CardAction, CardNote, CardValue, Chip, IconButton, LineSkeleton, ProgressBar, ScreenTitle, SectionTitle, Segmented, WhoRow } from "./parts";
 
 export type Catalog = { groups: PermissionGroup[] | null; error: string };
 
@@ -16,13 +19,96 @@ const PERIODS: { value: Period; label: string }[] = [
   { value: "month", label: "This month" },
 ];
 
-export function HomeScreen({ person, offline, canOpen, onOpen, onLock }: { person: StoredPerson; offline: boolean; canOpen: (tab: Tab) => boolean; onOpen: (tab: Tab) => void; onLock: () => void }) {
+// The cards backed by revenue records; the others keep their "not available yet" state until their data exists.
+const REVENUE_CARDS = ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"];
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+// What a revenue card shows, from that card's own figures only, or null when the API left them out (null: not shown
+// to this person). A note never speaks for a figure that is null.
+// The wording follows XCODE Web.
+function revenueFigures(permission: string, dashboard: RevenueDashboard, period: Period): { value?: string; bad?: boolean; bar?: number; note?: string } | null {
+  const { capturedToday, vehiclesToday, revenue, expected, percent, missingDays, missingVehicles, editedRecords } = dashboard;
+  if (permission === "dash.capture") {
+    if (capturedToday === null || vehiclesToday === null) return null;
+    if (vehiclesToday === 0) return { note: "None of your vehicles is in the fleet today." };
+    const left = Math.max(0, vehiclesToday - capturedToday);
+    return {
+      value: `${capturedToday} of ${vehiclesToday} captured`,
+      note: left ? `${plural(left, "vehicle", "vehicles")} still to capture` : "Every vehicle has a record for today.",
+    };
+  }
+  if (permission === "dash.revenue") {
+    if (revenue === null) return null;
+    const soFar = period !== "month" && capturedToday !== null && vehiclesToday ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.` : "";
+    if (percent === null || expected === null) return { value: revenue ? money(revenue) : undefined, note: `No weekly target applies in this period${soFar}` };
+    return { value: money(revenue), bar: percent, note: `${percentText(percent)} of target ${money(expected)}, from each vehicle’s weekly target${soFar}` };
+  }
+  if (permission === "dash.gaps") {
+    if (missingDays === null) return null;
+    return {
+      value: plural(missingDays, "day", "days"),
+      bad: missingDays > 0,
+      note: missingDays ? `${missingVehicles === null ? "" : `On ${plural(missingVehicles, "vehicle", "vehicles")}. `}Always this month, whatever period you pick.` : "Every vehicle has a record for every day.",
+    };
+  }
+  if (editedRecords === null) return null;
+  return { value: plural(editedRecords, "record", "records"), note: editedRecords ? undefined : "Nothing was changed after capture in this period." };
+}
+
+// Missing days count the month up to yesterday: today is not a gap before it is captured.
+function gapsSub(businessDate?: string) {
+  if (!isDate(businessDate)) return "This month. No record and no reason.";
+  const first = `${businessDate.slice(0, 8)}01`;
+  const yesterday = shiftDate(businessDate, -1);
+  return first <= yesterday ? `${rangeLabel(first, yesterday)}. No record and no reason.` : "No record and no reason.";
+}
+
+export function HomeScreen({
+  person,
+  offline,
+  businessDate,
+  canOpen,
+  onOpen,
+  onLock,
+  onSessionEnded,
+}: {
+  person: StoredPerson;
+  offline: boolean;
+  businessDate?: string;
+  canOpen: (tab: Tab) => boolean;
+  onOpen: (tab: Tab) => void;
+  onLock: () => void;
+  onSessionEnded: () => void;
+}) {
   const { colors } = useTheme();
   const has = (permission: string) => person.permissions.includes(permission);
   // People who capture or spend start on today; everyone else on the month so far.
   const [period, setPeriod] = useState<Period>(has("dash.capture") || has("dash.float") ? "today" : "month");
   const cards = DASHBOARD_CARDS.filter((card) => has(card.permission));
-  const label = periodLabel(period);
+  const label = periodLabel(period, businessDate);
+  // Each revenue card reads the dashboard for its period: the one picked, or its own (missing days: the month).
+  const periodOf = (card: (typeof cards)[number]) => card.period ?? period;
+  const needed = [...new Set(cards.filter((card) => REVENUE_CARDS.includes(card.permission)).map(periodOf))].sort().join(",");
+  const [dashboards, setDashboards] = useState<Partial<Record<Period, RevenueDashboard>>>({});
+  const [dashboardError, setDashboardError] = useState("");
+  useEffect(() => {
+    setDashboards({});
+    setDashboardError("");
+    if (!needed || offline) return;
+    let active = true;
+    for (const each of needed.split(",") as Period[])
+      apiGet<RevenueDashboard>(`setup/revenue/dashboard?period=${each}`).then(
+        (value) => active && setDashboards((current) => ({ ...current, [each]: value })),
+        (reason: Error) => {
+          if (!active) return;
+          if (reason instanceof SessionEndedError) return onSessionEnded();
+          setDashboardError(reason.message);
+        },
+      );
+    return () => {
+      active = false;
+    };
+  }, [needed, offline, onSessionEnded]);
   return (
     <View style={styles.screen}>
       <WhoRow initials={initials(person)} name={`Hi ${person.firstName}`} role={person.role} action={<IconButton icon="lock" label="Lock app" onPress={onLock} />} />
@@ -34,17 +120,48 @@ export function HomeScreen({ person, offline, canOpen, onOpen, onLock }: { perso
         </Text>
       </View>
       {cards.length ? (
-        cards.map((card) => (
-          <Card key={card.permission} title={card.title} sub={card.sub ?? label}>
-            <CardValue>{typeof card.value === "number" ? money(card.value) : card.value}</CardValue>
-            <CardNote>{card.note}</CardNote>
-            {card.action && card.tab && canOpen(card.tab) ? (
-              <CardAction primary={card.primary} onPress={() => onOpen(card.tab!)}>
-                {card.action}
-              </CardAction>
-            ) : null}
-          </Card>
-        ))
+        cards.map((card) => {
+          // Revenue cards show the API's figures, never placeholder zeros while loading, offline or refused.
+          const live = REVENUE_CARDS.includes(card.permission);
+          const dashboard = dashboards[periodOf(card)];
+          const figures = live && dashboard ? revenueFigures(card.permission, dashboard, periodOf(card)) : null;
+          const sub =
+            card.permission === "dash.capture"
+              ? `Your vehicles, ${isDate(businessDate) ? dayLabel(businessDate) : "today"}`
+              : card.permission === "dash.gaps"
+                ? gapsSub(businessDate)
+                : (card.sub ?? "").replace("{period}", label);
+          const action = card.action && card.tab && canOpen(card.tab) && (!card.actionNeeds || card.actionNeeds.some(has));
+          return (
+            <Card key={card.permission} title={card.title} sub={sub}>
+              {card.unavailable ? (
+                <>
+                  <Chip>Not available yet</Chip>
+                  <CardNote>{card.unavailable}</CardNote>
+                </>
+              ) : figures ? (
+                <>
+                  {figures.value ? <CardValue bad={figures.bad}>{figures.value}</CardValue> : null}
+                  {figures.bar !== undefined ? <ProgressBar percent={figures.bar} /> : null}
+                  {figures.note ? <CardNote>{figures.note}</CardNote> : null}
+                </>
+              ) : dashboard ? (
+                <CardNote>Not shown with your access.</CardNote>
+              ) : offline ? (
+                <CardNote>Connect to the internet to see revenue figures.</CardNote>
+              ) : dashboardError ? (
+                <CardNote>{dashboardError}</CardNote>
+              ) : (
+                <LineSkeleton lines={2} />
+              )}
+              {action ? (
+                <CardAction primary={card.primary} onPress={() => onOpen(card.tab!)}>
+                  {card.action!}
+                </CardAction>
+              ) : null}
+            </Card>
+          );
+        })
       ) : (
         <Card title="Nothing to show yet" sub="Your admin decides what you can see here." />
       )}
@@ -80,7 +197,7 @@ export function MoreScreen({ person, catalog, busy, onLock, onSwitchUser }: { pe
       {links.length > 0 && (
         <View style={{ gap: 12 }}>
           <SectionTitle>Setup</SectionTitle>
-          <View style={[styles.links, { borderColor: colors.cardLine, backgroundColor: colors.white }]}>
+          <View style={[styles.links, { borderColor: colors.cardLine, backgroundColor: colors.surface }]}>
             {links.map((link, index) => (
               <View
                 key={link.label}
@@ -96,7 +213,7 @@ export function MoreScreen({ person, catalog, busy, onLock, onSwitchUser }: { pe
         </View>
       )}
       <SectionTitle>Your access</SectionTitle>
-      <View style={[styles.access, { borderColor: colors.cardLine, backgroundColor: colors.white }]}>
+      <View style={[styles.access, { borderColor: colors.cardLine, backgroundColor: colors.surface }]}>
         <View>
           <Text style={{ fontSize: 13, color: colors.grey }}>Role</Text>
           <Text weight="semibold">{person.role || "Not assigned"}</Text>

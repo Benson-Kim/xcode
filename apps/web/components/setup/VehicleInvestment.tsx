@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { apiRequest, useResource } from "../../lib/data";
-import { kes, plural } from "../../lib/format";
+import { kes, money, plural } from "../../lib/format";
 import { useSession } from "../../lib/session-context";
 import type { VehicleInvestment } from "../../lib/types";
-import { formatDateOnly } from "../recurringPresentation";
+import { formatDateOnly, formatDateRange } from "../recurringPresentation";
 import {
   Banner,
   Button,
@@ -44,9 +44,16 @@ function problem(draft: Draft, date: string, today?: string) {
   return "";
 }
 
-// The Investment tab on a vehicle: what went into it, and how much of that has come back. Investment is never
-// counted as money out. Seeing it needs invest.view; adding, changing and removing entries need invest.manage.
-export function VehicleInvestmentTab({ vehicle, today }: { vehicle: { id: string; registration: string }; today?: string }) {
+// The Investment tab on a vehicle: what went into it, and how much of that has come back (its net contribution since
+// it joined, worked out by the server). Investment is never counted as money out. Seeing it needs invest.view;
+// adding, changing and removing entries need invest.manage.
+export function VehicleInvestmentTab({
+  vehicle,
+  today,
+}: {
+  vehicle: { id: string; registration: string; joinedOn?: string };
+  today?: string;
+}) {
   const { can } = useSession();
   const canManage = can("invest.manage");
   const toast = useToast();
@@ -126,14 +133,20 @@ export function VehicleInvestmentTab({ vehicle, today }: { vehicle: { id: string
           <>
             <StatGrid>
               <Stat label="Invested" value={kes(data.totalInvested)} />
-              <Stat label="Back so far" value={data.returned === null ? "—" : kes(data.returned)} />
+              <Stat
+                label="Back so far"
+                value={data.returned === null ? "—" : money(data.returned)}
+                tone={data.returned !== null && data.returned < 0 ? "bad" : undefined}
+              />
               <Stat label="Paid back" value={paidOff === null ? "—" : `${Math.round(paidOff)}%`} />
             </StatGrid>
             {paidOff !== null && <ProgressBar value={paidOff} />}
             <CardNote>
               {data.returned === null
                 ? "Back so far and paid back show once they can be worked out from the revenue records."
-                : "Back so far counts net contribution from the records kept."}
+                : `Back so far counts net contribution from the records kept${
+                    vehicle.joinedOn && today && vehicle.joinedOn <= today ? `, ${formatDateRange(vehicle.joinedOn, today)}` : ""
+                  }.`}
             </CardNote>
           </>
         )}
@@ -144,6 +157,7 @@ export function VehicleInvestmentTab({ vehicle, today }: { vehicle: { id: string
         <Spacer />
         {canManage && (
           <Button
+            tone="ok"
             onClick={() => {
               setAddError("");
               setAdding({ ...blank });
@@ -163,6 +177,7 @@ export function VehicleInvestmentTab({ vehicle, today }: { vehicle: { id: string
         loading={investment.loading}
         loadingLabel="Loading investment entries"
         isEmpty={!entries.length}
+        failed={Boolean(investment.error)}
         emptyMessage="Nothing recorded yet."
       >
         {entries.map((entry) =>
@@ -200,11 +215,11 @@ export function VehicleInvestmentTab({ vehicle, today }: { vehicle: { id: string
               </Td>
               <Td>
                 <FormActions className="justify-end">
-                  <Button disabled={busy} onClick={() => void saveEdit()}>
+                  <Button tone="ok" disabled={busy} onClick={() => void saveEdit()}>
                     Save
                   </Button>
                   <Button
-                    tone="outline"
+                    tone="quiet"
                     onClick={() => {
                       setEditing(null);
                       setError("");
@@ -276,10 +291,10 @@ export function VehicleInvestmentTab({ vehicle, today }: { vehicle: { id: string
             </Field>
             {addError && <Banner>{addError}</Banner>}
             <FormActions>
-              <Button disabled={busy} onClick={() => void add()}>
+              <Button tone="ok" disabled={busy} onClick={() => void add()}>
                 Add
               </Button>
-              <Button tone="outline" onClick={() => setAdding(null)}>
+              <Button tone="quiet" onClick={() => setAdding(null)}>
                 Cancel
               </Button>
             </FormActions>

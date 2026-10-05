@@ -18,7 +18,7 @@ export function Toolbar({ align = "center", className, ...props }: ComponentProp
     <div
       {...props}
       className={cn(
-        "mt-5 flex flex-wrap gap-3 rounded-[14px] border border-card-line bg-white p-3",
+        "mt-5 flex flex-wrap gap-3 rounded-[14px] border border-card-line bg-surface p-3",
         align === "start" ? "items-start" : "items-center",
         className,
       )}
@@ -35,18 +35,28 @@ export function Hint({ className, ...props }: ComponentProps<"p">) {
   return <p {...props} className={cn("m-0 text-[13px] text-grey", className)} />;
 }
 
-// A stack of form cards (.form).
+// A stack of form cards (.form). Forms use the full width of the page, as in the design since v1.6.
 export function FormLayout({ className, ...props }: ComponentProps<"div">) {
-  return <div {...props} className={cn("mt-5 flex max-w-195 flex-col gap-4", className)} />;
+  return <div {...props} className={cn("mt-5 flex flex-col gap-4", className)} />;
 }
 
 export function FormActions({ className, ...props }: ComponentProps<"div">) {
   return <div {...props} className={cn("flex flex-wrap items-center gap-3", className)} />;
 }
 
-// Two form columns that stack on narrow screens (.grid2).
-export function Grid2({ className, ...props }: ComponentProps<"div">) {
-  return <div {...props} className={cn("grid grid-cols-2 gap-3.5 max-[720px]:grid-cols-1", className)} />;
+// Form columns at least 260px wide, as many as fit, that stack on narrow screens (.grid2). The fields share the
+// row between them; `narrow` keeps each field to one column instead of stretching one or two across the page.
+export function Grid2({ narrow = false, className, ...props }: ComponentProps<"div"> & { narrow?: boolean }) {
+  return (
+    <div
+      {...props}
+      className={cn(
+        "grid gap-x-5 gap-y-3.5 max-[720px]:grid-cols-1",
+        narrow ? "grid-cols-[repeat(auto-fill,minmax(260px,1fr))]" : "grid-cols-[repeat(auto-fit,minmax(260px,1fr))]",
+        className,
+      )}
+    />
+  );
 }
 
 // A heading inside a card or dialog (.access-group).

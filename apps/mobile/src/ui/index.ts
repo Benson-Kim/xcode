@@ -6,6 +6,7 @@ export { Icon, type IconName } from "./Icon";
 export { Text } from "./Text";
 export {
   ThemeProvider,
+  darkPalette,
   defaultTheme,
   fonts,
   mix,

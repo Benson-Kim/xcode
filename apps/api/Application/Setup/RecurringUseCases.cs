@@ -1,3 +1,4 @@
+using System.Globalization;
 using Auth.Domain.Setup;
 
 namespace Auth.Application.Setup;
@@ -15,7 +16,7 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
 
     public Task<Guid> Save(Guid? id, SaveRecurring input, CancellationToken ct) => execution.Write("commitments.manage", async actor =>
     {
-        var reason = SetupPagination.OptionalReason(input.Reason);
+        var typed = SetupPagination.OptionalReason(input.Reason);
         var definition = await Definition(actor, input, ct);
 
         var item = id is null ? null : await repository.RecurringItem(actor, id.Value, ct) ?? throw new KeyNotFoundException();
@@ -49,25 +50,29 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
             if (Same(latest, definition)) return item.Id;
             item.Revise(definition, actor.Today);
         }
-        reason ??= SetupPagination.Automatic(latest is null
+        var reason = SetupPagination.Automatic(latest is null
             ? $"Added scheduled {(definition.Kind == RecurringKind.Savings ? "saving" : "expense")} {definition.Name.Trim()}"
-            : Changed(latest, definition));
+            : Changed(latest, definition), typed);
         await repository.RecordChange(actor, "recurring", item.Id, before, Snapshot(item), reason, ct);
         return item.Id;
     }, ct);
 
     public Task<Guid> Stop(Guid id, StopRecurring input, CancellationToken ct) => execution.Write("commitments.manage", async actor =>
     {
-        var reason = SetupPagination.Reason(input.Reason);
+        var typed = SetupPagination.Reason(input.Reason);
         if (!input.Confirmed) throw new ArgumentException("Confirm stopping this item. Past postings are retained; no posting occurs from today.");
         var item = await repository.RecurringItem(actor, id, ct) ?? throw new KeyNotFoundException();
         // Only someone who can see every vehicle on the item may stop it; one read for all of them.
-        var shares = item.Versions.OrderByDescending(v => v.Revision).First().Allocations;
+        var latest = item.Versions.OrderByDescending(v => v.Revision).First();
+        var shares = latest.Allocations;
         var visible = await repository.VehiclesById(actor, shares.Select(a => a.VehicleId), ct);
         if (shares.Any(share => !visible.ContainsKey(share.VehicleId)))
             throw new UnauthorizedAccessException();
         var before = Snapshot(item);
-        if (item.Stop(actor.Today)) await repository.RecordChange(actor, "recurring", item.Id, before, Snapshot(item), reason, ct);
+        // Stopping needs a typed reason, which follows the automatic one rather than replacing it.
+        if (item.Stop(actor.Today))
+            await repository.RecordChange(actor, "recurring", item.Id, before, Snapshot(item),
+                SetupPagination.Automatic($"Stopped {latest.Name} from {actor.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}", typed), ct);
         return item.Id;
     }, ct);
 
@@ -92,8 +97,8 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
     {
         if (input.Kind != RecurringKind.Cost)
         {
-            if (input.ExpenseItemId is not null || input.Category is not null)
-                throw new ArgumentException("Savings must not have an expense item or cost category.");
+            if (input.ExpenseItemId is not null)
+                throw new ArgumentException("Savings must not have an expense item.");
             return input.Definition(input.Name, null);
         }
         var expense = input.ExpenseItemId is { } expenseItemId ? await repository.ActiveExpenseItem(expenseItemId, actor.Today, ct) : null;
@@ -122,7 +127,7 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
     }
 
     private static bool Same(RecurringVersion version, RecurringDefinition definition) =>
-        version.Name == definition.Name.Trim() && version.Kind == definition.Kind && version.Category == definition.Category &&
+        version.Name == definition.Name.Trim() && version.Kind == definition.Kind &&
         version.Amount == definition.Amount && version.Frequency == definition.Schedule.Frequency && version.Day == definition.Schedule.Day &&
         version.LastDay == definition.Schedule.LastDay && version.Month == definition.Schedule.Month && version.Start == definition.Start &&
         version.End == definition.End && version.ExpenseItemId == definition.ExpenseItemId && version.Bucket == definition.Bucket &&
@@ -143,7 +148,6 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
             v.EffectiveFrom,
             v.Name,
             v.Kind,
-            v.Category,
             v.Amount,
             v.Frequency,
             v.Day,

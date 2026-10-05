@@ -77,6 +77,9 @@ export async function keepSession(
     phoneNumber,
     accessToken: result.accessToken || "",
     refreshToken: result.refreshToken || "",
+    // Every sign-in and every renewal passes through here, so this is the last time the phone reached
+    // the server: what the 72-hour offline unlock window is measured from (D7).
+    lastOnlineAt: Date.now(),
   };
   await saveSession(session);
   return session;
@@ -103,25 +106,51 @@ function renew() {
   return renewing;
 }
 
-// GET from the API as the signed-in person (path relative to the API, for example "auth/session").
-export async function apiGet<T>(path: string): Promise<T> {
+// A request as the signed-in person. An expired access token is renewed once; a session that cannot be renewed ends.
+async function authorized(path: string, init: RequestInit = {}) {
   const session = await loadSession();
   if (!session) throw new SessionEndedError();
   const call = (token: string) =>
     reach(`${apiUrl}/${path}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      ...init,
+      headers: { ...(init.headers as Record<string, string>), Authorization: `Bearer ${token}` },
     });
   let response = await call(session.accessToken);
   if (response.status === 401)
     response = await call((await renew()).accessToken);
   if (response.status === 401) throw new SessionEndedError();
+  return response;
+}
+
+// GET from the API as the signed-in person (path relative to the API, for example "auth/session").
+export async function apiGet<T>(path: string): Promise<T> {
+  const response = await authorized(path);
   const body = await response.json().catch(() => ({}));
-  // The API's detail says what to fix; its title is only the category.
+  // The API's detail says what to fix; its title is only the category. A server failure has nothing to fix on the phone.
+  if (response.status >= 500)
+    throw new Error("Something went wrong on the server. Try again in a moment.");
   if (!response.ok)
     throw new Error(
       body.detail || body.title || "The request could not be completed.",
     );
   return body as T;
+}
+
+// PUT JSON as the signed-in person and return the status with the body, whatever the outcome, for callers
+// that act on a 400, 403, 404 or 409 themselves. Only no connection or an ended session throws.
+export async function apiPutResult<T>(
+  path: string,
+  body: unknown,
+): Promise<{ status: number; body: T }> {
+  const response = await authorized(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    body: (await response.json().catch(() => ({}))) as T,
+  };
 }
 
 // Switch user: stop trusting this phone for the person (their refresh tokens go with it), then everything kept for them on the phone is removed.

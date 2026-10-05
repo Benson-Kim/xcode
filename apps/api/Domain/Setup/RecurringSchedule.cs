@@ -16,14 +16,6 @@ public enum RecurringKind
 }
 
 
-public enum CostCategory
-{
-     RunningCosts = 1,
-     RepairsAndUpkeep = 2,
-     CrewCosts = 3,
-     FixedCommitments = 4
-}
-
 public sealed record RecurringSchedule
 {
      public RecurrenceFrequency Frequency { get; }
@@ -52,6 +44,28 @@ public sealed record RecurringSchedule
           RecurrenceFrequency.Yearly => date.Month == Month && date.Day == DueDay(date),
           _ => false
      };
+     // The dates from first through last that IsDue accepts, stepped rather than tested: by 7 days for weekly, one per
+     // month or one per year. O(dates returned + 1).
+     public IEnumerable<DateOnly> Occurrences(DateOnly first, DateOnly last)
+     {
+          if (first > last) yield break;
+          if (Frequency is RecurrenceFrequency.Daily or RecurrenceFrequency.Weekly)
+          {
+               var step = Frequency == RecurrenceFrequency.Daily ? 1 : 7;
+               var date = Frequency == RecurrenceFrequency.Daily ? first : first.AddDays((Day!.Value - (int)first.DayOfWeek + 7) % 7);
+               for (; date <= last; date = date.AddDays(step)) yield return date;
+               yield break;
+          }
+          var months = Frequency == RecurrenceFrequency.Monthly ? 1 : 12;
+          for (var month = new DateOnly(first.Year, Frequency == RecurrenceFrequency.Monthly ? first.Month : Month!.Value, 1);
+               month <= last; month = month.AddMonths(months))
+          {
+               var day = DueDay(month)!.Value;
+               if (day > DateTime.DaysInMonth(month.Year, month.Month)) continue;
+               var date = new DateOnly(month.Year, month.Month, day);
+               if (date >= first && date <= last) yield return date;
+          }
+     }
      private int? DueDay(DateOnly date) => LastDay ? DateTime.DaysInMonth(date.Year, date.Month) : Day;
 }
 

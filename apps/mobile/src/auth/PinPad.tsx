@@ -42,7 +42,7 @@ export function PinPad({
   onDelete,
   links,
 }: Props) {
-  const { colors, reducedMotion } = useTheme();
+  const { colors, reducedMotion, fontScale } = useTheme();
   const { height } = useWindowDimensions();
   const short = height < 700;
   const offset = useRef(new Animated.Value(0)).current;
@@ -94,12 +94,13 @@ export function PinPad({
             {header.initials ? (
               <Text
                 weight="bold"
-                style={{ color: colors.white, fontSize: short ? 17 : 21 }}
+                // Decorative initials keep their size so a larger text preference cannot push them out of the circle.
+                style={{ color: colors.onBrand, fontSize: (short ? 17 : 21) / fontScale, lineHeight: (short ? 22 : 27) / fontScale }}
               >
                 {header.initials}
               </Text>
             ) : (
-              <Icon name="lock" size={24} color={colors.white} />
+              <Icon name="lock" size={24} color={colors.onBrand} />
             )}
           </View>
           <Text weight="bold" accessibilityRole="header" style={styles.title}>
@@ -166,7 +167,7 @@ export function PinPad({
                         borderColor: pressed ? colors.blue : colors.keyLine,
                         backgroundColor: pressed
                           ? colors.blueWash
-                          : colors.white,
+                          : colors.surface,
                       },
                   busy && styles.disabled,
                 ]}

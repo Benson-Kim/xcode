@@ -124,7 +124,7 @@ export function RecurringPage({
           <option value="stopped">Stopped</option>
         </SelectInput>
         <Spacer />
-        {canManage && <Button onClick={() => setEditing("new")}>Add scheduled expense or saving</Button>}
+        {canManage && <Button tone="ok" onClick={() => setEditing("new")}>Add scheduled expense or saving</Button>}
       </Toolbar>
       <DataTable
         columns={[
@@ -139,6 +139,7 @@ export function RecurringPage({
         pendingRows={recurring.pendingRows}
         loadingLabel="Loading scheduled expenses and savings"
         isEmpty={!visible.length}
+        failed={Boolean(recurring.error)}
         emptyMessage="Nothing here yet."
       >
         {visible.map((item) => {

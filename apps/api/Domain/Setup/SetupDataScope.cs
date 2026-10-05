@@ -38,12 +38,6 @@ public sealed class RecurringKindLookup
 }
 
 
-public sealed class CostCategoryLookup
-{
-     public CostCategory Id { get; set; }
-     public string Name { get; set; } = "";
-}
-
 
 public sealed class ExpenseBucketLookup
 {

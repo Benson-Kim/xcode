@@ -35,13 +35,28 @@ export function currencyCode() {
   return formats.currency;
 }
 
-// "KES 49,000": whole amounts stay whole; the organization's decimals are the most shown.
+// "KES 49,000" and "KES 1,500.50": whole amounts stay whole; any other shows the organization's decimals in full.
 export function kes(amount: number) {
   const number = amount.toLocaleString(formats.locale, {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : formats.numberDecimals,
     maximumFractionDigits: formats.numberDecimals,
     useGrouping: formats.useGroupping,
   });
   return `${formats.currency} ${number}`;
+}
+
+// A result that can go below zero, as the design writes it: "KES 1,200 loss" rather than a minus sign.
+export function money(amount: number) {
+  return amount < 0 ? `${kes(-amount)} loss` : kes(amount);
+}
+
+// The most a share of a target shows. A vehicle with a tiny target and a large record can reach millions of percent, which tells no one anything.
+// Only the display is capped: the stored and API values stay as they are.
+export const MAX_PERCENT_SHOWN = 999;
+
+// "83%", and "999%+" for anything above the cap.
+export function percentText(percent: number) {
+  return percent > MAX_PERCENT_SHOWN ? `${MAX_PERCENT_SHOWN}%+` : `${percent}%`;
 }
 
 export function plural(count: number, one: string, many: string) {

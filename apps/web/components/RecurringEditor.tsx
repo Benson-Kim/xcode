@@ -44,7 +44,6 @@ import type { ExpenseBucket, ExpenseItemOption } from "../lib/types";
 import {
   costBucket,
   expenseBucketNames,
-  legacyCostTypeNames,
   type RecurringItem,
   type VehicleOption,
 } from "./setup/shared";
@@ -188,6 +187,8 @@ export function RecurringEditor({
   const [saveError, setSaveError] = useState("");
   const [splitNotice, setSplitNotice] = useState("");
   const [confirmStop, setConfirmStop] = useState(false);
+  // Shown beside the reason field, not at the top of the page, so it is next to what needs fixing.
+  const [stopError, setStopError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const total = Number(amount) || 0;
@@ -208,11 +209,10 @@ export function RecurringEditor({
     ).entries(),
   ];
 
-  // Items saved before expense items keep their old cost type and daily schedule until someone changes them.
-  const legacyCategory = Boolean(item?.kind === 1 && !item.expenseItemId);
-  const legacyCategoryName = legacyCostTypeNames[item?.category || 4];
-  // Until an expense item is chosen, an old row keeps counting in its old type's bucket.
-  const legacyBucket = item && legacyCategory ? costBucket(item) : null;
+  // Items saved before expense items, or on the daily schedule, keep posting until someone changes them.
+  const noExpenseItem = Boolean(item?.kind === 1 && !item.expenseItemId);
+  // Until an expense item is chosen, such a row keeps counting in the bucket it was saved under.
+  const savedBucket = item && noExpenseItem ? costBucket(item) : null;
   const legacyDaily = item?.frequency === 1;
   const itemChoices: ItemChoice[] = (expenseItems ?? []).map((option) => ({
     ...option,
@@ -245,8 +245,8 @@ export function RecurringEditor({
   ];
   const countedAs = picked?.bucket
     ? expenseBucketNames[picked.bucket]
-    : legacyBucket && !expenseItemId
-      ? expenseBucketNames[legacyBucket]
+    : savedBucket && !expenseItemId
+      ? expenseBucketNames[savedBucket]
       : undefined;
 
   // A vehicle not in the fleet today (left, or not joined yet) keeps its share, read-only: it stays in the total but
@@ -406,7 +406,6 @@ export function RecurringEditor({
             // A cost takes its name and bucket from its expense item on the server.
             name: title,
             kind,
-            category: null,
             amount: total,
             frequency,
             day: schedule.day,
@@ -437,9 +436,10 @@ export function RecurringEditor({
     if (!item || disabled) return;
     if (!confirmStop) return setConfirmStop(true);
     if (!stopReason.trim()) {
-      setSaveError("Give a reason for stopping this item.");
+      setStopError("Give a reason for stopping this item.");
       return;
     }
+    setStopError("");
     setBusy(true);
     try {
       await apiRequest(`setup/recurring/${item.id}/stop`, {
@@ -478,13 +478,9 @@ export function RecurringEditor({
     }
   }
 
-  // What an item saved before expense items still uses, shown as read-only labels.
-  const legacyUses = [
-    legacyCategory && `the old cost type ${legacyCategoryName}`,
-    legacyDaily && "a daily schedule",
-  ].filter(Boolean);
+  // What an item saved under the old rules must be given before any change to it can be saved.
   const legacyNeeds = [
-    legacyCategory && "an expense item",
+    noExpenseItem && "an expense item",
     legacyDaily && "how often it posts",
   ].filter(Boolean);
   const dayOptions = Array.from({ length: 28 }, (_, index) => index + 1);
@@ -530,11 +526,10 @@ export function RecurringEditor({
             change the schedule, or cancel the stop, before then.
           </Note>
         )}
-        {legacyUses.length > 0 && !stopped && (
+        {legacyNeeds.length > 0 && !stopped && (
           <Note tone="info">
-            Set up with {legacyUses.join(" and ")}, which{" "}
-            {legacyUses.length > 1 ? "are" : "is"} no longer offered. It keeps
-            posting as it is.
+            Saved before the rules it would follow today, and still posting as
+            it is.
             {canEdit ? ` To save a change, choose ${legacyNeeds.join(" and ")}.` : ""}
           </Note>
         )}
@@ -573,8 +568,8 @@ export function RecurringEditor({
                 hint={
                   picked
                     ? `${picked.categoryName ? `${picked.categoryName}. ` : ""}${countedAs ? `Counts as ${countedAs}.` : ""}`
-                    : legacyCategory && !expenseItemId
-                      ? `Was the old cost type ${legacyCategoryName}.`
+                    : noExpenseItem && !expenseItemId
+                      ? `Saved before expense items${countedAs ? `, counting as ${countedAs}` : ""}. Choose the one it is for.`
                       : "Items come from Expense categories."
                 }
               >
@@ -724,7 +719,7 @@ export function RecurringEditor({
               </Field>
             )}
           </Grid2>
-          <Grid2>
+          <Grid2 narrow>
             <Field
               id="recurring-start"
               label="Starts"
@@ -841,7 +836,7 @@ export function RecurringEditor({
                     .map((vehicle) => (
                       <div
                         key={vehicle.id}
-                        className="grid min-h-13 grid-cols-[minmax(0,1fr)_170px] items-center gap-3 border-t border-divider max-[720px]:grid-cols-[minmax(0,1fr)_140px]"
+                        className="grid min-h-13 grid-cols-[minmax(0,320px)_200px] items-center gap-4 border-t border-divider max-[720px]:grid-cols-[minmax(0,1fr)_140px] max-[720px]:gap-3"
                       >
                         <Choice
                           label={vehicle.active === false ? `${vehicle.registration} (not in the fleet today)` : vehicle.registration}
@@ -927,9 +922,34 @@ export function RecurringEditor({
           )}
         </Card>
 
+        {item && canEdit && !stopped && confirmStop && (
+          <Card density="form">
+            <CardHeader
+              title="Stop from today"
+              description="A short reason is required and is kept in the change log."
+            />
+            <Field id="recurring-stop-reason" label="Reason for stopping">
+              <TextInput
+                autoFocus
+                maxLength={500}
+                placeholder="For example, the loan is paid off"
+                value={stopReason}
+                disabled={busy}
+                aria-invalid={Boolean(stopError) || undefined}
+                onChange={(event) => {
+                  setStopReason(event.target.value);
+                  setStopError("");
+                }}
+              />
+            </Field>
+            {stopError && <Banner>{stopError}</Banner>}
+          </Card>
+        )}
+
         <FormActions>
           {canEdit && !stopped && (
             <Button
+              tone="ok"
               disabled={busy}
               aria-busy={busy || undefined}
               onClick={() => void save()}
@@ -937,7 +957,7 @@ export function RecurringEditor({
               {busy ? "Saving..." : isNew ? "Add" : "Save changes"}
             </Button>
           )}
-          <Button tone="outline" disabled={busy} onClick={onCancel}>
+          <Button tone="quiet" disabled={busy} onClick={onCancel}>
             {canEdit && !stopped ? "Cancel" : "Back"}
           </Button>
           <Spacer />
@@ -947,20 +967,9 @@ export function RecurringEditor({
             </Button>
           )}
           {item && canEdit && !stopped && !futureStop && (
-            <>
-              {confirmStop && (
-                <TextInput
-                  aria-label="Reason for stopping"
-                  placeholder="Why is it stopping?"
-                  value={stopReason}
-                  disabled={busy}
-                  onChange={(event) => setStopReason(event.target.value)}
-                />
-              )}
-              <Button tone="danger" disabled={busy} onClick={() => void stop()}>
-                {confirmStop ? "Tap again to stop from today" : "Stop from today"}
-              </Button>
-            </>
+            <Button tone="warn" disabled={busy} onClick={() => void stop()}>
+              {confirmStop ? "Tap again to stop from today" : "Stop from today"}
+            </Button>
           )}
         </FormActions>
       </FormLayout>

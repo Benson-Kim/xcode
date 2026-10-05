@@ -27,7 +27,7 @@ export function Dialog({ open, title, onClose, children }: { open: boolean; titl
       onCancel={onClose}
       className="m-auto max-h-[calc(100%-64px)] w-[min(520px,calc(100%-32px))] rounded-2xl border border-card-line p-0 text-navy backdrop:bg-navy/40"
     >
-      <div className="sticky top-0 flex items-center justify-between border-b border-card-line bg-white px-5 py-4">
+      <div className="sticky top-0 flex items-center justify-between border-b border-card-line bg-surface px-5 py-4">
         <h2 id={titleId} className="m-0 text-xl font-bold">
           {title}
         </h2>

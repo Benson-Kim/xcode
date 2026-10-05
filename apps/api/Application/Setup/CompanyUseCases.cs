@@ -13,7 +13,7 @@ public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository 
 
     public Task<Guid> Save(Guid? id, SaveCompany input, CancellationToken ct) => execution.Write("companies.manage", async actor =>
     {
-        var reason = SetupPagination.OptionalReason(input.Reason);
+        var typed = SetupPagination.OptionalReason(input.Reason);
         var name = SetupValue.Name(input.Name);
         var company = id is null ? new PsvCompany(actor.OrganizationId, name)
             : await repository.Company(actor, id.Value, ct) ?? throw new KeyNotFoundException();
@@ -31,7 +31,7 @@ public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository 
         if (id is null)
             repository.Add(company);
 
-        reason ??= SetupPagination.Automatic(id is null ? $"Added company {company.Name}" : $"Renamed company {previous} to {company.Name}");
+        var reason = SetupPagination.Automatic(id is null ? $"Added company {company.Name}" : $"Renamed company {previous} to {company.Name}", typed);
         await repository.RecordChange(
             actor, "companies", company.Id, before, Snapshot(company), reason, ct);
         return company.Id;
@@ -40,7 +40,7 @@ public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository 
     public Task<Guid> SetArchived(Guid id, bool archived, CompanyLifecycleRequest input, CancellationToken ct)
         => execution.Write("companies.manage", async actor =>
         {
-            var reason = SetupPagination.OptionalReason(input.Reason);
+            var typed = SetupPagination.OptionalReason(input.Reason);
             var company = await repository.Company(actor, id, ct) ?? throw new KeyNotFoundException();
             var before = Snapshot(company);
             bool changed;
@@ -57,7 +57,7 @@ public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository 
             }
             if (changed)
                 await repository.RecordChange(actor, "companies", company.Id, before, Snapshot(company),
-                    reason ?? SetupPagination.Automatic($"{(archived ? "Archived" : "Restored")} company {company.Name}"), ct);
+                    SetupPagination.Automatic($"{(archived ? "Archived" : "Restored")} company {company.Name}", typed), ct);
             return company.Id;
         }, ct);
 

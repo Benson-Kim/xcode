@@ -1,13 +1,14 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Auth.Application;
 using Auth.Application.Setup;
 using Xunit;
 
 namespace Auth.Tests;
 
 // Contract C7 (addendum 1, section 2): keep the automatic reason, and ask for a typed one only where a person must say
-// why, such as stopping a scheduled item. A reason that is typed is still checked and used.
+// why, such as stopping a scheduled item. A reason that is typed is still checked, and follows the automatic one.
 public sealed class AutomaticReasonTests : IDisposable
 {
     private readonly AuthFactory app = new();
@@ -46,7 +47,8 @@ public sealed class AutomaticReasonTests : IDisposable
             $"Changed the weekly target of KDA 482M to KES 5,000 from {date}",
             "Moved KDA 482M to South Line; changed when KDA 482M joined the fleet to 2026-01-05",
             $"Vehicle KDA 482M left the fleet on {date}",
-            "Vehicle KDA 482M returned to the fleet"], await Reasons(owner, "vehicles"));
+            // Retired and restored on the same date: the leave took effect for no day, so no time away is named.
+            $"Vehicle KDA 482M returned to the fleet on {date}"], await Reasons(owner, "vehicles"));
     }
 
     [Fact]
@@ -71,12 +73,15 @@ public sealed class AutomaticReasonTests : IDisposable
             name = "Owner savings", kind = 2, amount = 500m, frequency = 3, day = 1, lastDay = false, start = today.ToString("yyyy-MM-dd"),
             allocations = new[] { new { vehicleId = first, amount = 500m } }, reason = "Put money aside for the owner"
         }));
-        Assert.Equal(["Added scheduled expense Parking", "Changed the amount and vehicles of Parking", "Put money aside for the owner"],
+        Assert.Equal(["Added scheduled expense Parking", "Changed the amount and vehicles of Parking", "Added scheduled saving Owner savings. Reason: Put money aside for the owner."],
             await Reasons(owner, "recurring"));
 
         Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/recurring/{item}/stop", new { confirmed = true })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/recurring/{item}/stop", new { confirmed = true, reason = "  " })).StatusCode);
         await Id(await owner.PostAsJsonAsync($"/setup/recurring/{item}/stop", new { confirmed = true, reason = "Parking moved into the SACCO fee" }));
+        // The typed reason follows the automatic one; it does not replace it.
+        Assert.Equal($"Stopped Parking from {today:yyyy-MM-dd}. Reason: Parking moved into the SACCO fee.", (await Reasons(owner, "recurring"))[^1]);
+
         // Stopped on another business date: stopping again is refused rather than reported as done.
         app.Clock.Advance(TimeSpan.FromDays(-3));
         Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/setup/recurring/{item}/stop", new { confirmed = true, reason = "Again" })).StatusCode);
@@ -89,7 +94,43 @@ public sealed class AutomaticReasonTests : IDisposable
         using var owner = await app.SignIn("antony.maina@shamayah.co.ke");
         Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync("/setup/companies", new { name = "North Star", reason = new string('r', 501) })).StatusCode);
         await Id(await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("North Star", "Signed with the SACCO")));
-        Assert.Equal(["Signed with the SACCO"], await Reasons(owner, "companies"));
+        Assert.Equal(["Added company North Star. Reason: Signed with the SACCO."], await Reasons(owner, "companies"));
+    }
+
+    // Build notes: "Keep the automatic reason. Ask for a typed reason in four places." The typed reason is added after
+    // the automatic one, so the change log still says who or what changed.
+    [Fact]
+    public async Task ATypedReasonFollowsTheAutomaticOne()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn("antony.maina@shamayah.co.ke");
+        var roles = (await owner.GetFromJsonAsync<List<AccessRole>>("/setup/access/roles"))!;
+        var grace = await Id(await owner.PostAsJsonAsync("/setup/people", new SavePerson("Grace", "Achieng", "grace.achieng@example.com", "0711000002",
+            "Revenue clerk", "all", [], [], roles.Single(x => x.Name == "Revenue clerk").Permissions.ToList(), null)));
+        var version = (await owner.GetFromJsonAsync<PersonDto>($"/setup/people/{grace}"))!.Version;
+        await Id(await owner.PostAsJsonAsync($"/setup/people/{grace}/deactivate", new { version, reason = "Moved to another SACCO" }));
+        Assert.Equal("Removed access for Grace Achieng. Reason: Moved to another SACCO.", (await Reasons(owner, "people"))[^1]);
+
+        var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
+        var company = await Id(await owner.PostAsJsonAsync("/setup/companies", new { name = "North Star" }));
+        var vehicle = await Id(await owner.PostAsJsonAsync("/setup/vehicles", new { companyId = company, registration = "KDA 482M", joinedOn = "2026-01-01", weeklyTarget = 15000m }));
+        await Id(await owner.PostAsJsonAsync($"/setup/vehicles/{vehicle}/retire", new { leftOn = today.ToString("yyyy-MM-dd"), reason = "Sold to the SACCO." }));
+        Assert.Equal($"Vehicle KDA 482M left the fleet on {today:yyyy-MM-dd}. Reason: Sold to the SACCO.", (await Reasons(owner, "vehicles"))[^1]);
+    }
+
+    [Fact]
+    public void ATypedReasonIsKeptWholeWithinTheChangeLogsLimit()
+    {
+        Assert.Equal("Removed access for Grace Achieng", SetupPagination.Automatic("Removed access for Grace Achieng", null));
+        Assert.Equal("Removed access for Grace Achieng. Reason: Moved to another SACCO.", SetupPagination.Automatic("Removed access for Grace Achieng", "Moved to another SACCO"));
+        Assert.Equal("Removed the logo. Reason: Is it withdrawn?", SetupPagination.Automatic("Removed the logo", "Is it withdrawn?"));
+
+        // Together they fit the change log's 500 characters: the automatic part is shortened first.
+        var typed = new string('t', 300);
+        var combined = SetupPagination.Automatic(new string('a', 400), typed);
+        Assert.Equal(500, combined.Length);
+        Assert.EndsWith($"... Reason: {typed}.", combined);
+        Assert.Equal(500, SetupPagination.Automatic(new string('a', 400), new string('t', 500)).Length);
     }
 
     // Oldest first, as the changes were made.

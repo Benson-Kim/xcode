@@ -148,10 +148,10 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
     if (editing?.id === entity.id)
       return (
         <FormActions className="justify-end">
-          <Button disabled={busy} onClick={() => void saveEdit(entity)}>
+          <Button tone="ok" disabled={busy} onClick={() => void saveEdit(entity)}>
             Save
           </Button>
-          <Button tone="outline" onClick={() => setEditing(null)}>
+          <Button tone="quiet" onClick={() => setEditing(null)}>
             Cancel
           </Button>
         </FormActions>
@@ -170,7 +170,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
           Edit
         </Button>
         <Button
-          tone={entity.stoppedOn ? "outline" : "danger"}
+          tone={entity.stoppedOn ? "ok" : "warn"}
           disabled={busy}
           aria-label={`${entity.stoppedOn ? "Turn on" : "Turn off"} ${entity.name}`}
           onClick={() => void toggle(kind, entity)}
@@ -263,7 +263,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
               {statusFilter}
               {!categories.loading && <Hint>{plural(visibleItems.length, "item", "items")}</Hint>}
               <Spacer />
-              {canManage && <Button onClick={() => openAdd("item")}>Add item</Button>}
+              {canManage && <Button tone="ok" onClick={() => openAdd("item")}>Add item</Button>}
             </Toolbar>
             <DataTable
               columns={[{ label: "Item" }, { label: "Category" }, { label: "Status" }, ...actionColumn]}
@@ -271,6 +271,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
               pendingRows={categories.pendingRows}
               loadingLabel="Loading expense items"
               isEmpty={!visibleItems.length}
+              failed={Boolean(categories.error)}
               emptyMessage="No items here yet."
             >
               {visibleItems.map(({ item, category }) => (
@@ -300,7 +301,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
               {statusFilter}
               {!categories.loading && <Hint>{plural(visibleCategories.length, "category", "categories")}</Hint>}
               <Spacer />
-              {canManage && <Button onClick={() => openAdd("category")}>Add category</Button>}
+              {canManage && <Button tone="ok" onClick={() => openAdd("category")}>Add category</Button>}
             </Toolbar>
             <DataTable
               columns={[{ label: "Category" }, { label: "Counts as" }, { label: "Items", numeric: true }, { label: "Status" }, ...actionColumn]}
@@ -308,6 +309,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
               pendingRows={categories.pendingRows}
               loadingLabel="Loading expense categories"
               isEmpty={!visibleCategories.length}
+              failed={Boolean(categories.error)}
               emptyMessage="No categories here yet."
             >
               {visibleCategories.map((category) => (
@@ -356,7 +358,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
                 autoFocus
                 maxLength={NAME_LIMIT}
                 value={adding.name}
-                placeholder={adding.kind === "category" ? "For example Fuel and road" : "For example Fuel"}
+                placeholder={adding.kind === "category" ? "For example Bodywork" : "For example Brake pads"}
                 onChange={(event) => setAdding({ ...adding, name: event.target.value, error: "" })}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") void add();
@@ -387,10 +389,10 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
             )}
             {adding.error && <Banner>{adding.error}</Banner>}
             <FormActions>
-              <Button disabled={busy} onClick={() => void add()}>
+              <Button tone="ok" disabled={busy} onClick={() => void add()}>
                 Add
               </Button>
-              <Button tone="outline" onClick={() => setAdding(null)}>
+              <Button tone="quiet" onClick={() => setAdding(null)}>
                 Cancel
               </Button>
             </FormActions>

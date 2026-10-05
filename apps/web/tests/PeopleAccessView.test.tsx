@@ -137,6 +137,65 @@ it("says why the server refused to save a person", async () => {
   expect(screen.queryByText("Not permitted in this organization or data scope.")).not.toBeInTheDocument();
 });
 
+it("asks for the reason beside its field before removing someone's access", async () => {
+  const grace = {
+    id: "person-2", firstName: "Grace", lastName: "Achieng", email: "grace@example.com", phoneNumber: "+254711222333", role: "Revenue clerk",
+    active: true, scopeMode: "companies", companyIds: ["company-1"], vehicleIds: [], permissions: ["revenue.view", "revenue.capture"], hasPin: true, version: 3,
+  };
+  const fetcher = vi.fn(async (input: string, init?: RequestInit) =>
+    init?.method === "POST"
+      ? new Response(JSON.stringify({ ok: true }), { status: 200 })
+      : new Response(JSON.stringify(input.startsWith("/api/setup/people?") ? { items: [grace], pageNumber: 1, pageSize: 25, total: 1 } : responses[input]), { status: 200 }),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  renderInApp(<PeopleAccessView canManageAccess />, { role: "Owner", permissions: ["people.view", "people.manage", "access.manage"] });
+  fireEvent.click(await screen.findByRole("button", { name: "Grace Achieng" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove access" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
+
+  expect(screen.getByRole("alert")).toHaveTextContent("Give a reason for removing access.");
+  expect(screen.getByLabelText("Reason")).toHaveAttribute("aria-invalid", "true");
+  expect(fetcher).not.toHaveBeenCalledWith("/api/setup/people/person-2/deactivate", expect.anything());
+
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Left the SACCO" } });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
+  await waitFor(() =>
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/setup/people/person-2/deactivate",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ version: 3, reason: "Left the SACCO" }) }),
+    ),
+  );
+});
+
+it("filters the list by role and by where each person is with signing in", async () => {
+  const person = (id: string, firstName: string, role: string, extra: object) => ({
+    id, firstName, lastName: "Test", email: `${id}@example.com`, phoneNumber: "+254711000000", role, active: true, scopeMode: "all",
+    companyIds: [], vehicleIds: [], permissions: [], hasPin: true, version: 1, ...extra,
+  });
+  const people = [person("a", "Amina", "Revenue clerk", {}), person("b", "Baraka", "Owner", { hasPin: false }), person("c", "Chebet", "Revenue clerk", { active: false })];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) =>
+      new Response(JSON.stringify(input.startsWith("/api/setup/people?") ? { items: people, pageNumber: 1, pageSize: 25, total: 3 } : responses[input]), { status: 200 }),
+    ),
+  );
+  renderInApp(<PeopleAccessView />, { permissions: ["people.view"] });
+  expect(await screen.findByText("3 people")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Sign in"), { target: { value: "waiting" } });
+  expect(screen.getByText("1 person")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Baraka Test" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Sign in"), { target: { value: "all" } });
+  fireEvent.change(screen.getByLabelText("Role"), { target: { value: "Revenue clerk" } });
+  expect(screen.getByText("2 people")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Baraka Test" })).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Sign in"), { target: { value: "none" } });
+  expect(screen.getByRole("button", { name: "Chebet Test" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Amina Test" })).not.toBeInTheDocument();
+});
+
 it("offers only roles whose defaults the editor can grant", async () => {
   responses["/api/setup/access/roles"] = [
     { id: "role-1", name: "Revenue clerk", permissions: ["revenue.view", "revenue.capture"] },

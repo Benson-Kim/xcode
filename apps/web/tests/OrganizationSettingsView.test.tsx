@@ -250,14 +250,14 @@ it("keeps the wrong-PIN policy inside the server's bounds: 3 to 10 tries, a paus
   expect(tries).toHaveAttribute("max", "10");
   expect(pause).toHaveAttribute("min", "1");
   expect(pause).toHaveAttribute("max", "60");
-  expect(screen.getByText("1 to 60, so a pause lasts at most an hour.")).toBeInTheDocument();
+  expect(screen.getByText("1 to 60, so a pause lasts at most an hour. A PIN reset by email still lifts a pause.")).toBeInTheDocument();
   const puts = () => vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "PUT");
 
   for (const [field, value, message] of [
-    [tries, "2", "Wrong PINs before a pause must be a whole number from 3 to 10."],
-    [tries, "11", "Wrong PINs before a pause must be a whole number from 3 to 10."],
-    [pause, "61", "Pause length in minutes must be a whole number from 1 to 60."],
-    [pause, "0", "Pause length in minutes must be a whole number from 1 to 60."],
+    [tries, "2", "Wrong PINs before a pause: use 3 to 10."],
+    [tries, "11", "Wrong PINs before a pause: use 3 to 10."],
+    [pause, "61", "Pause length: use 1 to 60."],
+    [pause, "0", "Pause length: use 1 to 60."],
   ] as const) {
     fireEvent.change(tries, { target: { value: "5" } });
     fireEvent.change(pause, { target: { value: "15" } });
@@ -272,4 +272,37 @@ it("keeps the wrong-PIN policy inside the server's bounds: 3 to 10 tries, a paus
   fireEvent.click(screen.getByRole("button", { name: "Save security" }));
   await waitFor(() => expect(puts()).toHaveLength(1));
   expect(JSON.parse(String(puts()[0][1]!.body)).value).toMatchObject({ lockoutThreshold: 10, lockoutMinutes: 60 });
+});
+
+it("says what the business date is now after following the calendar again", async () => {
+  const frozen = {
+    ...settings,
+    organization: { ...settings.organization, businessDate: "2026-09-29" },
+    effectiveBusinessDate: "2026-09-29",
+    calendarDate: "2026-09-30",
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: string, init?: RequestInit) =>
+      new Response(JSON.stringify(init?.method === "PUT" ? { ok: true } : frozen), { status: 200 }),
+    ),
+  );
+  render(<OrganizationSettingsView />);
+  expect(await screen.findByText("Held at 29 Sep 2026. The organization's calendar date is 30 Sep 2026.")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Follow organization time zone" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save business date" }));
+  expect(await screen.findByText("Following the organization's calendar date, 30 Sep 2026.")).toBeInTheDocument();
+  expect(screen.getByLabelText("Business date", { selector: "input" })).toHaveValue("2026-09-30");
+});
+
+it("checks the security policy's limits before saving, and caps the pause at an hour", async () => {
+  render(<OrganizationSettingsView />);
+  await screen.findByDisplayValue("Demo Fleet");
+  fireEvent.change(screen.getByLabelText("Wrong PINs before a pause"), { target: { value: "2" } });
+  fireEvent.change(screen.getByLabelText("Pause length in minutes"), { target: { value: "90" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save security" }));
+
+  expect(screen.getByRole("alert")).toHaveTextContent("Wrong PINs before a pause: use 3 to 10. Pause length: use 1 to 60.");
+  expect(fetch).not.toHaveBeenCalledWith("/api/setup/organization/settings/securityPolicy", expect.anything());
 });

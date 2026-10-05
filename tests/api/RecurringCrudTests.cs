@@ -37,12 +37,11 @@ public sealed class RecurringCrudTests : IDisposable
         var vehicle = await createVehicle.Content.ReadFromJsonAsync<IdResponse>();
         Assert.NotNull(vehicle);
 
-        // A cost picks an expense item: the name typed and the old category are ignored.
+        // A cost picks an expense item: the name typed for it is ignored.
         var parking = await ExpenseItemTestData.Id(client, "Parking");
         var create = new SaveRecurring(
             "Typed name",
             RecurringKind.Cost,
-            CostCategory.RunningCosts,
             1200m,
             RecurrenceFrequency.Weekly,
             6,
@@ -62,7 +61,6 @@ public sealed class RecurringCrudTests : IDisposable
         var createdItem = Assert.Single(afterCreate!.Items);
         Assert.Equal(created.Id, createdItem.Id);
         Assert.Equal("Parking", createdItem.Name);
-        Assert.Null(createdItem.Category);
         Assert.Equal(parking, createdItem.ExpenseItemId);
         Assert.Equal("Parking", createdItem.ExpenseItemName);
         Assert.Equal(ExpenseBucket.RecurringCharges, createdItem.Bucket);
@@ -74,7 +72,6 @@ public sealed class RecurringCrudTests : IDisposable
         var update = new SaveRecurring(
             "Fuel reserve revised",
             RecurringKind.Savings,
-            null,
             1450m,
             RecurrenceFrequency.Monthly,
             null,
@@ -152,7 +149,7 @@ public sealed class RecurringCrudTests : IDisposable
         async Task<Guid> Vehicle(string registration) => (await (await client.PostAsJsonAsync("/setup/vehicles",
             new SaveVehicle(company, registration, today, 20000m))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
         var (first, second) = (await Vehicle("KQA 321M"), await Vehicle("KQA 322M"));
-        (await client.PostAsJsonAsync("/setup/recurring", new SaveRecurring(null, RecurringKind.Cost, null, 1000m, RecurrenceFrequency.Weekly, 1, false,
+        (await client.PostAsJsonAsync("/setup/recurring", new SaveRecurring(null, RecurringKind.Cost, 1000m, RecurrenceFrequency.Weekly, 1, false,
             today, null, [new VehicleShare(first, 700m), new VehicleShare(second, 300m)], ExpenseItemId: await ExpenseItemTestData.Id(client, "Parking"))))
             .EnsureSuccessStatusCode();
         async Task<RecurringDto> Item() => Assert.Single((await client.GetFromJsonAsync<Page<RecurringDto>>("/setup/recurring"))!.Items);
@@ -179,7 +176,7 @@ public sealed class RecurringCrudTests : IDisposable
 
         var options = await client.GetFromJsonAsync<List<VehicleOption>>("/setup/recurring/vehicle-options");
         Assert.Equal([early], options!.Select(x => x.Id));
-        using var refused = await client.PostAsJsonAsync("/setup/recurring", new SaveRecurring(null, RecurringKind.Cost, null, 100m, RecurrenceFrequency.Weekly, 1, false,
+        using var refused = await client.PostAsJsonAsync("/setup/recurring", new SaveRecurring(null, RecurringKind.Cost, 100m, RecurrenceFrequency.Weekly, 1, false,
             new DateOnly(2026, 3, 5), null, [new VehicleShare(late, 100m)], ExpenseItemId: await ExpenseItemTestData.Id(client, "Parking")));
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
     }
@@ -194,7 +191,7 @@ public sealed class RecurringCrudTests : IDisposable
         async Task<Guid> Vehicle(string registration, DateOnly joined) => (await (await client.PostAsJsonAsync("/setup/vehicles",
             new SaveVehicle(company, registration, joined, 20000m))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
         var (early, late) = (await Vehicle("KQA 341M", new DateOnly(2026, 1, 1)), await Vehicle("KQA 342M", new DateOnly(2026, 3, 10)));
-        (await client.PostAsJsonAsync("/setup/recurring", new SaveRecurring(null, RecurringKind.Cost, null, 1000m, RecurrenceFrequency.Weekly, 1, false,
+        (await client.PostAsJsonAsync("/setup/recurring", new SaveRecurring(null, RecurringKind.Cost, 1000m, RecurrenceFrequency.Weekly, 1, false,
             today, null, [new VehicleShare(early, 600m), new VehicleShare(late, 400m)], ExpenseItemId: await ExpenseItemTestData.Id(client, "Parking"))))
             .EnsureSuccessStatusCode();
         (await client.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = "2026-03-05" })).EnsureSuccessStatusCode();

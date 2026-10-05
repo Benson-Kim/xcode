@@ -56,7 +56,9 @@ public static class DemoSeed
                 if (membership is null) db.Memberships.Add(new OrganizationMembership { OrganizationId = organization.Id, UserId = user.Id, FirstName = email.Split('.')[0] is var first ? char.ToUpperInvariant(first[0]) + first[1..] : "Demo", LastName = email.Split('.')[1].Split('@')[0] is var last ? char.ToUpperInvariant(last[0]) + last[1..] : "User" });
                 var role = roles.Single(x => x.Name == roleName);
                 if (!await db.PersonRoles.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organization.Id && x.UserId == user.Id, cancellationToken)) db.PersonRoles.Add(new PersonRole { OrganizationId = organization.Id, UserId = user.Id, RoleId = role.Id });
-                if (roleName is "Owner" or "Office admin" && !await db.SetupDataScopes.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organization.Id && x.UserId == user.Id, cancellationToken)) db.SetupDataScopes.Add(new SetupDataScope { OrganizationId = organization.Id, UserId = user.Id, AllCompanies = true });
+                // The seed has no companies or vehicles to choose from, and a scope of none cannot be saved, so these roles see
+                // every company. A scope chosen during development is kept.
+                if (roleName is "Owner" or "Office admin" or "Fleet manager" && !await HasScope(db, organization.Id, user.Id, cancellationToken)) db.SetupDataScopes.Add(new SetupDataScope { OrganizationId = organization.Id, UserId = user.Id, AllCompanies = true });
             }
             // Only into an empty catalog, so categories renamed, stopped or added during development survive restarts.
             if (!await db.Set<ExpenseCategory>().IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organization.Id, cancellationToken))
@@ -70,4 +72,9 @@ public static class DemoSeed
         }
         finally { db.Provisioning = false; }
     }
+
+    private static async Task<bool> HasScope(AuthDb db, Guid organizationId, Guid userId, CancellationToken cancellationToken) =>
+        await db.SetupDataScopes.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organizationId && x.UserId == userId, cancellationToken) ||
+        await db.SetupCompanyScopes.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organizationId && x.UserId == userId, cancellationToken) ||
+        await db.SetupVehicleScopes.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organizationId && x.UserId == userId, cancellationToken);
 }

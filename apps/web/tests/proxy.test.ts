@@ -5,7 +5,7 @@ import { GET, POST } from "../app/api/auth/[...path]/route";
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => jar.has(name) ? { value: jar.get(name) } : undefined }) }));
 beforeEach(() => { jar.clear(); jar.set("device", "browser-device"); });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 const request = (origin = "http://localhost:3000", body: object = { email: "person@example.com", pin: "5826", deviceId: "forged" }, path = "sign-in") => new NextRequest(`http://localhost:3000/api/auth/${path}`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(body) });
 const upstream = (body: object, status = 200) => vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
 const jwt = (exp: number) => `header.${Buffer.from(JSON.stringify({ exp })).toString("base64url")}.signature`;
@@ -84,4 +84,50 @@ it("refuses a sign-in body over 1 MB without calling the API", async () => {
   expect(result.status).toBe(413);
   expect(await result.json()).toEqual({ status: "payload_too_large" });
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+// The API limits sign-in tries per client. A client-sent X-Forwarded-For survives Next.js, so it is only believed
+// through the entries the trusted proxies appended (TRUSTED_PROXY_HOPS, default 0).
+async function signInWith(headers: Record<string, string>) {
+  const fetcher = upstream({ status: "authentication_failed" }, 401);
+  vi.stubGlobal("fetch", fetcher);
+  await POST(
+    new NextRequest("http://localhost:3000/api/auth/sign-in", { method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json", ...headers }, body: "{}" }),
+    { params: Promise.resolve({ path: ["sign-in"] }) });
+  return fetcher.mock.calls[0][1].headers as Record<string, string>;
+}
+
+it("forwards no client address unless proxies are trusted, so a rotated header cannot open new rate-limit partitions", async () => {
+  const sent = await signInWith({ "x-forwarded-for": "198.51.100.7", "x-real-ip": "198.51.100.9", forwarded: "for=198.51.100.5" });
+  expect(Object.keys(sent).map((k) => k.toLowerCase())).not.toContain("x-forwarded-for");
+  expect(Object.keys(sent).map((k) => k.toLowerCase())).not.toContain("x-real-ip");
+  expect(Object.keys(sent).map((k) => k.toLowerCase())).not.toContain("forwarded");
+});
+
+it("takes the Nth entry from the right of X-Forwarded-For, never what the client put first", async () => {
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+  expect((await signInWith({ "x-forwarded-for": "203.0.113.99, 198.51.100.7", "x-real-ip": "198.51.100.9" }))["X-Forwarded-For"]).toBe("198.51.100.7");
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "2");
+  expect((await signInWith({ "x-forwarded-for": "203.0.113.99, 198.51.100.7, 10.0.0.1" }))["X-Forwarded-For"]).toBe("198.51.100.7");
+});
+
+it("forwards nothing when the trusted entry is missing or not an IP, or the setting is invalid", async () => {
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "2");
+  expect(await signInWith({ "x-forwarded-for": "198.51.100.7" })).not.toHaveProperty("X-Forwarded-For");
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+  expect(await signInWith({ "x-forwarded-for": "198.51.100.7, evil\"; drop" })).not.toHaveProperty("X-Forwarded-For");
+  expect(await signInWith({})).not.toHaveProperty("X-Forwarded-For");
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "-1");
+  expect(await signInWith({ "x-forwarded-for": "198.51.100.7" })).not.toHaveProperty("X-Forwarded-For");
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "abc");
+  expect(await signInWith({ "x-forwarded-for": "198.51.100.7" })).not.toHaveProperty("X-Forwarded-For");
+});
+
+it("tells the API which browser a session check comes from", async () => {
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+  jar.set("access", "access-value");
+  const fetcher = upstream({ userId: "u-1" });
+  vi.stubGlobal("fetch", fetcher);
+  await GET(new NextRequest("http://localhost:3000/api/auth/session", { headers: { "x-forwarded-for": "203.0.113.99, 198.51.100.7" } }), { params: Promise.resolve({ path: ["session"] }) });
+  expect(fetcher.mock.calls[0][1].headers["X-Forwarded-For"]).toBe("198.51.100.7");
 });

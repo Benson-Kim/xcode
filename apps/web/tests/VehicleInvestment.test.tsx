@@ -89,6 +89,25 @@ it("shows what has come back once the server works it out", async () => {
     fireEvent.click(screen.getByRole("tab", { name: "Investment" }));
     expect(await screen.findByText("KES 845,000")).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();
+    // Counted from the day the vehicle joined through the business date.
+    expect(screen.getByText("Back so far counts net contribution from the records kept, 1 Jan to 21 Sep 2026.")).toBeInTheDocument();
+  } finally {
+    investment.returned = null;
+    investment.percentPaidOff = null;
+  }
+});
+
+it("shows a vehicle that has cost more than it brought in as a loss", async () => {
+  serve();
+  investment.returned = -84500;
+  investment.percentPaidOff = -5;
+  try {
+    await openVehicle(["invest.view"]);
+    fireEvent.click(screen.getByRole("tab", { name: "Investment" }));
+    const stat = async (label: string) => (await screen.findByText(label, { selector: "small" })).nextElementSibling;
+    expect(await stat("Back so far")).toHaveTextContent("KES 84,500 loss");
+    expect(await stat("Back so far")).toHaveClass("text-red");
+    expect(await stat("Paid back")).toHaveTextContent("-5%");
   } finally {
     investment.returned = null;
     investment.percentPaidOff = null;

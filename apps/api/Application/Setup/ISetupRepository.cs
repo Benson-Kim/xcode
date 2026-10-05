@@ -8,6 +8,9 @@ public interface ISetupRepository
     Task<PsvCompany?> Company(SetupActor actor, Guid id, CancellationToken ct);
     Task<IReadOnlyList<CompanyOption>> CompanyOptions(SetupActor actor, CancellationToken ct);
     Task<bool> HasActiveVehicles(Guid companyId, DateOnly today, CancellationToken ct);
+    // The first and last day this vehicle has revenue recorded for, or null when it has none. A lifecycle
+    // change that would put a recorded day outside the vehicle's time in the fleet is refused (D4).
+    Task<(DateOnly First, DateOnly Last)?> RecordedRevenueDays(Guid vehicleId, CancellationToken ct);
     Task<bool> CompanyNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct);
     Task<Page<VehicleDto>> Vehicles(SetupActor actor, int page, int pageSize, CancellationToken ct);
     Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct);
@@ -20,8 +23,9 @@ public interface ISetupRepository
     Task<string> Currency(CancellationToken ct);
     Task<Page<RecurringDto>> Recurring(SetupActor actor, int page, int pageSize, CancellationToken ct);
     Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct);
-    Task<VehicleReport> Report(SetupActor actor, Guid vehicleId, DateOnly from, DateOnly through, CancellationToken ct);
-    Task<Page<HistoryEntry>> History(SetupActor actor, int page, int pageSize, CancellationToken ct);
+    // Contract C6 for a vehicle already found in the actor's scope: figures over its active days from `from` through `through`.
+    Task<VehicleReport> Report(SetupActor actor, FleetVehicle vehicle, DateOnly from, DateOnly through, CancellationToken ct);
+    Task<Page<HistoryEntry>> History(SetupActor actor, HistoryFilter filter, int page, int pageSize, CancellationToken ct);
     Task<Page<ExpenseCategoryDto>> ExpenseCategories(DateOnly today, int page, int pageSize, CancellationToken ct);
     Task<IReadOnlyList<ExpenseItemOption>> ExpenseItemOptions(DateOnly today, CancellationToken ct);
     Task<ExpenseItemOption?> ActiveExpenseItem(Guid id, DateOnly today, CancellationToken ct);

@@ -56,5 +56,29 @@ public sealed class DemoSeedTests : IDisposable
         Assert.Equal(13, categories.Items.Sum(x => x.Items.Count));
     }
 
+    // A "vehicles" scope with no vehicles chosen cannot be saved, so every change to the demo Fleet manager was refused.
+    [Fact]
+    public async Task TheFleetManagerHasAScopeThatCanBeSavedAndKeepsOneChosenLater()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn("antony.maina@shamayah.co.ke");
+        async Task<PersonDto> Manager() => (await owner.GetFromJsonAsync<Page<PersonDto>>("/setup/people?pageSize=100"))!.Items.Single(x => x.Role == "Fleet manager");
+        SavePerson Edited(PersonDto x, string scopeMode, List<Guid> companyIds) =>
+            new(x.FirstName, x.LastName, x.Email, x.PhoneNumber, x.Role, scopeMode, companyIds, [.. x.VehicleIds], [.. x.Permissions], 5000m, x.Version);
+
+        var manager = await Manager();
+        Assert.Equal("all", manager.ScopeMode);
+        (await owner.PutAsJsonAsync($"/setup/people/{manager.Id}", Edited(manager, manager.ScopeMode, [.. manager.CompanyIds]))).EnsureSuccessStatusCode();
+
+        // A scope chosen during development survives reseeding.
+        var company = (await (await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("North Star"))).Content.ReadFromJsonAsync<IdResponse>())!.Id;
+        (await owner.PutAsJsonAsync($"/setup/people/{manager.Id}", Edited(await Manager(), "companies", [company]))).EnsureSuccessStatusCode();
+        await app.WithDb(db => DemoSeed.Run(db));
+        manager = await Manager();
+        Assert.Equal(("companies", company), (manager.ScopeMode, Assert.Single(manager.CompanyIds)));
+    }
+
+    private sealed record IdResponse(Guid Id);
+
     public void Dispose() => app.Dispose();
 }

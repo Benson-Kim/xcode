@@ -51,7 +51,7 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         var people = (await History(owner)).Where(x => x.Section == "people").ToList();
         Assert.All(people, x => Assert.Equal(id, x.EntityId));
         Assert.Equal(
-            ["Left the organization", "Signed Jane Njeri out of every device", "Changed role for Jane Njeri", "Added Jane Njeri as Revenue clerk"],
+            ["Removed access for Jane Njeri. Reason: Left the organization.", "Signed Jane Njeri out of every device", "Changed role for Jane Njeri", "Added Jane Njeri as Revenue clerk"],
             people.Select(x => x.Reason));
         Assert.All(people, x => Assert.Equal("Antony Maina", x.ActorName));
 
@@ -74,7 +74,7 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         var theirs = await Id(await owner.PostAsJsonAsync("/setup/vehicles", new SaveVehicle(south, "KDB 111A", new DateOnly(2026, 1, 1), 15000m, "Add")));
         var today = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
         var items = new Dictionary<string, Guid> { ["Office rent"] = await ExpenseItemTestData.Id(owner, "Office rent"), ["Insurance"] = await ExpenseItemTestData.Id(owner, "Insurance") };
-        SaveRecurring Cost(string name, params VehicleShare[] shares) => new(name, RecurringKind.Cost, null,
+        SaveRecurring Cost(string name, params VehicleShare[] shares) => new(name, RecurringKind.Cost,
             shares.Sum(x => x.Amount), RecurrenceFrequency.Monthly, 1, false, today, null, [.. shares], "Add " + name, items[name]);
         await Id(await owner.PostAsJsonAsync("/setup/recurring", Cost("Office rent", new VehicleShare(mine, 500m), new VehicleShare(theirs, 500m))));
         await Id(await owner.PostAsJsonAsync("/setup/recurring", Cost("Insurance", new VehicleShare(mine, 900m))));
@@ -129,7 +129,7 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         }
         var companies = (await owner.GetFromJsonAsync<Page<CompanyDto>>("/setup/companies"))!.Items;
         Assert.Equal(["North Star", "South Line"], companies.Select(x => x.Name).Order());
-        Assert.Equal(2, (await History(owner)).Count(x => x.Reason == "Rename"));
+        Assert.Equal(2, (await History(owner)).Count(x => x.Reason is "Renamed company North to North Star. Reason: Rename." or "Renamed company South to South Line. Reason: Rename."));
 
         // A collision that keeps happening gives up after three retries.
         app.Database.Reset();
@@ -217,6 +217,56 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }.CopyTo(largest, 0);
         var logo = OrganizationLogo.FromDataUrl(Guid.NewGuid(), "data:image/png;base64," + Convert.ToBase64String(largest), now);
         Assert.Equal(OrganizationLogo.MaxBytes, logo.Data.Length);
+    }
+
+    [Fact]
+    public async Task TheChangeLogIsNarrowedByItsFilters()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        await Id(await owner.PostAsJsonAsync("/setup/companies", new SaveCompany("Westlands Movers")));
+        await Id(await owner.PostAsJsonAsync("/setup/expense-categories", new SaveExpenseCategory("Tolls and levies", ExpenseBucket.RecurringCharges)));
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var day = (DateOnly date) => date.ToString("yyyy-MM-dd");
+
+        async Task<Page<HistoryEntry>> Log(string query) =>
+            (await owner.GetFromJsonAsync<Page<HistoryEntry>>($"/setup/history?pageSize=100{query}"))!;
+
+        var all = await Log("");
+        Assert.Contains(all.Items, x => x.Section == "companies");
+        Assert.Contains(all.Items, x => x.Section == "expenses");
+
+        // One section only, and the count describes the narrowed log, not the whole one, so Load more means
+        // more of what was asked for.
+        var companies = await Log("&section=companies");
+        Assert.All(companies.Items, x => Assert.Equal("companies", x.Section));
+        Assert.Equal(companies.Items.Count, companies.Total);
+        Assert.True(companies.Total < all.Total);
+
+        // The text matches the reason a line gives...
+        var named = await Log("&text=Westlands");
+        Assert.NotEmpty(named.Items);
+        Assert.All(named.Items, x => Assert.Contains("Westlands", x.Reason));
+        // ...or the person who made the change, which is the other thing a line shows...
+        var byPerson = await Log("&text=antony");
+        Assert.NotEmpty(byPerson.Items);
+        Assert.All(byPerson.Items, x => Assert.Contains("Antony", x.ActorName));
+        // ...and nothing else. A wildcard typed into the box is a character to look for, not a pattern.
+        Assert.Empty((await Log("&text=nobody%20wrote%20this")).Items);
+        Assert.Empty((await Log("&text=%25")).Items);
+
+        // Both ends of a range are included, and a day on either side of everything holds nothing.
+        Assert.Equal(all.Total, (await Log($"&from={day(today)}&to={day(today)}")).Total);
+        Assert.Empty((await Log($"&from={day(today.AddDays(1))}")).Items);
+        Assert.Empty((await Log($"&to={day(today.AddDays(-1))}")).Items);
+
+        // Filters narrow together, not one at a time.
+        Assert.Empty((await Log($"&section=companies&text=Tolls")).Items);
+
+        // A backwards range is a mistake, and is named as one rather than quietly returning nothing.
+        var refused = await owner.GetAsync($"/setup/history?from={day(today)}&to={day(today.AddDays(-1))}");
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("cannot be after", await refused.Content.ReadAsStringAsync());
     }
 
     public void Dispose() => app.Dispose();

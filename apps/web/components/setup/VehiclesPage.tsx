@@ -5,8 +5,10 @@ import { useAppearance } from "../../lib/appearance";
 import { apiRequest } from "../../lib/data";
 import { useResource, useStreamedList } from "../../lib/data";
 import { useSession } from "../../lib/session-context";
-import { kes, plural } from "../../lib/format";
+import { kes, money, plural } from "../../lib/format";
+import type { ExpenseBucket } from "../../lib/types";
 import { formatDateOnly, formatDateRange, recurringFrequency } from "../recurringPresentation";
+import { shiftDate } from "../revenueFormat";
 import {
   Banner,
   Button,
@@ -32,6 +34,7 @@ import {
   SelectInput,
   Spacer,
   Stat,
+  StatusBadge,
   StatGrid,
   StatGridSkeleton,
   SubHeading,
@@ -42,7 +45,6 @@ import {
   Tr,
   useToast,
 } from "../ui";
-import type { ExpenseBucket } from "../../lib/types";
 import { costBucket, expenseBucketNames, type Company, type RecurringItem, type Vehicle, type VehicleReport } from "./shared";
 import { VehicleInvestmentTab } from "./VehicleInvestment";
 
@@ -82,7 +84,8 @@ export function VehiclesPage({
     return (
       <VehicleEditor
         vehicle={editedVehicle}
-        defaultCompany={filter === "all" ? "" : filter}
+        // A new vehicle starts on the filtered company only while it can be chosen: never on an archived one.
+        defaultCompany={companies.some((company) => company.id === filter && company.active !== false) ? filter : ""}
         companies={companies}
         today={today}
         onOpenRecurring={onOpenRecurring}
@@ -127,66 +130,86 @@ export function VehiclesPage({
           <Hint>{plural(visible.length, "vehicle", "vehicles")}</Hint>
         )}
         <Spacer />
-        {canManage && <Button onClick={() => setEditing({ id: null })}>Add vehicle</Button>}
+        {canManage && <Button tone="ok" onClick={() => setEditing({ id: null })}>Add vehicle</Button>}
       </Toolbar>
       <DataTable
+        // Targets and scheduled items are for vehicle managers; the server leaves them out for anyone else.
         columns={[
           { label: "Registration" },
           { label: "Company" },
           { label: "Status" },
-          { label: "Weekly target", numeric: true },
+          ...(canManage ? [{ label: "Weekly target", numeric: true }] : []),
           { label: "In the fleet from" },
-          { label: "Scheduled items", numeric: true },
+          ...(canManage ? [{ label: "Scheduled items", numeric: true }] : []),
         ]}
         loading={vehicles.loading}
         pendingRows={filter === "all" ? vehicles.pendingRows : 0}
         loadingLabel="Loading vehicles"
         isEmpty={!visible.length}
-        emptyMessage={
-          filter === "all"
-            ? "No vehicles yet. Add the first one above."
-            : "No vehicles in this company yet."
-        }
+        failed={Boolean(vehicles.error)}
+        emptyMessage={filter === "all" ? "No vehicles yet. Add the first one above." : "No vehicles in this company yet."}
       >
-        {visible.map((vehicle) => (
-          <Tr key={vehicle.id}>
-            <Td label="Registration">
-              <RowButton onClick={() => setEditing({ id: vehicle.id })}>{vehicle.registration}</RowButton>
-            </Td>
-            <Td label="Company">{vehicle.companyName}</Td>
-            <Td label="Status">{fleetStatus(vehicle)}</Td>
-            <Td label="Weekly target" numeric>
-              {kes(vehicle.weeklyTarget)}
-              <CellNote>
-                About {kes(Math.round(vehicle.weeklyTarget / 7))} a day
-              </CellNote>
-            </Td>
-            <Td label="In the fleet from">
-              {formatDateOnly(vehicle.joinedOn)}
-            </Td>
-            <Td label="Scheduled items" numeric>{vehicle.recurringItems ?? 0}</Td>
-          </Tr>
-        ))}
+        {visible.map((vehicle) => {
+          const status = fleetStatus(vehicle);
+          return (
+            <Tr key={vehicle.id}>
+              <Td label="Registration">
+                <RowButton onClick={() => setEditing({ id: vehicle.id })}>{vehicle.registration}</RowButton>
+              </Td>
+              <Td label="Company">{vehicle.companyName}</Td>
+              <Td label="Status">
+                <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+              </Td>
+              {canManage && (
+                <Td label="Weekly target" numeric>
+                  {/* Leaving the fleet ends the target: no "KES 0 a day" for a vehicle that no longer runs. */}
+                  {status.left ? (
+                    <>
+                      —<CellNote>Target ended</CellNote>
+                    </>
+                  ) : (
+                    <>
+                      {kes(vehicle.weeklyTarget ?? 0)}
+                      <CellNote>About {kes(Math.round((vehicle.weeklyTarget ?? 0) / 7))} a day</CellNote>
+                    </>
+                  )}
+                </Td>
+              )}
+              <Td label="In the fleet from">{formatDateOnly(vehicle.joinedOn)}</Td>
+              {canManage && (
+                <Td label="Scheduled items" numeric>
+                  {vehicle.recurringItems ?? 0}
+                </Td>
+              )}
+            </Tr>
+          );
+        })}
       </DataTable>
     </section>
   );
 }
 
-// A leave date means the vehicle is retired. Without one, a vehicle that is not active has not joined yet: the
-// business date is before its join date.
-function fleetStatus(vehicle: Vehicle) {
+// A leave date means the vehicle is retired: it has left once it is no longer active, and until then it leaves on
+// that date. Without one, a vehicle that is not active has not joined yet: the business date is before its join date.
+function fleetStatus(vehicle: Vehicle): { label: string; tone: "ok" | "warn" | "off" | "neutral"; left: boolean } {
   if (vehicle.leftOn)
-    return vehicle.active === false ? `Left fleet ${formatDateOnly(vehicle.leftOn)}` : `Leaves the fleet ${formatDateOnly(vehicle.leftOn)}`;
-  return vehicle.active === false ? `Joins ${formatDateOnly(vehicle.joinedOn)}` : "Active";
+    return vehicle.active === false
+      ? { label: `Left fleet ${formatDateOnly(vehicle.leftOn)}`, tone: "off", left: true }
+      : { label: `Leaves the fleet ${formatDateOnly(vehicle.leftOn)}`, tone: "warn", left: false };
+  return vehicle.active === false
+    ? { label: `Joins ${formatDateOnly(vehicle.joinedOn)}`, tone: "neutral", left: false }
+    : { label: "Active", tone: "ok", left: false };
 }
 
 function companyChoices(vehicles: Vehicle[], companies?: Company[], options?: CompanyChoice[]): CompanyChoice[] {
   const byId = new Map<string, CompanyChoice>();
   for (const company of companies ?? []) byId.set(company.id, { id: company.id, name: company.name, active: company.active });
   for (const company of options ?? []) byId.set(company.id, company);
+  // A company known only through its vehicles is one the server did not offer (archived, or not loaded yet): it
+  // filters the list but is never offered for a vehicle to join.
   for (const vehicle of vehicles) {
     if (!byId.has(vehicle.companyId))
-      byId.set(vehicle.companyId, { id: vehicle.companyId, name: vehicle.companyName, active: true });
+      byId.set(vehicle.companyId, { id: vehicle.companyId, name: vehicle.companyName, active: false });
   }
   return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -231,7 +254,7 @@ function VehicleEditor({
   const [form, setForm] = useState<{ registration: string; companyId: string; weeklyTarget: string; joinedOn: string | null }>({
     registration: vehicle?.registration ?? "",
     companyId: vehicle?.companyId ?? defaultCompany,
-    weeklyTarget: vehicle ? String(vehicle.weeklyTarget) : "",
+    weeklyTarget: vehicle?.weeklyTarget != null ? String(vehicle.weeklyTarget) : "",
     joinedOn: vehicle?.joinedOn ?? null,
   });
   const joinedOn = form.joinedOn ?? today ?? "";
@@ -239,6 +262,8 @@ function VehicleEditor({
   const [saveError, setSaveError] = useState("");
   const [lifecycleInput, setLifecycleDate] = useState<string | null>(vehicle?.leftOn ?? null);
   const lifecycleDate = lifecycleInput ?? today ?? "";
+  const [returnInput, setReturnDate] = useState<string | null>(null);
+  const returnedOn = returnInput ?? today ?? "";
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<VehicleTab>("details");
   // Each tab needs its own permission: the details and the report need vehicles.manage.
@@ -258,6 +283,8 @@ function VehicleEditor({
   // Retired means it has a leave date; a vehicle that is not active without one joins after the business date.
   const retired = Boolean(vehicle?.leftOn);
   const joinsLater = Boolean(vehicle && !vehicle.leftOn && vehicle.active === false);
+  // Newest first: the stretch someone is most likely to be checking is the one that just ended.
+  const away = [...(vehicle?.away ?? [])].reverse();
 
   async function retireVehicle() {
     if (!vehicle || retired) return;
@@ -280,15 +307,21 @@ function VehicleEditor({
 
   async function restoreVehicle() {
     if (!vehicle || !retired) return;
+    if (!returnedOn) return setSaveError("Choose the date it returns to the fleet.");
     setBusy(true);
     setSaveError("");
     try {
       await apiRequest(`setup/vehicles/${vehicle.id}/restore`, {
         method: "POST",
-        body: "{}",
+        body: JSON.stringify({ returnedOn }),
       });
       toast(`${vehicle.registration} returned to the active fleet.`);
-      onSaved({ ...vehicle, leftOn: null, active: true });
+      // A leave undone on its own date took effect for no day, so it leaves no stretch away behind (D4).
+      const away =
+        vehicle.leftOn && returnedOn > vehicle.leftOn
+          ? [...(vehicle.away ?? []), { leftOn: vehicle.leftOn, returnedOn }]
+          : vehicle.away;
+      onSaved({ ...vehicle, leftOn: null, active: true, away });
     } catch (value) {
       setSaveError((value as Error).message);
     } finally {
@@ -351,7 +384,7 @@ function VehicleEditor({
   const history = [...(vehicle?.targets ?? [])].sort((left, right) => right.effectiveFrom.localeCompare(left.effectiveFrom) || right.revision - left.revision);
   const back = (
     <FormActions>
-      <Button tone="outline" onClick={onClose}>
+      <Button tone="quiet" onClick={onClose}>
         Back
       </Button>
     </FormActions>
@@ -442,8 +475,28 @@ function VehicleEditor({
                 <Hint>
                   {vehicle.active === false ? "Left the fleet on" : "Leaves the fleet on"} {formatDateOnly(vehicle.leftOn!)}.
                 </Hint>
+                <Grid2 narrow>
+                  <Field
+                    id="vehicle-returned-on"
+                    label="Returns to the fleet"
+                    hint={
+                      returnedOn > vehicle.leftOn!
+                        ? `${formatDateRange(vehicle.leftOn!, shiftDate(returnedOn, -1))} is recorded as time away: those days are neither expected nor missing.`
+                        : "Returning on the day it left undoes the leave outright."
+                    }
+                  >
+                    <TextInput
+                      type="date"
+                      min={vehicle.leftOn!}
+                      max={today}
+                      value={returnedOn}
+                      onChange={(event) => setReturnDate(event.target.value)}
+                    />
+                  </Field>
+                </Grid2>
                 <FormActions>
                   <Button
+                    tone="ok"
                     disabled={busy}
                     onClick={() => void restoreVehicle()}
                   >
@@ -455,12 +508,14 @@ function VehicleEditor({
               <Hint>It can leave the fleet once it has joined.</Hint>
             ) : (
               <>
-                <Field id="vehicle-left-on" label="Leaves the fleet" hint="No target or scheduled posting is active on this date.">
-                  <TextInput type="date" min={vehicle.joinedOn} max={today} value={lifecycleDate} onChange={(event) => setLifecycleDate(event.target.value)} />
-                </Field>
+                <Grid2 narrow>
+                  <Field id="vehicle-left-on" label="Leaves the fleet" hint="No target or scheduled posting is active on this date.">
+                    <TextInput type="date" min={vehicle.joinedOn} max={today} value={lifecycleDate} onChange={(event) => setLifecycleDate(event.target.value)} />
+                  </Field>
+                </Grid2>
                 <FormActions>
                   <Button
-                    tone="outline"
+                    tone="warn"
                     disabled={busy}
                     onClick={() => void retireVehicle()}
                   >
@@ -469,13 +524,27 @@ function VehicleEditor({
                 </FormActions>
               </>
             )}
+            {away.length > 0 && (
+              <div>
+                <p className="m-0 text-sm font-semibold">Time away from the fleet</p>
+                <CardList>
+                  {away.map((period) => (
+                    <CardListItem
+                      key={period.leftOn}
+                      left={formatDateRange(period.leftOn, shiftDate(period.returnedOn, -1))}
+                      rightSub={`Back on ${formatDateOnly(period.returnedOn)}`}
+                    />
+                  ))}
+                </CardList>
+              </div>
+            )}
           </Card>
         )}
         <FormActions>
-          <Button disabled={busy || retired} onClick={() => void save()}>
+          <Button tone="ok" disabled={busy || retired} onClick={() => void save()}>
             {isNew ? "Add vehicle" : "Save changes"}
           </Button>
-          <Button tone="outline" onClick={onClose}>
+          <Button tone="quiet" onClick={onClose}>
             Cancel
           </Button>
         </FormActions>
@@ -520,28 +589,26 @@ function VehicleEditor({
   );
 }
 
-const buckets = [1, 2, 3] as const;
-
+// The vehicle report (contract C6), with the design's figures in the design's order. Postings are listed per item,
+// each under its bucket or as savings. A revision that renamed the item or moved it to another bucket gets its own
+// line, so no posting shows under a bucket it was not counted in.
 function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
   const [period, setPeriod] = useState<"week" | "month">("month");
-  const report = useResource<VehicleReport>(
-    `setup/vehicles/${vehicle.id}/report?period=${period}`,
-  );
-  const postings = report.data?.postings ?? [];
-  // Money out counts in three buckets; savings are set aside, not money out.
-  const byBucket = (bucket: ExpenseBucket) =>
-    postings.filter((posting) => costBucket(posting) === bucket).reduce((sum, posting) => sum + posting.amount, 0);
-  const grouped = [...postings.reduce((items, posting) => {
-    const item = items.get(posting.itemId) ?? { id: posting.itemId, name: posting.name, bucket: costBucket(posting), total: 0, dates: [] as string[] };
+  const report = useResource<VehicleReport>(`setup/vehicles/${vehicle.id}/report?period=${period}`);
+  const data = report.data;
+  const grouped = [...(data?.postings ?? []).reduce((items, posting) => {
+    const bucket = costBucket(posting);
+    const key = JSON.stringify([posting.itemId, posting.name, posting.kind, bucket]);
+    const item = items.get(key) ?? { id: key, name: posting.name, kind: posting.kind, bucket, total: 0, dates: [] as string[] };
     item.total += posting.amount;
     item.dates.push(posting.date);
-    return items.set(posting.itemId, item);
-  }, new Map<string, { id: string; name: string; bucket: ExpenseBucket | null; total: number; dates: string[] }>()).values()];
+    return items.set(key, item);
+  }, new Map<string, { id: string; name: string; kind: number; bucket: ExpenseBucket | null; total: number; dates: string[] }>()).values()];
   return (
     <Card>
       <CardHeader
-        title="Vehicle report"
-        description={`${period === "week" ? "This week" : "This month"}${report.data ? `, ${formatDateRange(report.data.from, report.data.through)}` : ""}. Scheduled items post on their own dates.`}
+        title={`${period === "week" ? "This week" : "This month"}${data ? `, ${formatDateRange(data.from, data.through)}` : ""}`}
+        description="Money in and money out, counted on the day it moved. Fuel and crew pay are not tracked; revenue is recorded net of them."
       />
       <SegmentedControl
         label="Report period"
@@ -551,22 +618,28 @@ function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
         ]}
         value={period}
         onChange={setPeriod}
+        className="self-start"
       />
       {report.error ? (
         <Hint>{report.error}</Hint>
-      ) : report.loading || !report.data ? (
+      ) : report.loading || !data ? (
         <div role="status" aria-busy="true" className="flex flex-col gap-2.5">
           <span className="sr-only">Loading the vehicle report</span>
-          <StatGridSkeleton count={5} />
+          <StatGridSkeleton count={9} />
           <ListSkeleton rows={2} />
         </div>
       ) : (
         <>
           <StatGrid>
-            {buckets.map((bucket) => (
-              <Stat key={bucket} label={expenseBucketNames[bucket]} value={kes(byBucket(bucket))} />
-            ))}
-            <Stat label="Savings set aside" value={kes(report.data.savings)} />
+            <Stat label="Money in" value={kes(data.moneyIn)} />
+            <Stat label="Target" value={kes(data.target)} />
+            <Stat label="Repairs and maintenance" value={kes(data.repairs)} />
+            <Stat label="Recurring charges" value={kes(data.charges)} />
+            <Stat label="Loan repayments" value={kes(data.loans)} />
+            <Stat label="Money out" value={kes(data.moneyOut)} />
+            <Stat label="Net contribution" value={money(data.net)} tone={data.net < 0 ? "bad" : undefined} />
+            <Stat label="Savings set aside" value={kes(data.savings)} />
+            <Stat label="After savings" value={money(data.afterSavings)} tone={data.afterSavings < 0 ? "bad" : undefined} />
           </StatGrid>
           <SubHeading>Postings in this period</SubHeading>
           {grouped.length ? (

@@ -44,7 +44,7 @@ export function Tabs<T extends string>({
             tabIndex={option.value === value ? 0 : -1}
             onClick={() => onChange(option.value)}
             onKeyDown={(event) => move(event, index)}
-            className="min-h-11 rounded-xl border border-card-line bg-white px-4.5 text-[15px] font-semibold text-navy hover:border-blue hover:text-blue-dark aria-selected:border-2 aria-selected:border-blue aria-selected:bg-blue-soft aria-selected:text-blue-dark"
+            className="min-h-11 rounded-xl border border-card-line bg-surface px-4.5 text-[15px] font-semibold text-navy hover:border-blue hover:text-blue-dark aria-selected:border-2 aria-selected:border-blue aria-selected:bg-blue-soft aria-selected:text-blue-dark"
           >
             {option.label}
           </button>

@@ -65,6 +65,14 @@ const shapes = {
       <Circle cx="19" cy="12" r="1.5" />
     </>
   ),
+  back: <Path d="M15 18l-6-6 6-6" />,
+  forward: <Path d="M9 18l6-6-6-6" />,
+  close: (
+    <>
+      <Path d="M6 6l12 12" />
+      <Path d="M18 6L6 18" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof shapes;

@@ -67,16 +67,33 @@ public sealed class RecurringItem : IOrganizationEntity
           var version = Versions.Where(v => v.EffectiveFrom <= date)
               .OrderByDescending(v => v.Revision).FirstOrDefault();
           return version is not null && date >= version.Start && (version.End is null || date <= version.End)
-              && new RecurringSchedule(version.Frequency, version.Day, version.LastDay, version.Month).IsDue(date) ? version : null;
+              && version.Schedule().IsDue(date) ? version : null;
+     }
+     // Every day from `from` through `through` on which DueOn gives a version, with that version, without asking about
+     // each day. A version is in charge from its EffectiveFrom until a higher revision takes effect, so each version's
+     // due dates are stepped within [max(from, EffectiveFrom, Start), min(through, End, next EffectiveFrom − 1, StoppedFrom − 1)].
+     // O(R log R + due dates), against O(D·R log R) for calling DueOn on each of D days. Dates come out per version.
+     public IEnumerable<(DateOnly Date, RecurringVersion Version)> DueBetween(DateOnly from, DateOnly through)
+     {
+          var end = StoppedFrom is { } stopped && stopped <= through ? stopped.DayNumber - 1 : through.DayNumber;
+          var supersededFrom = int.MaxValue;
+          foreach (var version in Versions.OrderByDescending(v => v.Revision))
+          {
+               var first = Math.Max(from.DayNumber, Math.Max(version.EffectiveFrom.DayNumber, version.Start.DayNumber));
+               var last = Math.Min(Math.Min(end, supersededFrom - 1), version.End?.DayNumber ?? int.MaxValue);
+               supersededFrom = Math.Min(supersededFrom, version.EffectiveFrom.DayNumber);
+               if (first > last) continue;
+               foreach (var date in version.Schedule().Occurrences(DateOnly.FromDayNumber(first), DateOnly.FromDayNumber(last)))
+                    yield return (date, version);
+          }
      }
 }
 
 public sealed record VehicleShare(Guid VehicleId, decimal Amount);
 
 
-// Category is the Phase 1 cost category, kept only so legacy versions stay readable. New costs name an expense
-// item instead, and carry the bucket of that item's category at the time of saving.
-public sealed record RecurringDefinition(string Name, RecurringKind Kind, CostCategory? Category, decimal Amount,
+// A cost names an expense item and carries the bucket of that item's category at the time of saving.
+public sealed record RecurringDefinition(string Name, RecurringKind Kind, decimal Amount,
     RecurringSchedule Schedule, DateOnly Start, DateOnly? End, IReadOnlyList<VehicleShare> Allocations,
     Guid? ExpenseItemId = null, ExpenseBucket? Bucket = null, string? Note = null)
 {
@@ -86,8 +103,8 @@ public sealed record RecurringDefinition(string Name, RecurringKind Kind, CostCa
      {
           SetupValue.Name(Name);
           SetupValue.Money(Amount);
-          var costTypeValid = Category is null ? Bucket is not null && Enum.IsDefined(Bucket.Value) : Enum.IsDefined(Category.Value) && Bucket is null;
-          if (!Enum.IsDefined(Kind) || (Kind == RecurringKind.Cost ? !costTypeValid : Category is not null || Bucket is not null || ExpenseItemId is not null))
+          var costTypeValid = Bucket is not null && Enum.IsDefined(Bucket.Value);
+          if (!Enum.IsDefined(Kind) || (Kind == RecurringKind.Cost ? !costTypeValid : Bucket is not null || ExpenseItemId is not null))
                throw new ArgumentException("Costs need an expense item; savings must not have one.");
           if (Note?.Length > NoteLength)
                throw new ArgumentException($"A note can have at most {NoteLength} characters.");
@@ -101,8 +118,8 @@ public sealed record RecurringDefinition(string Name, RecurringKind Kind, CostCa
                throw new ArgumentException("Vehicle shares must equal the total exactly.");
      }
 
-     // What may be saved from now on (addendum 1). Versions saved before it (daily schedules, the four old cost
-     // categories, older starts) are history: they stay readable and keep posting, and are never checked against this.
+     // What may be saved from now on (addendum 1). Versions saved before it (daily schedules, older starts) are
+     // history: they stay readable and keep posting, and are never checked against this.
      public void ValidateNew(DateOnly today, DateOnly? currentStart)
      {
           Validate();
@@ -110,7 +127,7 @@ public sealed record RecurringDefinition(string Name, RecurringKind Kind, CostCa
                throw new ArgumentException("Daily schedules are no longer offered. Choose weekly, monthly or yearly.");
           if (Kind == RecurringKind.Savings && Schedule.Frequency is not (RecurrenceFrequency.Weekly or RecurrenceFrequency.Monthly))
                throw new ArgumentException("Savings are set aside weekly or monthly.");
-          if (Kind == RecurringKind.Cost && (ExpenseItemId is null || Category is not null))
+          if (Kind == RecurringKind.Cost && ExpenseItemId is null)
                throw new ArgumentException("Choose the expense item this cost is for.");
           if (Start == default)
                throw new ArgumentException("Start date is required.");
@@ -135,7 +152,6 @@ public sealed class RecurringVersion : IOrganizationEntity
      public DateOnly EffectiveFrom { get; private set; }
      public string Name { get; private set; } = "";
      public RecurringKind Kind { get; private set; }
-     public CostCategory? Category { get; private set; }
      public decimal Amount { get; private set; }
      public RecurrenceFrequency Frequency { get; private set; }
      public int? Day { get; private set; }
@@ -143,20 +159,24 @@ public sealed class RecurringVersion : IOrganizationEntity
      public DateOnly Start { get; private set; }
      public DateOnly? End { get; private set; }
      public Guid? ExpenseItemId { get; private set; }
-     // Every cost version carries its bucket; legacy versions were backfilled from their category (assumption A2).
+     // Every cost version carries its bucket.
      public ExpenseBucket? Bucket { get; private set; }
      public string? Note { get; private set; }
      public int? Month { get; private set; }
      public List<RecurringAllocation> Allocations { get; private set; } = [];
+     public RecurringSchedule Schedule() => new(Frequency, Day, LastDay, Month);
+     // Every cost reports under exactly one bucket, savings under none; ExpenseBuckets.Of holds that rule for
+     // every surface, so the report and the list cannot disagree.
+     public ExpenseBucket? ReportedBucket() => ExpenseBuckets.Of(Kind, Bucket);
      internal RecurringVersion(Guid org, Guid item, int revision, DateOnly effectiveFrom, RecurringDefinition definition)
      {
           definition.Validate();
           (OrganizationId, ItemId, Revision, EffectiveFrom) = (org, item, revision, effectiveFrom);
-          (Name, Kind, Category, Amount) = (SetupValue.Name(definition.Name), definition.Kind, definition.Category, definition.Amount);
+          (Name, Kind, Amount) = (SetupValue.Name(definition.Name), definition.Kind, definition.Amount);
           (Frequency, Day, LastDay, Month, Start, End) = (definition.Schedule.Frequency, definition.Schedule.Day, definition.Schedule.LastDay,
                definition.Schedule.Month, definition.Start, definition.End);
           (ExpenseItemId, Note) = (definition.ExpenseItemId, definition.Note);
-          Bucket = definition.Bucket ?? (definition.Category is { } category ? ExpenseBuckets.FromLegacy(category) : null);
+          Bucket = definition.Bucket;
           Allocations = definition.Allocations.Select(a => new RecurringAllocation(org, Id, a.VehicleId, a.Amount)).ToList();
      }
 }

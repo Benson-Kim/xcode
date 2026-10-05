@@ -400,6 +400,60 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.ToTable("RefreshTokens");
                 });
 
+            modelBuilder.Entity("Auth.Domain.RevenueRecord", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("Amount")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("decimal(14,2)");
+
+                    b.Property<DateOnly>("BusinessDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset>("CapturedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("CapturedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("CorrectedAfterDate")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<int?>("Reason")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("UpdatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("OrganizationId", "Id");
+
+                    b.HasIndex("OrganizationId", "BusinessDate");
+
+                    b.HasIndex("OrganizationId", "VehicleId", "BusinessDate")
+                        .IsUnique();
+
+                    b.ToTable("RevenueRecords");
+                });
+
             modelBuilder.Entity("Auth.Domain.Role", b =>
                 {
                     b.Property<Guid>("OrganizationId")
@@ -436,42 +490,6 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.HasKey("OrganizationId", "RoleId", "Permission");
 
                     b.ToTable("RolePermissions");
-                });
-
-            modelBuilder.Entity("Auth.Domain.Setup.CostCategoryLookup", b =>
-                {
-                    b.Property<int>("Id")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("CostCategoryLookup");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            Name = "RunningCosts"
-                        },
-                        new
-                        {
-                            Id = 2,
-                            Name = "RepairsAndUpkeep"
-                        },
-                        new
-                        {
-                            Id = 3,
-                            Name = "CrewCosts"
-                        },
-                        new
-                        {
-                            Id = 4,
-                            Name = "FixedCommitments"
-                        });
                 });
 
             modelBuilder.Entity("Auth.Domain.Setup.ExpenseBucketLookup", b =>
@@ -627,14 +645,14 @@ namespace Auth.Api.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<DateTimeOffset?>("EffectiveFrom")
-                        .HasColumnType("datetimeoffset");
+                    b.Property<DateTime?>("EffectiveFrom")
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid>("EntityId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<DateTimeOffset>("OccurredAt")
-                        .HasColumnType("datetimeoffset");
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Reason")
                         .IsRequired()
@@ -809,9 +827,6 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.Property<int?>("Bucket")
                         .HasColumnType("int");
 
-                    b.Property<int?>("Category")
-                        .HasColumnType("int");
-
                     b.Property<int?>("Day")
                         .HasColumnType("int");
 
@@ -857,8 +872,6 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.HasKey("OrganizationId", "Id");
 
                     b.HasIndex("Bucket");
-
-                    b.HasIndex("Category");
 
                     b.HasIndex("Frequency");
 
@@ -922,6 +935,31 @@ namespace Auth.Api.Infrastructure.Migrations
                     b.HasIndex("OrganizationId", "VehicleId");
 
                     b.ToTable("SetupVehicleScopes");
+                });
+
+            modelBuilder.Entity("Auth.Domain.Setup.VehicleAwayPeriod", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("LeftOn")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("ReturnedOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("OrganizationId", "Id");
+
+                    b.HasIndex("OrganizationId", "VehicleId", "LeftOn")
+                        .IsUnique();
+
+                    b.ToTable("VehicleAwayPeriod");
                 });
 
             modelBuilder.Entity("Auth.Domain.Setup.VehicleInvestment", b =>
@@ -1246,6 +1284,21 @@ namespace Auth.Api.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Auth.Domain.RevenueRecord", b =>
+                {
+                    b.HasOne("Auth.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Domain.Setup.FleetVehicle", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "VehicleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Auth.Domain.Role", b =>
                 {
                     b.HasOne("Auth.Domain.Organization", null)
@@ -1376,11 +1429,6 @@ namespace Auth.Api.Infrastructure.Migrations
                         .HasForeignKey("Bucket")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("Auth.Domain.Setup.CostCategoryLookup", null)
-                        .WithMany()
-                        .HasForeignKey("Category")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("Auth.Domain.Setup.RecurrenceFrequencyLookup", null)
                         .WithMany()
                         .HasForeignKey("Frequency")
@@ -1468,6 +1516,21 @@ namespace Auth.Api.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Auth.Domain.Setup.VehicleAwayPeriod", b =>
+                {
+                    b.HasOne("Auth.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Domain.Setup.FleetVehicle", null)
+                        .WithMany("AwayPeriods")
+                        .HasForeignKey("OrganizationId", "VehicleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Auth.Domain.Setup.VehicleInvestment", b =>
                 {
                     b.HasOne("Auth.Domain.Organization", null)
@@ -1539,6 +1602,8 @@ namespace Auth.Api.Infrastructure.Migrations
 
             modelBuilder.Entity("Auth.Domain.Setup.FleetVehicle", b =>
                 {
+                    b.Navigation("AwayPeriods");
+
                     b.Navigation("Targets");
                 });
 

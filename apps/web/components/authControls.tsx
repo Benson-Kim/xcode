@@ -11,7 +11,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         <Brand />
       </header>
       <main className="flex flex-1 flex-col px-6 pt-7 pb-4 min-[720px]:items-center min-[720px]:justify-center min-[720px]:gap-5 min-[720px]:pt-6 min-[720px]:pb-10">
-        <div className="w-full min-[720px]:w-110 min-[720px]:rounded-[20px] min-[720px]:border min-[720px]:border-card-line min-[720px]:bg-white min-[720px]:p-10 min-[720px]:shadow-panel">
+        <div className="w-full min-[720px]:w-110 min-[720px]:rounded-[20px] min-[720px]:border min-[720px]:border-card-line min-[720px]:bg-surface min-[720px]:p-10 min-[720px]:shadow-panel">
           {children}
         </div>
         <p className="mt-auto mb-0 pt-6 text-center text-sm text-grey min-[720px]:m-0 min-[720px]:pt-0">
@@ -79,7 +79,7 @@ export function AuthInput({
     <input
       {...props}
       className={cn(
-        "h-14 w-full rounded-xl border border-line bg-white px-4 text-[19px] focus:border-blue focus:outline-3 focus:outline-offset-1 focus:outline-blue/35 aria-invalid:border-2 aria-invalid:border-red min-[720px]:h-13",
+        "h-14 w-full rounded-xl border border-line bg-surface px-4 text-[19px] focus:border-blue focus:outline-3 focus:outline-offset-1 focus:outline-blue/35 aria-invalid:border-2 aria-invalid:border-red min-[720px]:h-13",
         digits &&
           "text-[22px] tracking-[0.4em] placeholder:text-[17px] placeholder:tracking-normal",
         className,
@@ -116,7 +116,7 @@ export function AuthButton({
       className={cn(
         "inline-flex h-14 w-full items-center justify-center rounded-full text-[17px] font-semibold disabled:cursor-not-allowed disabled:opacity-55 min-[720px]:h-13",
         tone === "primary"
-          ? "bg-blue text-white hover:enabled:bg-blue-dark aria-busy:cursor-progress aria-busy:bg-blue-busy"
+          ? "bg-blue text-on-fill hover:enabled:bg-blue-dark aria-busy:cursor-progress aria-busy:bg-blue-busy"
           : "border-2 border-blue bg-transparent text-blue hover:enabled:bg-blue-tint",
         className,
       )}

@@ -127,3 +127,95 @@ it("keeps the rows it has and says why when the next page fails", async () => {
   await waitFor(() => expect(changeRows()).toHaveLength(25));
   expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled();
 });
+
+it("leaves out internal ids and shows a list of plain values as one field", async () => {
+  serveHistory(1, [
+    change(1, {
+      section: "people",
+      reason: "Changed role for Grace Achieng",
+      before: JSON.stringify({ Id: "p-1", Role: "Revenue clerk", CompanyIds: ["c-1"], Permissions: ["revenue.view", "dash.capture"], Versions: [{ VehicleId: "v-1" }] }),
+      after: JSON.stringify({
+        Id: "p-1", Role: "Fleet manager", CompanyIds: ["c-2"], Permissions: ["dash.capture", "revenue.view", "revenue.correct"], Versions: [{ VehicleId: "v-2" }],
+        UpdatedBy: "10c5de87-afae-417b-98a2-ce4d4f6b8eca", Version: 2,
+      }),
+    }),
+  ]);
+  renderInApp(<HistoryPage />);
+
+  const changed = within(await screen.findByRole("table", { name: "People and access: Changed role for Grace Achieng, before and after" }));
+  expect(fields(changed)).toEqual([
+    ["Role", "Revenue clerk", "Fleet manager"],
+    ["Permissions", "dash.capture, revenue.view", "dash.capture, revenue.correct, revenue.view"],
+  ]);
+});
+
+// The server does the narrowing, so the filter bar's job is to ask for exactly what the controls say.
+function serveFiltered(rows: ReturnType<typeof change>[]) {
+  const fetchMock = vi.fn(async (input: string) => {
+    const url = new URL(input, "http://app");
+    const [section, text, from, to] = ["section", "text", "from", "to"].map((name) => url.searchParams.get(name));
+    const matches = rows.filter(
+      (row) =>
+        (!section || row.section === section) &&
+        (!text || `${row.reason} ${row.actorName}`.toLowerCase().includes(text.toLowerCase())) &&
+        (!from || row.occurredAt >= from) &&
+        (!to || row.occurredAt <= `${to}T23:59:59Z`),
+    );
+    return new Response(JSON.stringify({ items: matches, pageNumber: 1, pageSize: 25, total: matches.length }), { status: 200 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+it("narrows the log through the server and starts again at the first page", async () => {
+  const rows = [
+    change(3, { section: "vehicles", reason: "Added vehicle KDA 123A", occurredAt: "2026-09-22T08:00:00Z" }),
+    change(2, { section: "people", reason: "Invited someone", actorName: "Antony Maina", occurredAt: "2026-09-21T08:00:00Z" }),
+    change(1, { section: "companies", reason: "Renamed Metro Trans", occurredAt: "2026-09-20T08:00:00Z" }),
+  ];
+  const fetchMock = serveFiltered(rows);
+  renderInApp(<HistoryPage />);
+  expect(await screen.findByText("Vehicles: Added vehicle KDA 123A")).toBeInTheDocument();
+  expect(screen.getByText("Showing all 3 changes")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Section"), { target: { value: "people" } });
+  await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/setup/history?page=1&pageSize=25&section=people", expect.anything()));
+  expect(await screen.findByText("People and access: Invited someone")).toBeInTheDocument();
+  expect(screen.queryByText("Vehicles: Added vehicle KDA 123A")).not.toBeInTheDocument();
+  expect(screen.getByText("1 change matches")).toBeInTheDocument();
+
+  // The search box settles before it asks: three keystrokes are one request, and it looks at the name too.
+  fireEvent.change(screen.getByLabelText("Section"), { target: { value: "all" } });
+  await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/setup/history?page=1&pageSize=25", expect.anything()));
+  const asked = fetchMock.mock.calls.length;
+  for (const typed of ["a", "an", "antony"]) fireEvent.change(screen.getByLabelText("Search"), { target: { value: typed } });
+  await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/setup/history?page=1&pageSize=25&text=antony", expect.anything()));
+  expect(fetchMock.mock.calls.length - asked).toBe(1);
+  expect(await screen.findByText("People and access: Invited someone")).toBeInTheDocument();
+
+  // A date range is sent as the two days it names, both included.
+  fireEvent.change(screen.getByLabelText("Search"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-09-21" } });
+  fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-09-21" } });
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/setup/history?page=1&pageSize=25&from=2026-09-21&to=2026-09-21", expect.anything()),
+  );
+  expect(await screen.findByText("People and access: Invited someone")).toBeInTheDocument();
+  expect(screen.queryByText("PSV companies: Renamed Metro Trans")).not.toBeInTheDocument();
+  // The range cannot be set backwards: each input stops where the other one is.
+  expect(screen.getByLabelText("From")).toHaveAttribute("max", "2026-09-21");
+  expect(screen.getByLabelText("To")).toHaveAttribute("min", "2026-09-21");
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/setup/history?page=1&pageSize=25", expect.anything()));
+  expect(await screen.findByText("Showing all 3 changes")).toBeInTheDocument();
+});
+
+it("says that nothing matches rather than that there is nothing", async () => {
+  serveFiltered([change(1, { section: "companies", reason: "Renamed Metro Trans" })]);
+  renderInApp(<HistoryPage />);
+  expect(await screen.findByText("PSV companies: Renamed Metro Trans")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Section"), { target: { value: "revenue" } });
+  expect(await screen.findByText("No changes match this filter.")).toBeInTheDocument();
+});

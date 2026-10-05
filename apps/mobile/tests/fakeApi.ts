@@ -22,6 +22,54 @@ export const catalog = [
   { name: "Setup", items: [{ key: "companies.manage", label: "Set up PSV companies", needs: [] }, { key: "people.view", label: "View people", needs: [] }] },
 ];
 
+
+export const revenueWeek = {
+  weekStart: "2026-09-28",
+  weekThrough: "2026-10-04",
+  currentWeekStart: "2026-09-28",
+  businessDate: "2026-09-29",
+  companies: [{ id: "company-1", name: "North Star" }],
+  vehicles: [{
+    id: "vehicle-1",
+    companyId: "company-1",
+    companyName: "North Star",
+    registration: "KDA 482M",
+    joinedOn: "2026-09-28",
+    leftOn: null,
+    earliestMissing: "2026-09-28",
+    days: [
+      { date: "2026-09-28", status: "missing", expected: 1000, amount: null, reason: null, note: null, canEdit: true, editedAfterCapture: false },
+      { date: "2026-09-29", status: "missing", expected: 1000, amount: null, reason: null, note: null, canEdit: true, editedAfterCapture: false },
+      { date: "2026-09-30", status: "future", expected: 1000, amount: null, reason: null, note: null, canEdit: false, editedAfterCapture: false },
+      { date: "2026-10-01", status: "future", expected: 1000, amount: null, reason: null, note: null, canEdit: false, editedAfterCapture: false },
+      { date: "2026-10-02", status: "future", expected: 1000, amount: null, reason: null, note: null, canEdit: false, editedAfterCapture: false },
+      { date: "2026-10-03", status: "future", expected: 1000, amount: null, reason: null, note: null, canEdit: false, editedAfterCapture: false },
+      { date: "2026-10-04", status: "future", expected: 1000, amount: null, reason: null, note: null, canEdit: false, editedAfterCapture: false }
+    ],
+    totalAmount: 0,
+    totalExpected: 2000,
+    percent: 0
+  }],
+  totalAmount: 0,
+  totalExpected: 2000,
+  percent: 0
+};
+
+export const revenueDashboard = {
+  period: "week",
+  from: "2026-09-28",
+  through: "2026-09-29",
+  businessDate: "2026-09-29",
+  revenue: 0,
+  expected: 2000,
+  percent: 0,
+  capturedToday: 0,
+  vehiclesToday: 1,
+  missingDays: 1,
+  missingVehicles: 1,
+  editedRecords: 0
+};
+
 export const tokens = (n = 1) => ({ status: "authenticated", accessToken: `access-${n}`, refreshToken: `refresh-${n}` });
 
 export function fakeApi() {

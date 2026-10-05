@@ -2,6 +2,7 @@
 using Auth.Domain;
 using Auth.Domain.Setup;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Auth.Infrastructure;
 
@@ -27,6 +28,12 @@ public sealed partial class AuthDb
           target.Property(x => x.WeeklyAmount).HasPrecision(14, 2);
           target.HasIndex(x => new { x.OrganizationId, x.VehicleId, x.Revision }).IsUnique();
           target.HasOne<FleetVehicle>().WithMany(x => x.Targets).HasForeignKey(x => new { x.OrganizationId, x.VehicleId }).OnDelete(DeleteBehavior.Restrict);
+
+          // Append-only history, like the targets: once a vehicle has been away those days stay out of every report (D4).
+          var away = model.Entity<VehicleAwayPeriod>();
+          away.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(away);
+          away.HasIndex(x => new { x.OrganizationId, x.VehicleId, x.LeftOn }).IsUnique();
+          away.HasOne<FleetVehicle>().WithMany(x => x.AwayPeriods).HasForeignKey(x => new { x.OrganizationId, x.VehicleId }).OnDelete(DeleteBehavior.Restrict);
 
           var item = model.Entity<RecurringItem>();
           item.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(item);
@@ -71,6 +78,15 @@ public sealed partial class AuthDb
           var history = model.Entity<OrganizationSettingsVersion>();
           history.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(history);
           history.HasIndex(x => new { x.OrganizationId, x.Version }).IsUnique();
+          // Both instants are UTC already (the entity refuses anything else), so they are stored as plain UTC
+          // datetimes. That keeps them comparable inside a query on every provider XCODE runs on: SQL Server, and
+          // the SQLite the tests use, which cannot compare a datetimeoffset at all. The change log is filtered by
+          // date, so being comparable in the database rather than in memory is the difference between paging the
+          // narrowed log and reading all of it.
+          var utc = new ValueConverter<DateTimeOffset, DateTime>(
+               value => value.UtcDateTime, stored => new DateTimeOffset(stored, TimeSpan.Zero));
+          history.Property(x => x.OccurredAt).HasConversion(utc);
+          history.Property(x => x.EffectiveFrom).HasConversion(utc);
           history.Property(x => x.Section).HasMaxLength(160);
           history.Property(x => x.Reason).HasMaxLength(500);
           history.Property(x => x.CorrelationId).HasMaxLength(100);
@@ -92,12 +108,10 @@ public sealed partial class AuthDb
 
           model.Entity<RecurrenceFrequencyLookup>().HasData(Enum.GetValues<RecurrenceFrequency>().Select(x => new RecurrenceFrequencyLookup { Id = x, Name = x.ToString() }));
           model.Entity<RecurringKindLookup>().HasData(Enum.GetValues<RecurringKind>().Select(x => new RecurringKindLookup { Id = x, Name = x.ToString() }));
-          model.Entity<CostCategoryLookup>().HasData(Enum.GetValues<CostCategory>().Select(x => new CostCategoryLookup { Id = x, Name = x.ToString() }));
           model.Entity<ExpenseBucketLookup>().HasData(Enum.GetValues<ExpenseBucket>().Select(x => new ExpenseBucketLookup { Id = x, Name = x.ToString() }));
 
           version.HasOne<RecurrenceFrequencyLookup>().WithMany().HasForeignKey(x => x.Frequency).OnDelete(DeleteBehavior.Restrict);
           version.HasOne<RecurringKindLookup>().WithMany().HasForeignKey(x => x.Kind).OnDelete(DeleteBehavior.Restrict);
-          version.HasOne<CostCategoryLookup>().WithMany().HasForeignKey(x => x.Category).OnDelete(DeleteBehavior.Restrict);
           version.HasOne<ExpenseBucketLookup>().WithMany().HasForeignKey(x => x.Bucket).OnDelete(DeleteBehavior.Restrict);
           expenseCategory.HasOne<ExpenseBucketLookup>().WithMany().HasForeignKey(x => x.Bucket).OnDelete(DeleteBehavior.Restrict);
 
@@ -107,9 +121,9 @@ public sealed partial class AuthDb
      {
           foreach (var entry in ChangeTracker.Entries().Where(e => e.State is EntityState.Modified or EntityState.Deleted))
           {
-               if (entry.Entity is OrganizationSettingsVersion or VehicleTarget or RecurringVersion or RecurringAllocation)
+               if (entry.Entity is OrganizationSettingsVersion or VehicleTarget or VehicleAwayPeriod or RecurringVersion or RecurringAllocation)
                     throw new InvalidOperationException("Setup versions and allocations are append-only.");
-               if (entry.Entity is PsvCompany or FleetVehicle or RecurringItem or ExpenseCategory or ExpenseItem && entry.State == EntityState.Deleted)
+               if (entry.Entity is PsvCompany or FleetVehicle or RecurringItem or RevenueRecord or ExpenseCategory or ExpenseItem && entry.State == EntityState.Deleted)
                     throw new InvalidOperationException("Setup records cannot be deleted.");
                if (entry.Entity is FleetVehicle && entry.Property(nameof(FleetVehicle.Registration)).IsModified)
                     throw new InvalidOperationException("Registration cannot change.");

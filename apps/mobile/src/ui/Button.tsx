@@ -58,7 +58,7 @@ export function Button({
     >
       <Text
         weight="semibold"
-        style={[styles.label, { color: primary ? colors.white : colors.blue }]}
+        style={[styles.label, { color: primary ? colors.onFill : colors.blue }]}
       >
         {busy && busyText ? busyText : children}
       </Text>
@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 16,
   },
-  label: { fontSize: 17 },
+  label: { fontSize: 17, textAlign: "center" },
   disabled: { opacity: 0.55 },
   link: { minHeight: 44, paddingHorizontal: 8, justifyContent: "center" },
 });

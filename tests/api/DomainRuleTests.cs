@@ -110,7 +110,8 @@ public sealed class DomainRuleTests
     }
 
     private static RecurringDefinition Daily(DateOnly start, decimal amount = 100m) =>
-        new("Insurance", RecurringKind.Cost, CostCategory.FixedCommitments, amount, new RecurringSchedule(RecurrenceFrequency.Daily), start, null, [new VehicleShare(Vehicle, amount)]);
+        new("Insurance", RecurringKind.Cost, amount, new RecurringSchedule(RecurrenceFrequency.Daily), start, null, [new VehicleShare(Vehicle, amount)],
+            Bucket: ExpenseBucket.RecurringCharges);
 
     [Fact]
     public void PostponingAPendingItemStopsTheOldScheduleAndKeepsItEditable()
@@ -157,9 +158,57 @@ public sealed class DomainRuleTests
         Assert.True(vehicle.Retire(Today, Today));
         Assert.Equal(0m, vehicle.TargetOn(Today));
         Assert.False(vehicle.ActiveOn(Today));
-        Assert.True(vehicle.Restore());
+        // Undone on its own date, the leave took effect for no day, so there is nothing to record as away.
+        Assert.True(vehicle.Restore(Today, Today));
+        Assert.Empty(vehicle.AwayPeriods);
         Assert.Equal(7000m, vehicle.TargetOn(Today));
         Assert.True(vehicle.ActiveOn(Today));
+    }
+
+    // D4: the days between a leave that took effect and the return are recorded, so they are neither expected nor
+    // missing once the vehicle is back.
+    [Fact]
+    public void AVehicleBackInTheFleetKeepsTheDaysItWasAwayOutOfEveryReport()
+    {
+        var company = Guid.NewGuid();
+        var vehicle = new FleetVehicle(Organization, company, new VehicleRegistration("KDA 482M"), Today.AddDays(-30), 7000m);
+
+        Assert.True(vehicle.Retire(Today.AddDays(-10), Today));
+        Assert.True(vehicle.Restore(Today, Today));
+        var away = Assert.Single(vehicle.AwayPeriods);
+        Assert.Equal((Today.AddDays(-10), Today), (away.LeftOn, away.ReturnedOn));
+
+        Assert.True(vehicle.ActiveOn(Today.AddDays(-11)));
+        Assert.False(vehicle.ActiveOn(Today.AddDays(-10)));
+        Assert.False(vehicle.ActiveOn(Today.AddDays(-1)));
+        Assert.Equal(0m, vehicle.TargetOn(Today.AddDays(-5)));
+        // Back in the fleet from the day it returned.
+        Assert.True(vehicle.ActiveOn(Today));
+        Assert.Equal(7000m, vehicle.TargetOn(Today));
+    }
+
+    [Fact]
+    public void AReturnDateOutsideTheTimeAwayIsRefusedAndASecondLeaveCannotOverlapTheFirst()
+    {
+        var company = Guid.NewGuid();
+        var vehicle = new FleetVehicle(Organization, company, new VehicleRegistration("KDA 482M"), Today.AddDays(-30), 7000m);
+        Assert.True(vehicle.Retire(Today.AddDays(-10), Today));
+
+        // Before the day it left, or after the business date, there is no stretch it could have been away for.
+        Assert.Throws<ArgumentException>(() => vehicle.Restore(Today.AddDays(-11), Today));
+        Assert.Throws<ArgumentException>(() => vehicle.Restore(Today.AddDays(1), Today));
+        Assert.True(vehicle.Restore(Today.AddDays(-4), Today));
+
+        // Leaving again inside the stretch it was already away would make the two read as one absence.
+        Assert.Throws<ArgumentException>(() => vehicle.Retire(Today.AddDays(-6), Today));
+        Assert.True(vehicle.Retire(Today.AddDays(-4), Today));
+        Assert.True(vehicle.Restore(Today.AddDays(-2), Today));
+        Assert.Equal(2, vehicle.AwayPeriods.Count);
+        // Away for -10 through -5, back for -4 alone, then away again for -4 and -3.
+        Assert.False(vehicle.ActiveOn(Today.AddDays(-5)));
+        Assert.False(vehicle.ActiveOn(Today.AddDays(-4)));
+        Assert.False(vehicle.ActiveOn(Today.AddDays(-3)));
+        Assert.True(vehicle.ActiveOn(Today.AddDays(-2)));
     }
 
     [Fact]

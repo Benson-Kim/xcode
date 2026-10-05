@@ -11,7 +11,7 @@ export function Card({
     <article
       {...props}
       className={cn(
-        "flex min-w-0 flex-col rounded-[14px] border border-card-line bg-white p-5",
+        "flex min-w-0 flex-col rounded-[14px] border border-card-line bg-surface p-5",
         density === "form" ? "gap-3.5" : "gap-2.5",
         className,
       )}

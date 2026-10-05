@@ -1,18 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { PeopleAccessView } from "./PeopleAccessView";
-import { OrganizationSettingsView } from "./OrganizationSettingsView";
-import { PreferencesView } from "./PreferencesView";
+import {
+  Component,
+  Suspense,
+  lazy,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { Brand } from "./Brand";
 import {
-  CompaniesPage,
-  ExpenseCategoriesPage,
-  HistoryPage,
-  RecurringPage,
-  VehiclesPage,
-} from "./setup";
-import {
+  Banner,
+  Button,
   Card,
   CardAction,
   CardGridSkeleton,
@@ -21,23 +22,28 @@ import {
   CardValue,
   ChevronIcon,
   Dialog,
+  FormActions,
   IconButton,
   ListSkeleton,
-  Skeleton,
+  LoadingRegion,
   MenuIcon,
   PageHeader,
+  ProgressBar,
   SegmentedControl,
+  Skeleton,
+  StatusBadge,
   SubHeading,
   ToastProvider,
   cn,
 } from "./ui";
+import { rangeLabel, shiftDate, shortDate } from "./revenueFormat";
 import { fetchWithSession } from "../lib/session";
 import {
   SessionProvider,
   useSession,
   type Session,
 } from "../lib/session-context";
-import { configureFormats, initials, plural } from "../lib/format";
+import { configureFormats, initials, kes, percentText, plural } from "../lib/format";
 import { useResource } from "../lib/data";
 import {
   AppearanceProvider,
@@ -45,6 +51,159 @@ import {
   type Appearance,
 } from "../lib/appearance";
 import type { MyScope, PermissionGroup, View } from "../lib/types";
+import type { RevenueDashboard } from "@xcode/shared";
+
+// React keeps a failed lazy import for good, so each screen that failed to load leaves a fresh import here. Trying
+// again, or opening another page, swaps them in; never a render, which would retry in a loop while offline.
+const failedScreens = new Set<() => void>();
+function retryFailedScreens() {
+  failedScreens.forEach((retry) => retry());
+  failedScreens.clear();
+}
+
+// Each screen but the dashboard loads the first time it is opened, so the first load holds only the shell and the
+// dashboard. React.lazy rather than next/dynamic: in the app router next/dynamic is this same lazy and Suspense pair,
+// and plain lazy runs the same way under the tests.
+function lazyScreen<P extends object>(load: () => Promise<ComponentType<P>>) {
+  const attempt = (): ComponentType<P> =>
+    lazy(() =>
+      load().then(
+        (screen) => ({ default: screen }),
+        (reason: unknown) => {
+          failedScreens.add(() => (Loaded = attempt()));
+          throw reason;
+        },
+      ),
+    );
+  let Loaded = attempt();
+  return function Screen(props: P) {
+    return <Loaded {...props} />;
+  };
+}
+
+const RevenuePage = lazyScreen(() =>
+  import("./RevenuePage").then((module) => module.RevenuePage),
+);
+const PeopleAccessView = lazyScreen(() =>
+  import("./PeopleAccessView").then((module) => module.PeopleAccessView),
+);
+const OrganizationSettingsView = lazyScreen(() =>
+  import("./OrganizationSettingsView").then(
+    (module) => module.OrganizationSettingsView,
+  ),
+);
+const PreferencesView = lazyScreen(() =>
+  import("./PreferencesView").then((module) => module.PreferencesView),
+);
+const CompaniesPage = lazyScreen(() =>
+  import("./setup/CompaniesPage").then((module) => module.CompaniesPage),
+);
+const VehiclesPage = lazyScreen(() =>
+  import("./setup/VehiclesPage").then((module) => module.VehiclesPage),
+);
+const ExpenseCategoriesPage = lazyScreen(() =>
+  import("./setup/ExpenseCategoriesPage").then(
+    (module) => module.ExpenseCategoriesPage,
+  ),
+);
+const RecurringPage = lazyScreen(() =>
+  import("./setup/RecurringPage").then((module) => module.RecurringPage),
+);
+const HistoryPage = lazyScreen(() =>
+  import("./setup/HistoryPage").then((module) => module.HistoryPage),
+);
+
+// A screen's code that did not download: what Turbopack throws (a ChunkLoadError, "Failed to load chunk …"), what
+// webpack throws ("Loading chunk … failed") and what the browsers' own import() rejects with.
+function isLoadFailure(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.name === "ChunkLoadError" ||
+      /Loading chunk|Failed to load chunk|dynamically imported module|Importing a module script failed/i.test(
+        error.message,
+      ))
+  );
+}
+
+// After Try again, moves focus to the page's heading once it shows, or to its placeholder while it loads, rather than
+// leaving keyboard and screen-reader users on the page body.
+function FocusPage() {
+  useEffect(() => {
+    const main = document.querySelector("main");
+    const target =
+      main?.querySelector("h1") ??
+      main?.querySelector<HTMLElement>('[role="status"]');
+    if (!target) return;
+    target.tabIndex = -1;
+    target.focus();
+  }, []);
+  return null;
+}
+
+// Opens one page: placeholders while its code loads (each screen shows its own as soon as it has loaded, so until
+// then only its title's), and a problem inside the page if it fails, with the header and menu still working. Try again
+// renders it afresh, importing again a screen that did not download; a reload picks up a new release. React and
+// Next.js log each error caught here to the console.
+class PageBoundary extends Component<
+  { children: ReactNode },
+  { problem: "load" | "other" | null; retried: boolean }
+> {
+  state: { problem: "load" | "other" | null; retried: boolean } = {
+    problem: null,
+    retried: false,
+  };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { problem: isLoadFailure(error) ? "load" : "other" };
+  }
+
+  render() {
+    const { problem, retried } = this.state;
+    if (!problem)
+      return (
+        <Suspense
+          fallback={
+            <>
+              {retried && <FocusPage />}
+              <LoadingRegion label="Loading the page">
+                <Skeleton className="h-8 w-1/3" />
+              </LoadingRegion>
+            </>
+          }
+        >
+          {this.props.children}
+          {retried && <FocusPage />}
+        </Suspense>
+      );
+    return (
+      <section>
+        <Banner>
+          {problem === "load"
+            ? "This page could not be loaded. Check your connection and try again."
+            : "Something went wrong on this page."}
+        </Banner>
+        <FormActions className="mt-4">
+          <Button
+            // A retry that failed again keeps focus on Try again.
+            autoFocus={retried}
+            onClick={() => {
+              retryFailedScreens();
+              this.setState({ problem: null, retried: true });
+            }}
+          >
+            Try again
+          </Button>
+          {/* Offline, a reload would lose the app, not bring the page back. */}
+          {navigator.onLine && (
+            <Button tone="outline" onClick={() => window.location.reload()}>
+              Reload the app
+            </Button>
+          )}
+        </FormActions>
+      </section>
+    );
+  }
+}
 
 type NavItem = { id: View; label: string; permission?: string | string[] };
 
@@ -157,6 +316,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
     : "";
 
   function navigate(next: View, nextParams: ViewParams = {}) {
+    retryFailedScreens();
     setView(next);
     setParams(nextParams);
     setVisit((current) => current + 1);
@@ -184,7 +344,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
       <AppearanceProvider value={appearanceState}>
         <ToastProvider>
           <div className="flex min-h-screen flex-col">
-            <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-card-line bg-white px-5 max-[899px]:gap-1.5 max-[899px]:pr-2 max-[899px]:pl-1">
+            <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-card-line bg-surface px-5 max-[899px]:gap-1.5 max-[899px]:pr-2 max-[899px]:pl-1">
               <IconButton
                 className="hidden max-[899px]:grid"
                 aria-label="Open menu"
@@ -231,7 +391,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                 {userMenuOpen && (
                   <div
                     role="menu"
-                    className="absolute top-13 right-0 z-40 min-w-50 rounded-xl border border-card-line bg-white p-1.5 shadow-menu"
+                    className="absolute top-13 right-0 z-40 min-w-50 rounded-xl border border-card-line bg-surface p-1.5 shadow-menu"
                   >
                     <MenuButton
                       onClick={() => {
@@ -254,7 +414,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                 id="main-menu"
                 aria-label="Main"
                 className={cn(
-                  "w-62 shrink-0 overflow-y-auto border-r border-card-line bg-white px-3 py-4",
+                  "w-62 shrink-0 overflow-y-auto border-r border-card-line bg-surface px-3 py-4",
                   "max-[899px]:fixed max-[899px]:top-16 max-[899px]:bottom-0 max-[899px]:left-0 max-[899px]:z-30 max-[899px]:transition-transform motion-reduce:transition-none",
                   menuOpen
                     ? "max-[899px]:shadow-drawer"
@@ -281,7 +441,8 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                       />
                     </button>
                     {setupOpen && (
-                      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+                      // Indented under the group with a rule down its left side, as in the design (.nav-group ul).
+                      <ul className="m-0 mt-0.5 ml-3.5 flex list-none flex-col gap-0.5 border-l border-card-line p-0 pl-2.5">
                         {visibleSetup.map(navButton)}
                       </ul>
                     )}
@@ -297,13 +458,16 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                 />
               )}
               <main className="min-w-0 flex-1 px-8 pt-7 pb-12 max-[899px]:px-4 max-[899px]:pt-5 max-[899px]:pb-10">
-                <Page
-                  key={visit}
-                  view={view}
-                  params={params}
-                  sessionError={sessionError}
-                  onNavigate={navigate}
-                />
+                {/* Keyed on the visit, so a screen still loading shows placeholders, never the page it replaced, and a
+                    page that failed to load is left behind on the next one. */}
+                <PageBoundary key={visit}>
+                  <Page
+                    view={view}
+                    params={params}
+                    sessionError={sessionError}
+                    onNavigate={navigate}
+                  />
+                </PageBoundary>
                 <p className="mt-8 mb-0 text-xs text-grey">XCODE Web v0.9</p>
               </main>
             </div>
@@ -354,7 +518,7 @@ function Page({
       <Dashboard session={session} error={sessionError} onOpen={onNavigate} />
     );
   if (view === "revenue")
-    return <RevenueModule onBack={() => onNavigate("dashboard")} />;
+    return <RevenuePage />;
   if (view === "companies") return <CompaniesPage />;
   if (view === "vehicles")
     return (
@@ -376,70 +540,146 @@ function Page({
   return <PreferencesView />;
 }
 
-const dashboardCards = [
-  {
-    permission: "dash.capture",
-    title: "Today's revenue",
-    sub: "Your vehicles, today",
-    value: "KES 0",
-    note: "Revenue capture data will appear here.",
-    action: "Capture revenue",
-    view: "revenue" as const,
-    primary: true,
-  },
-  {
-    permission: "dash.revenue",
-    title: "Revenue",
-    sub: "This {period}",
-    value: "KES 0",
-    note: "No revenue records are available yet.",
-  },
-  {
-    permission: "dash.net",
-    title: "Net contribution",
-    sub: "Revenue less all costs",
-    value: "KES 0",
-    note: "Cost and revenue data will appear here.",
-  },
-  {
-    permission: "dash.costs",
-    title: "Costs",
-    sub: "This {period}",
-    value: "KES 0",
-    note: "Cost totals are waiting for records.",
-  },
-  {
-    permission: "dash.gaps",
-    title: "Missing revenue days",
-    sub: "No record and no reason",
-    value: "0 days",
-    note: "No gaps are available yet.",
-    action: "Open revenue",
-    view: "revenue" as const,
-  },
-  {
-    permission: "dash.commitments",
-    title: "Renewals due",
-    sub: "Upcoming commitments",
-    value: "0",
-    note: "Renewal data will appear here.",
-  },
-  {
-    permission: "dash.edits",
-    title: "Edited after capture",
-    sub: "Records changed after they were captured",
-    value: "0",
-    note: "Change history will appear here.",
-    action: "View change log",
-    view: "history" as const,
-  },
-];
-
 const periods = [
   { value: "today", label: "Today" },
   { value: "week", label: "This week" },
   { value: "month", label: "This month" },
 ] as const;
+type Period = (typeof periods)[number]["value"];
+
+// One dashboard card. A card whose data is not connected yet says so rather than showing zeros.
+type DashboardCard = {
+  permission: string;
+  title: string;
+  sub: string;
+  value?: string;
+  bad?: boolean;
+  bar?: number;
+  note?: string;
+  busy?: boolean;
+  unavailable?: boolean;
+  action?: { label: string; view: View; primary?: boolean };
+};
+type Figures = { data?: RevenueDashboard; error: string };
+// What the figures decide: the value and its note, and whether the card's action still applies.
+type Shown = Pick<DashboardCard, "value" | "bad" | "bar" | "note" | "action">;
+
+// "Today, 30 Sep 2026", "This week, 28 Sep to 4 Oct 2026", "This month, 1 to 30 Sep 2026", from the business date.
+function periodLabel(period: Period, data?: RevenueDashboard) {
+  const name = periods.find((item) => item.value === period)?.label ?? "";
+  if (!data) return name;
+  if (period === "today") return `${name}, ${shortDate(data.from)}`;
+  return `${name}, ${rangeLabel(data.from, period === "week" ? shiftDate(data.from, 6) : data.through)}`;
+}
+
+// A card from the revenue dashboard: placeholders while it loads, the error if it failed, and only the figures the
+// server sent, which leaves out (null) anything the viewer may not see.
+function revenueCard(card: Omit<DashboardCard, Exclude<keyof Shown, "action">>, figures: Figures, show: (data: RevenueDashboard) => Shown): DashboardCard {
+  if (figures.error) return { ...card, note: figures.error };
+  if (!figures.data) return { ...card, busy: true };
+  return { ...card, ...show(figures.data) };
+}
+
+const unavailable = (permission: string, title: string, sub: string, note: string): DashboardCard => ({
+  permission,
+  title,
+  sub,
+  note,
+  unavailable: true,
+});
+
+// The cards in the design's order, each shown to the people with its permission.
+function dashboardCards(can: (permission: string) => boolean, period: Period, selected: Figures, month: Figures) {
+  const label = periodLabel(period, selected.data);
+  const today = selected.data?.businessDate ?? month.data?.businessDate;
+  const monthData = month.data;
+  const yesterday = monthData && shiftDate(monthData.businessDate, -1);
+  const fillGaps: DashboardCard["action"] =
+    can("revenue.capture") || can("revenue.correct") ? { label: "Fill the gaps", view: "revenue" } : undefined;
+  const cards: DashboardCard[] = [
+    revenueCard(
+      {
+        permission: "dash.capture",
+        title: "Today's revenue",
+        sub: today ? `Your vehicles, ${shortDate(today)}` : "Your vehicles, today",
+        action: { label: "Capture revenue", view: "revenue", primary: true },
+      },
+      selected,
+      ({ capturedToday: captured, vehiclesToday: vehicles }) => {
+        if (captured === null || vehicles === null) return {};
+        if (vehicles === 0) return { note: "None of your vehicles is in the fleet today." };
+        const pending = vehicles - captured;
+        return {
+          value: `${captured} of ${vehicles} captured`,
+          note: pending > 0 ? `${plural(pending, "vehicle", "vehicles")} still to capture` : "Every vehicle has a record for today.",
+        };
+      },
+    ),
+    unavailable("dash.float", "My petty cash float", "Cash in hand now", "Petty cash is not connected yet."),
+    revenueCard({ permission: "dash.revenue", title: "Revenue", sub: label }, selected, ({ revenue, expected, percent, capturedToday, vehiclesToday }) => {
+      if (revenue === null) return {};
+      const soFar =
+        period !== "month" && capturedToday !== null && vehiclesToday
+          ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.`
+          : "";
+      if (percent === null) return { value: revenue ? kes(revenue) : undefined, note: `No weekly target applies in this period${soFar || "."}` };
+      return {
+        value: kes(revenue),
+        bar: percent,
+        note: `${percentText(percent)} of target ${kes(expected ?? 0)}, from each vehicle’s weekly target${soFar || "."}`,
+      };
+    }),
+    unavailable("dash.net", "Net contribution", `Revenue less all costs. ${label}`, "Needs cost totals, which are not connected yet."),
+    unavailable("dash.costs", "Money out", `${label}. Fuel and crew pay are not tracked; revenue is recorded net of them.`, "Cost totals are not connected yet."),
+    revenueCard(
+      {
+        permission: "dash.gaps",
+        title: "Missing revenue days",
+        // This month up to yesterday: today is not a gap before it is captured.
+        sub:
+          monthData && yesterday
+            ? monthData.from <= yesterday
+              ? `${rangeLabel(monthData.from, yesterday)}. No record and no reason.`
+              : "No record and no reason."
+            : "This month. No record and no reason.",
+        action: fillGaps,
+      },
+      month,
+      ({ missingDays, missingVehicles }) =>
+        missingDays === null
+          ? {}
+          : {
+              value: plural(missingDays, "day", "days"),
+              bad: missingDays > 0,
+              // With no gaps there is nothing to fill.
+              action: missingDays > 0 ? fillGaps : undefined,
+              note: missingDays
+                ? `${missingVehicles === null ? "" : `On ${plural(missingVehicles, "vehicle", "vehicles")}. `}Always this month, whatever period you pick.`
+                : "Every vehicle has a record for every day.",
+            },
+    ),
+    unavailable("dash.pettycash", "Petty cash to approve", "All managers", "Petty cash is not connected yet."),
+    unavailable("dash.commitments", "Yearly items due", "Next 30 days", "Yearly items are not connected yet."),
+    unavailable("dash.investment", "Money invested", "Against what has come back", "What has come back is not connected yet."),
+    revenueCard(
+      {
+        permission: "dash.edits",
+        title: "Edited after capture",
+        sub: label,
+        action: can("audit.view") ? { label: "View change log", view: "history" } : undefined,
+      },
+      selected,
+      ({ editedRecords }) =>
+        editedRecords === null
+          ? {}
+          : {
+              value: plural(editedRecords, "record", "records"),
+              note: editedRecords ? undefined : "Nothing was changed after capture in this period.",
+            },
+    ),
+  ];
+  return cards.filter((card) => can(card.permission));
+}
 
 function Dashboard({
   session,
@@ -450,25 +690,31 @@ function Dashboard({
   error: string;
   onOpen: (view: View) => void;
 }) {
-  const [period, setPeriod] =
-    useState<(typeof periods)[number]["value"]>("week");
-  const cards = dashboardCards.filter((card) =>
-    session?.permissions.includes(card.permission),
+  const { can } = useSession();
+  const [chosen, setChosen] = useState<Period | null>(null);
+  // A capturer starts on today and everyone else on the month, as in the design.
+  const period: Period = chosen ?? (can("dash.capture") || can("dash.float") ? "today" : "month");
+  const periodCards = ["dash.capture", "dash.revenue", "dash.edits"].some(can);
+  // Missing days always cover the month, so the month is asked for once and shared when it is also the period.
+  const byPeriod = useResource<RevenueDashboard>(
+    periodCards && period !== "month" ? `setup/revenue/dashboard?period=${period}` : null,
   );
-  const periodLabel =
-    period === "today" ? "today" : period === "week" ? "week" : "month";
+  const byMonth = useResource<RevenueDashboard>(
+    can("dash.gaps") || (periodCards && period === "month") ? "setup/revenue/dashboard?period=month" : null,
+  );
+  const cards = dashboardCards(can, period, period === "month" ? byMonth : byPeriod, byMonth);
   return (
     <section>
       <PageHeader
         title="Dashboard"
         description="Your fleet at a glance, based on the access you have."
       />
-      <div className="mt-5 mb-6 flex flex-wrap items-center gap-3 rounded-[14px] border border-card-line bg-white p-3 max-[480px]:flex-col max-[480px]:items-stretch">
+      <div className="mt-5 mb-6 flex flex-wrap items-center gap-3 rounded-[14px] border border-card-line bg-surface p-3 max-[480px]:flex-col max-[480px]:items-stretch">
         <SegmentedControl
           label="Period"
           options={[...periods]}
           value={period}
-          onChange={setPeriod}
+          onChange={setChosen}
           className="max-[480px]:grid max-[480px]:grid-cols-3 max-[480px]:self-stretch"
         />
         <span className="flex items-center gap-2 text-sm">
@@ -496,46 +742,35 @@ function Dashboard({
         </Card>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] items-start gap-4 max-[480px]:grid-cols-1">
-          {cards.map((card) => (
-            <Card key={card.title} aria-labelledby={`card-${card.permission}`}>
-              <CardHeader
-                id={`card-${card.permission}`}
-                title={card.title}
-                description={card.sub.replace("{period}", periodLabel)}
-              />
-              <CardValue>{card.value}</CardValue>
-              <CardNote>{card.note}</CardNote>
-              {card.action && card.view && (
-                <CardAction
-                  primary={card.primary}
-                  onClick={() => onOpen(card.view)}
-                >
-                  {card.action}
-                </CardAction>
-              )}
-            </Card>
-          ))}
+          {cards.map((card) => {
+            const action = card.action;
+            return (
+              <Card key={card.permission} aria-labelledby={`card-${card.permission}`} aria-busy={card.busy || undefined}>
+                <CardHeader id={`card-${card.permission}`} title={card.title} description={card.sub} />
+                {card.busy ? (
+                  <>
+                    <Skeleton className="mt-2 h-8 w-3/5" />
+                    <Skeleton className="h-3 w-4/5" />
+                  </>
+                ) : card.unavailable ? (
+                  <p className="m-0">
+                    <StatusBadge>Not available yet</StatusBadge>
+                  </p>
+                ) : (
+                  card.value && <CardValue tone={card.bad ? "bad" : undefined}>{card.value}</CardValue>
+                )}
+                {card.bar !== undefined && <ProgressBar value={card.bar} />}
+                {card.note && <CardNote>{card.note}</CardNote>}
+                {action && (
+                  <CardAction primary={action.primary} onClick={() => onOpen(action.view)}>
+                    {action.label}
+                  </CardAction>
+                )}
+              </Card>
+            );
+          })}
         </div>
       )}
-    </section>
-  );
-}
-
-// Screens not built yet are shown as a card explaining why the person sees them (the design's module view).
-function RevenueModule({ onBack }: { onBack: () => void }) {
-  return (
-    <section>
-      <PageHeader title="Revenue" />
-      <Card className="mt-5 max-w-140">
-        <CardHeader
-          title="Revenue"
-          description="You see this because you can: View revenue records."
-        />
-        <CardNote>
-          Revenue records are not available from the current API yet.
-        </CardNote>
-        <CardAction onClick={onBack}>Back to dashboard</CardAction>
-      </Card>
     </section>
   );
 }
