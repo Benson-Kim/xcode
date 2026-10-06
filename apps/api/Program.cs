@@ -36,13 +36,21 @@ var connectionString = builder.Configuration.GetConnectionString("Auth");
 var isLocalDb = IsLocalDatabase(connectionString);
 options.DevelopmentMode = builder.Environment.IsDevelopment() && isLocalDb;
 
-// P3-11: validate production-critical email config at startup, not on first send.
+// Production-critical settings are checked at startup, not on first use.
 if (!builder.Environment.IsDevelopment() && !builder.Environment.IsEnvironment("Testing"))
 {
     if (string.IsNullOrEmpty(builder.Configuration["Email:Host"])) throw new InvalidOperationException("Email:Host is required.");
     if (string.IsNullOrEmpty(builder.Configuration["Email:From"])) throw new InvalidOperationException("Email:From is required.");
     if (string.IsNullOrEmpty(connectionString)) throw new InvalidOperationException("ConnectionStrings:Auth is required.");
 }
+
+// Console logs outside Development are JSON with scopes, so the per-request RequestId reaches every line.
+if (!builder.Environment.IsDevelopment())
+    builder.Logging.AddJsonConsole(o =>
+    {
+        o.IncludeScopes = true;
+        o.UseUtcTimestamp = true;
+    });
 
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<IClock, Auth.Infrastructure.SystemClock>();
@@ -62,7 +70,7 @@ builder.Services.AddSingleton<SettingsSectionRegistry>();
 if ((builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")) && isLocalDb) builder.Services.AddScoped<IEmailSender, LogEmailSender>();
 else builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddDbContext<AuthDb>(o => o.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure(3, TimeSpan.FromSeconds(5), null)));
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database", tags: ["ready"], timeout: TimeSpan.FromSeconds(10));
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? []).AllowAnyHeader().AllowAnyMethod()));
 // The web app's sign-ins all reach the API from its Next.js proxy, which names the browser's address in X-Forwarded-For.
 // Only a configured proxy (ForwardedHeaders:KnownProxies, loopback when unset) is believed, so the rate limit below

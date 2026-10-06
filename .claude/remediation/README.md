@@ -23,7 +23,7 @@ Every phase prompt starts the same way:
 |---|---|---|
 | 1 Safety & security | Done | Gaps found and closed during the Phase 2 session on 2026-10-06 (see handover). |
 | 2 Domain integrity | Done | 2026-10-06. |
-| 3 Operability | Started, stopped mid-flight | Its state when it stopped is residual 9. |
+| 3 Operability | Done (2026-10-06) | Finished in the staging-deploy session; see the Phase 3 closing note under residual 9. Item 6's auth-lookup cache moved to Phase 4. |
 | 4 Scalability | Pending | `phase-4.md`, `findings/phase-4.md` |
 | 5 Architecture & DRY | Pending | `phase-5.md`, `findings/phase-5-6.md` |
 | 6 Maintainability & CI | Pending | `phase-6.md`, `findings/phase-5-6.md` |
@@ -32,7 +32,7 @@ Every phase prompt starts the same way:
 Update this table and the residuals at the end of every session.
 
 ## Commit hygiene
-Phases 1–2 and Phase 3's partial work are committed on `fix/format` (4318865, titled "phase 1" but covering all three) and pushed to origin. Commit each later phase on its own, including every new file it adds. Commits are authored as Benson-Kim with no AI trailers.
+Phases 1–2 and Phase 3's partial work are committed on `fix/format` (4318865, titled "phase 1" but covering all three) and pushed to origin. Phase 3's completion is its own commit, "fix(operability): complete phase 3 reliability work", not yet pushed. Commit each later phase on its own, including every new file it adds. Commits are authored as Benson-Kim with no AI trailers.
 
 ## Handover: mechanisms later phases build on
 - **Formatting:** `createFormatter(formats)` in `packages/shared/src/format.ts`, provided through `useFormats()` (web `lib/formats.ts`, mobile `src/lib/formats.ts`). Helpers take a `Formatter`. There is no global formatter.
@@ -74,8 +74,11 @@ Phases 1–2 and Phase 3's partial work are committed on `fix/format` (4318865, 
    - Fix this in Phase 6 item 3: change the message, or return the person to the PIN pad.
 6. **Web `API_URL`:** a missing value is a logged 503 per request, not a startup failure. Startup fail-fast would need Next.js instrumentation; check `node_modules/next/dist/docs`.
 7. **Response shape validation:** GET `/api/auth/session` now maps upstream 5xx to 503 `service_unavailable`, but it still forwards a 2xx body without validating its shape, and the shared auth client casts JSON.
-8. **Mobile unlock on a 5xx:** shows an AuthError instead of the offline fallback (Phase 3 item 10 territory).
-9. **Phase 3 state when its session stopped (2026-10-06 ~14:15)** (verify before relying on it):
+   - Partly addressed 2026-10-06: every browser call to `/api/*` goes through `apps/web/lib/checkedFetch.ts`. A 2xx `text/html` answer, which is the staging host's bot check, raises `SecurityCheckError` ("nothing was sent, reload"). It is not retried and does not sign the person out.
+   - `useStreamedList` throws a clear error when a page has no `items` array.
+   - Still open: the session GET body and the shared auth client cast.
+8. **Mobile unlock on a 5xx:** resolved 2026-10-06. In unlock mode, `AuthError` with `httpStatus >= 500` takes the offline-unlock path, like `OfflineError` (`AuthFlow.tsx` `checkPin`). Covered by 4 tests in `apps/mobile/tests/auth.test.tsx`.
+9. **Phase 3 state when its session stopped (2026-10-06 ~14:15).** Kept for history; the closing note at the end of this item gives the current state.
    - The 30s session cache in `OnTokenValidated` existed around 13:35 (it accepted revoked tokens: `AccessLifecycleTests` ×2, `Phase1AuthContractTests.SwitchUserRevokesThisPhone`, and it changed `VehicleReportTests` query counts). It was gone again by 13:44: Program.cs has no `AddMemoryCache`.
    - `tests/api/OperabilityTests.cs` was updated at 13:54 to match: plain revocation tests and no cache expectations. The full API suite (284 tests, excluding the SqlServer category) passed at 14:40.
    - `/health/ready` filters on tag "ready", but no check is registered, so readiness never touches the database. `ReadinessProbeChecksDatabase` asserts only a 200 and cannot fail. Phase 3 item 3 is therefore not done.
@@ -83,6 +86,14 @@ Phases 1–2 and Phase 3's partial work are committed on `fix/format` (4318865, 
    - `P3-*` plan IDs appear in comments in Program.cs and `tests/api/OperabilityTests.cs`, which the house rules forbid.
    - Already fixed by that session at 13:42: AuthTests `Seen` now ignores `X-Request-ID`.
    - Fixed in the Phase 2 session at 14:20: `src/revenue/week.ts` rethrows `ServerError` instead of treating it as offline, so `revenue.test.tsx` passes.
+   - **Phase 3 closing note (2026-10-06, evening):**
+     - Readiness: `apps/api/Infrastructure/DatabaseHealthCheck.cs` (`CanConnectAsync`) is registered with tag "ready" and a 10 s timeout. `OperabilityTests.ReadinessProbeFailsWhenDatabaseIsUnreachable` asserts a 503. `/health/live` and `GET /health` are unchanged; staging's start.js depends on `/health`.
+     - Logs: outside Development the console is JSON with scopes and UTC timestamps, so the RequestId reaches every line. Covered by `OperabilityTests.ConsoleLogsAreJsonWithScopesOutsideDevelopment`. `ProblemDetailsIncludesRequestIdNotException` now asserts both `requestId` and `traceId` without guards.
+     - Startup: `tests/api/ProductionStartupTests.cs` covers the missing Email:Host, Email:From and connection string cases.
+     - No auto-migration in Production is covered by `ProductionStartupDoesNotCreateOrMigrateTheSchema`. That test relies on Production startup failing on an empty SQLite database with "no such table"; update it if that changes.
+     - Plan IDs removed from the comments in Program.cs and OperabilityTests.cs.
+     - Item 6's per-request auth-lookup cache is deliberately not done here: the first attempt broke immediate revocation. It belongs to Phase 4 (`findings/phase-4.md` item 2b, scalability #4) and must follow the cache rules in CLAUDE.md.
+     - Validation at the close: three typechecks clean; lint 0 errors (1 known warning); shared 39, web 221 and mobile 106 tests pass; API suite 290 passed in both the helper's run and the parent's own full run (`Category!=SqlServer`, 9 m 45 s).
 10. **`AuthService.outgoing` is not reset between execution-strategy retry attempts.** Phase 3 added `EnableRetryOnFailure`, so a code issued in a rolled-back attempt could still be mailed. Fix it in the Phase 5 item 8 split, or at closure.
 11. **Owned by no phase** (from `findings/phase-4.md` N1–N9 and the "Unowned" section of `findings/phase-5-6.md`; for closure unless a phase folds them in):
     - about 11 context queries per setup request;

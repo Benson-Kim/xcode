@@ -1,3 +1,5 @@
 import { createAuthClient } from "@xcode/shared/auth";
 
-export const authApi = createAuthClient("/api/auth");
+import { checkedFetch } from "./checkedFetch";
+
+export const authApi = createAuthClient("/api/auth", checkedFetch);

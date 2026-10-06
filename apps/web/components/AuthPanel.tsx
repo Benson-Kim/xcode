@@ -11,6 +11,7 @@ import {
 } from "@xcode/shared/auth";
 
 import { authApi } from "../lib/api";
+import { SecurityCheckError } from "../lib/checkedFetch";
 import { onSessionExpired, restoreSession } from "../lib/session";
 import { AppShell } from "./AppShell";
 import { Brand } from "./Brand";
@@ -192,7 +193,8 @@ export function AuthPanel() {
         if (error.response.retryAfterSeconds)
           setPausedUntil(Date.now() + error.response.retryAfterSeconds * 1000);
         setMessage(failureMessage(operation, error));
-      } else setMessage("Could not reach the service. Please try again.");
+      } else if (error instanceof SecurityCheckError) setMessage(error.message);
+      else setMessage("Could not reach the service. Please try again.");
     } finally {
       setBusy(false);
     }

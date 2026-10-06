@@ -19,6 +19,7 @@ beforeEach(() => {
   vi.mocked(restoreSession).mockResolvedValue(false);
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
     ok: true,
+    headers: new Headers(),
     json: async () => ({ firstName: "Test", lastName: "User", role: "Owner", permissions: [] }),
   }));
 });
@@ -174,8 +175,8 @@ it("never keeps or shows a PIN someone just chose", async () => {
   // Signed in, the app shell also loads the organization's appearance; this test has none.
   vi.stubGlobal("fetch", vi.fn(async (url: string) =>
     url.includes("/auth/session")
-      ? { ok: true, status: 200, json: async () => ({ firstName: "Test", lastName: "User", role: "Owner", permissions: [] }) }
-      : { ok: false, status: 404, json: async () => ({}) },
+      ? { ok: true, status: 200, headers: new Headers(), json: async () => ({ firstName: "Test", lastName: "User", role: "Owner", permissions: [] }) }
+      : { ok: false, status: 404, headers: new Headers(), json: async () => ({}) },
   ));
   vi.mocked(authApi)
     .mockResolvedValueOnce({ status: "check_email" })

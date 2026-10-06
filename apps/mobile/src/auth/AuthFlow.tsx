@@ -321,7 +321,11 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
         );
       if (error instanceof AuthError && error.httpStatus === 401)
         return wrongPin();
-      if (error instanceof OfflineError && mode === "unlock")
+      if (
+        mode === "unlock" &&
+        (error instanceof OfflineError ||
+          (error instanceof AuthError && error.httpStatus >= 500))
+      )
         return await unlockOffline(entered);
       setPadError(
         failure(
