@@ -16,26 +16,31 @@ Implement Phase 5 of the Revenue App Remediation Plan completely while preservin
 1. **Organization settings application layer.**
    - Add `OrganizationSettingsUseCases` behind `ISetupExecution`, so `OrganizationEndpoints` no longer orchestrates over `AuthDb`.
    - Endpoints keep routing and transport only.
-   - Replace section-name branching with an `ISettingsSection` strategy where it really removes the branching. `SettingsSectionRegistry` already exists, so build on it.
-   - Route time-zone changes through the domain method `Organization.ChangeTimeZone`. Today the endpoint calls `EnsureBusinessDateWithin` directly, so `ChangeTimeZone` is used only by a unit test.
+   - Replace section-name branching with an `ISettingsSection` strategy where it really removes the branching. `SettingsSectionRegistry` is registered (Program.cs) but dead: it covers 3 sections and nothing consumes or tests it. Complete or replace it, and do not assume it works.
+   - Today the settings, logo and preference endpoints bypass `UnitOfWork` (`OrganizationEndpoints.cs` ~83/105/119/182). Moving them onto the pipeline adds the serializable transaction and the change-log retry, which is a deliberate behavior change.
+   - `UnitOfWork.Read` throws if tracked entities change. `Settings()` uses tracked queries and `UserPreference.Validate()` mutates, so use `AsNoTracking` or validate copies.
+   - Route time-zone changes through `Organization.ChangeTimeZone`. Today it is called only by a unit test, while the endpoint calls `EnsureBusinessDateWithin` directly. `ChangeTimeZone` bumps `SettingsVersion` itself, so remove the endpoint's separate bump or the version moves twice.
    - Keep these exactly: the HTTP contract (statuses, problem titles and details that the tests pin, e.g. the 400 "held business date" message), the change-log entries, and the 409 on version conflicts.
+   - Add the missing test for the 409 on a slug conflict.
 2. **Shared capture rules.**
    - Move `missingOn`, `firstGap`, `nextMissing`, `opens` and the week capture rules into `@xcode/shared/capture.ts` as pure functions over `RevenueWeek`.
-   - Migrate web `RevenuePage` and mobile `RevenueScreen` (plus `src/revenue/week.ts` if it duplicates them).
+   - Migrate web `RevenuePage` and mobile `RevenueScreen`. The mobile copies live in `RevenueScreen.tsx` (~82–177, ~285–311, ~806); `src/revenue/week.ts` does not duplicate them.
    - Delete the copies.
    - Add table tests in `packages/shared/tests`.
 3. **Shared appearance.**
    - Put the `Appearance` type, `resolveTheme` and brand-token derivation in shared, free of frameworks.
    - Today web `lib/appearance.ts` and mobile `src/appearance.ts` each define them.
-   - Keep the dark-palette parity tests green.
+   - No web↔mobile palette parity test exists, and the palettes already disagree: mobile light `blueTint`/`blueWash` hold web's `blue-soft`/`blue-tint` values. Reconcile them deliberately and add a parity test.
 4. **Status metadata.**
    - Use one exhaustive `Record<RevenueStatus, { counted, label, tone, recorded }>` (or equivalent) in shared.
    - Migrate every switch and mapping in web and mobile, and delete them.
    - Adding a status must fail typechecking until every consumer is handled.
+   - Define each field from its actual uses. "Counted" is used two different ways on mobile (`RevenueScreen.tsx` ~412 vs ~970–973).
 5. **Revenue date formatting.**
    - Provide one shared revenue date formatter built from the organization's `Formats`, as a member of `createFormatter`'s result. Phase 2 removed the global formatter, so do not reintroduce module state.
    - Mobile must honor the organization's `datePattern`.
    - Components get it from `useFormats()`.
+   - The offline queue persists already-formatted date text (`QueuedCapture.message`, `queue.ts` ~321). Derive that sentence at render time, and keep `periodLabel` as `appearance.test.tsx` pins it.
 6. **Permissions.**
    - Make `PermissionCatalog` (C#) the single source for permission keys, with an exported TS union (generated or checked by a test that fails on drift) and a shared nav-visibility predicate.
    - The server remains the final authority.
@@ -53,10 +58,12 @@ Implement Phase 5 of the Revenue App Remediation Plan completely while preservin
      - `UntrustedAttemptLimit`, and the rule that `IssueTokens` does not clear lockout;
      - enumeration-resistant responses (AuthTests `Seen` comparisons);
      - policy clamping;
-     - refresh rotation and reuse detection.
+     - refresh rotation and reuse detection;
+     - the public constants `AuthService.UntrustedAttemptLimit`, `HourlyCodeLimit` and `DailyCodeLimit`, which tests reference (move them deliberately).
+   - Fix while splitting: `outgoing` is never reset between execution-strategy retry attempts, so a code from a rolled-back attempt could still be mailed. Also note the device-revoke route locks on `device:{id}`, not on the account.
    - Migrate DI and all callers.
 9. **Shared package root export.**
-   - `packages/shared/package.json` points `main`, `types` and `exports["."]` at `src/index.ts`, which does not exist.
+   - `packages/shared/package.json` points `main`, `types` and `exports["."]` at `src/index.ts`. That file existed at HEAD and was deleted by the uncommitted split into `auth`, `dates`, `format` and `revenue` modules.
    - Either add a deliberate barrel or remove the root export.
    - Prove it with a typecheck or test that imports each public entry.
 

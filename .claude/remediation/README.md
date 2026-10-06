@@ -23,13 +23,16 @@ Every phase prompt starts the same way:
 |---|---|---|
 | 1 Safety & security | Done | Gaps found and closed during the Phase 2 session on 2026-10-06 (see handover). |
 | 2 Domain integrity | Done | 2026-10-06. |
-| 3 Operability | In progress (another session) | Observed in-flight breakage on 2026-10-06 is listed under handover. |
+| 3 Operability | Started, stopped mid-flight | Its state when it stopped is residual 9. |
 | 4 Scalability | Pending | `phase-4.md`, `findings/phase-4.md` |
 | 5 Architecture & DRY | Pending | `phase-5.md`, `findings/phase-5-6.md` |
 | 6 Maintainability & CI | Pending | `phase-6.md`, `findings/phase-5-6.md` |
 | Closure | Pending | `closure.md` |
 
 Update this table and the residuals at the end of every session.
+
+## Commit hygiene
+Phases 1–2 and Phase 3's partial work are committed on `fix/format` (4318865, titled "phase 1" but covering all three) and pushed to origin. Commit each later phase on its own, including every new file it adds. Commits are authored as Benson-Kim with no AI trailers.
 
 ## Handover: mechanisms later phases build on
 - **Formatting:** `createFormatter(formats)` in `packages/shared/src/format.ts`, provided through `useFormats()` (web `lib/formats.ts`, mobile `src/lib/formats.ts`). Helpers take a `Formatter`. There is no global formatter.
@@ -74,13 +77,14 @@ Update this table and the residuals at the end of every session.
 8. **Mobile unlock on a 5xx:** shows an AuthError instead of the offline fallback (Phase 3 item 10 territory).
 9. **Phase 3 state when its session stopped (2026-10-06 ~14:15)** (verify before relying on it):
    - The 30s session cache in `OnTokenValidated` existed around 13:35 (it accepted revoked tokens: `AccessLifecycleTests` ×2, `Phase1AuthContractTests.SwitchUserRevokesThisPhone`, and it changed `VehicleReportTests` query counts). It was gone again by 13:44: Program.cs has no `AddMemoryCache`.
-   - `tests/api/OperabilityTests.cs` still expects that cache (`AuthValidationCachesPerSession`, `RevokedUserIsRejectedAfterCacheExpiry`, `CacheDoesNotSurviveDeviceRevocation`).
-   - `/health/ready` filters on tag "ready", but no check is registered.
+   - `tests/api/OperabilityTests.cs` was updated at 13:54 to match: plain revocation tests and no cache expectations. The full API suite (284 tests, excluding the SqlServer category) passed at 14:40.
+   - `/health/ready` filters on tag "ready", but no check is registered, so readiness never touches the database. `ReadinessProbeChecksDatabase` asserts only a 200 and cannot fail. Phase 3 item 3 is therefore not done.
    - Mobile `ServerError` (new, a subclass of `OfflineError`) is treated as offline by `src/revenue/week.ts` (`instanceof OfflineError` fallback), so a server 500 shows the cached "No internet" list. `revenue.test.tsx` › "loads the week again with Try again after it failed" fails. `RevenueScreen.tsx` already excludes `ServerError`; `week.ts` does not.
    - `P3-*` plan IDs appear in comments in Program.cs and `tests/api/OperabilityTests.cs`, which the house rules forbid.
    - Already fixed by that session at 13:42: AuthTests `Seen` now ignores `X-Request-ID`.
    - Fixed in the Phase 2 session at 14:20: `src/revenue/week.ts` rethrows `ServerError` instead of treating it as offline, so `revenue.test.tsx` passes.
-10. **Owned by no phase** (from `findings/phase-4.md` N1–N9; for closure unless a phase folds them in):
+10. **`AuthService.outgoing` is not reset between execution-strategy retry attempts.** Phase 3 added `EnableRetryOnFailure`, so a code issued in a rolled-back attempt could still be mailed. Fix it in the Phase 5 item 8 split, or at closure.
+11. **Owned by no phase** (from `findings/phase-4.md` N1–N9 and the "Unowned" section of `findings/phase-5-6.md`; for closure unless a phase folds them in):
     - about 11 context queries per setup request;
     - heavy visibility predicates;
     - no ETag or reference-data caching;
