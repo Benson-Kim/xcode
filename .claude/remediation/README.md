@@ -32,7 +32,7 @@ Every phase prompt starts the same way:
 Update this table and the residuals at the end of every session.
 
 ## Commit hygiene
-Phases 1–2 and Phase 3's partial work are committed on `fix/format` (4318865, titled "phase 1" but covering all three) and pushed to origin. Phase 3's completion is its own commit, "fix(operability): complete phase 3 reliability work", not yet pushed. Commit each later phase on its own, including every new file it adds. Commits are authored as Benson-Kim with no AI trailers.
+Phases 1–2 and Phase 3's partial work are committed on `fix/format` (4318865, titled "phase 1" but covering all three) and pushed to origin. Phase 3's completion is its own commit (f7ecad7, "fix(operability): complete phase 3 reliability work"), pushed to `origin/fix/format`. That branch was recreated for it after PR #7 merged the earlier commits into `develop` (the integration branch; `master` holds only the initial commit). Commit each later phase on its own, including every new file it adds. Commits are authored as Benson-Kim with no AI trailers.
 
 ## Handover: mechanisms later phases build on
 - **Formatting:** `createFormatter(formats)` in `packages/shared/src/format.ts`, provided through `useFormats()` (web `lib/formats.ts`, mobile `src/lib/formats.ts`). Helpers take a `Formatter`. There is no global formatter.
