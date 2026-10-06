@@ -130,6 +130,47 @@ it("unlocks without internet against the PIN check the phone kept", async () => 
   expect(screen.getByText("No internet. You are seeing what this phone saved at your last sign in.")).toBeTruthy();
 });
 
+it.each([500, 503])("unlocks offline when the server answers %i, as it does without internet", async (status) => {
+  await trustPhone();
+  const api = fakeApi();
+  api.on("auth/unlock", [status, { title: "Server error" }]);
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+
+  await typePin("4826");
+  await screen.findByText("Hi Antony");
+  expect(screen.getByText("No internet. You are seeing what this phone saved at your last sign in.")).toBeTruthy();
+  expect(screen.queryByText("The service is not available right now. Try again shortly.")).toBeNull();
+});
+
+it("counts a wrong PIN as an offline try when the server answers 503 to an unlock", async () => {
+  await trustPhone();
+  fakeApi().on("auth/unlock", [503, { title: "Service Unavailable" }]);
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+
+  await typePin("9999");
+  await screen.findByText("Wrong PIN. 4 tries left.");
+  await typePin("9999");
+  await screen.findByText("Wrong PIN. 3 tries left.");
+  await typePin("4826");
+  await screen.findByText("Hi Antony");
+});
+
+it("still says the service is unavailable when a first sign-in meets a server error", async () => {
+  const api = fakeApi();
+  api.on("auth/sign-in", [503, { title: "Service Unavailable" }]);
+  await startApp();
+  await fireEvent.changeText(await screen.findByLabelText("Mobile number"), "0733520614");
+  await fireEvent.press(screen.getByText("Continue"));
+  await screen.findByText("Enter the PIN for this number");
+  await typePin("4826");
+
+  await screen.findByText("The service is not available right now. Try again shortly.");
+  expect(screen.queryByText("Hi Antony")).toBeNull();
+  expect(api.sent("auth/unlock")).toEqual([]);
+});
+
 // After the person's number changed elsewhere, the server refuses the old number with the PIN they still know.
 it("does not count the PIN the phone knows as wrong when the server refuses it", async () => {
   await trustPhone();
