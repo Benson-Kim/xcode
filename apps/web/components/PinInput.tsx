@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { PIN_HELP, validatePin } from "@xcode/shared";
-import { AuthField, AuthFieldError, AuthInput } from "./authControls";
-import { LinkButton } from "./ui";
+
+import { PIN_HELP, validatePin } from "@xcode/shared/auth";
+
+import { AlertIcon, Field, LinkButton, TextInput } from "./ui";
 
 export function PinInput({
   value,
@@ -18,19 +19,25 @@ export function PinInput({
   const error = newPin && value.length > 0 ? validatePin(value) : null;
 
   return (
-    <AuthField
+    <Field
       label={newPin ? "New PIN" : "PIN"}
-      htmlFor="pin"
+      id="pin"
       action={
         !newPin && (
-          <LinkButton align="end" compact aria-controls="pin" aria-pressed={visible} onClick={() => setVisible((current) => !current)}>
+          <LinkButton
+            align="end"
+            compact
+            aria-controls="pin"
+            aria-pressed={visible}
+            onClick={() => setVisible((current) => !current)}
+          >
             {visible ? "Hide" : "Show"}
           </LinkButton>
         )
       }
     >
-      <AuthInput
-        digits
+      <TextInput
+        className="text-[22px] tracking-[0.4em] placeholder:text-[17px] placeholder:tracking-normal"
         id="pin"
         name="pin"
         type={visible ? "text" : "password"}
@@ -42,11 +49,21 @@ export function PinInput({
         autoComplete={newPin ? "new-password" : "current-password"}
         required
         value={value}
-        onChange={(event) => onChange(event.target.value.replace(/[^0-9]/g, ""))}
+        onChange={(event) =>
+          onChange(event.target.value.replace(/[^0-9]/g, ""))
+        }
         aria-invalid={Boolean(error)}
         aria-describedby={error ? "pin-help" : undefined}
       />
-      {error && <AuthFieldError id="pin-help">{PIN_HELP}</AuthFieldError>}
-    </AuthField>
+      {error && (
+        <p
+          id="pin-help"
+          className="m-0 flex items-start gap-1.5 text-sm text-red"
+        >
+          <AlertIcon className="mt-px shrink-0" />
+          {PIN_HELP}
+        </p>
+      )}
+    </Field>
   );
 }

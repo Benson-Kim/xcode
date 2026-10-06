@@ -1,4 +1,5 @@
 import { expect, it, vi } from "vitest";
+
 import { fetchWithSession, onSessionExpired } from "../lib/session";
 
 const json = (status: number) => new Response("{}", { status });

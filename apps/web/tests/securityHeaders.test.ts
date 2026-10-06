@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
+
 import config from "../next.config";
 
 afterEach(() => vi.unstubAllEnvs());

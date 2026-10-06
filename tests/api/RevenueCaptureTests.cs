@@ -207,7 +207,7 @@ public sealed class RevenueCaptureTests : IDisposable
         // Someone who may correct the day changes it, so the clerk's queued entry is no longer an identical replay.
         Assert.Equal(HttpStatusCode.OK, (await Put(admin, vehicle, today, amount: 1400m, version: 1)).StatusCode);
 
-        // D5: authorization comes before state disclosure. A capture-only clerk may not correct a past day, so the
+        // Authorization comes before state disclosure. A capture-only clerk may not correct a past day, so the
         // replay is refused and the saved record is never handed to them, with or without a version.
         var stale = await Put(clerk, vehicle, today, amount: 1500m);
         Assert.Equal(HttpStatusCode.Forbidden, stale.StatusCode);
@@ -245,6 +245,25 @@ public sealed class RevenueCaptureTests : IDisposable
         Assert.Equal(409, problem.GetProperty("status").GetInt32());
         Assert.False(problem.TryGetProperty("current", out _));
         Assert.Equal(HttpStatusCode.OK, (await Put(owner, vehicle, today, amount: 1500m)).StatusCode);
+    }
+
+    [Fact]
+    public async Task AConcurrentUpdateRaceReturns409NotAServerError()
+    {
+        var (today, company) = await Arrange();
+        var vehicle = await Vehicle(app, company, "KAA 162A", today.AddDays(-10));
+        await Records(app, vehicle, today.AddDays(-10), today.AddDays(-1));
+        using var owner = await app.SignIn(Owner);
+        Assert.Equal(HttpStatusCode.OK, (await Put(owner, vehicle, today, amount: 1500m)).StatusCode);
+
+        app.Database.Reset();
+        app.Database.Interleave("RevenueRecords", "UPDATE \"RevenueRecords\" SET \"Version\" = \"Version\" + 1");
+        var raced = await Put(owner, vehicle, today, amount: 1700m, version: 1);
+        Assert.Equal(HttpStatusCode.Conflict, raced.StatusCode);
+        Assert.Equal(1, app.Database.Transactions);
+        var problem = await Body(raced);
+        Assert.Equal(409, problem.GetProperty("status").GetInt32());
+        Assert.Equal("This day was changed by another save.", problem.GetProperty("title").GetString());
     }
 
     [Fact]
@@ -438,7 +457,7 @@ public sealed class RevenueCaptureTests : IDisposable
     private sealed record Cell(DateOnly Date, string Status, decimal Expected, decimal? Amount, string? Reason, string? Note,
         bool CanEdit, bool EditedAfterCapture, long? Version);
 
-    // D4: recorded revenue never disappears. A lifecycle change that would put a captured day outside the
+    // Recorded revenue never disappears. A lifecycle change that would put a captured day outside the
     // vehicle's time in the fleet is refused, and the refusal names the day.
     [Fact]
     public async Task ALifecycleChangeCannotHideADayThatHasARecord()

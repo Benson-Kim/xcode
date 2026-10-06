@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { MAX_PERCENT_SHOWN, percentText } from "../lib/format";
+
+import { MAX_PERCENT_SHOWN, percentText } from "@xcode/shared/format";
 
 it("shows a share of a target as it is, up to 999%", () => {
   expect(percentText(0)).toBe("0%");

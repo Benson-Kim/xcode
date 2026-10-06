@@ -1,6 +1,7 @@
 // @vitest-environment node
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
 import { GET, POST, PUT } from "../app/api/setup/[...path]/route";
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (jar.has(name) ? { value: jar.get(name) } : undefined) }) }));
@@ -114,4 +115,26 @@ it("never forwards an empty body, which fetch would send as text/plain and the A
   const init = fetcher.mock.calls[0][1];
   expect(init.body).toBeUndefined();
   expect(init.headers["Content-Type"]).toBeUndefined();
+});
+
+it("turns an upstream 5xx into a 503 with a request id", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response("stack trace", { status: 502 }));
+  vi.stubGlobal("fetch", fetcher);
+  const result = await get(["people"]);
+  expect(result.status).toBe(503);
+  expect(result.headers.get("Cache-Control")).toBe("no-store");
+  const body = await result.json();
+  expect(body).toEqual({ status: "service_unavailable", requestId: expect.any(String) });
+  expect(fetcher.mock.calls[0][1].headers["X-Request-ID"]).toBe(body.requestId);
+});
+
+it("answers 503 with no-store and logs when the API cannot be reached", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+  const result = await get(["people"]);
+  expect(result.status).toBe(503);
+  expect(result.headers.get("Cache-Control")).toBe("no-store");
+  const body = await result.json();
+  expect(body).toEqual({ status: "service_unavailable", requestId: expect.any(String) });
+  expect(JSON.parse(log.mock.calls[0][0] as string)).toMatchObject({ requestId: body.requestId, operation: "people" });
 });

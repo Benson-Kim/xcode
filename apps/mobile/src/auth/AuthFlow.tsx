@@ -1,22 +1,26 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNetworkState } from "expo-network";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
 import {
   AuthError,
+  pauseSeconds,
   validatePin,
   type AuthResponse,
-} from "@xcode/shared";
+} from "@xcode/shared/auth";
+import {
+  initials,
+  formatPhone,
+  maskPhone,
+  normalisePhone,
+  phoneError,
+} from "@xcode/shared/format";
+
 import {
   OfflineError,
   authApi,
   forgetThisPhone,
   keepSession,
 } from "../lib/api";
-import {
-  formatPhone,
-  maskPhone,
-  normalisePhone,
-  phoneError,
-} from "../lib/phone";
 import {
   DEFAULT_PIN_POLICY,
   OFFLINE_UNLOCK_HOURS,
@@ -27,7 +31,7 @@ import {
   savePinCheck,
   type StoredPerson,
 } from "../lib/storage";
-import { fetchPerson, initials } from "../session";
+import { fetchPerson } from "../session";
 import { LinkButton } from "../ui";
 import { AuthLayout, type BrandInfo } from "./AuthLayout";
 import { LinkRow, PinPad, type PadHeader } from "./PinPad";
@@ -82,19 +86,23 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
   const [remaining, setRemaining] = useState(0);
   const [busy, setBusy] = useState(false);
 
-  // Never rendered: the PIN behind a new-phone challenge (so "Send a new code" can repeat that sign-in and
-  // the phone can keep its offline check afterwards), the code a new PIN will be saved with, and wrong-PIN counts.
   const challengePin = useRef("");
   const verifiedCode = useRef("");
   const codeTries = useRef(0);
   const pinTries = useRef<Record<string, number>>({});
+  const completionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completing = useRef(false);
 
   const trustedHere = Boolean(person && person.phoneNumber === phone);
-  // Wrong PINs before sign-in pauses, and for how long: the organization's policy as this phone last loaded it
-  // (5 and 15 minutes until it has). The phone counts so it can say how many tries are left and pause offline unlock.
   const policy = trustedHere && person ? person : DEFAULT_PIN_POLICY;
   const triesAllowed = policy.lockoutThreshold;
-  const pauseSeconds = policy.lockoutMinutes * 60;
+  const lockoutSeconds = policy.lockoutMinutes * 60;
+
+  useEffect(() => {
+    return () => {
+      if (completionTimer.current) clearTimeout(completionTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -105,7 +113,7 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
   useEffect(() => {
     if (!pausedUntil) return;
     const tick = () => {
-      const left = Math.max(0, Math.ceil((pausedUntil - Date.now()) / 1000));
+      const left = pauseSeconds(pausedUntil);
       setRemaining(left);
       if (left > 0) return;
       setPausedUntil(0);
@@ -116,11 +124,9 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
     tick();
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-    // openPad only reads state that this effect's inputs already cover.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pausedUntil]);
 
-  // A pause from wrong PINs typed offline outlives restarting the app.
   useEffect(() => {
     if (!trusted) return;
     void loadOfflineTries().then((tries) => {
@@ -130,6 +136,10 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
   }, []);
 
   function openPad(next: Mode, error = "") {
+    if (completionTimer.current) {
+      clearTimeout(completionTimer.current);
+      completionTimer.current = null;
+    }
     setMode(next);
     setPin("");
     setPadError(error);
@@ -138,7 +148,7 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
 
   function pause(until: number) {
     setPausedUntil(until);
-    setRemaining(Math.max(0, Math.ceil((until - Date.now()) / 1000)));
+    setRemaining(pauseSeconds(until));
     setStep("paused");
   }
 
@@ -146,7 +156,7 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
     setShake((value) => value + 1);
     const count = (pinTries.current[phone] ?? 0) + 1;
     pinTries.current[phone] = count;
-    if (count >= triesAllowed) return pause(Date.now() + pauseSeconds * 1000);
+    if (count >= triesAllowed) return pause(Date.now() + lockoutSeconds * 1000);
     const left = triesAllowed - count;
     setPadError(`Wrong PIN. ${left} ${left === 1 ? "try" : "tries"} left.`);
   }
@@ -168,25 +178,15 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
     await savePinCheck(usedPin);
     await saveOfflineTries({ count: 0, pausedUntil: 0 });
     pinTries.current[phone] = 0;
-    const fallback =
-      trustedHere && person
-        ? person
-        : {
-            phoneNumber: phone,
-            firstName: "",
-            lastName: "",
-            role: "",
-            permissions: [],
-            pinLength: usedPin.length,
-            ...DEFAULT_PIN_POLICY,
-          };
-    onSignedIn(
-      await fetchPerson(phone, usedPin.length).catch(() => ({
-        ...fallback,
-        pinLength: usedPin.length,
-      })),
-      false,
-    );
+    try {
+      const fetched = await fetchPerson(phone, usedPin.length);
+      onSignedIn(fetched, false);
+    } catch {
+      const message =
+        "Signed in, but your profile could not be loaded. Check your connection and try again.";
+      if (step === "code") setCodeError(message);
+      else setPadError(message);
+    }
   }
 
   function showCode(lead: string, result: AuthResponse) {
@@ -245,16 +245,20 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
     setPin(next);
     setPadError("");
     if (longPin || next.length < pinLength) return;
-    // A moment with every dot filled, so the last press registers, before the PIN is checked.
     setBusy(true);
-    setTimeout(() => {
-      setBusy(false);
+    if (completionTimer.current) clearTimeout(completionTimer.current);
+    completionTimer.current = setTimeout(() => {
+      completionTimer.current = null;
       void complete(next);
     }, 180);
   }
 
   async function complete(entered: string) {
+    if (completing.current) return;
+    completing.current = true;
+    setBusy(true);
     setPin("");
+    try {
     if (mode === "choose") {
       const weak = validatePin(entered);
       if (weak) {
@@ -276,13 +280,16 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
           "The two PINs did not match. Choose your PIN again.",
         );
       }
-      return savePin(entered);
+      return await savePin(entered);
     }
-    return checkPin(entered);
+    return await checkPin(entered);
+    } finally {
+      completing.current = false;
+      setBusy(false);
+    }
   }
 
   async function checkPin(entered: string) {
-    setBusy(true);
     try {
       const result = await authApi(mode === "unlock" ? "unlock" : "sign-in", {
         phoneNumber: phone,
@@ -299,7 +306,7 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
       if (error instanceof AuthError && error.response.status === "paused")
         return pause(
           Date.now() +
-            (error.response.retryAfterSeconds ?? pauseSeconds) * 1000,
+            (error.response.retryAfterSeconds ?? lockoutSeconds) * 1000,
         );
       // The PIN this phone last signed in with, refused online: the person's number (or PIN) was changed
       // elsewhere, so another try cannot help and must not count toward a pause.
@@ -315,7 +322,7 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
       if (error instanceof AuthError && error.httpStatus === 401)
         return wrongPin();
       if (error instanceof OfflineError && mode === "unlock")
-        return unlockOffline(entered);
+        return await unlockOffline(entered);
       setPadError(
         failure(
           error,
@@ -332,27 +339,33 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
     const match = await matchesPinCheck(entered);
     if (match === null || !person)
       return setPadError("No internet. Connect to unlock this phone.");
-    // D7: after 72 hours away from the server the phone stops opening on its PIN alone. Captures waiting
-    // to be sent are kept, so connecting once costs nothing but the connection.
+
     const until = await offlineUnlockUntil();
     if (until !== null && Date.now() > until)
       return setPadError(
         `This phone has been offline for more than ${OFFLINE_UNLOCK_HOURS} hours. Connect to the internet and unlock once to carry on. Anything waiting to be sent is kept.`,
       );
+
     const tries = await loadOfflineTries();
+
     if (match) {
       await saveOfflineTries({ count: 0, pausedUntil: 0 });
       return onSignedIn(person, true);
     }
+
     const count = tries.count + 1;
     setShake((value) => value + 1);
+
     if (count >= triesAllowed) {
-      const until = Date.now() + pauseSeconds * 1000;
+      const until = Date.now() + lockoutSeconds * 1000;
       await saveOfflineTries({ count: 0, pausedUntil: until });
       return pause(until);
     }
+
     await saveOfflineTries({ count, pausedUntil: 0 });
+
     const left = triesAllowed - count;
+
     setPadError(`Wrong PIN. ${left} ${left === 1 ? "try" : "tries"} left.`);
   }
 
@@ -363,6 +376,7 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
         flow === "setup" ? "setup-pin/complete" : "pin-reset/complete",
         { phoneNumber: phone, pin: entered, code: verifiedCode.current },
       );
+
       if (result.status === "authenticated") await signedIn(result, entered);
     } catch (error) {
       if (
@@ -404,13 +418,16 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
       return setCodeError(
         entered ? "The code has 6 numbers." : "Enter the code from your email.",
       );
+
     setBusy(true);
+
     try {
       if (flow === "signin") {
         const result = await authApi("verify-device", {
           phoneNumber: phone,
           code: entered,
         });
+
         if (result.status === "authenticated")
           await signedIn(result, challengePin.current);
       } else {
@@ -543,7 +560,7 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
   const header: PadHeader = personal
     ? {
         kind: "person",
-        initials: known ? initials(known) : "",
+        initials: known ? initials(known.firstName, known.lastName) : "",
         title: known?.firstName
           ? `${mode === "unlock" ? "Welcome back" : "Hi"}, ${known.firstName}`
           : formatPhone(phone),

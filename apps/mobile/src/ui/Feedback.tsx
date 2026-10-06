@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
+
 import { Icon } from "./Icon";
 import { Text } from "./Text";
 import { useTheme } from "./theme";

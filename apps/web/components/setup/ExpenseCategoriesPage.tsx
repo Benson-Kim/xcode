@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+
+import { plural } from "@xcode/shared/format";
+
 import { apiRequest, useStreamedList } from "../../lib/data";
-import { plural } from "../../lib/format";
-import { formatDateOnly } from "../recurringPresentation";
+import { useFormats } from "../../lib/formats";
 import type { ExpenseBucket, ExpenseCategory, ExpenseItem } from "../../lib/types";
 import {
   Banner,
@@ -43,6 +45,7 @@ const NAME_LIMIT = 100;
 export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
   const categories = useStreamedList<ExpenseCategory>("setup/expense-categories", 100);
   const toast = useToast();
+  const { formatDateOnly } = useFormats();
   const [tab, setTab] = useState<"items" | "categories">("items");
   const [status, setStatus] = useState<Status>("all");
   const [categoryFilter, setCategoryFilter] = useState("all");

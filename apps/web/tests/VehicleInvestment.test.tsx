@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+
 import { VehiclesPage } from "../components/setup";
 import type { VehicleInvestment } from "../lib/types";
 import { renderInApp } from "./renderInApp";

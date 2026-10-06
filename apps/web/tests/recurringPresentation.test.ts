@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
+
+import { firstOfMonth } from "@xcode/shared/dates";
+
 import * as presentation from "../components/recurringPresentation";
-import { firstOfMonth, recurringFrequency, recurringMonthlyEstimate, recurringNextPostings } from "../components/recurringPresentation";
+import { recurringFrequency, recurringMonthlyEstimate, recurringNextPostings } from "../components/recurringPresentation";
 
 const schedule = { day: null, lastDay: false, start: "2026-01-01", end: null, stoppedFrom: null, month: null };
 
@@ -25,6 +28,40 @@ it("estimates a month as a twelfth of a yearly amount", () => {
   expect(recurringMonthlyEstimate(1000, 1)).toBe(30400);
   expect(recurringMonthlyEstimate(700, 2)).toBe(3045);
   expect(recurringMonthlyEstimate(3000, 3)).toBe(3000);
+});
+
+it("clamps day 31 to the final valid day of shorter months", () => {
+  const monthly31 = { ...schedule, frequency: 3, day: 31 };
+  const postings = recurringNextPostings(monthly31, "2026-01-01", 6);
+  expect(postings).toEqual([
+    "2026-01-31",
+    "2026-02-28",
+    "2026-03-31",
+    "2026-04-30",
+    "2026-05-31",
+    "2026-06-30",
+  ]);
+});
+
+it("clamps day 31 in a leap year February", () => {
+  const monthly31 = { ...schedule, frequency: 3, day: 31 };
+  const postings = recurringNextPostings(monthly31, "2028-02-01", 2);
+  expect(postings).toEqual(["2028-02-29", "2028-03-31"]);
+});
+
+it("clamps day 30 for February", () => {
+  const monthly30 = { ...schedule, frequency: 3, day: 30 };
+  const postings = recurringNextPostings(monthly30, "2026-02-01", 3);
+  expect(postings).toEqual(["2026-02-28", "2026-03-30", "2026-04-30"]);
+});
+
+it("clamps yearly day 31 to shorter months", () => {
+  const yearly31Feb = { ...schedule, frequency: 4, month: 2, day: 31 };
+  expect(recurringNextPostings(yearly31Feb, "2026-01-01", 3)).toEqual([
+    "2026-02-28",
+    "2027-02-28",
+    "2028-02-29",
+  ]);
 });
 
 it("takes the earliest start from the business date's month, not the computer clock", () => {

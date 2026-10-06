@@ -20,10 +20,17 @@ export async function apiRequest<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetchWithSession(`/api/${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-  });
+  let response: Response;
+  try {
+    response = await fetchWithSession(`/api/${path}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    });
+  } catch (error) {
+    if (error instanceof TypeError)
+      throw new ApiError("Unable to reach the server. Check your connection.", 0, {});
+    throw error;
+  }
   const body = await response.json().catch(() => ({}));
   // The API's detail says what to fix;
   // its title is only the category (for example "Invalid setup change"). A refusal with no detail is said in plain

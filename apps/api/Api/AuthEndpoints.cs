@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using System.Net.Mail;
 using System.Security.Claims;
@@ -8,8 +9,45 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Api;
 
-// Serializes local requests; serializable database transactions also protect multi-instance state.
-public sealed class AuthGate { public SemaphoreSlim Semaphore { get; } = new(1, 1); }
+// Per-user locking: serializes auth for the same account while unrelated users proceed concurrently.
+// Capped at MaxEntries to prevent memory exhaustion from attackers probing many phone numbers.
+public sealed class AuthGate
+{
+    private const int MaxEntries = 10_000;
+    private readonly ConcurrentDictionary<string, Entry> locks = new();
+
+    private sealed class Entry
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+        public long LastUsedTicks = Environment.TickCount64;
+    }
+
+    public SemaphoreSlim For(string key)
+    {
+        var entry = locks.GetOrAdd(key, _ => new Entry());
+        entry.LastUsedTicks = Environment.TickCount64;
+
+        if (locks.Count > MaxEntries)
+            Evict();
+
+        return entry.Semaphore;
+    }
+
+    private void Evict()
+    {
+        var target = (int)(MaxEntries * 0.8);
+        var candidates = locks
+            .Where(kv => kv.Value.Semaphore.CurrentCount > 0)
+            .OrderBy(kv => kv.Value.LastUsedTicks)
+            .ToList();
+
+        foreach (var kv in candidates)
+        {
+            if (locks.Count <= target) break;
+            locks.TryRemove(kv);
+        }
+    }
+}
 public static class AuthEndpoints
 {
     public static void MapAuth(this WebApplication app)
@@ -56,30 +94,36 @@ public static class AuthEndpoints
             .RequireAuthorization().Produces<AuthSessionResponse>();
     }
 
-    // Documents the AuthResponse body that each listed status carries.
     private static RouteHandlerBuilder Answers(this RouteHandlerBuilder endpoint, params int[] statuses)
     {
         foreach (var status in statuses)
             endpoint.Produces<AuthResponse>(status);
         return endpoint;
     }
+    private static string LockKey(AuthRequest r) =>
+        PhoneNumber.Normalize(r.PhoneNumber) is { Length: > 0 } phone ? phone : $"device:{r.DeviceId}";
+
     private static async Task<IResult> Run(AuthRequest r, AuthDb db, AuthGate gate, AuthService s, Func<Task<AuthResult>> action, CancellationToken ct)
     {
         if (r.DeviceId is null || r.DeviceId.Length is < 1 or > 128 || r.PhoneNumber is null || r.PhoneNumber.Length > 14 || r.Email is null || r.Email.Length > 320 ||
-            (r.Email.Length > 0 && !MailAddress.TryCreate(r.Email, out _)) || r.Pin is null || r.Pin.Length > 128 || r.Code is null || r.Code.Length > 32 || r.RefreshToken is null || r.RefreshToken.Length > 256)
+            (r.Email.Length > 0 && !MailAddress.TryCreate(r.Email, out _)) || r.Pin is null || r.Pin.Length > PinRules.MaximumLength || r.Code is null || r.Code.Length > 32 || r.RefreshToken is null || r.RefreshToken.Length > 256)
             return Results.Json(new AuthResponse("invalid_request"), statusCode: 400);
         AuthResult result;
-        await gate.Semaphore.WaitAsync(ct);
+        var semaphore = gate.For(LockKey(r));
+        await semaphore.WaitAsync(ct);
         try
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-            result = await action();
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
+            var strategy = db.Database.CreateExecutionStrategy();
+            result = await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+                var r2 = await action();
+                await db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+                return r2;
+            });
         }
-        finally { gate.Semaphore.Release(); }
-        // A verification email goes out only now: after the commit, so a failed commit sends nothing, and outside the
-        // gate, so a slow mail server holds up no one else's sign-in.
+        finally { semaphore.Release(); }
         result = await s.Deliver(result, ct);
         return Results.Json(result.Body, statusCode: result.HttpStatus);
     }

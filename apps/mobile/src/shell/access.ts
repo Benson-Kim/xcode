@@ -1,5 +1,15 @@
-import { firstDayOfWeek } from "../lib/format";
-import { dayLabel, isDate, rangeLabel, shiftDate } from "../revenue/dates";
+import {
+  revenuePeriodLabel,
+  type RevenuePeriod,
+} from "@xcode/shared/revenue";
+
+import {
+  dayLabel,
+  isDate,
+  rangeLabel,
+  shiftDate,
+  startOfWeek,
+} from "../revenue/dates";
 import type { IconName } from "../ui";
 
 export type PermissionGroup = {
@@ -58,7 +68,7 @@ export const allowedTabs = (permissions: string[]) =>
     (tab) => !tab.any || tab.any.some((key) => permissions.includes(key)),
   );
 
-export type Period = "today" | "week" | "month";
+export type Period = RevenuePeriod;
 
 // The dashboard cards, in the order XCODE Web shows them, each for the people with its permission. Cards whose
 // figures the API does not serve yet say so (unavailable) rather than showing zeros. In sub, {period} stands for the
@@ -76,34 +86,74 @@ export const DASHBOARD_CARDS: {
   // A card that always covers this period, whichever the person picks.
   period?: Period;
 }[] = [
-  { permission: "dash.capture", title: "Today's revenue", action: "Capture revenue", tab: "revenue", primary: true },
-  { permission: "dash.float", title: "My petty cash float", sub: "Cash in hand now", unavailable: "Petty cash is not connected yet." },
+  {
+    permission: "dash.capture",
+    title: "Today's revenue",
+    action: "Capture revenue",
+    tab: "revenue",
+    primary: true,
+  },
+  {
+    permission: "dash.float",
+    title: "My petty cash float",
+    sub: "Cash in hand now",
+    unavailable: "Petty cash is not connected yet.",
+  },
   { permission: "dash.revenue", title: "Revenue", sub: "{period}" },
-  { permission: "dash.net", title: "Net contribution", sub: "Revenue less all costs. {period}", unavailable: "Needs cost totals, which are not connected yet." },
-  { permission: "dash.costs", title: "Money out", sub: "{period}. Fuel and crew pay are not tracked; revenue is recorded net of them.", unavailable: "Cost totals are not connected yet." },
-  { permission: "dash.gaps", title: "Missing revenue days", period: "month", action: "Fill the gaps", tab: "revenue", actionNeeds: ["revenue.capture", "revenue.correct"] },
-  { permission: "dash.pettycash", title: "Petty cash to approve", sub: "All managers", unavailable: "Petty cash is not connected yet." },
-  { permission: "dash.commitments", title: "Yearly items due", sub: "Next 30 days", unavailable: "Yearly items are not connected yet." },
-  { permission: "dash.investment", title: "Money invested", sub: "Against what has come back", unavailable: "What has come back is not connected yet." },
+  {
+    permission: "dash.net",
+    title: "Net contribution",
+    sub: "Revenue less all costs. {period}",
+    unavailable: "Needs cost totals, which are not connected yet.",
+  },
+  {
+    permission: "dash.costs",
+    title: "Money out",
+    sub: "{period}. Fuel and crew pay are not tracked; revenue is recorded net of them.",
+    unavailable: "Cost totals are not connected yet.",
+  },
+  {
+    permission: "dash.gaps",
+    title: "Missing revenue days",
+    period: "month",
+    action: "Fill the gaps",
+    tab: "revenue",
+    actionNeeds: ["revenue.capture", "revenue.correct"],
+  },
+  {
+    permission: "dash.pettycash",
+    title: "Petty cash to approve",
+    sub: "All managers",
+    unavailable: "Petty cash is not connected yet.",
+  },
+  {
+    permission: "dash.commitments",
+    title: "Yearly items due",
+    sub: "Next 30 days",
+    unavailable: "Yearly items are not connected yet.",
+  },
+  {
+    permission: "dash.investment",
+    title: "Money invested",
+    sub: "Against what has come back",
+    unavailable: "What has come back is not connected yet.",
+  },
   { permission: "dash.edits", title: "Edited after capture", sub: "{period}" },
 ];
 
-const PERIOD_NAMES: Record<Period, string> = {
-  today: "Today",
-  week: "This week",
-  month: "This month",
-};
-
-// "Today, 27 Sep 2026", "This week, 21 to 27 Sep 2026", "This month, 1 to 27 Sep 2026". The week starts on the
-// organization's first day of the week, as the API counts its dashboard week (Monday until the phone knows).
 // Today is the organization's business date ("yyyy-MM-dd"), never the phone's clock; until the phone has one,
-// the label leaves the date out.
-export function periodLabel(period: Period, businessDate?: string, weekStartsOn = firstDayOfWeek()) {
-  const name = PERIOD_NAMES[period];
+export function periodLabel(
+  period: Period,
+  businessDate: string | undefined,
+  weekStartsOn: number,
+) {
+  const name = revenuePeriodLabel(period);
+
   if (!isDate(businessDate)) return name;
   if (period === "today") return `${name}, ${dayLabel(businessDate)}`;
   if (period === "month") return `${name}, 1 to ${dayLabel(businessDate)}`;
-  const weekday = new Date(`${businessDate}T00:00:00Z`).getUTCDay();
-  const start = shiftDate(businessDate, -((weekday - weekStartsOn + 7) % 7));
+
+  const start = startOfWeek(businessDate, weekStartsOn);
+
   return `${name}, ${rangeLabel(start, shiftDate(start, 6))}`;
 }

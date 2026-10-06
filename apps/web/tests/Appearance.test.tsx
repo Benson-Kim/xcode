@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
+
 import { AppShell } from "../components/AppShell";
 import { OrganizationSettingsView } from "../components/OrganizationSettingsView";
-import { AppearanceProvider, type Appearance } from "../lib/appearance";
-import { configureFormats, kes } from "../lib/format";
 import { ToastProvider } from "../components/ui";
+import { AppearanceProvider, type Appearance } from "../lib/appearance";
 
 const appearance = (overrides: Partial<Appearance["branding"]> = {}): Appearance => ({
   organizationName: "Demo Fleet",
@@ -16,14 +16,20 @@ const appearance = (overrides: Partial<Appearance["branding"]> = {}): Appearance
   fontScale: 1,
 });
 
-afterEach(() => configureFormats(null));
+const dashboard = { period: "month", from: "2026-09-01", through: "2026-09-30", businessDate: "2026-09-30", revenue: 1200, expected: null, percent: null, capturedToday: null, vehiclesToday: null, missingDays: null, missingVehicles: null, editedRecords: null };
 
 it("applies the organization's branding, formats and preferences across the app", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string) =>
       new Response(
-        JSON.stringify(input.includes("appearance") ? appearance() : { userId: "me", firstName: "Test", lastName: "User", role: "Owner", permissions: [] }),
+        JSON.stringify(
+          input.includes("appearance")
+            ? appearance()
+            : input.includes("dashboard")
+              ? dashboard
+              : { userId: "me", firstName: "Test", lastName: "User", role: "Owner", permissions: ["dash.revenue"] },
+        ),
         { status: 200 },
       ),
     ),
@@ -36,7 +42,7 @@ it("applies the organization's branding, formats and preferences across the app"
   expect(document.documentElement.style.getPropertyValue("--color-brand")).toBe("#1B2A4A");
   expect(document.documentElement.dataset.reducedMotion).toBe("true");
   expect(document.title).toBe("North Star");
-  expect(kes(1200)).toBe("USD 1,200");
+  expect(await screen.findByText("USD 1,200")).toBeInTheDocument();
 });
 
 const settings = {

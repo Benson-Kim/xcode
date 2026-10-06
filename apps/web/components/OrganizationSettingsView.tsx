@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { apiRequest } from "../lib/data";
-import { useResource } from "../lib/data";
+
+import { weekdayName } from "@xcode/shared/dates";
+
 import { useAppearance } from "../lib/appearance";
-import { formatDateOnly } from "./recurringPresentation";
+import { apiRequest, useResource } from "../lib/data";
+import { useFormats } from "../lib/formats";
 import {
   Banner,
   BrandIcon,
@@ -77,15 +79,25 @@ type Section = keyof Pick<
   "organization" | "localization" | "branding" | "securityPolicy"
 >;
 
-type PolicyNumber = Exclude<keyof Settings["securityPolicy"], "passwordComplexity" | "allowPinSignIn">;
+type PolicyNumber = Exclude<
+  keyof Settings["securityPolicy"],
+  "passwordComplexity" | "allowPinSignIn"
+>;
 
 // The security policy's bounds, as the server checks them (OrganizationSecurityPolicy.Validate). The form uses them
 // for its inputs and hints, and checks every number before saving, including those it does not show.
-const POLICY_BOUNDS: Record<PolicyNumber, { min: number; max: number; label: string }> = {
+const POLICY_BOUNDS: Record<
+  PolicyNumber,
+  { min: number; max: number; label: string }
+> = {
   pinLength: { min: 4, max: 8, label: "Shortest new PIN" },
   lockoutThreshold: { min: 3, max: 10, label: "Wrong PINs before a pause" },
   lockoutMinutes: { min: 1, max: 60, label: "Pause length in minutes" },
-  accessTokenMinutes: { min: 1, max: 15, label: "Session renews every (minutes)" },
+  accessTokenMinutes: {
+    min: 1,
+    max: 15,
+    label: "Session renews every (minutes)",
+  },
   refreshTokenDays: { min: 1, max: 90, label: "Stay signed in for (days)" },
   idleUnlockSeconds: { min: 30, max: 3600, label: "Idle unlock (seconds)" },
   passwordMinLength: { min: 12, max: 128, label: "Shortest password" },
@@ -94,13 +106,29 @@ const POLICY_BOUNDS: Record<PolicyNumber, { min: number; max: number; label: str
 
 // Every number outside its bounds, field by field, rather than the server's one-line refusal. Empty when all are in.
 function policyProblem(policy: Settings["securityPolicy"]) {
-  return (Object.entries(POLICY_BOUNDS) as [PolicyNumber, (typeof POLICY_BOUNDS)[PolicyNumber]][])
-    .filter(([key, { min, max }]) => !Number.isInteger(policy[key]) || policy[key] < min || policy[key] > max)
-    .map(([, { min, max, label }]) => `${label} must be a whole number from ${min} to ${max}.`)
+  return (
+    Object.entries(POLICY_BOUNDS) as [
+      PolicyNumber,
+      (typeof POLICY_BOUNDS)[PolicyNumber],
+    ][]
+  )
+    .filter(
+      ([key, { min, max }]) =>
+        !Number.isInteger(policy[key]) ||
+        policy[key] < min ||
+        policy[key] > max,
+    )
+    .map(
+      ([, { min, max, label }]) =>
+        `${label} must be a whole number from ${min} to ${max}.`,
+    )
     .join(" ");
 }
 
-const bounds = (key: PolicyNumber) => ({ min: String(POLICY_BOUNDS[key].min), max: String(POLICY_BOUNDS[key].max) });
+const bounds = (key: PolicyNumber) => ({
+  min: String(POLICY_BOUNDS[key].min),
+  max: String(POLICY_BOUNDS[key].max),
+});
 
 // The toast after each save. Saves carry no typed reason: the server writes one for the change log.
 const saved: Record<Section, string> = {
@@ -133,9 +161,6 @@ export function OrganizationSettingsView() {
   return <SettingsForm initial={loaded.data} onSaved={loaded.reload} />;
 }
 
-// Day numbers as the API stores them: 0 is Sunday.
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
 const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const LOGO_MAX_BYTES = 256 * 1024;
 
@@ -148,8 +173,15 @@ function readAsDataUrl(file: File) {
   });
 }
 
-function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => void }) {
+function SettingsForm({
+  initial,
+  onSaved,
+}: {
+  initial: Settings;
+  onSaved: () => void;
+}) {
   const toast = useToast();
+  const { formatDateOnly } = useFormats();
   // Saved settings show at once: the shell reloads branding and formats after each save.
   const { appearance, loading: appearanceLoading, refresh } = useAppearance();
   const [logoBusy, setLogoBusy] = useState(false);
@@ -173,11 +205,16 @@ function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => 
         ["Session renews every", policy.accessTokenMinutes, 1, 15],
         ["Stay signed in for", policy.refreshTokenDays, 1, 90],
       ];
-      const outside = limits.filter(([, current, min, max]) => !Number.isInteger(current) || current < min || current > max);
+      const outside = limits.filter(
+        ([, current, min, max]) =>
+          !Number.isInteger(current) || current < min || current > max,
+      );
       if (outside.length) {
         setErrors({
           ...errors,
-          securityPolicy: outside.map(([label, , min, max]) => `${label}: use ${min} to ${max}.`).join(" "),
+          securityPolicy: outside
+            .map(([label, , min, max]) => `${label}: use ${min} to ${max}.`)
+            .join(" "),
         });
         return;
       }
@@ -230,7 +267,11 @@ function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => 
         body: JSON.stringify({ value }),
       });
       setBusinessDateError("");
-      toast(value ? "Business date saved." : "Business date now follows the organization time zone.");
+      toast(
+        value
+          ? "Business date saved."
+          : "Business date now follows the organization time zone.",
+      );
       refresh();
       onSaved();
     } catch (reason) {
@@ -339,7 +380,12 @@ function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => 
               <TextInput
                 type="date"
                 // Without a held date the business date is the organization's calendar date.
-                value={held || initial.calendarDate || initial.effectiveBusinessDate || ""}
+                value={
+                  held ||
+                  initial.calendarDate ||
+                  initial.effectiveBusinessDate ||
+                  ""
+                }
                 max={initial.calendarDate}
                 onChange={(event) =>
                   setSettings({
@@ -383,7 +429,7 @@ function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => 
                 <Skeleton className="size-10 rounded-[10px]" />
               ) : logo ? (
                 // The logo is a data URL from the API, which next/image cannot optimise.
-                // eslint-disable-next-line @next/next/no-img-element
+
                 <img
                   src={logo}
                   alt={branding.logoAlt}
@@ -566,13 +612,14 @@ function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => 
                   })
                 }
               >
-                <option value="1">Monday</option>
-                <option value="0">Sunday</option>
-                <option value="6">Saturday</option>
+                <option value="1">{weekdayName(1)}</option>
+                <option value="0">{weekdayName(0)}</option>
+                <option value="6">{weekdayName(6)}</option>
                 {/* The API takes any day; one set elsewhere is shown as it is rather than as Monday. */}
                 {![0, 1, 6].includes(localization.firstDayOfWeek) && (
                   <option value={localization.firstDayOfWeek}>
-                    {WEEKDAYS[localization.firstDayOfWeek] ?? localization.firstDayOfWeek}
+                    {weekdayName(localization.firstDayOfWeek) ??
+                      localization.firstDayOfWeek}
                   </option>
                 )}
               </SelectInput>

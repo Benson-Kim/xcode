@@ -1,14 +1,17 @@
 "use client";
 
 import { useState } from "react";
+
+import { plural } from "@xcode/shared/format";
+
 import { useAppearance } from "../../lib/appearance";
 import { useResource, useStreamedList } from "../../lib/data";
-import { kes, plural } from "../../lib/format";
+import { useFormats } from "../../lib/formats";
 import type { ExpenseItemOption } from "../../lib/types";
+import { RecurringEditor } from "../RecurringEditor";
+import { recurringFrequency, recurringMonthlyEstimate, recurringNextPosting } from "../recurringPresentation";
 import { Banner, Button, CellNote, DataTable, FormSkeleton, PageHeader, RowButton, SegmentedControl, SelectInput, Spacer, StatusBadge, Td, Toolbar, Tr } from "../ui";
 import { costBucket, expenseBucketNames, type RecurringItem, type VehicleOption } from "./shared";
-import { formatDateOnly, recurringFrequency, recurringMonthlyEstimate, recurringNextPosting } from "../recurringPresentation";
-import { RecurringEditor } from "../RecurringEditor";
 
 type Filter = "all" | "cost" | "savings";
 type Status = "all" | "running" | "stopped";
@@ -23,6 +26,7 @@ export function RecurringPage({
   newForVehicle?: string;
 }) {
   const { appearance } = useAppearance();
+  const { formatDateOnly, kes } = useFormats();
   const recurring = useStreamedList<RecurringItem>("setup/recurring");
   const [filter, setFilter] = useState<Filter>("all");
   const [companyFilter, setCompanyFilter] = useState("all");

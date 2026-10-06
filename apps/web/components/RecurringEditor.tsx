@@ -1,17 +1,32 @@
 "use client";
 
 import { useState } from "react";
-import { useAppearance } from "../lib/appearance";
-import { apiRequest } from "../lib/data";
+
 import {
   firstOfMonth,
-  formatDateOnly,
-  monthNames,
+  MONTH_NAMES as monthNames,
   ordinal,
+  WEEKDAYS,
+} from "@xcode/shared/dates";
+import { plural } from "@xcode/shared/format";
+
+import { useAppearance } from "../lib/appearance";
+import { apiRequest } from "../lib/data";
+import { useFormats } from "../lib/formats";
+import type { ExpenseBucket, ExpenseItemOption } from "../lib/types";
+import {
+  RECURRING_FREQUENCY,
+  RECURRING_FREQUENCY_OPTIONS,
   recurringFrequency,
   recurringMonthlyEstimate,
   recurringNextPostings,
 } from "./recurringPresentation";
+import {
+  costBucket,
+  expenseBucketNames,
+  type RecurringItem,
+  type VehicleOption,
+} from "./setup/shared";
 import {
   BalancePanel,
   Banner,
@@ -39,14 +54,6 @@ import {
   TextInput,
   useToast,
 } from "./ui";
-import { kes, plural } from "../lib/format";
-import type { ExpenseBucket, ExpenseItemOption } from "../lib/types";
-import {
-  costBucket,
-  expenseBucketNames,
-  type RecurringItem,
-  type VehicleOption,
-} from "./setup/shared";
 
 type Props = {
   item?: RecurringItem;
@@ -89,22 +96,7 @@ type ItemChoice = {
 
 const NOTE_LIMIT = 200;
 
-// Every day (1) stays only on items saved before; savings post every week or every month.
-const frequencies = [
-  { value: 2, label: "Every week" },
-  { value: 3, label: "Every month" },
-  { value: 4, label: "Every year" },
-];
-
-const weekdays = [
-  { value: 1, label: "Monday" },
-  { value: 2, label: "Tuesday" },
-  { value: 3, label: "Wednesday" },
-  { value: 4, label: "Thursday" },
-  { value: 5, label: "Friday" },
-  { value: 6, label: "Saturday" },
-  { value: 0, label: "Sunday" },
-];
+const weekdays = [...WEEKDAYS.slice(1), WEEKDAYS[0]];
 
 // Splits a total into whole cents, giving the first vehicles the remainder so it adds up exactly.
 function splitAmountEvenly(total: number, vehicleIds: string[]) {
@@ -120,7 +112,6 @@ function splitAmountEvenly(total: number, vehicleIds: string[]) {
   );
 }
 
-// Whole amounts without ".00", as the design shows them.
 function formatShare(amount: number) {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
 }
@@ -137,27 +128,37 @@ export function RecurringEditor({
   loadError,
 }: Props) {
   const toast = useToast();
+  const { formatDateOnly, kes } = useFormats();
   const { appearance } = useAppearance();
-  // "Today" is always the organization's business date, never the computer clock. It is undefined until the
-  // appearance has loaded, and a new item's start date defaults to it as soon as it arrives.
   const today = appearance?.businessDate;
   const earliestStart = today ? firstOfMonth(today) : undefined;
   const isNew = !item;
+
   const [kind, setKind] = useState(item?.kind || 1);
   const [expenseItemId, setExpenseItemId] = useState(item?.expenseItemId ?? "");
   const [name, setName] = useState(item?.kind === 2 ? item.name : "");
   const [note, setNote] = useState(item?.note ?? "");
-  // The saved total is the sum of every share, including those of vehicles not in the fleet today, so an existing
-  // item always opens balanced.
   const [amount, setAmount] = useState(
-    item ? formatShare(item.allocations.reduce((sum, allocation) => sum + allocation.amount, 0)) : "",
+    item
+      ? formatShare(
+          item.allocations.reduce(
+            (sum, allocation) => sum + allocation.amount,
+            0,
+          ),
+        )
+      : "",
   );
-  const [frequency, setFrequency] = useState(item?.frequency || 3);
+  const [frequency, setFrequency] = useState(
+    item?.frequency || RECURRING_FREQUENCY.monthly,
+  );
   const [weekday, setWeekday] = useState(
-    String(item?.frequency === 2 ? (item.day ?? 6) : 6),
+    String(
+      item?.frequency === RECURRING_FREQUENCY.weekly ? (item.day ?? 6) : 6,
+    ),
   );
   const [monthDay, setMonthDay] = useState(
-    item?.frequency === 3 || item?.frequency === 4
+    item?.frequency === RECURRING_FREQUENCY.monthly ||
+      item?.frequency === RECURRING_FREQUENCY.yearly
       ? item.lastDay
         ? "last"
         : String(item.day ?? 1)
@@ -168,7 +169,7 @@ export function RecurringEditor({
   const start = startInput ?? today ?? "";
   const [end, setEnd] = useState(item?.end || "");
   const [noEnd, setNoEnd] = useState(!item?.end);
-  // Only stopping asks for a typed reason; the server writes the reason for adding or changing an item.
+
   const [stopReason, setStopReason] = useState("");
   const initialSelection =
     item?.allocations.map((allocation) => allocation.vehicleId) ||
@@ -187,7 +188,6 @@ export function RecurringEditor({
   const [saveError, setSaveError] = useState("");
   const [splitNotice, setSplitNotice] = useState("");
   const [confirmStop, setConfirmStop] = useState(false);
-  // Shown beside the reason field, not at the top of the page, so it is next to what needs fixing.
   const [stopError, setStopError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -199,8 +199,13 @@ export function RecurringEditor({
   const difference =
     Math.round(total * 100) - Math.round(allocationTotal * 100);
   const isBalanced = selected.length > 0 && total > 0 && difference === 0;
-  const stopped = Boolean(item?.stoppedFrom && (!today || item.stoppedFrom <= today));
-  const futureStop = item?.stoppedFrom && today && item.stoppedFrom > today ? item.stoppedFrom : null;
+  const stopped = Boolean(
+    item?.stoppedFrom && (!today || item.stoppedFrom <= today),
+  );
+  const futureStop =
+    item?.stoppedFrom && today && item.stoppedFrom > today
+      ? item.stoppedFrom
+      : null;
   const startLocked = Boolean(item && (!today || item.start < today));
   const disabled = !canEdit || stopped || busy;
   const companies = [
@@ -213,7 +218,7 @@ export function RecurringEditor({
   const noExpenseItem = Boolean(item?.kind === 1 && !item.expenseItemId);
   // Until an expense item is chosen, such a row keeps counting in the bucket it was saved under.
   const savedBucket = item && noExpenseItem ? costBucket(item) : null;
-  const legacyDaily = item?.frequency === 1;
+  const legacyDaily = item?.frequency === RECURRING_FREQUENCY.daily;
   const itemChoices: ItemChoice[] = (expenseItems ?? []).map((option) => ({
     ...option,
     off: false,
@@ -249,8 +254,6 @@ export function RecurringEditor({
       ? expenseBucketNames[savedBucket]
       : undefined;
 
-  // A vehicle not in the fleet today (left, or not joined yet) keeps its share, read-only: it stays in the total but
-  // does not post.
   const inFleet = (vehicleId: string) =>
     vehicles.find((vehicle) => vehicle.id === vehicleId)?.active !== false;
   const outOfFleetShares = (vehicleIds: string[]) =>
@@ -262,10 +265,16 @@ export function RecurringEditor({
   // Splits what is left after the shares of vehicles not in the fleet across the vehicles that are.
   function splitAcrossFleet(amountTotal: number, vehicleIds: string[]) {
     const kept = outOfFleetShares(vehicleIds);
-    const keptTotal = Object.values(kept).reduce((sum, share) => sum + (Number(share) || 0), 0);
+    const keptTotal = Object.values(kept).reduce(
+      (sum, share) => sum + (Number(share) || 0),
+      0,
+    );
     return {
       ...kept,
-      ...splitAmountEvenly(Math.max(0, amountTotal - keptTotal), vehicleIds.filter(inFleet)),
+      ...splitAmountEvenly(
+        Math.max(0, amountTotal - keptTotal),
+        vehicleIds.filter(inFleet),
+      ),
     };
   }
 
@@ -278,8 +287,9 @@ export function RecurringEditor({
 
   function updateKind(value: number) {
     setKind(value);
-    // Savings are set aside every week or every month, never yearly.
-    if (value === 2 && frequency === 4) setFrequency(3);
+    // Savings are set aside every week or every month
+    if (value === 2 && frequency === RECURRING_FREQUENCY.yearly)
+      setFrequency(RECURRING_FREQUENCY.monthly);
   }
 
   function updateSelection(vehicleId: string, checked: boolean) {
@@ -299,7 +309,9 @@ export function RecurringEditor({
         delete nextShares[vehicleId];
         return nextShares;
       });
-      setSplitNotice(`Took ${vehicle.registration}'s ${kes(share)} share off the amount.`);
+      setSplitNotice(
+        `Took ${vehicle.registration}'s ${kes(share)} share off the amount.`,
+      );
       return;
     }
     if (!manualAllocations) setShares(splitAcrossFleet(total, next));
@@ -317,7 +329,10 @@ export function RecurringEditor({
       ...new Set([
         ...selected,
         ...vehicles
-          .filter((vehicle) => vehicle.companyId === companyId && vehicle.active !== false)
+          .filter(
+            (vehicle) =>
+              vehicle.companyId === companyId && vehicle.active !== false,
+          )
           .map((vehicle) => vehicle.id),
       ]),
     ];
@@ -328,7 +343,8 @@ export function RecurringEditor({
   }
 
   const vehicleName = (vehicleId: string) =>
-    vehicles.find((vehicle) => vehicle.id === vehicleId)?.registration ?? "A vehicle";
+    vehicles.find((vehicle) => vehicle.id === vehicleId)?.registration ??
+    "A vehicle";
   const postingIds = selected.filter(inFleet);
   const outOfFleetIds = selected.filter((vehicleId) => !inFleet(vehicleId));
   // What posts on each due date: the shares of the vehicles still in the fleet.
@@ -342,24 +358,30 @@ export function RecurringEditor({
     const shared = splitAcrossFleet(total, selected);
     setManualAllocations(false);
     setShares(shared);
-    const split = postingIds.reduce((sum, vehicleId) => sum + (Number(shared[vehicleId]) || 0), 0);
+    const split = postingIds.reduce(
+      (sum, vehicleId) => sum + (Number(shared[vehicleId]) || 0),
+      0,
+    );
     setSplitNotice(
       `Split ${kes(split)} equally across ${plural(postingIds.length, "vehicle", "vehicles")}.`,
     );
   }
 
   const periodIsValid = noEnd || Boolean(end && end >= start);
-  const lastDay = (frequency === 3 || frequency === 4) && monthDay === "last";
+  const lastDay =
+    (frequency === RECURRING_FREQUENCY.monthly ||
+      frequency === RECURRING_FREQUENCY.yearly) &&
+    monthDay === "last";
   const schedule = {
     frequency,
     day:
-      frequency === 2
+      frequency === RECURRING_FREQUENCY.weekly
         ? Number(weekday)
-        : frequency === 1 || lastDay
+        : frequency === RECURRING_FREQUENCY.daily || lastDay
           ? null
           : Number(monthDay),
     lastDay,
-    month: frequency === 4 ? Number(month) : null,
+    month: frequency === RECURRING_FREQUENCY.yearly ? Number(month) : null,
     start,
     end: noEnd ? null : end || null,
   };
@@ -371,27 +393,37 @@ export function RecurringEditor({
 
   async function save() {
     if (disabled) return;
+
     const next: Errors = {};
+
     if (kind === 1 && !picked) next.expenseItem = "Choose the expense item.";
     else if (kind === 1 && picked?.off)
-      next.expenseItem = "This item is turned off. Choose another expense item.";
+      next.expenseItem =
+        "This item is turned off. Choose another expense item.";
     if (kind === 2 && !name.trim()) next.name = "Enter a name.";
     if (note.trim().length > NOTE_LIMIT)
       next.note = `Keep the note to ${NOTE_LIMIT} characters.`;
     if (total <= 0) next.amount = "Enter the amount in KES.";
-    if (frequency === 1)
-      next.frequency = "Every day is no longer offered. Choose how often it posts.";
+    if (frequency === RECURRING_FREQUENCY.daily)
+      next.frequency =
+        "Every day is no longer offered. Choose how often it posts.";
     if (!start) next.start = "Enter the start date.";
-    else if (earliestStart && start < earliestStart && (isNew || start !== item.start))
+    else if (
+      earliestStart &&
+      start < earliestStart &&
+      (isNew || start !== item.start)
+    )
       next.start = `Start on or after ${formatDateOnly(earliestStart)}. Anything earlier is a one-off expense, not a schedule.`;
     if (!noEnd && (!end || end < start))
       next.end = "The end date must be on or after the start date.";
     if (!selected.length) next.allocations = "Tick at least one vehicle.";
     else if (difference !== 0)
       next.allocations = `The split must add up to ${kes(total)}. It is ${kes(allocationTotal)}.`;
+
     setErrors(next);
     setSaveError("");
     if (Object.keys(next).length) return;
+
     const allocations = selected.map((vehicleId) => ({
       vehicleId,
       amount: Number(shares[vehicleId]) || 0,
@@ -403,7 +435,6 @@ export function RecurringEditor({
         {
           method: isNew ? "POST" : "PUT",
           body: JSON.stringify({
-            // A cost takes its name and bucket from its expense item on the server.
             name: title,
             kind,
             amount: total,
@@ -460,7 +491,6 @@ export function RecurringEditor({
   }
 
   // A stop dated after the business date has not taken effect, so it can be cancelled and the item keeps posting
-  // (D16). Cancelling is not one of the places that ask for a typed reason, so the server writes its own.
   async function cancelStop() {
     if (!item || !canEdit || busy) return;
     setBusy(true);
@@ -502,8 +532,9 @@ export function RecurringEditor({
         {!canEdit &&
           (item?.partial ? (
             <Note>
-              This item also posts to vehicles you can&apos;t see, so only someone who can see all of them can change it.
-              The amounts here are your vehicles&apos; share.
+              This item also posts to vehicles you can&apos;t see, so only
+              someone who can see all of them can change it. The amounts here
+              are your vehicles&apos; share.
             </Note>
           ) : (
             <Note>You can view this item but not change it.</Note>
@@ -530,7 +561,9 @@ export function RecurringEditor({
           <Note tone="info">
             Saved before the rules it would follow today, and still posting as
             it is.
-            {canEdit ? ` To save a change, choose ${legacyNeeds.join(" and ")}.` : ""}
+            {canEdit
+              ? ` To save a change, choose ${legacyNeeds.join(" and ")}.`
+              : ""}
           </Note>
         )}
 
@@ -585,7 +618,10 @@ export function RecurringEditor({
                   </option>
                   {itemGroups.map((group) =>
                     group[0].categoryName ? (
-                      <optgroup key={group[0].categoryId} label={group[0].categoryName}>
+                      <optgroup
+                        key={group[0].categoryId}
+                        label={group[0].categoryName}
+                      >
                         {group.map((choice) => (
                           <option key={choice.id} value={choice.id}>
                             {choice.name}
@@ -595,7 +631,9 @@ export function RecurringEditor({
                     ) : (
                       group.map((choice) => (
                         <option key={choice.id} value={choice.id}>
-                          {choice.off ? `${choice.name} (turned off)` : choice.name}
+                          {choice.off
+                            ? `${choice.name} (turned off)`
+                            : choice.name}
                         </option>
                       ))
                     ),
@@ -643,28 +681,29 @@ export function RecurringEditor({
               label="How often"
               error={errors.frequency}
               hint={
-                frequency === 1
+                frequency === RECURRING_FREQUENCY.daily
                   ? "Now every day, which is no longer offered."
                   : kind === 2
                     ? "Savings are set aside every week or every month."
                     : undefined
               }
             >
-              {frequencies
-                .filter((option) => kind === 1 || option.value !== 4)
-                .map((option) => (
-                  <Choice
-                    key={option.value}
-                    type="radio"
-                    name="recurring-frequency"
-                    label={option.label}
-                    checked={frequency === option.value}
-                    disabled={disabled}
-                    onChange={() => setFrequency(option.value)}
-                  />
-                ))}
+              {RECURRING_FREQUENCY_OPTIONS.filter(
+                (option) =>
+                  kind === 1 || option.value !== RECURRING_FREQUENCY.yearly,
+              ).map((option) => (
+                <Choice
+                  key={option.value}
+                  type="radio"
+                  name="recurring-frequency"
+                  label={option.label}
+                  checked={frequency === option.value}
+                  disabled={disabled}
+                  onChange={() => setFrequency(option.value)}
+                />
+              ))}
             </ChoiceField>
-            {frequency === 2 && (
+            {frequency === RECURRING_FREQUENCY.weekly && (
               <Field id="recurring-weekday" label="On">
                 <SelectInput
                   value={weekday}
@@ -679,7 +718,7 @@ export function RecurringEditor({
                 </SelectInput>
               </Field>
             )}
-            {frequency === 4 && (
+            {frequency === RECURRING_FREQUENCY.yearly && (
               <Field id="recurring-month" label="Month">
                 <SelectInput
                   value={month}
@@ -694,12 +733,13 @@ export function RecurringEditor({
                 </SelectInput>
               </Field>
             )}
-            {(frequency === 3 || frequency === 4) && (
+            {(frequency === RECURRING_FREQUENCY.monthly ||
+              frequency === RECURRING_FREQUENCY.yearly) && (
               <Field
                 id="recurring-monthday"
                 label="On"
                 hint={
-                  frequency === 3
+                  frequency === RECURRING_FREQUENCY.monthly
                     ? "For the 29th to the 31st, choose the last day so short months are covered."
                     : "The day it falls due each year."
                 }
@@ -817,7 +857,8 @@ export function RecurringEditor({
               {outOfFleetIds.length === 1
                 ? `${vehicleName(outOfFleetIds[0])} is not in the fleet today, so its share stays in the total but does not post.`
                 : `${outOfFleetIds.map(vehicleName).join(", ")} are not in the fleet today, so their shares stay in the total but do not post.`}
-              {!disabled && " Untick a vehicle to take its share off the amount."}
+              {!disabled &&
+                " Untick a vehicle to take its share off the amount."}
             </Hint>
           )}
           {vehiclesLoading && (
@@ -839,9 +880,17 @@ export function RecurringEditor({
                         className="grid min-h-13 grid-cols-[minmax(0,320px)_200px] items-center gap-4 border-t border-divider max-[720px]:grid-cols-[minmax(0,1fr)_140px] max-[720px]:gap-3"
                       >
                         <Choice
-                          label={vehicle.active === false ? `${vehicle.registration} (not in the fleet today)` : vehicle.registration}
+                          label={
+                            vehicle.active === false
+                              ? `${vehicle.registration} (not in the fleet today)`
+                              : vehicle.registration
+                          }
                           checked={selected.includes(vehicle.id)}
-                          disabled={disabled || (vehicle.active === false && !selected.includes(vehicle.id))}
+                          disabled={
+                            disabled ||
+                            (vehicle.active === false &&
+                              !selected.includes(vehicle.id))
+                          }
                           onChange={(event) =>
                             updateSelection(vehicle.id, event.target.checked)
                           }
@@ -901,7 +950,8 @@ export function RecurringEditor({
                 ))}
               </ol>
               <Hint>
-                About {kes(recurringMonthlyEstimate(postingTotal, frequency))} a month.{" "}
+                About {kes(recurringMonthlyEstimate(postingTotal, frequency))} a
+                month.{" "}
                 {kind === 2
                   ? "Shown as savings in each vehicle report."
                   : countedAs
@@ -962,7 +1012,11 @@ export function RecurringEditor({
           </Button>
           <Spacer />
           {item && canEdit && !stopped && futureStop && (
-            <Button tone="outline" disabled={busy} onClick={() => void cancelStop()}>
+            <Button
+              tone="outline"
+              disabled={busy}
+              onClick={() => void cancelStop()}
+            >
               Cancel stop
             </Button>
           )}

@@ -67,11 +67,11 @@ public static class UserProvisioning
             if (wasExisting &&
                 (oldPhone != phone || oldStatus != UserStatus.Active || membershipWasInactive || previousRoleId != role.Id))
             {
-                user.SecurityVersion++;
+                user.BumpSecurityVersion();
                 foreach (var device in await db.TrustedDevices.IgnoreQueryFilters().Where(x => x.UserId == user.Id).ToListAsync(ct))
-                    device.Revoked = true;
+                    device.Revoke();
                 foreach (var token in await db.RefreshTokens.IgnoreQueryFilters().Where(x => x.UserId == user.Id).ToListAsync(ct))
-                    token.Revoked = true;
+                    token.Revoke();
             }
 
             if (role.Name is "Owner" or "Office admin" && !await db.SetupDataScopes.IgnoreQueryFilters().AnyAsync(x => x.OrganizationId == organization.Id && x.UserId == user.Id, ct))

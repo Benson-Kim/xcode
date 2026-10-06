@@ -7,7 +7,6 @@ namespace Auth.Infrastructure;
 public sealed partial class AuthDb(DbContextOptions<AuthDb> options, Auth.Application.IOrganizationContext? organizationContext = null) : DbContext(options)
 {
     public Guid CurrentOganizationId => organizationContext?.OrganizationId ?? Guid.Empty;
-    // only truested provisioning/seed code may set this, never a request DTO
     public bool Provisioning { get; set; }
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<OrganizationMembership> Memberships => Set<OrganizationMembership>();
@@ -44,6 +43,7 @@ public sealed partial class AuthDb(DbContextOptions<AuthDb> options, Auth.Applic
         model.Entity<User>().HasIndex(x => x.PhoneNumber).IsUnique().HasFilter("[PhoneNumber] <> ''");
 
         model.Entity<User>().Property(x => x.PinHash).HasMaxLength(256);
+        model.Entity<User>().Property(x => x.Version).IsConcurrencyToken();
 
         model.Entity<TrustedDevice>().Property(x => x.DeviceId).HasMaxLength(128);
         model.Entity<TrustedDevice>().HasIndex(x => new { x.UserId, x.DeviceId }).IsUnique();
@@ -55,9 +55,19 @@ public sealed partial class AuthDb(DbContextOptions<AuthDb> options, Auth.Applic
         model.Entity<RefreshToken>().Property(x => x.DeviceId).HasMaxLength(128);
         model.Entity<RefreshToken>().Property(x => x.TokenHash).HasMaxLength(64);
         model.Entity<RefreshToken>().HasIndex(x => x.TokenHash).IsUnique();
+        model.Entity<RefreshToken>().Property(x => x.Version).IsConcurrencyToken();
 
         model.Entity<TrustedDevice>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId);
         model.Entity<VerificationCode>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId);
         model.Entity<RefreshToken>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId);
+    }
+
+    private void BumpVersions()
+    {
+        foreach (var entry in ChangeTracker.Entries().Where(x => x.State == EntityState.Modified && x.Entity is User or RefreshToken))
+        {
+            var version = entry.Property("Version");
+            version.CurrentValue = (long)version.OriginalValue! + 1;
+        }
     }
 }

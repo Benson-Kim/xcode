@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+
+import { plural } from "@xcode/shared/format";
+
 import { apiRequest, useResource } from "../../lib/data";
-import { kes, money, plural } from "../../lib/format";
+import { useFormats } from "../../lib/formats";
 import { useSession } from "../../lib/session-context";
 import type { VehicleInvestment } from "../../lib/types";
-import { formatDateOnly, formatDateRange } from "../recurringPresentation";
 import {
   Banner,
   Button,
@@ -55,6 +57,7 @@ export function VehicleInvestmentTab({
   today?: string;
 }) {
   const { can } = useSession();
+  const { formatDateOnly, formatDateRange, kes, money } = useFormats();
   const canManage = can("invest.manage");
   const toast = useToast();
   const investment = useResource<VehicleInvestment>(`setup/vehicles/${vehicle.id}/investment`);

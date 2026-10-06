@@ -1,7 +1,8 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { Formats } from "./format";
+
+import type { Formats } from "@xcode/shared/format";
 
 export type Appearance = {
   organizationName: string;

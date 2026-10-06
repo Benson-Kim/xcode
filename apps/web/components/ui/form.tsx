@@ -7,9 +7,10 @@ import {
   type ComponentProps,
   type ReactNode,
 } from "react";
+
+import { useFormats } from "../../lib/formats";
 import { cn } from "./cn";
 import { AlertIcon } from "./icons";
-import { currencyCode } from "../../lib/format";
 
 type FieldWiring = { id: string; describedBy?: string; invalid: boolean };
 const FieldContext = createContext<FieldWiring | null>(null);
@@ -34,6 +35,7 @@ export function ErrorText({
 export function Field({
   id,
   label,
+  action,
   hint,
   error,
   className,
@@ -41,6 +43,7 @@ export function Field({
 }: {
   id: string;
   label: ReactNode;
+  action?: ReactNode;
   hint?: ReactNode;
   error?: string;
   className?: string;
@@ -51,9 +54,12 @@ export function Field({
     undefined;
   return (
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
-      <label htmlFor={id} className="text-sm font-semibold">
-        {label}
-      </label>
+      <div className="flex items-center justify-between">
+        <label htmlFor={id} className="text-sm font-semibold">
+          {label}
+        </label>
+        {action}
+      </div>
       <FieldContext.Provider
         value={{ id, describedBy, invalid: Boolean(error) }}
       >
@@ -148,7 +154,7 @@ function groupThousands(value: ComponentProps<"input">["value"]) {
 // An amount with its currency in front. It shows thousands separators while typing
 // onChange receives the plain number text (e.g. "49000.50").
 export function CurrencyInput({
-  currency = currencyCode(),
+  currency,
   density = "standard",
   className,
   value,
@@ -158,10 +164,11 @@ export function CurrencyInput({
   currency?: string;
   density?: keyof typeof DENSITY;
 }) {
+  const { currencyCode } = useFormats();
   return (
     <div className="flex w-full min-w-0 items-stretch">
       <span className="flex shrink-0 items-center rounded-l-[10px] border border-r-0 border-line bg-paper px-3 text-[15px] text-grey">
-        {currency}
+        {currency ?? currencyCode()}
       </span>
       <input
         type="text"

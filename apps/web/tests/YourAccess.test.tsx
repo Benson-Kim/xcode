@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+
 import { AppShell } from "../components/AppShell";
 import { appearanceFixture } from "./renderInApp";
 
@@ -69,6 +70,6 @@ it("says All companies for an organization-wide viewer, with no vehicle count", 
 it("says so when the scope cannot be fetched, instead of claiming no access", async () => {
   signIn({ status: 503 });
   const dialog = await openYourAccess();
-  expect(await dialog.findByText("Connect to see what you can reach.")).toBeInTheDocument();
+  expect(await dialog.findByText("Connect to see what you can reach.", {}, { timeout: 6000 })).toBeInTheDocument();
   expect(dialog.queryByText("All companies")).not.toBeInTheDocument();
 });

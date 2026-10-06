@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { apiRequest } from "../../lib/data";
-import { useStreamedList } from "../../lib/data";
-import { Banner, Button, DataTable, Field, FormActions, PageHeader, StatusBadge, TextInput, Toolbar, Td, Tr, useToast } from "../ui";
-import { formatDateOnly } from "../recurringPresentation";
+
+import { apiRequest, useStreamedList } from "../../lib/data";
+import { useFormats } from "../../lib/formats";
+import { Banner, Button, DataTable, Field, FormActions, PageHeader, StatusBadge, Td, TextInput, Toolbar, Tr, useToast } from "../ui";
 import type { Company } from "./shared";
 
 // Whether the company carries an archive date, even one still ahead of the business date. Older rows had none, so inactive counts too.
@@ -21,6 +21,7 @@ export function CompaniesPage() {
   const rows = companies.items;
 
   const toast = useToast();
+  const { formatDateOnly } = useFormats();
 
   async function add() {
     const trimmed = name.trim();

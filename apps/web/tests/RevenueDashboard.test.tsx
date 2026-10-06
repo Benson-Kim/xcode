@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+
 import { AppShell } from "../components/AppShell";
 import type { Appearance } from "../lib/appearance";
-import { configureFormats } from "../lib/format";
 
 const appearance: Appearance = {
   organizationName: "Demo Fleet",
@@ -65,7 +65,6 @@ const card = (name: string) => screen.getByRole("article", { name });
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  configureFormats(null);
 });
 
 const EVERYTHING = [

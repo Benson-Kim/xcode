@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
 import { RecurringEditor } from "../components/RecurringEditor";
 import { RecurringPage } from "../components/setup";
 import type { ExpenseItemOption } from "../lib/types";

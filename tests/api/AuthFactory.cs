@@ -175,7 +175,7 @@ public sealed class AuthFactory : WebApplicationFactory<Program>
             await AddOrganization(db);
             // Provisioning gives the person the membership and role that token issuance requires.
             var user = await UserProvisioning.Provision(db, new("person@example.com", "+254712345678", "Revenue clerk"));
-            user.PinHash = withPin ? PinHasher.Hash("5826") : null;
+            if (withPin) user.SetPin(PinHasher.Hash("5826"));
             if (trusted) db.TrustedDevices.Add(new() { UserId = user.Id, DeviceId = "phone" });
             await db.SaveChangesAsync();
         });

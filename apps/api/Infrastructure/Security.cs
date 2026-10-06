@@ -123,7 +123,7 @@ public sealed class VerificationMailer(IServiceScopeFactory scopes, ILogger<Veri
     private readonly Lock gate = new();
     private readonly HashSet<Task> sending = [];
 
-    public static bool Withdrawn(VerificationCode code) => code.Consumed && code.ExpiresAt <= code.CreatedAt;
+    public static bool Withdrawn(VerificationCode code) => code.IsWithdrawn;
 
     // Sends now. False when the code could not be sent, and has been withdrawn.
     public async Task<bool> Send(Message message, CancellationToken ct)
@@ -166,8 +166,7 @@ public sealed class VerificationMailer(IServiceScopeFactory scopes, ILogger<Veri
             var code = await db.VerificationCodes.SingleOrDefaultAsync(x => x.Id == message.CodeId);
             if (code is null)
                 return;
-            code.Consumed = true;
-            code.ExpiresAt = code.CreatedAt;
+            code.Withdraw();
             await db.SaveChangesAsync();
         }
         catch (Exception error)

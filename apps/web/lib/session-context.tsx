@@ -2,13 +2,9 @@
 
 import { createContext, useContext } from "react";
 
-export type Session = {
-  userId: string;
-  firstName: string;
-  lastName: string;
-  role: string;
-  permissions: string[];
-};
+import type { AuthenticatedPerson } from "@xcode/shared/auth";
+
+export type Session = AuthenticatedPerson;
 
 type SessionState = { session: Session | null; can: (permission: string) => boolean };
 

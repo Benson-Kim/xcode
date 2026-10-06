@@ -165,7 +165,7 @@ public sealed class DomainRuleTests
         Assert.True(vehicle.ActiveOn(Today));
     }
 
-    // D4: the days between a leave that took effect and the return are recorded, so they are neither expected nor
+    // The days between a leave that took effect and the return are recorded, so they are neither expected nor
     // missing once the vehicle is back.
     [Fact]
     public void AVehicleBackInTheFleetKeepsTheDaysItWasAwayOutOfEveryReport()
@@ -245,6 +245,76 @@ public sealed class DomainRuleTests
         Assert.Equal(7000m, vehicle.TargetOn(Today.AddDays(-20)));
         Assert.Equal(7000m, vehicle.TargetOn(Today.AddDays(-7)));
         Assert.Equal(9000m, vehicle.TargetOn(Today));
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, false)]
+    [InlineData(6, false)]
+    [InlineData(-1, false)]
+    public void NumberDecimalsIsCappedAtTwo(int decimals, bool valid)
+    {
+        var localization = new OrganizationLocalization { NumberDecimals = decimals };
+        if (valid) localization.Validate();
+        else Assert.Throws<ArgumentException>(localization.Validate);
+    }
+
+    [Theory]
+    [InlineData("0712345678", true)]
+    [InlineData("+254712345678", true)]
+    [InlineData("254712345678", true)]
+    [InlineData("0112345678", true)]
+    [InlineData("0812345678", false)]
+    [InlineData("+25471234567", false)]
+    [InlineData("", false)]
+    [InlineData("not a number", false)]
+    public void PhoneNumberTryCreateMirrorsNormalize(string input, bool valid)
+    {
+        Assert.Equal(valid, PhoneNumber.TryCreate(input, out var phone));
+        if (valid) Assert.Equal(PhoneNumber.Normalize(input), phone.Value);
+    }
+
+    [Fact]
+    public void UserBehaviorMethodsEnforceDomainRules()
+    {
+        var user = new User { Email = "test@example.com" };
+        Assert.False(user.HasPin);
+
+        user.SetPin(PinHasher.Hash("5826"));
+        Assert.True(user.HasPin);
+        Assert.Equal(1, user.SecurityVersion);
+
+        user.RecordFailedAttempt();
+        Assert.Equal(1, user.FailedAttempts);
+        user.RecordUntrustedFailedAttempt();
+        Assert.Equal(1, user.UntrustedFailedAttempts);
+
+        var now = DateTimeOffset.UtcNow;
+        user.Pause(now.AddMinutes(15));
+        Assert.True(user.IsPaused(now));
+        Assert.False(user.IsPaused(now.AddMinutes(15)));
+
+        user.ClearLockout();
+        Assert.Equal(0, user.FailedAttempts);
+        Assert.Equal(1, user.UntrustedFailedAttempts);
+        Assert.Null(user.PausedUntil);
+
+        user.ClearUntrustedFailedAttempts();
+        Assert.Equal(0, user.UntrustedFailedAttempts);
+
+        user.RecordUntrustedFailedAttempt();
+        user.SetPin(PinHasher.Hash("4719"));
+        Assert.Equal(0, user.UntrustedFailedAttempts);
+        Assert.Equal(2, user.SecurityVersion);
+
+        user.BumpSecurityVersion();
+        Assert.Equal(3, user.SecurityVersion);
+
+        user.Remove();
+        Assert.Equal(UserStatus.Removed, user.Status);
+        Assert.Equal(4, user.SecurityVersion);
     }
 
     [Theory]

@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import { AuthError } from "@xcode/shared";
+import { AuthError } from "@xcode/shared/auth";
+
 import { AuthPanel } from "../components/AuthPanel";
 import { PinInput } from "../components/PinInput";
 import { authApi } from "../lib/api";

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -7,6 +8,7 @@ using Auth.Application;
 using Auth.Domain;
 using Auth.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -20,6 +22,27 @@ if (string.IsNullOrEmpty(options.SigningKey) && (builder.Environment.IsDevelopme
     options.SigningKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
 if (Encoding.UTF8.GetByteCount(options.SigningKey) < 32) throw new InvalidOperationException("Set Auth__SigningKey to at least 32 random bytes.");
 if (options.TrustLifetimeDays is <= 0) throw new InvalidOperationException("TrustLifetimeDays must be positive or null.");
+
+// Guards dev-only features: Development + remote database must not activate DemoSeed or LogEmailSender.
+static bool IsLocalDatabase(string? connectionString)
+{
+    if (string.IsNullOrEmpty(connectionString)) return true; // no connection string = in-memory or not yet configured
+    var lower = connectionString.ToLowerInvariant();
+    return lower.Contains("localhost") || lower.Contains("(localdb)") || lower.Contains("127.0.0.1")
+        || lower.Contains("data source=:memory:") || lower.Contains(":memory:")
+        || lower.Contains("mode=memory") || lower.Contains(".db");
+}
+var connectionString = builder.Configuration.GetConnectionString("Auth");
+var isLocalDb = IsLocalDatabase(connectionString);
+options.DevelopmentMode = builder.Environment.IsDevelopment() && isLocalDb;
+
+// P3-11: validate production-critical email config at startup, not on first send.
+if (!builder.Environment.IsDevelopment() && !builder.Environment.IsEnvironment("Testing"))
+{
+    if (string.IsNullOrEmpty(builder.Configuration["Email:Host"])) throw new InvalidOperationException("Email:Host is required.");
+    if (string.IsNullOrEmpty(builder.Configuration["Email:From"])) throw new InvalidOperationException("Email:From is required.");
+    if (string.IsNullOrEmpty(connectionString)) throw new InvalidOperationException("ConnectionStrings:Auth is required.");
+}
 
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<IClock, Auth.Infrastructure.SystemClock>();
@@ -36,9 +59,10 @@ builder.Services.AddSingleton<VerificationMailer>();
 builder.Services.AddSetup();
 builder.Services.AddRevenue();
 builder.Services.AddSingleton<SettingsSectionRegistry>();
-if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")) builder.Services.AddScoped<IEmailSender, LogEmailSender>();
+if ((builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")) && isLocalDb) builder.Services.AddScoped<IEmailSender, LogEmailSender>();
 else builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
-builder.Services.AddDbContext<AuthDb>(o => o.UseSqlServer(builder.Configuration.GetConnectionString("Auth")));
+builder.Services.AddDbContext<AuthDb>(o => o.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure(3, TimeSpan.FromSeconds(5), null)));
+builder.Services.AddHealthChecks();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? []).AllowAnyHeader().AllowAnyMethod()));
 // The web app's sign-ins all reach the API from its Next.js proxy, which names the browser's address in X-Forwarded-For.
 // Only a configured proxy (ForwardedHeaders:KnownProxies, loopback when unset) is believed, so the rate limit below
@@ -79,25 +103,43 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
     {
         OnTokenValidated = async context =>
     {
+        if (!Guid.TryParse(context.Principal?.FindFirst("sub")?.Value, out var id)) { context.Fail("Invalid session"); return; }
+        var version = context.Principal?.FindFirst("version")?.Value ?? "";
+        var deviceId = context.Principal?.FindFirst("device")?.Value ?? "";
         var db = context.HttpContext.RequestServices.GetRequiredService<AuthDb>();
         var clock = context.HttpContext.RequestServices.GetRequiredService<IClock>();
-        if (!Guid.TryParse(context.Principal?.FindFirst("sub")?.Value, out var id)) { context.Fail("Invalid session"); return; }
         var user = await db.Users.FindAsync(id);
-        var deviceId = context.Principal?.FindFirst("device")?.Value;
         var device = await db.TrustedDevices.SingleOrDefaultAsync(d => d.UserId == id && d.DeviceId == deviceId);
-        if (user is not { Status: UserStatus.Active } || user.SecurityVersion.ToString() != context.Principal?.FindFirst("version")?.Value ||
-            device is not { Revoked: false } || (device.TrustExpiresAt is not null && clock.UtcNow >= device.TrustExpiresAt)) context.Fail("Invalid session");
+        var ok = user is { Status: UserStatus.Active } && user.SecurityVersion.ToString() == version &&
+            device is { Revoked: false } && (device.TrustExpiresAt is null || clock.UtcNow < device.TrustExpiresAt);
+        if (!ok) context.Fail("Invalid session");
     }
     };
 });
 builder.Services.AddAuthorization();
-builder.Services.AddProblemDetails();
+builder.Services.AddProblemDetails(o => o.CustomizeProblemDetails = ctx =>
+{
+    ctx.ProblemDetails.Extensions.Remove("exception");
+    if (ctx.HttpContext.Items["RequestId"] is string id)
+        ctx.ProblemDetails.Extensions["requestId"] = id;
+});
 builder.Services.AddOpenApi(OpenApiDocumentation.Configure);
 var app = builder.Build();
 // Codes sent after their reply are still going out at shutdown; give them a moment rather than drop them.
 app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<VerificationMailer>().Idle().Wait(TimeSpan.FromSeconds(10)));
-// First, so everything after it (the rate limiter above all) sees the client's address rather than the proxy's.
 app.UseForwardedHeaders();
+app.Use(async (context, next) =>
+{
+    var id = context.Request.Headers["X-Request-ID"].FirstOrDefault()
+        ?? Activity.Current?.Id ?? context.TraceIdentifier;
+    context.Items["RequestId"] = id;
+    context.Response.Headers["X-Request-ID"] = id;
+    using (context.RequestServices.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("RequestPipeline").BeginScope(new Dictionary<string, object?> { ["RequestId"] = id }))
+    {
+        await next();
+    }
+});
 app.UseExceptionHandler();
 app.UseCors();
 app.UseRateLimiter();
@@ -107,6 +149,8 @@ app.MapAuth();
 app.MapSetup();
 app.MapRevenue();
 app.MapOrganization();
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") });
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 // The API description (/openapi/v1.json) is for developers and contract tests only; production does not serve it.
 if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
@@ -115,20 +159,36 @@ if (!app.Environment.IsEnvironment("Testing"))
 {
     await using var scope = app.Services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<AuthDb>();
-    // 20260924172309 was renamed from Phase1Setup to OrganizationsAndFleet. Databases that applied it under the
-    // old name must not run it again; this is a no-op everywhere else. A database that does not exist yet has nothing to
-    // rename (and cannot be opened), so MigrateAsync below creates it. ExistsAsync is false only for a missing database;
-    // any other connection failure still stops startup here.
-    if (await db.Database.GetService<IRelationalDatabaseCreator>().ExistsAsync())
-        await db.Database.ExecuteSqlRawAsync("""
-            IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NOT NULL
-                UPDATE [__EFMigrationsHistory] SET [MigrationId] = N'20260924172309_OrganizationsAndFleet'
-                WHERE [MigrationId] = N'20260924172309_Phase1Setup'
-            """);
-    await db.Database.MigrateAsync();
-    if (app.Environment.IsDevelopment()) await DemoSeed.Run(db);
     string? Option(string name) => Array.IndexOf(args, name) is var at and >= 0 && at + 1 < args.Length && !args[at + 1].StartsWith("--") ? args[at + 1] : null;
-    // Bootstrap and backfill: --provision-user <email> --phone <mobile> [--role <role>] [--first-name <name>] [--last-name <name>] [--organization-name <name>]
+
+    // --migrate: apply pending migrations and exit. Run this once per deployment before starting replicas.
+    if (args.Contains("--migrate"))
+    {
+        if (await db.Database.GetService<IRelationalDatabaseCreator>().ExistsAsync())
+            await db.Database.ExecuteSqlRawAsync("""
+                IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NOT NULL
+                    UPDATE [__EFMigrationsHistory] SET [MigrationId] = N'20260924172309_OrganizationsAndFleet'
+                    WHERE [MigrationId] = N'20260924172309_Phase1Setup'
+                """);
+        await db.Database.MigrateAsync();
+        app.Logger.LogInformation("Migrations applied.");
+        return;
+    }
+
+    // Development auto-migrates the local database for convenience; production must use --migrate.
+    if (options.DevelopmentMode)
+    {
+        if (await db.Database.GetService<IRelationalDatabaseCreator>().ExistsAsync())
+            await db.Database.ExecuteSqlRawAsync("""
+                IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NOT NULL
+                    UPDATE [__EFMigrationsHistory] SET [MigrationId] = N'20260924172309_OrganizationsAndFleet'
+                    WHERE [MigrationId] = N'20260924172309_Phase1Setup'
+                """);
+        await db.Database.MigrateAsync();
+        if (string.Equals(Environment.GetEnvironmentVariable("ALLOW_DEMO_SEED"), "true", StringComparison.OrdinalIgnoreCase))
+            await DemoSeed.Run(db);
+    }
+
     if (args.Contains("--provision-user"))
     {
         var user = await UserProvisioning.Provision(db, new(
@@ -145,9 +205,8 @@ if (!app.Environment.IsEnvironment("Testing"))
         var user = await db.Users.SingleOrDefaultAsync(u => u.Email == address);
         if (user is not null)
         {
-            user.Status = UserStatus.Removed;
-            user.SecurityVersion++;
-            foreach (var token in await db.RefreshTokens.Where(t => t.UserId == user.Id).ToListAsync()) token.Revoked = true;
+            user.Remove();
+            foreach (var token in await db.RefreshTokens.Where(t => t.UserId == user.Id).ToListAsync()) token.Revoke();
         }
         await db.SaveChangesAsync();
         return;

@@ -1,7 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { apiRequest } from "../lib/data";
+
+import {
+  formatPhone,
+  normalisePhone,
+  phoneError,
+  plural,
+} from "@xcode/shared/format";
+
+import { apiRequest, useResource, useStreamedList } from "../lib/data";
+import { useFormats } from "../lib/formats";
+import { useSession } from "../lib/session-context";
 import type {
   Page,
   Permission,
@@ -10,9 +20,6 @@ import type {
   Role,
   ScopeOptions,
 } from "../lib/types";
-import { useResource, useStreamedList } from "../lib/data";
-import { useSession } from "../lib/session-context";
-import { formatDateTime, formatPhone, kes, plural } from "../lib/format";
 import type { HistoryRow } from "./setup/shared";
 import {
   Banner,
@@ -64,6 +71,7 @@ export function PeopleAccessView({
   canManageAccess?: boolean;
 }) {
   const { can } = useSession();
+  const { formatDateTime, kes } = useFormats();
   const canManage = can("people.manage") || canManageAccess;
   const people = useStreamedList<Person>("setup/people");
   const roles = useResource<Role[]>("setup/access/roles");
@@ -332,13 +340,6 @@ function withoutDependents(selected: string[], key: string, all: Permission[]) {
   return selected.filter((item) => !removed.has(item));
 }
 
-function normalisePhone(value: string) {
-  const digits = value.replace(/\D/g, "");
-  if (digits.startsWith("254")) return `0${digits.slice(3)}`;
-  if (/^[17]/.test(digits)) return `0${digits}`;
-  return digits;
-}
-
 type Errors = Partial<
   Record<
     | "firstName"
@@ -459,11 +460,13 @@ function PersonEditor({
 
   async function save() {
     const phone = normalisePhone(form.phoneNumber);
+
     const next: Errors = {};
+
     if (!form.firstName.trim()) next.firstName = "Enter a first name.";
     if (!form.lastName.trim()) next.lastName = "Enter a last name.";
-    if (!/^0[17][0-9]{8}$/.test(phone))
-      next.phoneNumber = "Enter all 10 numbers, starting 07 or 01.";
+    const phoneValidation = phoneError(phone);
+    if (phoneValidation) next.phoneNumber = phoneValidation;
     if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(form.email.trim()))
       next.email = "Enter an email address like name@company.co.ke";
     if (roles && !assignableRoles.length)
@@ -472,10 +475,14 @@ function PersonEditor({
       next.scope = "Tick at least one company.";
     if (form.scopeMode === "vehicles" && !form.vehicleIds.length)
       next.scope = "Tick at least one vehicle.";
+
     if (!permissions.length) next.permissions = "Tick at least one permission.";
+
     setErrors(next);
     setSaveError("");
+
     if (Object.keys(next).length) return;
+
     setBusy(true);
     try {
       await apiRequest(person ? `setup/people/${person.id}` : "setup/people", {
@@ -680,7 +687,7 @@ function PersonEditor({
                   ? "Changing the role resets single permissions to the new role."
                   : roles && !assignableRoles.length
                     ? "You cannot assign any available role."
-                  : undefined
+                    : undefined
               }
             >
               {!roles ? (
@@ -757,7 +764,9 @@ function PersonEditor({
                 </Hint>
               )}
               {keptCompanies > 0 && (
-                <Hint>{kept(keptCompanies, "company", "companies", "archived")}</Hint>
+                <Hint>
+                  {kept(keptCompanies, "company", "companies", "archived")}
+                </Hint>
               )}
             </ChoiceGroup>
           ) : form.scopeMode === "vehicles" && scopeOptions ? (
@@ -796,7 +805,12 @@ function PersonEditor({
               )}
               {keptVehicles > 0 && (
                 <Hint>
-                  {kept(keptVehicles, "vehicle", "vehicles", "out of the fleet")}
+                  {kept(
+                    keptVehicles,
+                    "vehicle",
+                    "vehicles",
+                    "out of the fleet",
+                  )}
                 </Hint>
               )}
             </div>

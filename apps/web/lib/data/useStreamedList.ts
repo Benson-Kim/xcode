@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiRequest } from "./request";
+
 import type { Page } from "../types";
+import { apiRequest } from "./request";
+import { withRetry } from "./retry";
 
 type Loaded<T> = {
   path: string | null;
@@ -29,6 +31,7 @@ export function useStreamedList<T>(path: string | null, pageSize = 25) {
   useEffect(() => {
     if (path === null) return;
     let active = true;
+    const controller = new AbortController();
     const progressive = shown.current !== path;
     (async () => {
       const items: T[] = [];
@@ -36,8 +39,13 @@ export function useStreamedList<T>(path: string | null, pageSize = 25) {
       try {
         for (let page = 1; ; page++) {
           const separator = path.includes("?") ? "&" : "?";
-          const result = await apiRequest<Page<T>>(
-            `${path}${separator}page=${page}&pageSize=${pageSize}`,
+          const result = await withRetry(
+            () =>
+              apiRequest<Page<T>>(
+                `${path}${separator}page=${page}&pageSize=${pageSize}`,
+                { signal: controller.signal },
+              ),
+            controller.signal,
           );
           if (!active) return;
           items.push(...result.items);
@@ -61,6 +69,7 @@ export function useStreamedList<T>(path: string | null, pageSize = 25) {
     })();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [path, pageSize, version]);
 

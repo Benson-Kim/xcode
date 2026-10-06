@@ -1,5 +1,9 @@
 import * as Crypto from "expo-crypto";
-import type { SessionTokens } from "@xcode/shared";
+
+import type { PersonIdentity } from "@xcode/shared/auth";
+import type { SessionTokens } from "@xcode/shared/auth";
+
+import { pbkdf2Sha256 } from "./pbkdf2";
 import { vault } from "./vault";
 
 const keys = {
@@ -13,26 +17,26 @@ const keys = {
 
 export interface StoredSession extends SessionTokens {
   phoneNumber: string;
-  // When this phone last reached the server, as a sign-in or a token renewal. Absent on records a Phase 1
-  // app saved; the offline window then starts the first time it is asked for.
   lastOnlineAt?: number;
 }
 
-// D7: a trusted phone unlocks without internet only within 72 hours of its last online sign-in or
-// renewal. After that it asks the person to connect once. Long enough to cover a weekend in the field.
+// A trusted phone unlocks without internet only within 72 hours of its last online sign-in or renewal.
 export const OFFLINE_UNLOCK_HOURS = 72;
 const OFFLINE_UNLOCK_MS = OFFLINE_UNLOCK_HOURS * 60 * 60 * 1000;
 
-// The organization's wrong-PIN policy: tries before a pause, and the pause. The phone enforces it offline.
+// The organization's wrong-PIN policy
 export interface PinPolicy {
   lockoutThreshold: number;
   lockoutMinutes: number;
 }
 
-// What a phone uses until it has loaded the organization's policy, and for records saved before it kept one.
-export const DEFAULT_PIN_POLICY: PinPolicy = { lockoutThreshold: 5, lockoutMinutes: 15 };
+// What a phone uses until it has loaded the organization's policy
+export const DEFAULT_PIN_POLICY: PinPolicy = {
+  lockoutThreshold: 5,
+  lockoutMinutes: 15,
+};
 
-// The bounds the API allows: at least three tries, a pause of at most an hour.
+// The bounds the for PIN
 export const validPinPolicy = (policy: Partial<PinPolicy>) =>
   Number.isInteger(policy.lockoutThreshold) &&
   policy.lockoutThreshold! >= 3 &&
@@ -41,20 +45,12 @@ export const validPinPolicy = (policy: Partial<PinPolicy>) =>
   policy.lockoutMinutes! >= 1 &&
   policy.lockoutMinutes! <= 60;
 
-// Who this phone is trusted for, kept so the unlock screen can greet them and the app can open offline.
-export interface StoredPerson extends PinPolicy {
-  // The account's id, which never changes; an admin can change the phone number. Absent on records a Phase 1 app
-  // saved: it arrives with the next online sign-in.
+export interface StoredPerson extends PersonIdentity, PinPolicy {
   userId?: string;
   phoneNumber: string;
-  firstName: string;
-  lastName: string;
-  role: string;
-  permissions: string[];
   pinLength: number;
 }
 
-// Wrong PINs typed while offline, and when the resulting pause ends.
 export interface OfflineTries {
   count: number;
   pausedUntil: number;
@@ -116,8 +112,7 @@ export function loadSession() {
   );
 }
 
-// When offline unlock stops working, or null when this phone is trusted for nobody. A session saved before
-// this rule shipped has no stamp, so the clock starts now rather than locking someone out mid-shift.
+// When offline unlock stops working, or null when this phone is trusted for nobody.
 export async function offlineUnlockUntil(): Promise<number | null> {
   const session = await loadSession();
   if (!session) return null;
@@ -142,7 +137,8 @@ export async function loadPerson(): Promise<StoredPerson | null> {
     (person) =>
       typeof person.phoneNumber === "string" &&
       person.phoneNumber.length > 0 &&
-      (person.userId === undefined || (typeof person.userId === "string" && person.userId.length > 0)) &&
+      (person.userId === undefined ||
+        (typeof person.userId === "string" && person.userId.length > 0)) &&
       typeof person.firstName === "string" &&
       person.firstName.length > 0 &&
       typeof person.lastName === "string" &&
@@ -150,47 +146,86 @@ export async function loadPerson(): Promise<StoredPerson | null> {
       typeof person.role === "string" &&
       person.role.length > 0 &&
       Array.isArray(person.permissions) &&
-      person.permissions.every((permission) => typeof permission === "string") &&
+      person.permissions.every(
+        (permission) => typeof permission === "string",
+      ) &&
       Number.isInteger(person.pinLength) &&
       person.pinLength >= 4 &&
       person.pinLength <= 8 &&
       // Absent on records saved before the policy was kept; those read as the defaults.
-      ((person.lockoutThreshold === undefined && person.lockoutMinutes === undefined) || validPinPolicy(person)),
+      ((person.lockoutThreshold === undefined &&
+        person.lockoutMinutes === undefined) ||
+        validPinPolicy(person)),
   );
   return person && { ...DEFAULT_PIN_POLICY, ...person };
 }
 
-// Keeps the organization's policy (from the appearance) with the person this phone is trusted for.
+// Keeps the organization's policy
 export async function savePinPolicy(policy: PinPolicy): Promise<void> {
   const person = await loadPerson();
   if (person && validPinPolicy(policy))
-    await savePerson({ ...person, lockoutThreshold: policy.lockoutThreshold, lockoutMinutes: policy.lockoutMinutes });
+    await savePerson({
+      ...person,
+      lockoutThreshold: policy.lockoutThreshold,
+      lockoutMinutes: policy.lockoutMinutes,
+    });
 }
 
-// The PIN itself is never stored: only a salted SHA-256 of it, so a PIN typed offline can be checked.
-// A four-digit PIN is quick to guess from its hash, so what protects it is the device-only keychain and the pause after the organization's wrong tries, not the hash.
-async function digest(salt: string, pin: string) {
+const PIN_CHECK_VERSION = 2;
+const PBKDF2_ITERATIONS = 100_000;
+
+function hexBytes(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function fromHex(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2)
+    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  return bytes;
+}
+
+async function pbkdf2(pin: string, saltHex: string): Promise<string> {
+  return hexBytes(
+    pbkdf2Sha256(
+      new TextEncoder().encode(pin),
+      fromHex(saltHex),
+      PBKDF2_ITERATIONS,
+    ),
+  );
+}
+
+async function digestV1(salt: string, pin: string) {
   return Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
     `${salt}:${pin}`,
   );
 }
 
-export async function savePinCheck(pin: string): Promise<void> {
-  const salt = Array.from(Crypto.getRandomBytes(16), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
-  await write(keys.pinCheck, { salt, hash: await digest(salt, pin) });
+interface PinCheck {
+  version?: number;
+  salt: string;
+  hash: string;
 }
 
-// true or false once a check is stored; null when this phone has none (it has never signed in online).
+export async function savePinCheck(pin: string): Promise<void> {
+  const salt = hexBytes(Crypto.getRandomBytes(16));
+  await write(keys.pinCheck, {
+    version: PIN_CHECK_VERSION,
+    salt,
+    hash: await pbkdf2(pin, salt),
+  });
+}
+
 export async function matchesPinCheck(pin: string): Promise<boolean | null> {
-  const check = await read<{ salt: string; hash: string }>(
+  const check = await read<PinCheck>(
     keys.pinCheck,
-    (value) => typeof value.salt === "string" && typeof value.hash === "string",
+    (v) => typeof v.salt === "string" && typeof v.hash === "string",
   );
   if (!check) return null;
-  return (await digest(check.salt, pin)) === check.hash;
+  const v = check.version ?? 1;
+  if (v === 1) return (await digestV1(check.salt, pin)) === check.hash;
+  return (await pbkdf2(pin, check.salt)) === check.hash;
 }
 
 export async function loadOfflineTries(): Promise<OfflineTries> {
@@ -211,9 +246,6 @@ export async function saveOfflineTries(tries: OfflineTries): Promise<void> {
   else await write(keys.offlineTries, tries);
 }
 
-// D9: enough to capture against after an offline cold start, and no more. No amounts, no targets and no
-// totals are written to the phone: just which vehicles the person may capture for and on which days.
-// What they are allowed to do is not repeated here; it comes from the person record already kept.
 export interface StoredCaptureVehicle {
   id: string;
   registration: string;
@@ -236,9 +268,9 @@ export async function saveCaptureList(list: StoredCaptureList): Promise<void> {
   await write(keys.captureList, list);
 }
 
-// The list for this person, or null when there is none, it belongs to someone else, or it has gone stale.
-// It keeps the same 72 hours as offline unlock, so nothing on the phone outlives the window.
-export async function loadCaptureList(owner: string): Promise<StoredCaptureList | null> {
+export async function loadCaptureList(
+  owner: string,
+): Promise<StoredCaptureList | null> {
   const list = await read<StoredCaptureList>(
     keys.captureList,
     (value) =>
@@ -267,10 +299,14 @@ export async function loadCaptureList(owner: string): Promise<StoredCaptureList 
   return list;
 }
 
-// Switch user: this phone stops being trusted for anyone. The device id stays; it names the install.
-// One removal at a time, session and person first: the phone is trusted only while both are kept, so a kill part
-// way leaves it trusted for no one, never trusted with its PIN check or wrong-PIN pause gone.
+// Switch user: this phone stops being trusted for anyone
 export async function forgetPerson(): Promise<void> {
-  for (const key of [keys.session, keys.person, keys.pinCheck, keys.offlineTries, keys.captureList])
+  for (const key of [
+    keys.session,
+    keys.person,
+    keys.pinCheck,
+    keys.offlineTries,
+    keys.captureList,
+  ])
     await vault.remove(key);
 }

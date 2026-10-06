@@ -1,11 +1,13 @@
 import { Platform } from "react-native";
+
 import {
   AuthError,
   createAuthClient,
   type AuthOperation,
   type AuthRequest,
   type AuthResponse,
-} from "@xcode/shared";
+} from "@xcode/shared/auth";
+
 import {
   forgetPerson,
   getDeviceId,
@@ -14,16 +16,36 @@ import {
   type StoredSession,
 } from "./storage";
 
-export const apiUrl =
-  process.env.EXPO_PUBLIC_API_URL ||
-  (Platform.OS === "android"
+const fallbackUrl =
+  Platform.OS === "android"
     ? "http://10.0.2.2:5000"
-    : "http://localhost:5000");
+    : "http://localhost:5000";
+
+export const apiUrl = (() => {
+  const url = process.env.EXPO_PUBLIC_API_URL || (__DEV__ ? fallbackUrl : "");
+  if (!url)
+    throw new Error(
+      "EXPO_PUBLIC_API_URL must be set for release builds.",
+    );
+  if (!__DEV__ && !url.startsWith("https://"))
+    throw new Error(
+      "EXPO_PUBLIC_API_URL must use HTTPS in release builds.",
+    );
+  return url;
+})();
 
 // The API could not be reached. Unlock falls back to the phone's own PIN check.
 export class OfflineError extends Error {
   constructor() {
     super("No internet connection.");
+  }
+}
+
+// The API answered with a failure that is not the person's to fix. Treated as unreachable.
+export class ServerError extends OfflineError {
+  constructor() {
+    super();
+    this.message = "Something went wrong on the server. Try again in a moment.";
   }
 }
 
@@ -34,11 +56,23 @@ export class SessionEndedError extends Error {
   }
 }
 
+const REQUEST_TIMEOUT_MS = 15_000;
+
+// A hung connection is as good as none: the request is abandoned after the timeout.
 async function reach(input: RequestInfo | URL, init?: RequestInit) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const caller = init?.signal;
+  if (caller) {
+    if (caller.aborted) controller.abort();
+    else caller.addEventListener("abort", () => controller.abort(), { once: true });
+  }
   try {
-    return await fetch(input, init);
+    return await fetch(input, { ...init, signal: controller.signal });
   } catch {
     throw new OfflineError();
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -98,7 +132,10 @@ function renew() {
         throw new SessionEndedError();
       return await keepSession(session.phoneNumber, result);
     } catch (error) {
-      throw error instanceof AuthError ? new SessionEndedError() : error;
+      if (!(error instanceof AuthError)) throw error;
+      throw error.httpStatus === 401 || error.httpStatus === 403
+        ? new SessionEndedError()
+        : new ServerError();
     }
   })().finally(() => {
     renewing = null;
@@ -127,8 +164,7 @@ export async function apiGet<T>(path: string): Promise<T> {
   const response = await authorized(path);
   const body = await response.json().catch(() => ({}));
   // The API's detail says what to fix; its title is only the category. A server failure has nothing to fix on the phone.
-  if (response.status >= 500)
-    throw new Error("Something went wrong on the server. Try again in a moment.");
+  if (response.status >= 500) throw new ServerError();
   if (!response.ok)
     throw new Error(
       body.detail || body.title || "The request could not be completed.",
