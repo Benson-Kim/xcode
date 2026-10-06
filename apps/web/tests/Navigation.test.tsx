@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+
 import { AppShell } from "../components/AppShell";
 import { appearanceFixture } from "./renderInApp";
 

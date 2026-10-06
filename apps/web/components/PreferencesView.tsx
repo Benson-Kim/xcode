@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { apiRequest } from "../lib/data";
-import { useResource } from "../lib/data";
+
 import { useAppearance } from "../lib/appearance";
+import { apiRequest, useResource } from "../lib/data";
 import {
   Banner,
   Button,

@@ -1,4 +1,5 @@
 import { Text as NativeText, StyleSheet, type TextProps } from "react-native";
+
 import { fonts, useTheme } from "./theme";
 
 type Weight = keyof typeof fonts;

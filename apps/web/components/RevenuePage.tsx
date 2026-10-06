@@ -1,11 +1,23 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import type { RevenueCell, RevenueVehicle, RevenueWeek, SaveRevenue } from "@xcode/shared";
+
+import { percentText, type Formatter } from "@xcode/shared/format";
+import {
+  parseRevenueAmount,
+  REVENUE_NOTE_LIMIT,
+  REVENUE_REASONS,
+  type RevenueCell,
+  type RevenueReason,
+  type RevenueVehicle,
+  type RevenueWeek,
+  type SaveRevenue,
+} from "@xcode/shared/revenue";
+
 import { ApiError, apiRequest, useResource } from "../lib/data";
-import { kes, percentText } from "../lib/format";
+import { useFormats } from "../lib/formats";
 import { useSession } from "../lib/session-context";
-import { dayOfMonth, difference, figure, longDate, rangeLabel, shiftDate, weekday } from "./revenueFormat";
+import { dayOfMonth, difference, figure, longDate, shiftDate, weekday } from "./revenueFormat";
 import {
   Banner,
   Button,
@@ -31,11 +43,8 @@ import {
   cn,
 } from "./ui";
 
-const REASONS = ["Garage", "Arrest", "No Crew", "Other"] as const;
-// What the API and the phone accept for a day's revenue: digits, optionally two decimals.
-const AMOUNT = /^\d{1,12}(\.\d{1,2})?$/;
-type Reason = (typeof REASONS)[number];
-const isReason = (value: string | null): value is Reason => REASONS.includes(value as Reason);
+const isReason = (value: string | null): value is RevenueReason =>
+  REVENUE_REASONS.includes(value as RevenueReason);
 
 // The day being captured and the day the person set out to fill (an earlier gap opens first), plus the vehicles
 // already done for that day in this run, so a grid that has not reloaded yet never sends capture back to them.
@@ -56,10 +65,10 @@ function missingOn(vehicle: RevenueVehicle, date: string) {
 }
 
 // Where capture opens for a day: a missing day waits for the vehicle's earliest gap, so that gap opens first.
-function openAt(vehicle: RevenueVehicle, day: string, done: string[] = []): Capture {
+function openAt(formats: Formatter, vehicle: RevenueVehicle, day: string, done: string[] = []): Capture {
   const first = vehicle.earliestMissing;
   if (first && first < day && missingOn(vehicle, day))
-    return { vehicleId: vehicle.id, date: first, target: day, info: `Fill ${longDate(first)} first.`, done };
+    return { vehicleId: vehicle.id, date: first, target: day, info: `Fill ${longDate(formats, first)} first.`, done };
   return { vehicleId: vehicle.id, date: day, target: day, info: "", done };
 }
 
@@ -85,14 +94,14 @@ function opens(vehicle: RevenueVehicle, cell: RevenueCell, canCapture: boolean) 
   );
 }
 
-function entryLabel(entry: Pick<RevenueCell, "amount" | "reason" | "note">) {
-  if (entry.amount !== null) return kes(entry.amount);
+function entryLabel(formats: Formatter, entry: Pick<RevenueCell, "amount" | "reason" | "note">) {
+  if (entry.amount !== null) return formats.kes(entry.amount);
   if (entry.reason) return entry.note ? `${entry.reason}: ${entry.note}` : entry.reason;
   return "No record";
 }
 
-function cellState(cell: RevenueCell) {
-  const state = cell.status === "missing" ? "Missing" : entryLabel(cell);
+function cellState(formats: Formatter, cell: RevenueCell) {
+  const state = cell.status === "missing" ? "Missing" : entryLabel(formats, cell);
   return cell.editedAfterCapture ? `${state}, edited after capture` : state;
 }
 
@@ -106,6 +115,7 @@ const MINI = "border-b border-card-line/70 px-2 py-1.5 text-sm tabular-nums";
 
 export function RevenuePage() {
   const { can } = useSession();
+  const formats = useFormats();
   const canView = can("revenue.view");
   const canCapture = can("revenue.capture");
   const [weekStart, setWeekStart] = useState("");
@@ -193,11 +203,11 @@ export function RevenuePage() {
     if (saved.date < saved.target) {
       const fresh = await apiRequest<RevenueWeek>(vehicleWeekPath(saved.vehicleId, saved.target)).catch(() => undefined);
       const same = fresh?.vehicles[0];
-      if (same && missingOn(same, saved.target)) return setCapture(openAt(same, saved.target, saved.done));
+      if (same && missingOn(same, saved.target)) return setCapture(openAt(formats, same, saved.target, saved.done));
     }
     const done = [...saved.done, saved.vehicleId];
     const next = canCapture && data ? nextMissing(data.vehicles, saved.vehicleId, saved.target, done) : undefined;
-    setCapture(next ? openAt(next, saved.target, done) : null);
+    setCapture(next ? openAt(formats, next, saved.target, done) : null);
   }
 
   if (!canView) {
@@ -217,7 +227,7 @@ export function RevenuePage() {
             <ChevronIcon size={20} className="rotate-90" />
           </IconButton>
           <strong aria-live="polite" className="min-w-44 text-center text-[15px] max-[600px]:min-w-0">
-            {start ? rangeLabel(start, shiftDate(start, 6)) : <Skeleton className="mx-auto w-36" />}
+            {start ? formats.formatDateRange(start, shiftDate(start, 6)) : <Skeleton className="mx-auto w-36" />}
           </strong>
           <IconButton
             aria-label="Next week"
@@ -243,7 +253,7 @@ export function RevenuePage() {
           <Button
             disabled={Boolean(stale)}
             aria-busy={stale ? true : undefined}
-            onClick={(event) => open(openAt(first.vehicle, first.date), event.currentTarget)}
+            onClick={(event) => open(openAt(formats, first.vehicle, first.date), event.currentTarget)}
           >
             Capture revenue
           </Button>
@@ -252,9 +262,9 @@ export function RevenuePage() {
           <small className="text-xs text-grey">Week to date</small>
           {data ? (
             <>
-              <strong className="text-xl tabular-nums">{kes(data.totalAmount)}</strong>
+              <strong className="text-xl tabular-nums">{formats.kes(data.totalAmount)}</strong>
               <small className="text-xs text-grey">
-                {`of ${kes(data.totalExpected)} expected${data.percent === null ? "" : `, ${percentText(data.percent)}`}`}
+                {`of ${formats.kes(data.totalExpected)} expected${data.percent === null ? "" : `, ${percentText(data.percent)}`}`}
               </small>
             </>
           ) : (
@@ -280,7 +290,7 @@ export function RevenuePage() {
         // grid, so they scroll with it instead of widening the page at tablet widths.
         <div ref={gridRef} tabIndex={-1} className="relative mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-surface">
           <table className="w-full border-collapse min-[721px]:min-w-225">
-            <caption className="sr-only">Revenue by vehicle and day, {rangeLabel(data.weekStart, data.weekThrough)}</caption>
+            <caption className="sr-only">Revenue by vehicle and day, {formats.formatDateRange(data.weekStart, data.weekThrough)}</caption>
             <thead>
               <tr>
                 <th scope="col" className={cn(HEAD, "sticky left-0 z-1 min-w-35 text-left")}>
@@ -339,12 +349,12 @@ export function RevenuePage() {
                               cell={day}
                               today={today}
                               canCapture={canCapture}
-                              onOpen={(from) => open(openAt(item, day.date), from)}
+                              onOpen={(from) => open(openAt(formats, item, day.date), from)}
                             />
                           </td>
                         ))}
                         <td className={cn(CELL, "text-right")}>
-                          <strong>{figure(item.totalAmount)}</strong>
+                          <strong>{figure(formats, item.totalAmount)}</strong>
                         </td>
                         <td className={cn(CELL, "text-right")}>
                           {item.percent !== null && (
@@ -359,7 +369,7 @@ export function RevenuePage() {
                               vehicle={item}
                               today={today}
                               canCapture={canCapture}
-                              onOpen={(date, from) => open(openAt(item, date), from)}
+                              onOpen={(date, from) => open(openAt(formats, item, date), from)}
                             />
                           </td>
                         </tr>
@@ -377,10 +387,10 @@ export function RevenuePage() {
                   </th>
                   {dayTotals.map((total, index) => (
                     <td key={days[index]} className={cn("px-2 py-2 text-right tabular-nums", DAY_COLUMN)}>
-                      {total ? figure(total) : ""}
+                      {total ? figure(formats, total) : ""}
                     </td>
                   ))}
-                  <td className="px-2 py-2 text-right tabular-nums">{figure(data.totalAmount)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{figure(formats, data.totalAmount)}</td>
                   <td className="px-2 py-2 text-right tabular-nums">{data.percent === null ? "" : percentText(data.percent)}</td>
                 </tr>
               </tfoot>
@@ -400,7 +410,7 @@ export function RevenuePage() {
               canChooseReason={can("revenue.no_earnings")}
               onCancel={() => setCapture(null)}
               onDone={() => advance(capture)}
-              onOpenDay={(date) => setCapture({ ...capture, date, info: `Fill ${longDate(date)} first.` })}
+              onOpenDay={(date) => setCapture({ ...capture, date, info: `Fill ${longDate(formats, date)} first.` })}
               reload={async () =>
                 (await apiRequest<RevenueWeek>(vehicleWeekPath(capture.vehicleId, capture.date))).vehicles[0]?.days.find(
                   (day) => day.date === capture.date,
@@ -434,12 +444,13 @@ function DayCell({
   canCapture: boolean;
   onOpen: (from: HTMLElement) => void;
 }) {
+  const formats = useFormats();
   const clickable = opens(vehicle, cell, canCapture);
   const missing = cell.status === "missing";
   const now = cell.date === today;
   const content =
     cell.status === "amount" ? (
-      figure(cell.amount ?? 0)
+      figure(formats, cell.amount ?? 0)
     ) : cell.status === "reason" ? (
       <span className={PILL}>{cell.reason}</span>
     ) : missing ? (
@@ -463,7 +474,7 @@ function DayCell({
   return (
     <button
       type="button"
-      aria-label={`${vehicle.registration}, ${longDate(cell.date)}: ${cellState(cell)}`}
+      aria-label={`${vehicle.registration}, ${longDate(formats, cell.date)}: ${cellState(formats, cell)}`}
       onClick={(event) => onOpen(event.currentTarget)}
       className={cn(className, "hover:bg-hover", missing && "border border-dashed", missing && (now ? "border-blue" : "border-red"))}
     >
@@ -485,6 +496,7 @@ function VehicleWeek({
   canCapture: boolean;
   onOpen: (date: string, from: HTMLElement) => void;
 }) {
+  const formats = useFormats();
   return (
     <table className="ml-6 w-[calc(100%-24px)] border-collapse max-[720px]:ml-0 max-[720px]:w-full">
       <caption className="sr-only">{vehicle.registration} week detail</caption>
@@ -523,7 +535,7 @@ function VehicleWeek({
                 </td>
               </tr>
             );
-          const expected = <td className={cn(MINI, "text-right")}>{figure(cell.expected)}</td>;
+          const expected = <td className={cn(MINI, "text-right")}>{figure(formats, cell.expected)}</td>;
           if (cell.status === "future")
             return (
               <tr key={cell.date} className="text-grey">
@@ -540,14 +552,14 @@ function VehicleWeek({
               {cell.date < today ? "No record" : "Not yet"}
             </span>
           ) : cell.amount !== null ? (
-            figure(cell.amount)
+            figure(formats, cell.amount)
           ) : (
             <span className={PILL}>{cell.reason}</span>
           );
           const revenue = opens(vehicle, cell, canCapture) ? (
             <button
               type="button"
-              aria-label={`${vehicle.registration}, ${longDate(cell.date)}: ${cellState(cell)}`}
+              aria-label={`${vehicle.registration}, ${longDate(formats, cell.date)}: ${cellState(formats, cell)}`}
               onClick={(event) => onOpen(cell.date, event.currentTarget)}
               className="min-h-8 rounded-lg px-1.5 underline decoration-dotted underline-offset-4 hover:bg-hover"
             >
@@ -588,8 +600,8 @@ function VehicleWeek({
           <th scope="row" className="px-2 py-1.5 text-left text-sm">
             To date
           </th>
-          <td className="px-2 py-1.5 text-right text-sm tabular-nums">{figure(vehicle.totalExpected)}</td>
-          <td className="px-2 py-1.5 text-right text-sm tabular-nums">{figure(vehicle.totalAmount)}</td>
+          <td className="px-2 py-1.5 text-right text-sm tabular-nums">{figure(formats, vehicle.totalExpected)}</td>
+          <td className="px-2 py-1.5 text-right text-sm tabular-nums">{figure(formats, vehicle.totalAmount)}</td>
           <td className="px-2 py-1.5 text-right text-sm tabular-nums">
             <Gap actual={vehicle.totalAmount} expected={vehicle.totalExpected} />
           </td>
@@ -601,7 +613,8 @@ function VehicleWeek({
 }
 
 function Gap({ actual, expected }: { actual: number; expected: number }) {
-  return <span className={cn(actual < expected && "text-red", actual > expected && "text-green")}>{difference(actual, expected)}</span>;
+  const formats = useFormats();
+  return <span className={cn(actual < expected && "text-red", actual > expected && "text-green")}>{difference(formats, actual, expected)}</span>;
 }
 
 function CaptureForm({
@@ -625,11 +638,12 @@ function CaptureForm({
   // Reads the day again, for a conflict that came without the saved record.
   reload: () => Promise<RevenueCell | undefined>;
 }) {
+  const formats = useFormats();
   // The record as it was when the day opened. A grid reload can bring a newer one, but saving over what the person
   // never saw must come back as a conflict, so its version is the one sent.
   const [opened] = useState(cell);
   const [amount, setAmount] = useState(opened.amount === null ? "" : String(opened.amount));
-  const [reason, setReason] = useState<Reason | "">(isReason(opened.reason) ? opened.reason : "");
+  const [reason, setReason] = useState<RevenueReason | "">(isReason(opened.reason) ? opened.reason : "");
   const [note, setNote] = useState(opened.note ?? "");
   const [error, setError] = useState("");
   const [earlier, setEarlier] = useState("");
@@ -648,12 +662,10 @@ function CaptureForm({
   }, []);
 
   function entry(): SaveRevenue | string {
-    // The same rule the API and the phone apply: more than zero, at most two decimals. Cents are kept,
-    // so a total always agrees with the records behind it (D3).
-    const text = amount.replace(/[,\s]/g, "");
-    if (text && (!AMOUNT.test(text) || Number(text) <= 0))
-      return "Enter the revenue as a positive amount with at most two decimals.";
-    if (text) return { amount: Number(text), reason: null, note: null };
+    const parsedAmount = parseRevenueAmount(amount);
+    if (!parsedAmount.ok) return parsedAmount.error;
+    if (parsedAmount.amount !== null)
+      return { amount: parsedAmount.amount, reason: null, note: null };
     if (!canChooseReason) return "Enter the revenue.";
     if (!reason) return "Enter the revenue or pick a reason.";
     if (reason === "Other" && !note.trim()) return "Say what happened.";
@@ -698,7 +710,7 @@ function CaptureForm({
     });
   }
 
-  function choose(item: Reason) {
+  function choose(item: RevenueReason) {
     setReason((current) => (current === item ? "" : item));
     setAmount("");
     setError("");
@@ -714,17 +726,17 @@ function CaptureForm({
         save(opened.version ?? null);
       }}
     >
-      <p className="m-0 text-[13px] text-grey">{`${longDate(cell.date)}. Expected ${kes(cell.expected)}`}</p>
+      <p className="m-0 text-[13px] text-grey">{`${longDate(formats, cell.date)}. Expected ${formats.kes(cell.expected)}`}</p>
       {info && <Note>{info}</Note>}
       {!canChooseReason && !conflict && opened.reason && (
-        <Hint>{`Recorded as ${entryLabel(opened)}. Enter the revenue to replace it.`}</Hint>
+        <Hint>{`Recorded as ${entryLabel(formats, opened)}. Enter the revenue to replace it.`}</Hint>
       )}
       {conflict ? (
         <>
           <Note>{conflict.message}</Note>
           <StatGrid className="grid-cols-2">
-            <Stat label="Saved value" value={entryLabel(conflict.current)} />
-            <Stat label="Yours" value={typeof mine === "string" ? "" : entryLabel(mine)} />
+            <Stat label="Saved value" value={entryLabel(formats, conflict.current)} />
+            <Stat label="Yours" value={typeof mine === "string" ? "" : entryLabel(formats, mine)} />
           </StatGrid>
           {!conflict.current.canEdit && <Hint>Your access does not include changing the saved record for this day.</Hint>}
           <FormActions>
@@ -762,7 +774,7 @@ function CaptureForm({
                 or no revenue
               </p>
               <div role="group" aria-label="No revenue reason" className="grid grid-cols-4 gap-2 max-[600px]:grid-cols-2">
-                {REASONS.map((item) => (
+                {REVENUE_REASONS.map((item) => (
                   <button
                     key={item}
                     type="button"
@@ -775,11 +787,11 @@ function CaptureForm({
                 ))}
               </div>
               {reason === "Other" && (
-                <Field id="revenue-note" label="What happened" hint="Up to 80 characters.">
+                <Field id="revenue-note" label="What happened" hint={`Up to ${REVENUE_NOTE_LIMIT} characters.`}>
                   <TextInput
                     ref={noteRef}
                     autoFocus
-                    maxLength={80}
+                    maxLength={REVENUE_NOTE_LIMIT}
                     value={note}
                     onChange={(event) => {
                       setNote(event.target.value);
@@ -792,9 +804,9 @@ function CaptureForm({
           )}
           {earlier && (
             <>
-              <Note>{`Record ${longDate(earlier)} first.`}</Note>
+              <Note>{`Record ${longDate(formats, earlier)} first.`}</Note>
               <Button tone="outline" className="self-start" onClick={() => onOpenDay(earlier)}>
-                {`Open ${longDate(earlier)}`}
+                {`Open ${longDate(formats, earlier)}`}
               </Button>
             </>
           )}

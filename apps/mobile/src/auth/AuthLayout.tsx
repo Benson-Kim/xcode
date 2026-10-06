@@ -5,6 +5,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+
 import { Brand, Text, useTheme } from "../ui";
 
 export const VERSION = "XCODE Mobile v0.9";

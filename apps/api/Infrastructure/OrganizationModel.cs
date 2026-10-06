@@ -116,12 +116,14 @@ public sealed partial class AuthDb
      public override int SaveChanges(bool acceptAllChangesOnSuccess)
      {
           ValidateWrites();
+          BumpVersions();
           return base.SaveChanges(acceptAllChangesOnSuccess);
      }
 
      public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
      {
           ValidateWrites();
+          BumpVersions();
           return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
      }
 }

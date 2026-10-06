@@ -13,6 +13,7 @@ public sealed class AuthOptions
     public string Issuer { get; set; } = "xcode-api";
     public string Audience { get; set; } = "xcode-clients";
     public int? TrustLifetimeDays { get; set; }
+    public bool DevelopmentMode { get; set; }
 }
 public sealed record AuthRequest(
     string Email = "",

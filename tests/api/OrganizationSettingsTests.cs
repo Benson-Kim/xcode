@@ -143,15 +143,26 @@ public sealed class OrganizationSettingsTests : IDisposable
     public void ChangingTheTimeZoneChecksTheHeldBusinessDate()
     {
         var organization = new Organization();
-        var localization = new OrganizationLocalization { OrganizationId = organization.Id, TimeZone = "UTC" };
+        var localization = new OrganizationLocalization
+        {
+            OrganizationId = organization.Id,
+            TimeZone = "UTC"
+        };
         var today = new DateOnly(2026, 9, 30);
+        var targetZone = new TimeZoneId("UTC");
+
         organization.ChangeBusinessDate(today, today);
-        Assert.Throws<ArgumentException>(() => organization.ChangeTimeZone(localization, new TimeZoneId("UTC"), today.AddDays(-1)));
-        organization.ChangeTimeZone(localization, new TimeZoneId("UTC"), today);
+
+        var pastDateInZone = today.AddDays(-1);
+        Assert.Throws<ArgumentException>(() =>
+            organization.ChangeTimeZone(localization, targetZone, pastDateInZone)
+        );
+
+        organization.ChangeTimeZone(localization, targetZone, today);
         Assert.Equal("UTC", localization.TimeZone);
     }
 
-    // Contract C7: organization settings keep the automatic reason; a typed one is optional but still checked.
+    // Organization settings keep the automatic reason; a typed one is optional but still checked.
     [Fact]
     public async Task SettingsSavedWithoutAReasonGetAnAutomaticOne()
     {

@@ -1,5 +1,26 @@
-import { isIP } from "node:net";
 import type { NextRequest } from "next/server";
+import { isIP } from "node:net";
+
+function secureOrLocal(url: string) {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "https:" || (protocol === "http:" && (hostname === "localhost" || hostname === "127.0.0.1"));
+  } catch {
+    return false;
+  }
+}
+
+export function upstreamUrl(): string {
+  const url = process.env.API_URL;
+  if (url) {
+    if (process.env.NODE_ENV === "production" && !secureOrLocal(url))
+      throw new Error("API_URL must use HTTPS in production, unless it is a local address.");
+    return url;
+  }
+  if (process.env.NODE_ENV === "production")
+    throw new Error("API_URL is required in production.");
+  return "http://localhost:5000";
+}
 
 // The largest body the proxy forwards. The biggest legitimate one is a logo upload, a data URL of about 350 KB.
 export const MAX_BODY_BYTES = 1024 * 1024;
@@ -37,4 +58,30 @@ export function forwardedFor(request: NextRequest): Record<string, string> {
   const entries = request.headers.get("x-forwarded-for")?.split(",").map((entry) => entry.trim()) ?? [];
   const address = entries.length >= hops ? entries[entries.length - hops] : "";
   return isIP(address) ? { "X-Forwarded-For": address } : {};
+}
+
+export function requestId() {
+  return crypto.randomUUID();
+}
+
+export function logProxyError(id: string, operation: string, error: unknown) {
+  console.error(
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      requestId: id,
+      operation,
+      error: error instanceof Error ? error.message : String(error),
+      level: "error",
+    }),
+  );
+}
+
+export function sameOrigin(origin: string, host: string | null, expectedOrigin: string) {
+  try {
+    const parsed = new URL(origin);
+    const expected = new URL(expectedOrigin);
+    return parsed.protocol === expected.protocol && parsed.host === (host || expected.host);
+  } catch {
+    return false;
+  }
 }

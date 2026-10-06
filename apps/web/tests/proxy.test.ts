@@ -1,6 +1,7 @@
 // @vitest-environment node
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
 import { GET, POST } from "../app/api/auth/[...path]/route";
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => jar.has(name) ? { value: jar.get(name) } : undefined }) }));
@@ -67,6 +68,21 @@ it("passes the organization's minimum PIN length back to the client", async () =
   expect(result.status).toBe(400);
   expect(await result.json()).toMatchObject({ status: "invalid_pin", minimumPinLength: 6 });
 });
+it("passes the development code back to the client outside production", async () => {
+  vi.stubGlobal("fetch", upstream({ status: "verification_required", developmentCode: "481516", maskedEmail: "a***@example.com" }, 202));
+  const result = await POST(request(), { params: Promise.resolve({ path: ["sign-in"] }) });
+  expect(await result.json()).toEqual({ status: "verification_required", developmentCode: "481516", maskedEmail: "a***@example.com" });
+});
+it("never passes the development code back to the client in production, even when the API sends one", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("API_URL", "https://api.example.com");
+  vi.stubGlobal("fetch", upstream({ status: "verification_required", developmentCode: "481516", maskedEmail: "a***@example.com" }, 202));
+  const result = await POST(request(), { params: Promise.resolve({ path: ["sign-in"] }) });
+  expect(result.status).toBe(202);
+  const body = await result.json();
+  expect(body).not.toHaveProperty("developmentCode");
+  expect(body).toEqual({ status: "verification_required", maskedEmail: "a***@example.com" });
+});
 
 it("answers 503 with a timeout when the API is down while checking the session", async () => {
   jar.set("access", "access-value");
@@ -74,8 +90,28 @@ it("answers 503 with a timeout when the API is down while checking the session",
   vi.stubGlobal("fetch", fetcher);
   const result = await GET(new NextRequest("http://localhost:3000/api/auth/session"), { params: Promise.resolve({ path: ["session"] }) });
   expect(result.status).toBe(503);
-  expect(await result.json()).toEqual({ status: "service_unavailable" });
+  expect(await result.json()).toEqual({ status: "service_unavailable", requestId: expect.any(String) });
   expect(fetcher.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+});
+
+it("maps an upstream 5xx on the session check to 503 service_unavailable with a request id", async () => {
+  jar.set("access", "access-value");
+  const fetcher = upstream({ title: "Internal Server Error", detail: "NullReferenceException in AuthService" }, 500);
+  vi.stubGlobal("fetch", fetcher);
+  const result = await GET(new NextRequest("http://localhost:3000/api/auth/session"), { params: Promise.resolve({ path: ["session"] }) });
+  expect(result.status).toBe(503);
+  expect(result.headers.get("Cache-Control")).toBe("no-store");
+  const body = await result.json();
+  expect(body).toEqual({ status: "service_unavailable", requestId: expect.any(String) });
+  expect(fetcher.mock.calls[0][1].headers["X-Request-ID"]).toBe(body.requestId);
+});
+
+it("passes an upstream answer below 500 on the session check through unchanged", async () => {
+  jar.set("access", "access-value");
+  vi.stubGlobal("fetch", upstream({ status: "authentication_failed" }, 401));
+  const result = await GET(new NextRequest("http://localhost:3000/api/auth/session"), { params: Promise.resolve({ path: ["session"] }) });
+  expect(result.status).toBe(401);
+  expect(await result.json()).toEqual({ status: "authentication_failed" });
 });
 
 it("refuses a sign-in body over 1 MB without calling the API", async () => {
@@ -130,4 +166,97 @@ it("tells the API which browser a session check comes from", async () => {
   vi.stubGlobal("fetch", fetcher);
   await GET(new NextRequest("http://localhost:3000/api/auth/session", { headers: { "x-forwarded-for": "203.0.113.99, 198.51.100.7" } }), { params: Promise.resolve({ path: ["session"] }) });
   expect(fetcher.mock.calls[0][1].headers["X-Forwarded-For"]).toBe("198.51.100.7");
+});
+
+it("rejects non-string auth fields and does not coerce arrays or objects", async () => {
+  const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+  await POST(request(undefined, { phoneNumber: ["injected"], pin: { $gt: "" } } as unknown as object), { params: Promise.resolve({ path: ["sign-in"] }) });
+  const sent = fetcher.mock.calls[0]?.[1]?.body ? JSON.parse(fetcher.mock.calls[0][1].body) : null;
+  if (sent) {
+    expect(sent.phoneNumber).toBe("");
+    expect(sent.pin).toBe("");
+  }
+});
+
+it("rejects an array body", async () => {
+  const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+  const result = await POST(
+    new NextRequest("http://localhost:3000/api/auth/sign-in", { method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json" }, body: JSON.stringify([{ phoneNumber: "0712345678" }]) }),
+    { params: Promise.resolve({ path: ["sign-in"] }) },
+  );
+  expect(result.status).toBe(400);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("rejects oversized field values before they reach the API", async () => {
+  const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+  const result = await POST(request(undefined, { pin: "1".repeat(9) }), { params: Promise.resolve({ path: ["sign-in"] }) });
+  expect(result.status).toBe(400);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("maps an upstream 5xx to 503 service_unavailable", async () => {
+  vi.stubGlobal("fetch", upstream({ title: "Internal Server Error" }, 500));
+  const result = await POST(request(), { params: Promise.resolve({ path: ["sign-in"] }) });
+  expect(result.status).toBe(503);
+  expect(await result.json()).toEqual({ status: "service_unavailable", requestId: expect.any(String) });
+});
+
+it("maps an upstream response with no status field to 503", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));
+  const result = await POST(request(), { params: Promise.resolve({ path: ["sign-in"] }) });
+  expect(result.status).toBe(503);
+  expect(await result.json()).toMatchObject({ status: "service_unavailable" });
+});
+
+it("maps a network failure on POST to 503 service_unavailable with a request id, and logs it", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const fetcher = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+  vi.stubGlobal("fetch", fetcher);
+  const result = await POST(request(), { params: Promise.resolve({ path: ["sign-in"] }) });
+  expect(result.status).toBe(503);
+  expect(result.headers.get("Cache-Control")).toBe("no-store");
+  const body = await result.json();
+  expect(body).toEqual({ status: "service_unavailable", requestId: expect.any(String) });
+  expect(fetcher.mock.calls[0][1].headers["X-Request-ID"]).toBe(body.requestId);
+  expect(JSON.parse(log.mock.calls[0][0] as string)).toMatchObject({ requestId: body.requestId, operation: "sign-in", level: "error", error: "fetch failed" });
+});
+
+it("requires API_URL in production", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("API_URL", "");
+  const { upstreamUrl } = await import("../app/api/body");
+  expect(() => upstreamUrl()).toThrow("API_URL is required in production");
+});
+
+it("requires HTTPS for API_URL in production unless local", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("API_URL", "http://api.example.com");
+  const { upstreamUrl } = await import("../app/api/body");
+  expect(() => upstreamUrl()).toThrow("HTTPS");
+});
+
+it("allows HTTP localhost API_URL in production", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("API_URL", "http://localhost:5000");
+  const { upstreamUrl } = await import("../app/api/body");
+  expect(upstreamUrl()).toBe("http://localhost:5000");
+});
+
+it("allows HTTP 127.0.0.1 and any HTTPS API_URL in production", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  const { upstreamUrl } = await import("../app/api/body");
+  for (const url of ["http://127.0.0.1:5000", "https://api.example.com"]) {
+    vi.stubEnv("API_URL", url);
+    expect(upstreamUrl(), url).toBe(url);
+  }
+});
+
+it("refuses HTTP for a host that only looks local in production", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  const { upstreamUrl } = await import("../app/api/body");
+  for (const url of ["http://localhost.evil.example", "http://127.0.0.1.evil.example", "http://localhost@evil.example", "not a url"]) {
+    vi.stubEnv("API_URL", url);
+    expect(() => upstreamUrl(), url).toThrow("HTTPS");
+  }
 });

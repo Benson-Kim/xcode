@@ -39,7 +39,7 @@ public sealed class AuthTests : IDisposable
         using var response = await client.PostAsJsonAsync("/auth/" + path, request);
         await Mailer.Idle();
         var headers = string.Join("; ", response.Headers.Concat(response.Content.Headers)
-            .Where(x => x.Key is not ("Date" or "Content-Length")).OrderBy(x => x.Key).Select(x => $"{x.Key}={string.Join(",", x.Value)}"));
+            .Where(x => x.Key is not ("Date" or "Content-Length" or "X-Request-ID")).OrderBy(x => x.Key).Select(x => $"{x.Key}={string.Join(",", x.Value)}"));
         return $"{(int)response.StatusCode} {headers} {await response.Content.ReadAsStringAsync()}";
     }
     private const string Unknown = "+254700000000";
@@ -90,15 +90,59 @@ public sealed class AuthTests : IDisposable
     [Theory]
     [InlineData("sign-in")]
     [InlineData("unlock")]
-    public async Task TheWrongPinThatStartsAPauseLooksLikeAnUnknownNumberOnAnotherDevice(string path)
+    public async Task UntrustedDeviceWrongPinsDoNotLockTheAccount(string path)
     {
         await app.Seed();
-        for (var i = 0; i < 4; i++) await Post(path, Request(pin: "9998", device: "stranger"));
+        // Wrong PINs from an untrusted device are tracked for monitoring but do not lock the account.
+        for (var i = 0; i < 10; i++) await Post(path, Request(pin: "9998", device: "stranger"));
 
-        // Anywhere but a trusted device, the try that starts the pause answers exactly as a number with no account does.
-        Assert.Equal(await Seen(path, Request(phoneNumber: Unknown, pin: "9998", device: "stranger")), await Seen(path, Request(pin: "9998", device: "stranger")));
-        await app.WithDb(async db => Assert.Equal(app.Clock.UtcNow.AddMinutes(15), (await db.Users.SingleAsync()).PausedUntil));
+        await app.WithDb(async db =>
+        {
+            var user = await db.Users.SingleAsync();
+            Assert.Equal(0, user.FailedAttempts);
+            Assert.Null(user.PausedUntil);
+            Assert.Equal(10, user.UntrustedFailedAttempts);
+        });
+
+        // The legitimate user on their trusted device can still sign in.
+        Assert.Equal(HttpStatusCode.OK, (await Post(path)).Status);
     }
+
+    [Fact]
+    public async Task PastTheAccountLimitAnUntrustedDeviceLearnsNothingFromThePin()
+    {
+        await app.Seed();
+        for (var i = 0; i < AuthService.UntrustedAttemptLimit; i++)
+            Assert.Equal(HttpStatusCode.Unauthorized, (await Post("sign-in", Request(pin: "9998", device: $"stranger-{i}"))).Status);
+
+        Assert.Equal(await Post("sign-in", Request(phoneNumber: Unknown, device: "stranger")), await Post("sign-in", Request(device: "stranger")));
+        Assert.Equal(0, app.Email.Count);
+
+        Assert.Equal(HttpStatusCode.OK, (await Post("sign-in")).Status);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Post("sign-in", Request(device: "stranger"))).Status);
+
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request", Request(device: "stranger"))).Status);
+        Assert.Equal(HttpStatusCode.OK, (await Post("pin-reset/complete", Request(pin: "4719", device: "stranger", code: app.Email.Codes[Address]))).Status);
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("sign-in", Request(pin: "4719", device: "another"))).Status);
+    }
+
+    [Fact]
+    public async Task AStaleWriteToAPersonOrTheirSessionConflictsRatherThanOverwrites()
+    {
+        await app.Seed();
+        Assert.Equal(HttpStatusCode.OK, (await Post("sign-in")).Status);
+        await Stale(db => db.Users.SingleAsync(), user => user.RecordFailedAttempt());
+        await Stale(db => db.RefreshTokens.SingleAsync(), token => token.Revoke());
+    }
+
+    private Task Stale<T>(Func<AuthDb, Task<T>> load, Action<T> change) => app.WithDb(first => app.WithDb(async second =>
+    {
+        var stale = await load(first);
+        change(await load(second));
+        await second.SaveChangesAsync();
+        change(stale);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => first.SaveChangesAsync());
+    }));
 
     [Fact]
     public async Task ANumberThatIsNotAPhoneNumberReachesNoAccount()
@@ -604,5 +648,101 @@ public sealed class AuthTests : IDisposable
             await Assert.ThrowsAsync<ArgumentException>(() => UserProvisioning.Provision(db, new("someone.else@example.com", "0722000111")));
         });
     }
+    [Fact]
+    public async Task DevelopmentCodeIsNullInTestingEnvironment()
+    {
+        // In Testing, DevelopmentMode is false by default (AuthFactory doesn't set it), so sign-in on an
+        // untrusted device returns verification_required with no plaintext code.
+        await app.Seed(trusted: false);
+        var result = await Post("sign-in");
+        Assert.Equal("verification_required", result.Body.Status);
+        Assert.Null(result.Body.DevelopmentCode);
+        // The code still arrives by email.
+        Assert.Equal(1, app.Email.Count);
+    }
+
+    [Fact]
+    public async Task TwoDifferentPhoneNumbersCanSignInConcurrently()
+    {
+        await app.SeedDemo();
+        using var c1 = app.CreateClient();
+        using var c2 = app.CreateClient();
+        var r1 = await c1.PostAsJsonAsync("/auth/sign-in", new AuthRequest(PhoneNumber: "0733520614", Pin: "4826", DeviceId: "device-a"));
+        var r2 = await c2.PostAsJsonAsync("/auth/sign-in", new AuthRequest(PhoneNumber: "0712345678", Pin: "2580", DeviceId: "device-b"));
+        Assert.True(r1.StatusCode is HttpStatusCode.OK or HttpStatusCode.Accepted, $"Expected 200 or 202, got {r1.StatusCode}");
+        Assert.True(r2.StatusCode is HttpStatusCode.OK or HttpStatusCode.Accepted, $"Expected 200 or 202, got {r2.StatusCode}");
+    }
+
+    [Fact]
+    public async Task HourlyCodeIssuanceLimitPreventsExcessiveCodes()
+    {
+        await app.Seed();
+        // Issue codes up to the hourly limit.
+        for (var i = 0; i < AuthService.HourlyCodeLimit; i++)
+        {
+            app.Clock.Advance(TimeSpan.FromMinutes(2)); // past the 1-minute resend cooldown
+            Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        }
+        var countBefore = app.Email.Count;
+
+        // The next request within the hour should be silently throttled (no new email).
+        app.Clock.Advance(TimeSpan.FromMinutes(2));
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        Assert.Equal(countBefore, app.Email.Count);
+
+        // After an hour elapses, codes can be issued again.
+        app.Clock.Advance(TimeSpan.FromHours(1));
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        Assert.Equal(countBefore + 1, app.Email.Count);
+    }
+
+    [Fact]
+    public async Task DailyCodeIssuanceLimitPreventsExcessiveCodes()
+    {
+        await app.Seed();
+        // Issue codes up to the daily limit, spacing them past the hourly window.
+        for (var i = 0; i < AuthService.DailyCodeLimit; i++)
+        {
+            app.Clock.Advance(TimeSpan.FromHours(2)); // past resend cooldown and spread across hours
+            Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        }
+        var countBefore = app.Email.Count;
+
+        // The next request within 24 hours should be silently throttled.
+        app.Clock.Advance(TimeSpan.FromHours(2));
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        Assert.Equal(countBefore, app.Email.Count);
+
+        // After 24 hours elapse from the first code, codes can be issued again.
+        app.Clock.Advance(TimeSpan.FromHours(24));
+        Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
+        Assert.Equal(countBefore + 1, app.Email.Count);
+    }
+
+    [Fact]
+    public async Task TrustedDeviceWrongPinsStillLockTheAccount()
+    {
+        await app.Seed();
+        // Trusted device failures still cause lockout (preserving existing behavior).
+        await Pause();
+        await app.WithDb(async db =>
+        {
+            var user = await db.Users.SingleAsync();
+            Assert.Equal(5, user.FailedAttempts);
+            Assert.NotNull(user.PausedUntil);
+        });
+        Assert.Equal((HttpStatusCode)423, (await Post("sign-in")).Status);
+    }
+
+    [Fact]
+    public async Task PinLongerThanMaximumIsRejectedBeforeHashing()
+    {
+        await app.Seed();
+        // A PIN longer than 8 digits is rejected at the endpoint level with 400, not 401.
+        var result = await Post("sign-in", Request(pin: "123456789"));
+        Assert.Equal(HttpStatusCode.BadRequest, result.Status);
+        Assert.Equal("invalid_request", result.Body.Status);
+    }
+
     public void Dispose() { client.Dispose(); app.Dispose(); }
 }

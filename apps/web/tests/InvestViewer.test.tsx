@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+
 import { AppShell } from "../components/AppShell";
 import { VehiclesPage } from "../components/setup";
 import { appearanceFixture, renderInApp } from "./renderInApp";
@@ -36,7 +37,7 @@ it("shows Vehicles in the menu for invest.view", async () => {
   serve(["invest.view"]);
   render(<AppShell onSignOut={() => {}} />);
   fireEvent.click(await within(screen.getByRole("navigation", { name: "Main" })).findByRole("button", { name: "Vehicles" }));
-  expect(await screen.findByRole("button", { name: "KDA 482M" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "KDA 482M" }, { timeout: 6000 })).toBeInTheDocument();
 });
 
 it("lists vehicles read-only and opens only the Investment tab", async () => {

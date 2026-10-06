@@ -8,20 +8,17 @@ public sealed record TimeZoneId
      public string Value { get; }
      public TimeZoneId(string value)
      {
-          if (string.IsNullOrWhiteSpace(value) || (value != "UTC" && !value.Contains('/'))) throw new ArgumentException("Use an IANA time zone.");
-          try
+          if (string.IsNullOrWhiteSpace(value))
           {
-               _ = TimeZoneInfo.FindSystemTimeZoneById(value);
+               throw new ArgumentException("Time zone identifier cannot be empty.");
           }
-          catch (TimeZoneNotFoundException)
+
+          if (!TimeZoneInfo.TryFindSystemTimeZoneById(value, out var timeZone))
           {
-               throw new ArgumentException("Unknown IANA time zone");
+               throw new ArgumentException($"'{value}' is an unknown or invalid time zone identifier.", nameof(value));
           }
-          catch (InvalidTimeZoneException)
-          {
-               throw new ArgumentException("Invalid IANA time zone");
-          }
-          Value = value;
+
+          Value = timeZone.Id;
      }
 }
 
@@ -31,7 +28,8 @@ public sealed record Locale
 
      public Locale(string value)
      {
-          if (value is null || !Regex.IsMatch(value, "^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$")) throw new ArgumentException("Use BCP 47 locale.");
+          if (value is null || !Regex.IsMatch(value, "^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$"))
+               throw new ArgumentException("Use BCP 47 locale.");
           Value = value;
      }
 
@@ -43,7 +41,8 @@ public sealed record HexColour
      public string Value { get; }
      public HexColour(string value)
      {
-          if (value is null || !Regex.IsMatch(value, "^#[0-9a-fA-F]{6}$")) throw new ArgumentException("Use a six-digit hex colour");
+          if (value is null || !Regex.IsMatch(value, "^#[0-9a-fA-F]{6}$"))
+               throw new ArgumentException("Use a six-digit hex colour");
           Value = value;
      }
 }
@@ -103,7 +102,8 @@ public sealed class Organization
      }
      public void ChangeTimeZone(OrganizationLocalization localization, TimeZoneId timeZone, DateOnly calendarDateInThatZone)
      {
-          if (localization.OrganizationId != Id) throw new InvalidOperationException("Organization mismatch");
+          if (localization.OrganizationId != Id)
+               throw new InvalidOperationException("Organization mismatch");
           EnsureBusinessDateWithin(calendarDateInThatZone);
           localization.TimeZone = timeZone.Value;
           SettingsChanged();
@@ -159,7 +159,7 @@ public sealed class OrganizationLocalization : IOrganizationEntity
      {
           _ = new Locale(Locale);
           _ = new TimeZoneId(TimeZone);
-          if (DatePattern is not ("short" or "medium" or "long") || FirstDayOfWeek is < 0 or > 6 || WeekNumbering is not ("iso8601" or "local") || !Regex.IsMatch(Currency ?? "", "^[A-Z]{3}$") || NumberDecimals is < 0 or > 6)
+          if (DatePattern is not ("short" or "medium" or "long") || FirstDayOfWeek is < 0 or > 6 || WeekNumbering is not ("iso8601" or "local") || !Regex.IsMatch(Currency ?? "", "^[A-Z]{3}$") || NumberDecimals is < 0 or > 2)
                throw new ArgumentException("Invalid format settings");
      }
 
@@ -307,9 +307,17 @@ public sealed class UserPreference : IOrganizationEntity
      public void Validate()
      {
           if (Locale is not null)
-               _ = new Locale(Locale);
+          {
+               var parsedLocale = new Locale(Locale);
+               Locale = parsedLocale.Value;
+          }
+
           if (TimeZone is not null)
-               _ = new TimeZoneId(TimeZone);
+          {
+               var parsedTimeZone = new TimeZoneId(TimeZone);
+               TimeZone = parsedTimeZone.Value;
+          }
+
           if (ThemeMode is not (null or "light" or "dark" or "system") || !double.IsFinite(FontScale) || FontScale is < 1 or > 3)
                throw new ArgumentException("Invalid accessibility preferences");
      }

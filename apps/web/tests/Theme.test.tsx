@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+
 import { applyAppearance, resolveTheme, type Appearance } from "../lib/appearance";
 
 const appearance = (themeMode: string): Appearance => ({

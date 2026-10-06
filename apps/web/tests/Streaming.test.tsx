@@ -1,5 +1,6 @@
 import { act, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
+
 import { CompaniesPage } from "../components/setup";
 import { renderInApp } from "./renderInApp";
 

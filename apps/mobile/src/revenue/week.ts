@@ -1,4 +1,4 @@
-import { OfflineError, apiGet } from "../lib/api";
+import { OfflineError, ServerError, apiGet } from "../lib/api";
 import { loadCaptureList, saveCaptureList, type StoredCaptureList } from "../lib/storage";
 import type { RevenueCell, RevenueWeek } from "./types";
 
@@ -90,7 +90,7 @@ export async function loadWeek(owner: string, weekStart?: string, vehicleId?: st
       await saveCaptureList(captureList(owner, week)).catch(() => {});
     return { week, saved: false };
   } catch (error) {
-    if (!(error instanceof OfflineError)) throw error;
+    if (!(error instanceof OfflineError) || error instanceof ServerError) throw error;
     const copy = kept.get(path);
     if (copy) return { week: copy, saved: true };
     // Nothing in memory: the app started without a connection. The saved list covers the current week only,

@@ -1,10 +1,11 @@
 import { act, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { CompaniesPage, ExpenseCategoriesPage, HistoryPage, RecurringPage, VehiclesPage } from "../components/setup";
-import { PeopleAccessView } from "../components/PeopleAccessView";
+
 import { OrganizationSettingsView } from "../components/OrganizationSettingsView";
+import { PeopleAccessView } from "../components/PeopleAccessView";
 import { PreferencesView } from "../components/PreferencesView";
+import { CompaniesPage, ExpenseCategoriesPage, HistoryPage, RecurringPage, VehiclesPage } from "../components/setup";
 import { renderInApp } from "./renderInApp";
 
 // Every request waits until the test releases it, so the loading state can be inspected.

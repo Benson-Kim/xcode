@@ -154,7 +154,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             Audit(actor, "person.sign_in_details_changed", target.User.Id,
                 JsonSerializer.Serialize(new { email, phoneNumber = phone }),
                 JsonSerializer.Serialize(new { email = target.User.Email, phoneNumber = target.User.PhoneNumber }));
-            target.User.SecurityVersion++;
+            target.User.BumpSecurityVersion();
             await RevokeSessions(target.User.Id, ct);
         }
         target.Membership.FirstName = payload.FirstName.Trim();
@@ -189,7 +189,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
             // request, and the client renews it with the new values, so the person is not signed out. Data scope is
             // checked against the database on every request, so it needs no renewal.
             if (changes.Intersect(["name", "role", "single permissions"]).Any())
-                target.User.SecurityVersion++;
+                target.User.BumpSecurityVersion();
             await RecordHistory(actor, target.User.Id, before, after, $"Changed {JoinWords(changes)} for {after.Name}", ct);
         }
         return target.User.Id;
@@ -223,8 +223,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         else
         {
             target.Membership.Deactivate();
-            target.User.Status = UserStatus.Removed;
-            target.User.SecurityVersion++;
+            target.User.Remove();
             await RevokeSessions(id, ct);
         }
 
@@ -320,7 +319,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         vehicleIds,
         x.Permissions.ToArray(),
         x.Membership.ApprovalLimit,
-        x.User.PinHash is not null,
+        x.User.HasPin,
         x.Membership.Version,
         otherCompanies,
         otherVehicles
@@ -568,9 +567,9 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     private async Task RevokeSessions(Guid userId, CancellationToken ct)
     {
         foreach (var device in await db.TrustedDevices.Where(x => x.UserId == userId).ToListAsync(ct))
-            device.Revoked = true;
+            device.Revoke();
         foreach (var token in await db.RefreshTokens.Where(x => x.UserId == userId).ToListAsync(ct))
-            token.Revoked = true;
+            token.Revoke();
     }
     private void Audit(SetupActor actor, string action, Guid id, string? detail, string? before = null)
     => db.AuditEvents.Add(new AuditEvent

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { forwardedFor, readLimitedBody } from "../../body";
+
+import { forwardedFor, logProxyError, readLimitedBody, requestId, sameOrigin, upstreamUrl } from "../../body";
 
 const allowedMethods = new Set(["GET", "POST", "PUT", "DELETE"]);
 
@@ -37,6 +38,7 @@ async function proxy(
   context: { params: Promise<{ path: string[] }> },
   method: string,
 ) {
+  const id = requestId();
   if (!allowedMethods.has(method))
     return NextResponse.json({ status: "invalid_request" }, { status: 405 });
   const origin = request.headers.get("origin");
@@ -80,12 +82,13 @@ async function proxy(
     return NextResponse.json({ status: "payload_too_large" }, { status: 413 });
   try {
     const response = await fetch(
-      `${process.env.API_URL || "http://localhost:5000"}/setup/${operation}${request.nextUrl.search}`,
+      `${upstreamUrl()}/setup/${operation}${request.nextUrl.search}`,
       {
         method,
         cache: "no-store",
         headers: {
           Authorization: `Bearer ${access}`,
+          "X-Request-ID": id,
           ...forwardedFor(request),
           ...(body ? { "Content-Type": "application/json" } : {}),
         },
@@ -94,6 +97,11 @@ async function proxy(
         signal: AbortSignal.timeout(15_000),
       },
     );
+    if (response.status >= 500)
+      return NextResponse.json(
+        { status: "service_unavailable", requestId: id },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
     const result = await response.text();
     return new NextResponse(result, {
       status: response.status,
@@ -103,27 +111,11 @@ async function proxy(
         "Cache-Control": "no-store",
       },
     });
-  } catch {
+  } catch (error) {
+    logProxyError(id, operation, error);
     return NextResponse.json(
-      { status: "service_unavailable" },
-      { status: 503 },
+      { status: "service_unavailable", requestId: id },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
     );
-  }
-}
-
-function sameOrigin(
-  origin: string,
-  host: string | null,
-  expectedOrigin: string,
-) {
-  try {
-    const parsed = new URL(origin);
-    const expected = new URL(expectedOrigin);
-    return (
-      parsed.protocol === expected.protocol &&
-      parsed.host === (host || expected.host)
-    );
-  } catch {
-    return false;
   }
 }

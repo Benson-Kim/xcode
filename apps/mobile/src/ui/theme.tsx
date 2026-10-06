@@ -1,10 +1,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 
-// Colours that follow the organization's branding (primary, secondary, accent)
-//  are read through useTheme() so a saved brand can replace them.
-// Three of them say what a colour is for rather than what it looks like, because the dark palette moves them in
-// opposite directions: "surface" is what a card, a field or a sheet sits on, "onBrand" the ink on the brand colour
-// (which stays dark in both themes) and "onFill" the ink on a blue or green fill (which lightens in the dark one).
+// Colours that follow the organization's branding (primary, secondary, accent) are read through useTheme() so a saved brand can replace them.
+
 export const palette = {
   cream: "#F6F3EC",
   navy: "#14213D",

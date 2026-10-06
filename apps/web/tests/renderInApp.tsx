@@ -1,8 +1,9 @@
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { SessionProvider, type Session } from "../lib/session-context";
-import { AppearanceProvider, type Appearance } from "../lib/appearance";
+
 import { ToastProvider } from "../components/ui";
+import { AppearanceProvider, type Appearance } from "../lib/appearance";
+import { SessionProvider, type Session } from "../lib/session-context";
 
 // The appearance the app shell loads from /setup/appearance, with the organization's business date.
 export function appearanceFixture(businessDate?: string): Appearance {

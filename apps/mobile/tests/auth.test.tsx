@@ -1,5 +1,8 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { AppState } from "react-native";
+
+import { OfflineError, SessionEndedError, apiGet } from "../src/lib/api";
+import { loadSession, saveSession } from "../src/lib/storage";
 import { fakeApi, people, tokens } from "./fakeApi";
 import { startApp, storedText, trustPhone, typePin } from "./helpers";
 
@@ -204,6 +207,54 @@ it("sets a first PIN with an email code and meets the organization's minimum len
   expect(api.sent("auth/setup-pin/complete").map((body) => body.pin)).toEqual(["5937", "593718"]);
 });
 
+it("holds the keypad while a new PIN is being saved, so a second entry sends no second request", async () => {
+  const api = fakeApi();
+  api.on("auth/setup-pin/request", [202, { status: "check_email", developmentCode: "123123" }]);
+  api.on("auth/setup-pin/verify", [200, { status: "code_verified" }]);
+  let saved = () => {};
+  api.on("auth/setup-pin/complete", () => new Promise<[number, unknown]>((resolve) => { saved = () => resolve([200, tokens()]); }));
+  api.on("auth/session", [200, people.manager]);
+  await startApp();
+
+  await fireEvent.changeText(await screen.findByLabelText("Mobile number"), "0700111222");
+  await fireEvent.press(screen.getByText("First time here? Set your PIN"));
+  await fireEvent.changeText(await screen.findByLabelText("6 digit code"), "123123");
+  await screen.findByText("Choose your PIN");
+  await typePin("5937");
+  await screen.findByText("Type it again");
+  await typePin("5937");
+  await waitFor(() => expect(api.sent("auth/setup-pin/complete")).toHaveLength(1));
+
+  expect(screen.getByRole("button", { name: "1" })).toBeDisabled();
+  await typePin("5937");
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  expect(screen.getByLabelText("0 of 4 numbers entered")).toBeTruthy();
+  expect(api.sent("auth/setup-pin/complete")).toHaveLength(1);
+
+  await act(async () => saved());
+  await screen.findByText("Hi Brian");
+  expect(api.sent("auth/setup-pin/complete")).toHaveLength(1);
+});
+
+it("holds the keypad while an offline unlock is being checked", async () => {
+  await trustPhone();
+  fakeApi().on("auth/unlock", "offline");
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+
+  let matched: (match: boolean) => void = () => {};
+  const check = jest.spyOn(require("../src/lib/storage"), "matchesPinCheck").mockImplementation(() => new Promise<boolean>((resolve) => { matched = resolve; }));
+  try {
+    await typePin("4826");
+    await waitFor(() => expect(check).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "1" })).toBeDisabled();
+    await act(async () => matched(true));
+    await screen.findByText("Hi Antony");
+  } finally {
+    check.mockRestore();
+  }
+});
+
 it("tells the person how many code tries are left", async () => {
   const api = fakeApi();
   api.on("auth/sign-in", [202, { status: "verification_required", maskedEmail: "w***@zurigenesis.co.ke" }]);
@@ -297,6 +348,34 @@ it("puts the offline window back on the clock after signing in online", async ()
   expect(Date.now() - saved.lastOnlineAt).toBeLessThan(5 * 60 * 1000);
 });
 
+it("stays on the auth screen when fetching the person fails after sign-in", async () => {
+  const api = fakeApi();
+  api.on("auth/sign-in", [200, tokens()]);
+  api.on("auth/session", [500, { title: "Internal Server Error" }]);
+  await startApp();
+  await fireEvent.changeText(await screen.findByLabelText("Mobile number"), "0712345678");
+  await fireEvent.press(screen.getByText("Continue"));
+  await typePin("2580");
+  await screen.findByText("Signed in, but your profile could not be loaded. Check your connection and try again.");
+  expect(screen.queryByText("Hi Wanjiru")).toBeNull();
+});
+
+it("says so on the code step when fetching the person fails after a new phone's code is confirmed", async () => {
+  const api = fakeApi();
+  api.on("auth/sign-in", [202, { status: "verification_required", maskedEmail: "w***@zurigenesis.co.ke" }]);
+  api.on("auth/verify-device", [200, tokens()]);
+  api.on("auth/session", [500, { title: "Internal Server Error" }]);
+  await startApp();
+  await fireEvent.changeText(await screen.findByLabelText("Mobile number"), "0712345678");
+  await fireEvent.press(screen.getByText("Continue"));
+  await typePin("2580");
+  await fireEvent.changeText(await screen.findByLabelText("6 digit code"), "481516");
+  await screen.findByText("Signed in, but your profile could not be loaded. Check your connection and try again.");
+  expect(screen.getByText("Check your email")).toBeTruthy();
+  expect(screen.queryByText("Hi Wanjiru")).toBeNull();
+  expect(api.sent("auth/verify-device")).toHaveLength(1);
+});
+
 it("locks again when the app goes to the background", async () => {
   let change: (state: "active" | "background") => void = () => {};
   const listener = jest.spyOn(AppState, "addEventListener").mockImplementation((_, handler) => {
@@ -315,4 +394,39 @@ it("locks again when the app goes to the background", async () => {
   await screen.findByText("Welcome back, Antony");
   expect(screen.getByLabelText("0 of 4 numbers entered")).toBeTruthy();
   listener.mockRestore();
+});
+
+async function expiredAccess(refresh: Parameters<ReturnType<typeof fakeApi>["on"]>[1]) {
+  await saveSession({ phoneNumber: "0712345678", accessToken: "access-0", refreshToken: "refresh-0" });
+  const api = fakeApi();
+  api.on("data", [401, {}]);
+  api.on("auth/refresh", refresh);
+  return api;
+}
+
+it("sends every request with a timeout signal", async () => {
+  const api = fakeApi();
+  api.on("auth/sign-in", [200, tokens()]);
+  await saveSession({ phoneNumber: "0712345678", accessToken: "access-0", refreshToken: "refresh-0" });
+  const { authApi } = require("../src/lib/api");
+  await authApi("sign-in", { phoneNumber: "0712345678", pin: "2580" });
+  const init = (globalThis.fetch as jest.Mock).mock.calls[0][1] as RequestInit;
+  expect(init.signal).toBeInstanceOf(AbortSignal);
+});
+
+it("keeps the session when the server fails while renewing the access token", async () => {
+  await expiredAccess([500, { title: "Internal Server Error" }]);
+  await expect(apiGet("data")).rejects.toBeInstanceOf(OfflineError);
+  expect((await loadSession())?.refreshToken).toBe("refresh-0");
+});
+
+it("keeps the session when renewing the access token is rate limited", async () => {
+  await expiredAccess([429, {}]);
+  await expect(apiGet("data")).rejects.toBeInstanceOf(OfflineError);
+  expect(await loadSession()).not.toBeNull();
+});
+
+it("ends the session when renewing the access token is refused", async () => {
+  await expiredAccess([401, { status: "authentication_failed" }]);
+  await expect(apiGet("data")).rejects.toBeInstanceOf(SessionEndedError);
 });

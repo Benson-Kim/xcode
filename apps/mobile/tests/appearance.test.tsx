@@ -1,22 +1,38 @@
 import { fireEvent, screen } from "@testing-library/react-native";
+
+import { createFormatter, type Formats } from "@xcode/shared/format";
+
 import { resolveTheme, themeFor, type Appearance } from "../src/appearance";
-import { darkPalette, mix, palette } from "../src/ui";
-import { configureFormats, money } from "../src/lib/format";
 import { periodLabel } from "../src/shell/access";
+import { darkPalette, mix, palette } from "../src/ui";
 import { catalog, fakeApi, people, revenueDashboard, tokens } from "./fakeApi";
 import { startApp, storedText, trustPhone, typePin } from "./helpers";
 
 const appearance: Appearance = {
   organizationName: "Demo Fleet",
   settingsVersion: 4,
-  branding: { displayName: "North Star Sacco", logoAlt: "North Star", primary: "#0B7A75", secondary: "#3B1F5C", accent: "#1E6B3A", logo: null },
-  formats: { locale: "en-GB", timeZone: "Africa/Nairobi", datePattern: "medium", hour12: false, currency: "USD", useGroupping: true, numberDecimals: 2 },
+  branding: {
+    displayName: "North Star Sacco",
+    logoAlt: "North Star",
+    primary: "#0B7A75",
+    secondary: "#3B1F5C",
+    accent: "#1E6B3A",
+    logo: null,
+  },
+  formats: {
+    locale: "en-GB",
+    timeZone: "Africa/Nairobi",
+    datePattern: "medium",
+    hour12: false,
+    currency: "USD",
+    useGroupping: true,
+    numberDecimals: 2,
+    firstDayOfWeek: 1,
+  },
   themeMode: "system",
   reducedMotion: true,
   fontScale: 1.25,
 };
-
-afterEach(() => configureFormats(null));
 
 it("mixes the organization's colours into the theme as XCODE Web does", () => {
   const theme = themeFor(appearance);
@@ -26,7 +42,12 @@ it("mixes the organization's colours into the theme as XCODE Web does", () => {
   expect(theme.reducedMotion).toBe(true);
   expect(theme.fontScale).toBe(1.25);
   // An invalid colour keeps the design's.
-  expect(themeFor({ ...appearance, branding: { ...appearance.branding, primary: "teal" } }).colors.blue).toBe("#1D5FD6");
+  expect(
+    themeFor({
+      ...appearance,
+      branding: { ...appearance.branding, primary: "teal" },
+    }).colors.blue,
+  ).toBe("#1D5FD6");
 });
 
 it("reads the organization's colours against a dark surface when the theme asks for one", () => {
@@ -58,10 +79,8 @@ it("reads the organization's colours against a dark surface when the theme asks 
 });
 
 it("formats money in the organization's currency", () => {
-  configureFormats({ currency: "USD" });
-  expect(money(1200)).toBe("USD 1,200");
-  configureFormats(null);
-  expect(money(49000.5)).toBe("KES 49,000.50");
+  expect(createFormatter({ currency: "USD" }).kes(1200)).toBe("USD 1,200");
+  expect(createFormatter(null).kes(49000.5)).toBe("KES 49,000.50");
 });
 
 it("applies saved settings at sign in and keeps them for the next unlock", async () => {
@@ -95,15 +114,13 @@ it("shows the organization's brand on the unlock screen, even before going onlin
 });
 
 it("names this week from the organization's first day of the week, Monday until it is known", () => {
+  const firstDay = (formats: Partial<Formats> | null) => createFormatter(formats).firstDayOfWeek();
   // Wednesday 30 Sep 2026.
-  expect(periodLabel("week", "2026-09-30")).toBe("This week, 28 Sep to 4 Oct 2026");
-  configureFormats({ firstDayOfWeek: 0 });
-  expect(periodLabel("week", "2026-09-30")).toBe("This week, 27 Sep to 3 Oct 2026");
-  configureFormats({ firstDayOfWeek: 6 });
-  expect(periodLabel("week", "2026-10-03")).toBe("This week, 3 to 9 Oct 2026");
+  expect(periodLabel("week", "2026-09-30", firstDay(null))).toBe("This week, 28 Sep to 4 Oct 2026");
+  expect(periodLabel("week", "2026-09-30", firstDay({ firstDayOfWeek: 0 }))).toBe("This week, 27 Sep to 3 Oct 2026");
+  expect(periodLabel("week", "2026-10-03", firstDay({ firstDayOfWeek: 6 }))).toBe("This week, 3 to 9 Oct 2026");
   // Out of range: the API's default, Monday.
-  configureFormats({ firstDayOfWeek: 9 });
-  expect(periodLabel("week", "2026-09-30")).toBe("This week, 28 Sep to 4 Oct 2026");
+  expect(periodLabel("week", "2026-09-30", firstDay({ firstDayOfWeek: 9 }))).toBe("This week, 28 Sep to 4 Oct 2026");
 });
 
 it("labels the dashboard week as the API counts it for an organization whose week starts on Sunday", async () => {

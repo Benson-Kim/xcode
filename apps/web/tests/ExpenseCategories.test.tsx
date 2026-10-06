@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+
 import { ExpenseCategoriesPage } from "../components/setup";
 import type { ExpenseCategory } from "../lib/types";
 import { renderInApp } from "./renderInApp";

@@ -57,24 +57,27 @@ public sealed class UnitOfWork(AuthDb db, IOrganizationContext context, IClock c
      // a stale person record, still surfaces on the first attempt.
      public async Task<T> Execute<T>(Func<Task<T>> action, CancellationToken ct)
      {
-          for (var attempt = 0; ; attempt++)
+          var strategy = db.Database.CreateExecutionStrategy();
+          return await strategy.ExecuteAsync(async () =>
           {
-               try
+               for (var attempt = 0; ; attempt++)
                {
-                    await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-                    var result = await action();
-                    await db.SaveChangesAsync(ct);
-                    await transaction.CommitAsync(ct);
-                    return result;
+                    try
+                    {
+                         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+                         var result = await action();
+                         await db.SaveChangesAsync(ct);
+                         await transaction.CommitAsync(ct);
+                         return result;
+                    }
+                    catch (Exception error) when (attempt < ChangeLogRetries && OnlyTheChangeLogCollided(error))
+                    {
+                         db.ChangeTracker.Clear();
+                         organizations.ForgetResolved();
+                         await Task.Delay(Random.Shared.Next(5, 25) * (attempt + 1), ct);
+                    }
                }
-               catch (Exception error) when (attempt < ChangeLogRetries && OnlyTheChangeLogCollided(error))
-               {
-                    db.ChangeTracker.Clear();
-                    organizations.ForgetResolved();
-                    // A little jitter, so writers that collided do not simply collide again.
-                    await Task.Delay(Random.Shared.Next(5, 25) * (attempt + 1), ct);
-               }
-          }
+          });
      }
 
      private static bool OnlyTheChangeLogCollided(Exception error)

@@ -1,5 +1,6 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+
 import { VehiclesPage } from "../components/setup";
 import type { VehicleReport } from "../components/setup/shared";
 import { renderInApp } from "./renderInApp";

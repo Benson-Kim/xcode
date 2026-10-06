@@ -1,13 +1,20 @@
 "use client";
 
 import { useState } from "react";
+
+import { plural, type Formatter } from "@xcode/shared/format";
+import {
+  REVENUE_REPORT_PERIODS,
+  revenuePeriodLabel,
+  type RevenueReportPeriod,
+} from "@xcode/shared/revenue";
+
 import { useAppearance } from "../../lib/appearance";
-import { apiRequest } from "../../lib/data";
-import { useResource, useStreamedList } from "../../lib/data";
+import { apiRequest, useResource, useStreamedList } from "../../lib/data";
+import { useFormats } from "../../lib/formats";
 import { useSession } from "../../lib/session-context";
-import { kes, money, plural } from "../../lib/format";
 import type { ExpenseBucket } from "../../lib/types";
-import { formatDateOnly, formatDateRange, recurringFrequency } from "../recurringPresentation";
+import { recurringFrequency } from "../recurringPresentation";
 import { shiftDate } from "../revenueFormat";
 import {
   Banner,
@@ -34,9 +41,9 @@ import {
   SelectInput,
   Spacer,
   Stat,
-  StatusBadge,
   StatGrid,
   StatGridSkeleton,
+  StatusBadge,
   SubHeading,
   Tabs,
   Td,
@@ -59,6 +66,7 @@ export function VehiclesPage({
 }) {
   const { can } = useSession();
   const { appearance } = useAppearance();
+  const { formatDateOnly, kes } = useFormats();
   // invest.view alone lists the vehicles read-only, to reach each one's Investment tab.
   const canManage = can("vehicles.manage");
   const vehicles = useStreamedList<Vehicle>("setup/vehicles");
@@ -150,7 +158,7 @@ export function VehiclesPage({
         emptyMessage={filter === "all" ? "No vehicles yet. Add the first one above." : "No vehicles in this company yet."}
       >
         {visible.map((vehicle) => {
-          const status = fleetStatus(vehicle);
+          const status = fleetStatus(vehicle, formatDateOnly);
           return (
             <Tr key={vehicle.id}>
               <Td label="Registration">
@@ -191,7 +199,10 @@ export function VehiclesPage({
 
 // A leave date means the vehicle is retired: it has left once it is no longer active, and until then it leaves on
 // that date. Without one, a vehicle that is not active has not joined yet: the business date is before its join date.
-function fleetStatus(vehicle: Vehicle): { label: string; tone: "ok" | "warn" | "off" | "neutral"; left: boolean } {
+function fleetStatus(
+  vehicle: Vehicle,
+  formatDateOnly: Formatter["formatDateOnly"],
+): { label: string; tone: "ok" | "warn" | "off" | "neutral"; left: boolean } {
   if (vehicle.leftOn)
     return vehicle.active === false
       ? { label: `Left fleet ${formatDateOnly(vehicle.leftOn)}`, tone: "off", left: true }
@@ -249,6 +260,7 @@ function VehicleEditor({
 }) {
   const toast = useToast();
   const { can } = useSession();
+  const { formatDateOnly, formatDateRange, kes } = useFormats();
   const isNew = !vehicle;
   // A null date has not been chosen yet and follows the business date, which may still be loading.
   const [form, setForm] = useState<{ registration: string; companyId: string; weeklyTarget: string; joinedOn: string | null }>({
@@ -593,7 +605,8 @@ function VehicleEditor({
 // each under its bucket or as savings. A revision that renamed the item or moved it to another bucket gets its own
 // line, so no posting shows under a bucket it was not counted in.
 function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
-  const [period, setPeriod] = useState<"week" | "month">("month");
+  const { formatDateOnly, formatDateRange, kes, money } = useFormats();
+  const [period, setPeriod] = useState<RevenueReportPeriod>("month");
   const report = useResource<VehicleReport>(`setup/vehicles/${vehicle.id}/report?period=${period}`);
   const data = report.data;
   const grouped = [...(data?.postings ?? []).reduce((items, posting) => {
@@ -607,15 +620,12 @@ function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
   return (
     <Card>
       <CardHeader
-        title={`${period === "week" ? "This week" : "This month"}${data ? `, ${formatDateRange(data.from, data.through)}` : ""}`}
+        title={`${revenuePeriodLabel(period)}${data ? `, ${formatDateRange(data.from, data.through)}` : ""}`}
         description="Money in and money out, counted on the day it moved. Fuel and crew pay are not tracked; revenue is recorded net of them."
       />
       <SegmentedControl
         label="Report period"
-        options={[
-          { value: "week", label: "This week" },
-          { value: "month", label: "This month" },
-        ]}
+        options={REVENUE_REPORT_PERIODS.map((option) => ({ ...option }))}
         value={period}
         onChange={setPeriod}
         className="self-start"
@@ -677,6 +687,7 @@ function VehicleRecurringCard({
 }) {
   const { can } = useSession();
   const { appearance } = useAppearance();
+  const { formatDateOnly, kes } = useFormats();
   const recurring = useStreamedList<RecurringItem>(can("commitments.view") ? "setup/recurring" : null);
   if (!can("commitments.view")) return null;
   const today = appearance?.businessDate;

@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+
+import { isDate } from "@xcode/shared/dates";
+import type { Formatter } from "@xcode/shared/format";
+
 import { apiRequest } from "../../lib/data";
-import { formatDateTime } from "../../lib/format";
+import { useFormats } from "../../lib/formats";
 import type { Page } from "../../lib/types";
-import { formatDateOnly } from "../recurringPresentation";
 import { Banner, Button, DataTable, Hint, PageHeader, SelectInput, Td, TextInput, Toolbar, Tr } from "../ui";
 import type { HistoryRow } from "./shared";
 
@@ -35,11 +38,11 @@ function humanize(key: string) {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-function display(value: unknown) {
+function display(formats: Formatter, value: unknown) {
   if (value === null || value === undefined) return "None";
   if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return formatDateOnly(value);
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value))) return formatDateTime(value);
+  if (isDate(value)) return formats.formatDateOnly(value);
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value))) return formats.formatDateTime(value);
   return String(value);
 }
 
@@ -51,9 +54,9 @@ const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Every value in a saved snapshot, keyed by its path: nested objects and lists become "Versions 2 › Amount".
 // A list of plain values (such as permissions) is one field, so a change reads as the whole list before and after
 // rather than as positions that shifted.
-function flatten(value: unknown, path: string[], labels: string[], into: Map<string, { label: string; value: string }>) {
+function flatten(formats: Formatter, value: unknown, path: string[], labels: string[], into: Map<string, { label: string; value: string }>) {
   if (Array.isArray(value) && value.length && value.every((entry) => entry === null || typeof entry !== "object")) {
-    into.set(path.join("."), { label: labels.join(" › ") || "Value", value: value.map(display).sort().join(", ") });
+    into.set(path.join("."), { label: labels.join(" › ") || "Value", value: value.map((entry) => display(formats, entry)).sort().join(", ") });
     return into;
   }
   const all: [string, unknown, string][] = Array.isArray(value)
@@ -66,30 +69,30 @@ function flatten(value: unknown, path: string[], labels: string[], into: Map<str
   if (!entries.length) {
     if (typeof value === "string" && GUID.test(value)) return into;
     const empty = Array.isArray(value) || (value && typeof value === "object");
-    into.set(path.join("."), { label: labels.join(" › ") || "Value", value: empty ? "None" : display(value) });
+    into.set(path.join("."), { label: labels.join(" › ") || "Value", value: empty ? "None" : display(formats, value) });
     return into;
   }
   for (const [key, entry, label] of entries) {
     // A list position joins the name before it ("Versions 2"), so a path reads as a sentence.
     const nextLabels = Array.isArray(value) && labels.length ? [...labels.slice(0, -1), `${labels[labels.length - 1]} ${label}`] : [...labels, label];
-    flatten(entry, [...path, key], nextLabels, into);
+    flatten(formats, entry, [...path, key], nextLabels, into);
   }
   return into;
 }
 
 // A saved value: missing or "null" (nothing there, as before a create), JSON, or plain text shown as it is.
-function parse(value?: string | null): Snapshot {
+function parse(formats: Formatter, value?: string | null): Snapshot {
   if (value === undefined || value === null || value === "null") return null;
   try {
-    return { fields: flatten(JSON.parse(value), [], [], new Map()) };
+    return { fields: flatten(formats, JSON.parse(value), [], [], new Map()) };
   } catch {
     return { raw: value };
   }
 }
 
 // What a change did, field by field. An update lists only the fields that changed; a create lists them all.
-export function fieldChanges(before?: string | null, after?: string | null): FieldChange[] {
-  const [old, next] = [parse(before), parse(after)];
+export function fieldChanges(formats: Formatter, before?: string | null, after?: string | null): FieldChange[] {
+  const [old, next] = [parse(formats, before), parse(formats, after)];
   if (!old && !next) return [];
   if ((old && "raw" in old) || (next && "raw" in next))
     return [{ key: "raw", label: "Saved value", before: before && before !== "null" ? before : "—", after: after && after !== "null" ? after : "—" }];
@@ -210,6 +213,7 @@ function ChangeTable({ caption, changes }: { caption: string; changes: FieldChan
 }
 
 export function HistoryPage() {
+  const formats = useFormats();
   const [filters, setFilters] = useState<Filters>(NOTHING_SET);
   // A section or a date is one choice and is asked for as it is made. Typing is not: the box settles first, so
   // a word is one request rather than one per letter.
@@ -278,11 +282,11 @@ export function HistoryPage() {
       >
         {rows.map((row) => {
           const what = `${sections[row.section] ?? row.section}: ${row.reason}`;
-          const changes = fieldChanges(row.before, row.after);
+          const changes = fieldChanges(formats, row.before, row.after);
           return (
             <Tr key={rowKey(row)}>
               <Td label="When" className="whitespace-nowrap">
-                {formatDateTime(row.occurredAt)}
+                {formats.formatDateTime(row.occurredAt)}
               </Td>
               <Td label="Who">{row.actorName || "Someone no longer in the organization"}</Td>
               <Td label="What changed" title={sections[row.section] ?? row.section}>

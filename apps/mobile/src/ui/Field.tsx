@@ -1,5 +1,6 @@
 import { forwardRef, useState } from "react";
 import { StyleSheet, TextInput, View, type TextInputProps } from "react-native";
+
 import { ErrorText } from "./Feedback";
 import { Text } from "./Text";
 import { fonts, useTheme } from "./theme";

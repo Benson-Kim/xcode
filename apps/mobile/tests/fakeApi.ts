@@ -1,6 +1,6 @@
 // A stand-in for the XCODE API behind fetch: tests say how each route answers and read what was sent.
 type Reply = [status: number, body: unknown] | "offline";
-type Handler = (body: Record<string, string>, headers: Record<string, string>) => Reply;
+type Handler = (body: Record<string, string>, headers: Record<string, string>) => Reply | Promise<Reply>;
 
 export const people = {
   owner: { userId: "u-antony", firstName: "Antony", lastName: "Maina", role: "Owner", permissions: ["dash.revenue", "dash.net", "dash.costs", "dash.gaps", "revenue.view", "revenue.correct", "people.view", "people.manage", "companies.manage", "audit.view"] },
@@ -80,7 +80,8 @@ export function fakeApi() {
     const body = init.body ? JSON.parse(String(init.body)) : {};
     const headers = (init.headers ?? {}) as Record<string, string>;
     calls.push({ path, body, headers });
-    const reply = routes.get(path)?.(body, headers) ?? [404, {}];
+    const answer = routes.get(path)?.(body, headers);
+    const reply = (answer instanceof Promise ? await answer : answer) ?? [404, {}];
     if (reply === "offline") throw new TypeError("Network request failed");
     const [status, json] = reply;
     return { ok: status >= 200 && status < 300, status, json: async () => json } as Response;

@@ -10,7 +10,37 @@ import {
   type ComponentType,
   type ReactNode,
 } from "react";
+
+import {
+  createFormatter,
+  initials,
+  percentText,
+  plural,
+  type Formatter,
+} from "@xcode/shared/format";
+import {
+  REVENUE_PERIODS,
+  revenuePeriodLabel,
+  type RevenueDashboard,
+  type RevenuePeriod,
+} from "@xcode/shared/revenue";
+
+import {
+  AppearanceProvider,
+  applyAppearance,
+  type Appearance,
+} from "../lib/appearance";
+import { useResource } from "../lib/data";
+import { FormatsContext, useFormats } from "../lib/formats";
+import { fetchWithSession } from "../lib/session";
+import {
+  SessionProvider,
+  useSession,
+  type Session,
+} from "../lib/session-context";
+import type { MyScope, PermissionGroup, View } from "../lib/types";
 import { Brand } from "./Brand";
+import { shiftDate, shortDate } from "./revenueFormat";
 import {
   Banner,
   Button,
@@ -36,22 +66,6 @@ import {
   ToastProvider,
   cn,
 } from "./ui";
-import { rangeLabel, shiftDate, shortDate } from "./revenueFormat";
-import { fetchWithSession } from "../lib/session";
-import {
-  SessionProvider,
-  useSession,
-  type Session,
-} from "../lib/session-context";
-import { configureFormats, initials, kes, percentText, plural } from "../lib/format";
-import { useResource } from "../lib/data";
-import {
-  AppearanceProvider,
-  applyAppearance,
-  type Appearance,
-} from "../lib/appearance";
-import type { MyScope, PermissionGroup, View } from "../lib/types";
-import type { RevenueDashboard } from "@xcode/shared";
 
 // React keeps a failed lazy import for good, so each screen that failed to load leaves a fresh import here. Trying
 // again, or opening another page, swaps them in; never a render, which would retry in a loop while offline.
@@ -281,11 +295,13 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const appearance = useResource<Appearance>(
     session ? "setup/appearance" : null,
   );
-  configureFormats(appearance.data?.formats);
+  const formatter = useMemo(
+    () => createFormatter(appearance.data?.formats),
+    [appearance.data?.formats],
+  );
   useEffect(() => applyAppearance(appearance.data ?? null), [appearance.data]);
   useEffect(
     () => () => {
-      configureFormats(null);
       applyAppearance(null);
     },
     [],
@@ -340,145 +356,147 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const visibleSetup = setupGroup.filter(allowed);
 
   return (
-    <SessionProvider value={sessionState}>
-      <AppearanceProvider value={appearanceState}>
-        <ToastProvider>
-          <div className="flex min-h-screen flex-col">
-            <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-card-line bg-surface px-5 max-[899px]:gap-1.5 max-[899px]:pr-2 max-[899px]:pl-1">
-              <IconButton
-                className="hidden max-[899px]:grid"
-                aria-label="Open menu"
-                aria-expanded={menuOpen}
-                aria-controls="main-menu"
-                onClick={() => setMenuOpen((open) => !open)}
-              >
-                <MenuIcon />
-              </IconButton>
-              <Brand
-                compact
-                loading={appearanceState.loading && !appearance.error}
-                name={brand?.displayName}
-                subline={appearance.data?.organizationName}
-                logo={brand?.logo}
-                logoAlt={brand?.logoAlt}
-              />
-              <span className="flex-1" />
-              <div className="relative">
-                <button
-                  type="button"
-                  aria-haspopup="menu"
-                  aria-expanded={userMenuOpen}
-                  onClick={() => setUserMenuOpen((open) => !open)}
-                  className="flex min-h-11 items-center gap-2.5 rounded-xl px-2 py-1 text-left hover:bg-hover"
+    <FormatsContext.Provider value={formatter}>
+      <SessionProvider value={sessionState}>
+        <AppearanceProvider value={appearanceState}>
+          <ToastProvider>
+            <div className="flex min-h-screen flex-col">
+              <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-card-line bg-surface px-5 max-[899px]:gap-1.5 max-[899px]:pr-2 max-[899px]:pl-1">
+                <IconButton
+                  className="hidden max-[899px]:grid"
+                  aria-label="Open menu"
+                  aria-expanded={menuOpen}
+                  aria-controls="main-menu"
+                  onClick={() => setMenuOpen((open) => !open)}
                 >
-                  <span
-                    aria-hidden="true"
-                    className="grid size-9 shrink-0 place-items-center rounded-full bg-brand text-sm font-bold text-white"
-                  >
-                    {session
-                      ? initials(session.firstName, session.lastName)
-                      : ""}
-                  </span>
-                  <span className="max-[899px]:hidden">
-                    <span className="block text-sm font-semibold">
-                      {displayName || "Your account"}
-                    </span>
-                    <span className="block text-xs text-grey">
-                      {session?.role || "Loading your access"}
-                    </span>
-                  </span>
-                </button>
-                {userMenuOpen && (
-                  <div
-                    role="menu"
-                    className="absolute top-13 right-0 z-40 min-w-50 rounded-xl border border-card-line bg-surface p-1.5 shadow-menu"
-                  >
-                    <MenuButton
-                      onClick={() => {
-                        setUserMenuOpen(false);
-                        setAccessOpen(true);
-                      }}
-                    >
-                      Your access
-                    </MenuButton>
-                    <MenuButton onClick={() => navigate("preferences")}>
-                      Your preferences
-                    </MenuButton>
-                    <MenuButton onClick={onSignOut}>Sign out</MenuButton>
-                  </div>
-                )}
-              </div>
-            </header>
-            <div className="flex min-h-0 flex-1">
-              <nav
-                id="main-menu"
-                aria-label="Main"
-                className={cn(
-                  "w-62 shrink-0 overflow-y-auto border-r border-card-line bg-surface px-3 py-4",
-                  "max-[899px]:fixed max-[899px]:top-16 max-[899px]:bottom-0 max-[899px]:left-0 max-[899px]:z-30 max-[899px]:transition-transform motion-reduce:transition-none",
-                  menuOpen
-                    ? "max-[899px]:shadow-drawer"
-                    : "max-[899px]:-translate-x-full",
-                )}
-              >
-                <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-                  {topLevel.filter(allowed).map(navButton)}
-                </ul>
-                {visibleSetup.length > 0 && (
-                  <div className="mt-3.5">
-                    <button
-                      type="button"
-                      aria-expanded={setupOpen}
-                      onClick={() => setSetupOpen((open) => !open)}
-                      className="flex min-h-9 w-full items-center justify-between px-3 text-[13px] font-bold text-grey"
-                    >
-                      Setup
-                      <ChevronIcon
-                        className={cn(
-                          "transition-transform motion-reduce:transition-none",
-                          !setupOpen && "-rotate-90",
-                        )}
-                      />
-                    </button>
-                    {setupOpen && (
-                      // Indented under the group with a rule down its left side, as in the design (.nav-group ul).
-                      <ul className="m-0 mt-0.5 ml-3.5 flex list-none flex-col gap-0.5 border-l border-card-line p-0 pl-2.5">
-                        {visibleSetup.map(navButton)}
-                      </ul>
-                    )}
-                  </div>
-                )}
-              </nav>
-              {menuOpen && (
-                <button
-                  type="button"
-                  aria-label="Close menu"
-                  onClick={() => setMenuOpen(false)}
-                  className="fixed inset-x-0 top-16 bottom-0 z-25 hidden bg-navy/35 max-[899px]:block"
+                  <MenuIcon />
+                </IconButton>
+                <Brand
+                  compact
+                  loading={appearanceState.loading && !appearance.error}
+                  name={brand?.displayName}
+                  subline={appearance.data?.organizationName}
+                  logo={brand?.logo}
+                  logoAlt={brand?.logoAlt}
                 />
-              )}
-              <main className="min-w-0 flex-1 px-8 pt-7 pb-12 max-[899px]:px-4 max-[899px]:pt-5 max-[899px]:pb-10">
-                {/* Keyed on the visit, so a screen still loading shows placeholders, never the page it replaced, and a
-                    page that failed to load is left behind on the next one. */}
-                <PageBoundary key={visit}>
-                  <Page
-                    view={view}
-                    params={params}
-                    sessionError={sessionError}
-                    onNavigate={navigate}
+                <span className="flex-1" />
+                <div className="relative">
+                  <button
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={userMenuOpen}
+                    onClick={() => setUserMenuOpen((open) => !open)}
+                    className="flex min-h-11 items-center gap-2.5 rounded-xl px-2 py-1 text-left hover:bg-hover"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="grid size-9 shrink-0 place-items-center rounded-full bg-brand text-sm font-bold text-white"
+                    >
+                      {session
+                        ? initials(session.firstName, session.lastName)
+                        : ""}
+                    </span>
+                    <span className="max-[899px]:hidden">
+                      <span className="block text-sm font-semibold">
+                        {displayName || "Your account"}
+                      </span>
+                      <span className="block text-xs text-grey">
+                        {session?.role || "Loading your access"}
+                      </span>
+                    </span>
+                  </button>
+                  {userMenuOpen && (
+                    <div
+                      role="menu"
+                      className="absolute top-13 right-0 z-40 min-w-50 rounded-xl border border-card-line bg-surface p-1.5 shadow-menu"
+                    >
+                      <MenuButton
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          setAccessOpen(true);
+                        }}
+                      >
+                        Your access
+                      </MenuButton>
+                      <MenuButton onClick={() => navigate("preferences")}>
+                        Your preferences
+                      </MenuButton>
+                      <MenuButton onClick={onSignOut}>Sign out</MenuButton>
+                    </div>
+                  )}
+                </div>
+              </header>
+              <div className="flex min-h-0 flex-1">
+                <nav
+                  id="main-menu"
+                  aria-label="Main"
+                  className={cn(
+                    "w-62 shrink-0 overflow-y-auto border-r border-card-line bg-surface px-3 py-4",
+                    "max-[899px]:fixed max-[899px]:top-16 max-[899px]:bottom-0 max-[899px]:left-0 max-[899px]:z-30 max-[899px]:transition-transform motion-reduce:transition-none",
+                    menuOpen
+                      ? "max-[899px]:shadow-drawer"
+                      : "max-[899px]:-translate-x-full",
+                  )}
+                >
+                  <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+                    {topLevel.filter(allowed).map(navButton)}
+                  </ul>
+                  {visibleSetup.length > 0 && (
+                    <div className="mt-3.5">
+                      <button
+                        type="button"
+                        aria-expanded={setupOpen}
+                        onClick={() => setSetupOpen((open) => !open)}
+                        className="flex min-h-9 w-full items-center justify-between px-3 text-[13px] font-bold text-grey"
+                      >
+                        Setup
+                        <ChevronIcon
+                          className={cn(
+                            "transition-transform motion-reduce:transition-none",
+                            !setupOpen && "-rotate-90",
+                          )}
+                        />
+                      </button>
+                      {setupOpen && (
+                        // Indented under the group with a rule down its left side, as in the design (.nav-group ul).
+                        <ul className="m-0 mt-0.5 ml-3.5 flex list-none flex-col gap-0.5 border-l border-card-line p-0 pl-2.5">
+                          {visibleSetup.map(navButton)}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </nav>
+                {menuOpen && (
+                  <button
+                    type="button"
+                    aria-label="Close menu"
+                    onClick={() => setMenuOpen(false)}
+                    className="fixed inset-x-0 top-16 bottom-0 z-25 hidden bg-navy/35 max-[899px]:block"
                   />
-                </PageBoundary>
-                <p className="mt-8 mb-0 text-xs text-grey">XCODE Web v0.9</p>
-              </main>
+                )}
+                <main className="min-w-0 flex-1 px-8 pt-7 pb-12 max-[899px]:px-4 max-[899px]:pt-5 max-[899px]:pb-10">
+                  {/* Keyed on the visit, so a screen still loading shows placeholders, never the page it replaced, and a
+                    page that failed to load is left behind on the next one. */}
+                  <PageBoundary key={visit}>
+                    <Page
+                      view={view}
+                      params={params}
+                      sessionError={sessionError}
+                      onNavigate={navigate}
+                    />
+                  </PageBoundary>
+                  <p className="mt-8 mb-0 text-xs text-grey">XCODE Web v0.9</p>
+                </main>
+              </div>
+              <AccessDialog
+                open={accessOpen}
+                onClose={() => setAccessOpen(false)}
+              />
             </div>
-            <AccessDialog
-              open={accessOpen}
-              onClose={() => setAccessOpen(false)}
-            />
-          </div>
-        </ToastProvider>
-      </AppearanceProvider>
-    </SessionProvider>
+          </ToastProvider>
+        </AppearanceProvider>
+      </SessionProvider>
+    </FormatsContext.Provider>
   );
 }
 
@@ -517,8 +535,7 @@ function Page({
     return (
       <Dashboard session={session} error={sessionError} onOpen={onNavigate} />
     );
-  if (view === "revenue")
-    return <RevenuePage />;
+  if (view === "revenue") return <RevenuePage />;
   if (view === "companies") return <CompaniesPage />;
   if (view === "vehicles")
     return (
@@ -540,12 +557,7 @@ function Page({
   return <PreferencesView />;
 }
 
-const periods = [
-  { value: "today", label: "Today" },
-  { value: "week", label: "This week" },
-  { value: "month", label: "This month" },
-] as const;
-type Period = (typeof periods)[number]["value"];
+type Period = RevenuePeriod;
 
 // One dashboard card. A card whose data is not connected yet says so rather than showing zeros.
 type DashboardCard = {
@@ -565,22 +577,35 @@ type Figures = { data?: RevenueDashboard; error: string };
 type Shown = Pick<DashboardCard, "value" | "bad" | "bar" | "note" | "action">;
 
 // "Today, 30 Sep 2026", "This week, 28 Sep to 4 Oct 2026", "This month, 1 to 30 Sep 2026", from the business date.
-function periodLabel(period: Period, data?: RevenueDashboard) {
-  const name = periods.find((item) => item.value === period)?.label ?? "";
+function periodLabel(
+  formats: Formatter,
+  period: Period,
+  data?: RevenueDashboard,
+) {
+  const name = revenuePeriodLabel(period);
   if (!data) return name;
-  if (period === "today") return `${name}, ${shortDate(data.from)}`;
-  return `${name}, ${rangeLabel(data.from, period === "week" ? shiftDate(data.from, 6) : data.through)}`;
+  if (period === "today") return `${name}, ${shortDate(formats, data.from)}`;
+  return `${name}, ${formats.formatDateRange(data.from, period === "week" ? shiftDate(data.from, 6) : data.through)}`;
 }
 
 // A card from the revenue dashboard: placeholders while it loads, the error if it failed, and only the figures the
 // server sent, which leaves out (null) anything the viewer may not see.
-function revenueCard(card: Omit<DashboardCard, Exclude<keyof Shown, "action">>, figures: Figures, show: (data: RevenueDashboard) => Shown): DashboardCard {
+function revenueCard(
+  card: Omit<DashboardCard, Exclude<keyof Shown, "action">>,
+  figures: Figures,
+  show: (data: RevenueDashboard) => Shown,
+): DashboardCard {
   if (figures.error) return { ...card, note: figures.error };
   if (!figures.data) return { ...card, busy: true };
   return { ...card, ...show(figures.data) };
 }
 
-const unavailable = (permission: string, title: string, sub: string, note: string): DashboardCard => ({
+const unavailable = (
+  permission: string,
+  title: string,
+  sub: string,
+  note: string,
+): DashboardCard => ({
   permission,
   title,
   sub,
@@ -589,48 +614,85 @@ const unavailable = (permission: string, title: string, sub: string, note: strin
 });
 
 // The cards in the design's order, each shown to the people with its permission.
-function dashboardCards(can: (permission: string) => boolean, period: Period, selected: Figures, month: Figures) {
-  const label = periodLabel(period, selected.data);
+function dashboardCards(
+  formats: Formatter,
+  can: (permission: string) => boolean,
+  period: Period,
+  selected: Figures,
+  month: Figures,
+) {
+  const label = periodLabel(formats, period, selected.data);
   const today = selected.data?.businessDate ?? month.data?.businessDate;
   const monthData = month.data;
   const yesterday = monthData && shiftDate(monthData.businessDate, -1);
   const fillGaps: DashboardCard["action"] =
-    can("revenue.capture") || can("revenue.correct") ? { label: "Fill the gaps", view: "revenue" } : undefined;
+    can("revenue.capture") || can("revenue.correct")
+      ? { label: "Fill the gaps", view: "revenue" }
+      : undefined;
   const cards: DashboardCard[] = [
     revenueCard(
       {
         permission: "dash.capture",
         title: "Today's revenue",
-        sub: today ? `Your vehicles, ${shortDate(today)}` : "Your vehicles, today",
+        sub: today
+          ? `Your vehicles, ${shortDate(formats, today)}`
+          : "Your vehicles, today",
         action: { label: "Capture revenue", view: "revenue", primary: true },
       },
       selected,
       ({ capturedToday: captured, vehiclesToday: vehicles }) => {
         if (captured === null || vehicles === null) return {};
-        if (vehicles === 0) return { note: "None of your vehicles is in the fleet today." };
+        if (vehicles === 0)
+          return { note: "None of your vehicles is in the fleet today." };
         const pending = vehicles - captured;
         return {
           value: `${captured} of ${vehicles} captured`,
-          note: pending > 0 ? `${plural(pending, "vehicle", "vehicles")} still to capture` : "Every vehicle has a record for today.",
+          note:
+            pending > 0
+              ? `${plural(pending, "vehicle", "vehicles")} still to capture`
+              : "Every vehicle has a record for today.",
         };
       },
     ),
-    unavailable("dash.float", "My petty cash float", "Cash in hand now", "Petty cash is not connected yet."),
-    revenueCard({ permission: "dash.revenue", title: "Revenue", sub: label }, selected, ({ revenue, expected, percent, capturedToday, vehiclesToday }) => {
-      if (revenue === null) return {};
-      const soFar =
-        period !== "month" && capturedToday !== null && vehiclesToday
-          ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.`
-          : "";
-      if (percent === null) return { value: revenue ? kes(revenue) : undefined, note: `No weekly target applies in this period${soFar || "."}` };
-      return {
-        value: kes(revenue),
-        bar: percent,
-        note: `${percentText(percent)} of target ${kes(expected ?? 0)}, from each vehicle’s weekly target${soFar || "."}`,
-      };
-    }),
-    unavailable("dash.net", "Net contribution", `Revenue less all costs. ${label}`, "Needs cost totals, which are not connected yet."),
-    unavailable("dash.costs", "Money out", `${label}. Fuel and crew pay are not tracked; revenue is recorded net of them.`, "Cost totals are not connected yet."),
+    unavailable(
+      "dash.float",
+      "My petty cash float",
+      "Cash in hand now",
+      "Petty cash is not connected yet.",
+    ),
+    revenueCard(
+      { permission: "dash.revenue", title: "Revenue", sub: label },
+      selected,
+      ({ revenue, expected, percent, capturedToday, vehiclesToday }) => {
+        if (revenue === null) return {};
+        const soFar =
+          period !== "month" && capturedToday !== null && vehiclesToday
+            ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.`
+            : "";
+        if (percent === null)
+          return {
+            value: revenue ? formats.kes(revenue) : undefined,
+            note: `No weekly target applies in this period${soFar || "."}`,
+          };
+        return {
+          value: formats.kes(revenue),
+          bar: percent,
+          note: `${percentText(percent)} of target ${formats.kes(expected ?? 0)}, from each vehicle’s weekly target${soFar || "."}`,
+        };
+      },
+    ),
+    unavailable(
+      "dash.net",
+      "Net contribution",
+      `Revenue less all costs. ${label}`,
+      "Needs cost totals, which are not connected yet.",
+    ),
+    unavailable(
+      "dash.costs",
+      "Money out",
+      `${label}. Fuel and crew pay are not tracked; revenue is recorded net of them.`,
+      "Cost totals are not connected yet.",
+    ),
     revenueCard(
       {
         permission: "dash.gaps",
@@ -639,7 +701,7 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
         sub:
           monthData && yesterday
             ? monthData.from <= yesterday
-              ? `${rangeLabel(monthData.from, yesterday)}. No record and no reason.`
+              ? `${formats.formatDateRange(monthData.from, yesterday)}. No record and no reason.`
               : "No record and no reason."
             : "This month. No record and no reason.",
         action: fillGaps,
@@ -658,15 +720,32 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
                 : "Every vehicle has a record for every day.",
             },
     ),
-    unavailable("dash.pettycash", "Petty cash to approve", "All managers", "Petty cash is not connected yet."),
-    unavailable("dash.commitments", "Yearly items due", "Next 30 days", "Yearly items are not connected yet."),
-    unavailable("dash.investment", "Money invested", "Against what has come back", "What has come back is not connected yet."),
+    unavailable(
+      "dash.pettycash",
+      "Petty cash to approve",
+      "All managers",
+      "Petty cash is not connected yet.",
+    ),
+    unavailable(
+      "dash.commitments",
+      "Yearly items due",
+      "Next 30 days",
+      "Yearly items are not connected yet.",
+    ),
+    unavailable(
+      "dash.investment",
+      "Money invested",
+      "Against what has come back",
+      "What has come back is not connected yet.",
+    ),
     revenueCard(
       {
         permission: "dash.edits",
         title: "Edited after capture",
         sub: label,
-        action: can("audit.view") ? { label: "View change log", view: "history" } : undefined,
+        action: can("audit.view")
+          ? { label: "View change log", view: "history" }
+          : undefined,
       },
       selected,
       ({ editedRecords }) =>
@@ -674,7 +753,9 @@ function dashboardCards(can: (permission: string) => boolean, period: Period, se
           ? {}
           : {
               value: plural(editedRecords, "record", "records"),
-              note: editedRecords ? undefined : "Nothing was changed after capture in this period.",
+              note: editedRecords
+                ? undefined
+                : "Nothing was changed after capture in this period.",
             },
     ),
   ];
@@ -691,18 +772,30 @@ function Dashboard({
   onOpen: (view: View) => void;
 }) {
   const { can } = useSession();
+  const formats = useFormats();
   const [chosen, setChosen] = useState<Period | null>(null);
   // A capturer starts on today and everyone else on the month, as in the design.
-  const period: Period = chosen ?? (can("dash.capture") || can("dash.float") ? "today" : "month");
+  const period: Period =
+    chosen ?? (can("dash.capture") || can("dash.float") ? "today" : "month");
   const periodCards = ["dash.capture", "dash.revenue", "dash.edits"].some(can);
   // Missing days always cover the month, so the month is asked for once and shared when it is also the period.
   const byPeriod = useResource<RevenueDashboard>(
-    periodCards && period !== "month" ? `setup/revenue/dashboard?period=${period}` : null,
+    periodCards && period !== "month"
+      ? `setup/revenue/dashboard?period=${period}`
+      : null,
   );
   const byMonth = useResource<RevenueDashboard>(
-    can("dash.gaps") || (periodCards && period === "month") ? "setup/revenue/dashboard?period=month" : null,
+    can("dash.gaps") || (periodCards && period === "month")
+      ? "setup/revenue/dashboard?period=month"
+      : null,
   );
-  const cards = dashboardCards(can, period, period === "month" ? byMonth : byPeriod, byMonth);
+  const cards = dashboardCards(
+    formats,
+    can,
+    period,
+    period === "month" ? byMonth : byPeriod,
+    byMonth,
+  );
   return (
     <section>
       <PageHeader
@@ -712,7 +805,7 @@ function Dashboard({
       <div className="mt-5 mb-6 flex flex-wrap items-center gap-3 rounded-[14px] border border-card-line bg-surface p-3 max-[480px]:flex-col max-[480px]:items-stretch">
         <SegmentedControl
           label="Period"
-          options={[...periods]}
+          options={[...REVENUE_PERIODS]}
           value={period}
           onChange={setChosen}
           className="max-[480px]:grid max-[480px]:grid-cols-3 max-[480px]:self-stretch"
@@ -745,8 +838,16 @@ function Dashboard({
           {cards.map((card) => {
             const action = card.action;
             return (
-              <Card key={card.permission} aria-labelledby={`card-${card.permission}`} aria-busy={card.busy || undefined}>
-                <CardHeader id={`card-${card.permission}`} title={card.title} description={card.sub} />
+              <Card
+                key={card.permission}
+                aria-labelledby={`card-${card.permission}`}
+                aria-busy={card.busy || undefined}
+              >
+                <CardHeader
+                  id={`card-${card.permission}`}
+                  title={card.title}
+                  description={card.sub}
+                />
                 {card.busy ? (
                   <>
                     <Skeleton className="mt-2 h-8 w-3/5" />
@@ -757,12 +858,19 @@ function Dashboard({
                     <StatusBadge>Not available yet</StatusBadge>
                   </p>
                 ) : (
-                  card.value && <CardValue tone={card.bad ? "bad" : undefined}>{card.value}</CardValue>
+                  card.value && (
+                    <CardValue tone={card.bad ? "bad" : undefined}>
+                      {card.value}
+                    </CardValue>
+                  )
                 )}
                 {card.bar !== undefined && <ProgressBar value={card.bar} />}
                 {card.note && <CardNote>{card.note}</CardNote>}
                 {action && (
-                  <CardAction primary={action.primary} onClick={() => onOpen(action.view)}>
+                  <CardAction
+                    primary={action.primary}
+                    onClick={() => onOpen(action.view)}
+                  >
                     {action.label}
                   </CardAction>
                 )}

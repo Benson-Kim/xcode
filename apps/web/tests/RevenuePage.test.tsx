@@ -1,6 +1,12 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { RevenueCell, RevenueVehicle, RevenueWeek } from "@xcode/shared";
+
+import type {
+  RevenueCell,
+  RevenueVehicle,
+  RevenueWeek,
+} from "@xcode/shared/revenue";
+
 import { RevenuePage } from "../components/RevenuePage";
 import { renderInApp } from "./renderInApp";
 

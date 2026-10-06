@@ -1,6 +1,7 @@
 import next from "eslint-config-next/core-web-vitals";
 import ts from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
+import importOrder from "./eslint-rules/import-order.mjs";
 export default [
   {
     ignores: [
@@ -18,6 +19,11 @@ export default [
     ...config,
     files: ["apps/web/**/*.{ts,tsx,js,mjs}"],
   })),
+  {
+    files: ["apps/web/**/*.{ts,tsx}", "apps/mobile/**/*.{ts,tsx}"],
+    plugins: { local: { rules: { "import-order": importOrder } } },
+    rules: { "local/import-order": "error" },
+  },
   {
     // eslint-plugin-react's "detect" calls context.getFilename(), which ESLint 10 removed; keep in step with apps/web.
     files: ["apps/web/**/*.{ts,tsx,js,mjs}"],

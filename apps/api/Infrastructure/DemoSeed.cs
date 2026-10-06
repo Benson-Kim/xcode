@@ -47,7 +47,8 @@ public static class DemoSeed
             {
                 if (!users.TryGetValue(email, out var user))
                 {
-                    user = new User { PhoneNumber = phoneNumber, Email = email, PinHash = pin is null ? null : PinHasher.Hash(pin) };
+                    user = new User { PhoneNumber = phoneNumber, Email = email };
+                    if (pin is not null) user.SetPin(PinHasher.Hash(pin));
                     db.Users.Add(user); users[email] = user;
                 }
                 user.Status = UserStatus.Active;

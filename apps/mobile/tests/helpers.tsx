@@ -1,4 +1,5 @@
 import { configure, fireEvent, render, screen } from "@testing-library/react-native";
+
 import App from "../App";
 import { savePerson, savePinCheck, saveSession, type StoredPerson } from "../src/lib/storage";
 import { people } from "./fakeApi";

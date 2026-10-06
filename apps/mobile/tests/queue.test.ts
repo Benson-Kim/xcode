@@ -1,5 +1,6 @@
 import { renderHook } from "@testing-library/react-native";
 import * as SecureStore from "expo-secure-store";
+
 import { saveSession } from "../src/lib/storage";
 import { QUEUE_LIMIT, QueueFullError, openQueue, useRevenueQueue, type NewCapture, type QueueSnapshot } from "../src/revenue/queue";
 import type { QueuedCapture } from "../src/revenue/types";
@@ -447,4 +448,78 @@ it("opens no queue for a person without an account id, and says what to do inste
   expect(result.current.loaded).toBe(true);
   await expect(result.current.add(capture("2026-09-25"))).rejects.toThrow("Connect to the internet");
   expect([...items().keys()].filter((key) => key.startsWith("xcode.revenue-queue."))).toEqual([]);
+});
+
+it("quarantines an entry after repeated server errors and carries on with the later ones", async () => {
+  const api = revenueApi();
+  const { queue, latest } = open();
+  await queue.add(capture("2026-09-25"));
+  await queue.add(capture("2026-09-26"));
+  await queue.sync();
+  api.answer((date) => (date === "2026-09-25" ? [500, {}] : [200, { version: 1 }]));
+  const now = jest.spyOn(Date, "now");
+  let clock = Date.now();
+  for (let round = 0; round < 9; round += 1) {
+    now.mockReturnValue((clock += 60_000));
+    await queue.sync();
+    expect(summary(latest().entries)).toEqual(["2026-09-25 1000 pending", "2026-09-26 1000 pending"]);
+  }
+  now.mockReturnValue((clock += 60_000));
+  await queue.sync();
+  now.mockRestore();
+  expect(summary(latest().entries)).toEqual(["2026-09-25 1000 failed"]);
+  expect(latest().entries[0].message).toBe("This entry could not be sent after several tries.");
+  expect(api.reached.map((sent) => sent.date)).toContain("2026-09-26");
+});
+
+it("quarantines an entry the API cannot accept (422) at once and keeps sending the rest", async () => {
+  const api = revenueApi();
+  const { queue, latest } = open();
+  await queue.add(capture("2026-09-25"));
+  await queue.add(capture("2026-09-26"));
+  await queue.sync();
+  api.answer((date) => (date === "2026-09-25" ? [422, { detail: "Too large." }] : [200, { version: 1 }]));
+  await queue.sync();
+  expect(summary(latest().entries)).toEqual(["2026-09-25 1000 failed"]);
+  expect(latest().entries[0].message).toBe("Too large.");
+});
+
+it("stops the round on 429 and holds the entry back until its backoff passes", async () => {
+  const api = revenueApi();
+  const { queue, latest } = open();
+  await queue.add(capture("2026-09-25"));
+  await queue.add(capture("2026-09-26"));
+  await queue.sync();
+  api.answer(() => [429, {}]);
+  await queue.sync();
+  expect(api.reached).toHaveLength(1);
+  expect(latest().entries[0]).toMatchObject({ state: "pending", attempts: 1 });
+
+  await queue.sync();
+  expect(api.reached.map((sent) => sent.date)).toEqual(["2026-09-25", "2026-09-26"]);
+  expect(latest().entries[0].attempts).toBe(1);
+
+  const now = jest.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000);
+  api.answer(() => [200, { version: 1 }]);
+  await queue.sync();
+  now.mockRestore();
+  expect(latest().entries).toEqual([]);
+});
+
+it("treats stored entries without attempt counts as never tried", async () => {
+  const api = revenueApi();
+  const first = open();
+  await first.queue.add(capture("2026-09-25"));
+  const slot = `${INDEX}.0`;
+  const stored = JSON.parse(items().get(slot)!);
+  delete stored.attempts;
+  delete stored.lastAttemptAt;
+  items().set(slot, JSON.stringify(stored));
+  first.queue.close();
+  const next = open();
+  await next.queue.ready;
+  expect(next.latest().entries[0]).toMatchObject({ attempts: 0, lastAttemptAt: 0 });
+  api.answer(() => [200, { version: 1 }]);
+  await next.queue.sync();
+  expect(next.latest().entries).toEqual([]);
 });

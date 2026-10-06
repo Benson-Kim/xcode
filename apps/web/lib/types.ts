@@ -1,3 +1,5 @@
+import type { PersonIdentity } from "@xcode/shared/auth";
+
 export type View =
   | "dashboard"
   | "revenue"
@@ -51,20 +53,16 @@ export type ScopeOptions = {
 // out from the session, so "Your access" cannot drift from what a request is actually allowed to reach.
 export type MyScope = ScopeOptions & { allCompanies: boolean };
 
-export type Person = {
+export type Person = PersonIdentity & {
   id: string;
-  firstName: string;
-  lastName: string;
   email: string;
   phoneNumber: string;
-  role: string;
   active: boolean;
   scopeMode: string;
   companyIds: string[];
   vehicleIds: string[];
   otherCompanies: number;
   otherVehicles: number;
-  permissions: string[];
   approvalLimit?: number;
   hasPin: boolean;
   version: number;
@@ -108,8 +106,6 @@ export type InvestmentEntry = {
   recordedAt: string;
 };
 
-// What went into a vehicle (contract C5). `returned` is its net contribution since it joined, which can be below zero;
-// `percentPaidOff` is that against `totalInvested`, and null when nothing went in.
 export type VehicleInvestment = {
   vehicleId: string;
   totalInvested: number;

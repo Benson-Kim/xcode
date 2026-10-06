@@ -1,5 +1,8 @@
 import * as SecureStore from "expo-secure-store";
+
 import { clearSession, forgetPerson, getDeviceId, loadPerson, loadSession, matchesPinCheck, saveOfflineTries, savePerson, savePinCheck, savePinPolicy, saveSession } from "../src/lib/storage";
+
+jest.unmock("../src/lib/pbkdf2");
 
 const session = { phoneNumber: "0712345678", accessToken: "jwt", refreshToken: "refresh" };
 
@@ -106,6 +109,35 @@ it("concurrent requests share a single persistent installation identifier", asyn
     expect(await Promise.all([fresh(), fresh()])).toEqual(["stable-test-device", "stable-test-device"]);
     expect(store.setItemAsync).toHaveBeenCalledTimes(1);
   });
+});
+
+it("verifies a v1 SHA-256 pin check from before the PBKDF2 upgrade", async () => {
+  const Crypto = require("expo-crypto");
+  const oldHash = await Crypto.digestStringAsync("SHA-256", "0707070707070707070707070707070707070707070707070707070707070707:2580");
+  await SecureStore.setItemAsync("xcode.pin-check", JSON.stringify({ salt: "0707070707070707070707070707070707070707070707070707070707070707", hash: oldHash }));
+  expect(await matchesPinCheck("2580")).toBe(true);
+  expect(await matchesPinCheck("9999")).toBe(false);
+});
+
+it("writes a v2 PBKDF2 pin check and verifies it", async () => {
+  await savePinCheck("1379");
+  const stored = JSON.parse((require("expo-secure-store").__items as Map<string, string>).get("xcode.pin-check")!);
+  expect(stored.version).toBe(2);
+  expect(stored.hash).not.toContain("1379");
+  expect(await matchesPinCheck("1379")).toBe(true);
+  expect(await matchesPinCheck("0000")).toBe(false);
+});
+
+it("checks a PIN offline on a phone, which has no WebCrypto", async () => {
+  const webCrypto = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { value: undefined, configurable: true });
+  try {
+    await savePinCheck("1379");
+    expect(await matchesPinCheck("1379")).toBe(true);
+    expect(await matchesPinCheck("1380")).toBe(false);
+  } finally {
+    if (webCrypto) Object.defineProperty(globalThis, "crypto", webCrypto);
+  }
 });
 
 it("keeps the organization's wrong-PIN policy with the person, and reads older records as 5 tries and 15 minutes", async () => {

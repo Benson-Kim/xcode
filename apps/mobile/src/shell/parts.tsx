@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+
 import { Icon, Text, useTheme, type IconName } from "../ui";
 
 export function ScreenTitle({ children }: { children: string }) {

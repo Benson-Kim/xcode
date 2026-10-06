@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 import { SessionEndedError, apiGet } from "../lib/api";
 import type { StoredPerson } from "../lib/storage";
 import { queueCounts, useRevenueQueue } from "../revenue/queue";
 import { Icon, Text, useTheme } from "../ui";
 import { allowedTabs, type PermissionGroup, type Tab } from "./access";
-import { HomeScreen, ModuleScreen, MoreScreen, type Catalog } from "./screens";
 import { RevenueScreen } from "./RevenueScreen";
+import { HomeScreen, ModuleScreen, MoreScreen, type Catalog } from "./screens";
 
 type Props = {
   person: StoredPerson;

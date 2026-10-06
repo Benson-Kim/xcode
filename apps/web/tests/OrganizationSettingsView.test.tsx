@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
+
 import { OrganizationSettingsView } from "../components/OrganizationSettingsView";
 import { PreferencesView } from "../components/PreferencesView";
 import { renderInApp } from "./renderInApp";

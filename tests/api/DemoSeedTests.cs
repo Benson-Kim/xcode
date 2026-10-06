@@ -28,7 +28,7 @@ public sealed class DemoSeedTests : IDisposable
         {
             Assert.Null((await db.Users.SingleAsync(u => u.Email == "brian.mwangi@metrotrans.co.ke")).PinHash);
             var owner = await db.Users.SingleAsync(u => u.Email == "antony.maina@shamayah.co.ke");
-            owner.PinHash = PinHasher.Hash("9731");
+            owner.SetPin(PinHasher.Hash("9731"));
             await db.SaveChangesAsync();
             await DemoSeed.Run(db);
             Assert.Equal(DemoSeed.Logins.Length, await db.Users.CountAsync());

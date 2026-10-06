@@ -16,7 +16,6 @@ public static class RevenueEndpoints
     public static void MapRevenue(this WebApplication app)
     {
         var group = app.MapGroup("/setup/revenue").RequireAuthorization().WithTags("Revenue").WithSetupErrors();
-        // Added after WithSetupErrors, so it runs inside it and sees the revenue errors first.
         group.AddEndpointFilter(async (context, next) =>
         {
             try { return await next(context); }
@@ -24,6 +23,10 @@ public static class RevenueEndpoints
             {
                 return Results.Problem(statusCode: 409, title: "This day already has a different record.", detail: conflict.Message,
                     extensions: new Dictionary<string, object?> { ["current"] = conflict.Current });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Problem(statusCode: 409, title: "This day was changed by another save.", detail: "Reload the current record and try again.");
             }
             catch (RevenueEarlierDayMissingException missing)
             {

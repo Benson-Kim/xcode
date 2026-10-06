@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+
 import { apiRequest } from "../lib/data";
 
 afterEach(() => vi.unstubAllGlobals());
