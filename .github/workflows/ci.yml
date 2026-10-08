@@ -150,12 +150,79 @@ jobs:
       - if: failure()
         run: docker logs web || true
 
+  # The MonsterASP upload, against an SFTP server on the runner with a password login, so it is proven before develop.
+  deploy-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: An SFTP server on the runner
+        run: |
+          sudo mkdir -p /etc/ssh/sshd_config.d
+          echo "PasswordAuthentication yes" | sudo tee /etc/ssh/sshd_config.d/00-ci.conf
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lftp openssh-server
+          sudo systemctl restart ssh
+          sudo useradd -m xcodesite
+          # A throwaway for this job's local server, not a secret.
+          echo "xcodesite:CiOnly_Sftp_2026" | sudo chpasswd
+          sudo -u xcodesite mkdir -p /home/xcodesite/wwwroot/logs
+          for i in $(seq 1 30); do ssh-keyscan -T 2 localhost > /dev/null 2>&1 && break; sleep 1; done
+      - name: upload.sh copies the API, writes its web.config and brings the site back, twice
+        env:
+          SFTP_HOST: localhost
+          SFTP_PORT: "22"
+          SFTP_USER: xcodesite
+          SFTP_PASSWORD: CiOnly_Sftp_2026
+          ConnectionStrings__Auth: Server=db.example.test;Database=ci
+          Auth__SigningKey: ci-only-signing-key
+          Email__Host: localhost
+          Email__From: ci@example.test
+          Cors__Origins__0: https://web.example.test
+        run: |
+          export SFTP_KNOWN_HOSTS="$(ssh-keyscan localhost 2> /dev/null)"
+          api="$RUNNER_TEMP/api"
+          mkdir -p "$api/runtimes/linux"
+          echo first > "$api/Auth.Api.dll"
+          echo symbols > "$api/Auth.Api.pdb"
+          echo native > "$api/runtimes/linux/native.so"
+          echo stale > "$api/web.config"
+          bash deploy/monsterasp/upload.sh "$api"
+          echo second-build > "$api/Auth.Api.dll"
+          bash deploy/monsterasp/upload.sh "$api"
+          site=/home/xcodesite/wwwroot
+          sudo grep -qx second-build "$site/Auth.Api.dll"
+          sudo test -f "$site/runtimes/linux/native.so"
+          sudo test -d "$site/logs"
+          sudo grep -q 'name="Auth__SigningKey" value="ci-only-signing-key"' "$site/web.config"
+          sudo grep -q 'name="Cors__Origins__0" value="https://web.example.test"' "$site/web.config"
+          sudo test ! -e "$site/Auth.Api.pdb"
+          sudo test ! -e "$site/app_offline.htm"
+      - name: A wrong host key stops the upload before anything is sent
+        env:
+          SFTP_HOST: localhost
+          SFTP_USER: xcodesite
+          SFTP_PASSWORD: CiOnly_Sftp_2026
+          ConnectionStrings__Auth: Server=db.example.test;Database=ci
+          Auth__SigningKey: ci-only-signing-key
+          Email__Host: localhost
+          Email__From: ci@example.test
+          Cors__Origins__0: https://web.example.test
+        run: |
+          ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/other"
+          export SFTP_KNOWN_HOSTS="localhost $(cut -d' ' -f1,2 "$RUNNER_TEMP/other.pub")"
+          if bash deploy/monsterasp/upload.sh "$RUNNER_TEMP/api"; then echo "::error::uploaded to an unknown host"; exit 1; fi
+          sudo test ! -e /home/xcodesite/wwwroot/app_offline.htm
+
   # Staging: a push to develop that passes every job above deploys. The API goes to MonsterASP, beside its database.
   # The web build and the Android app are published as GitHub releases; the cPanel account installs the web build
   # itself (deploy/cpanel/update.sh), so nothing has to reach into the account past its bot protection.
   deploy-api:
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    needs: [js, mobile, api, api-sqlserver, web-image]
+    needs: [js, mobile, api, api-sqlserver, web-image, deploy-scripts]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
