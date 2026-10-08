@@ -11,6 +11,7 @@ import {
 import {
   apiGet,
   apiSendResult,
+  isNoInternet,
   OfflineError,
   ServerError,
   SessionEndedError,
@@ -75,9 +76,10 @@ export async function send<T>(
     return {
       ok: false,
       status: 0,
-      message:
-        error instanceof OfflineError
-          ? "No internet connection. Nothing was saved."
+      message: isNoInternet(error)
+        ? "No internet connection. Nothing was saved."
+        : error instanceof OfflineError
+          ? `${error.message} Nothing was saved.`
           : "The request could not be completed.",
       reload: false,
     };

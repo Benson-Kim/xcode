@@ -12,6 +12,7 @@ import {
   OfflineError,
   authApi,
   forgetThisPhone,
+  isNoInternet,
   keepSession,
 } from "../lib/api";
 import {
@@ -46,7 +47,7 @@ import {
 import type { DelayedSubmit, OperationLock } from "./hooks";
 
 export type AuthContext = {
-  // The newest state. Handlers read it after every await instead of what they closed over.
+  // The newest state.
   state(): AuthState;
   dispatch: Dispatch<Action>;
   lock: OperationLock;
@@ -71,8 +72,7 @@ const codeDetails = (result: AuthResponse) => ({
   developmentCode: result.developmentCode || "",
 });
 
-// Everything after the server accepted a sign-in. A failure here never replays what the server consumed:
-// the person goes back to the PIN pad, where the phone is trusted now.
+// Everything after the server accepted a sign-in.
 async function finishSignIn(
   ctx: AuthContext,
   result: AuthResponse,
@@ -115,14 +115,20 @@ function pauseFromServer(ctx: AuthContext, error: AuthError) {
   });
 }
 
-// PIN unlock works without internet: the phone checks the PIN against the hash it kept at the last sign-in.
-async function unlockOffline(ctx: AuthContext, entered: string) {
+// PIN unlock works without internet
+async function unlockOffline(
+  ctx: AuthContext,
+  entered: string,
+  failure: unknown,
+) {
   const { person, phone } = ctx.state();
   const match = await matchesPinCheck(entered);
   if (match === null || !person)
     return ctx.dispatch({
       type: "padError",
-      message: "No internet. Connect to unlock this phone.",
+      message: isNoInternet(failure)
+        ? "No internet. Connect to unlock this phone."
+        : "Can't reach the XCODE server right now. Try again shortly.",
     });
 
   const until = await offlineUnlockUntil();
@@ -166,7 +172,7 @@ async function failPad(
     (error instanceof OfflineError ||
       (error instanceof AuthError && error.httpStatus >= 500))
   )
-    return unlockOffline(ctx, entered);
+    return unlockOffline(ctx, entered, error);
   ctx.dispatch({
     type: "padError",
     message: failureMessage(

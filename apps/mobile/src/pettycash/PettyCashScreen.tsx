@@ -14,6 +14,7 @@ import {
 
 import { SessionEndedError } from "../lib/api";
 import { useFormats } from "../lib/formats";
+import { useConnected } from "../lib/network";
 import { LineSkeleton, SectionTitle, Segmented } from "../shell/parts";
 import { Banner, Button, ErrorText } from "../ui";
 import { send, useLoaded, type Outcome } from "./client";
@@ -36,6 +37,8 @@ type NoticeState = { tone: "ok" | "error"; text: string } | null;
 
 const OFFLINE_NOTE =
   "No internet. Petty cash loads and saves only while you are online.";
+const UNREACHABLE_NOTE =
+  "Can't reach the XCODE server. Petty cash loads and saves only while it answers.";
 
 // Petty cash: the person's own float, approvals, cash given and every float, each only with its permission.
 // Everything here is online-only; the server decides what each entry allows.
@@ -51,6 +54,7 @@ export function PettyCashScreen({
   onSessionEnded: () => void;
 }) {
   const formats = useFormats();
+  const connected = useConnected();
   const [stamp, setStamp] = useState(0);
   const [date, setDate] = useState<string | null>(null);
   const [period, setPeriod] = useState<PettyCashPeriod>("day");
@@ -199,7 +203,12 @@ export function PettyCashScreen({
   }
 
   function body() {
-    if (offline) return <Banner tone="offline">{OFFLINE_NOTE}</Banner>;
+    if (offline)
+      return (
+        <Banner tone="offline">
+          {connected ? UNREACHABLE_NOTE : OFFLINE_NOTE}
+        </Banner>
+      );
     if (!current || !permissions || !today) {
       if (overview.error)
         return (

@@ -1,3 +1,4 @@
+import { getNetworkStateAsync } from "expo-network";
 import { Platform } from "react-native";
 
 import {
@@ -8,6 +9,7 @@ import {
   type AuthResponse,
 } from "@xcode/shared/auth";
 
+import { hasConnection } from "./network";
 import {
   forgetPerson,
   getDeviceId,
@@ -34,6 +36,20 @@ export class OfflineError extends Error {
     super("No internet connection.");
   }
 }
+
+// The phone has a connection but the API did not answer: wrong address, server down or too slow.
+export class ServerUnreachableError extends OfflineError {
+  constructor() {
+    super();
+    this.message = "Can't reach the XCODE server right now. Try again shortly.";
+  }
+}
+
+// The phone itself has no internet, as opposed to a server that is down, out of reach or failing.
+export const isNoInternet = (error: unknown) =>
+  error instanceof OfflineError &&
+  !(error instanceof ServerUnreachableError) &&
+  !(error instanceof ServerError);
 
 // The API answered with a failure that is not the person's to fix. Treated as unreachable.
 export class ServerError extends OfflineError {
@@ -67,10 +83,16 @@ async function reach(input: RequestInfo | URL, init?: RequestInit) {
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } catch {
-    throw new OfflineError();
+    throw caller?.aborted || !(await phoneIsOnline())
+      ? new OfflineError()
+      : new ServerUnreachableError();
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function phoneIsOnline() {
+  return getNetworkStateAsync().then(hasConnection, () => false);
 }
 
 const authClient = createAuthClient(`${apiUrl}/auth`, reach as typeof fetch);

@@ -4,6 +4,7 @@ import { percentText } from "@xcode/shared/format";
 import { STATUS_META, isRecorded } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
+import { useConnected } from "../../lib/network";
 import { shiftDate } from "../../revenue/dates";
 import type { RevenueQueue } from "../../revenue/queue";
 import type {
@@ -18,6 +19,8 @@ import {
   OFFLINE_EMPTY,
   OFFLINE_SAVED,
   onCurrentWeek,
+  UNREACHABLE_EMPTY,
+  UNREACHABLE_SAVED,
   type DayRowData,
   type ViewMode,
 } from "./model";
@@ -35,14 +38,19 @@ function LoadNotice({
   loading: boolean;
   onRetry: () => void;
 }) {
+  const connected = useConnected();
   return (
     <>
       {saved ? (
-        <Banner tone="offline">{OFFLINE_SAVED}</Banner>
-      ) : error ? (
-        <Banner tone={error === OFFLINE_EMPTY ? "offline" : "error"}>
-          {error}
+        <Banner tone="offline">
+          {connected ? UNREACHABLE_SAVED : OFFLINE_SAVED}
         </Banner>
+      ) : error === OFFLINE_EMPTY ? (
+        <Banner tone="offline">
+          {connected ? UNREACHABLE_EMPTY : OFFLINE_EMPTY}
+        </Banner>
+      ) : error ? (
+        <Banner tone="error">{error}</Banner>
       ) : null}
       {error && !loading ? (
         <Button tone="outline" onPress={onRetry} style={shared.smallButton}>

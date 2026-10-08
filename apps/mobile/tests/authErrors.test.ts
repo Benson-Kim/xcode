@@ -8,7 +8,11 @@ import {
   profileFailedMessage,
   type CheckedOperation,
 } from "../src/auth/authErrors";
-import { OfflineError } from "../src/lib/api";
+import {
+  OfflineError,
+  ServerError,
+  ServerUnreachableError,
+} from "../src/lib/api";
 
 describe("failureMessage", () => {
   it("says no internet, in the words of the step", () => {
@@ -21,6 +25,15 @@ describe("failureMessage", () => {
         "No internet. Sending a code needs network.",
       ),
     ).toBe("No internet. Sending a code needs network.");
+  });
+
+  it("keeps the server's own words, whatever the step says about the internet", () => {
+    expect(
+      failureMessage(new ServerUnreachableError(), "No internet. Try later."),
+    ).toBe("Can't reach the XCODE server right now. Try again shortly.");
+    expect(failureMessage(new ServerError(), "No internet. Try later.")).toBe(
+      "Something went wrong on the server. Try again in a moment.",
+    );
   });
 
   it.each([

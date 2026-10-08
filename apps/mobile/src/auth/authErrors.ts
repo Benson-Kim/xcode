@@ -4,7 +4,7 @@ import {
   type AuthStatus,
 } from "@xcode/shared/auth";
 
-import { OfflineError } from "../lib/api";
+import { OfflineError, ServerError, ServerUnreachableError } from "../lib/api";
 
 export const OFFLINE_MESSAGE =
   "No internet. Check your connection and try again.";
@@ -14,6 +14,8 @@ export function failureMessage(
   error: unknown,
   offlineMessage = OFFLINE_MESSAGE,
 ): string {
+  if (error instanceof ServerUnreachableError || error instanceof ServerError)
+    return error.message;
   if (error instanceof OfflineError) return offlineMessage;
   return error instanceof AuthError
     ? error.message

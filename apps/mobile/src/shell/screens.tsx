@@ -22,6 +22,7 @@ import { REVENUE_PERIODS } from "@xcode/shared/revenue";
 import { VERSION } from "../auth/AuthLayout";
 import { apiGet, SessionEndedError } from "../lib/api";
 import { useFormats } from "../lib/formats";
+import { useConnected } from "../lib/network";
 import type { StoredPerson } from "../lib/storage";
 import { PETTY_CASH_CARDS, pettyFigures } from "../pettycash/dashboard";
 import {
@@ -170,6 +171,7 @@ export function HomeScreen({
 }) {
   const { colors } = useTheme();
   const formats = useFormats();
+  const connected = useConnected();
   const has = permissionChecker(person.permissions);
   // People who capture or spend start on today; everyone else on the month so far.
   const [period, setPeriod] = useState<Period>(
@@ -243,8 +245,7 @@ export function HomeScreen({
       />
       {offline && (
         <Banner tone="offline">
-          No internet. You are seeing what this phone saved at your last sign
-          in.
+          {`${connected ? "Can't reach the XCODE server." : "No internet."} You are seeing what this phone saved at your last sign in.`}
         </Banner>
       )}
       <Segmented

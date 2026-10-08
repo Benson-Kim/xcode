@@ -29,9 +29,13 @@ jest.mock("../src/lib/pbkdf2", () => {
   };
 });
 
-// Tests announce a change of network with require("expo-network").__emit(state).
+// Tests announce a change of network with require("expo-network").__emit(state), and set what the phone reports
+// when asked with __setState(state). A phone is offline until a test says otherwise, as fakeApi's "offline" implies.
 jest.mock("expo-network", () => {
   // Names inside a mock factory must start with "mock" to be allowed there.
+  const mockOffline = { isConnected: false, isInternetReachable: false };
+  let mockCurrent: { isConnected?: boolean; isInternetReachable?: boolean } =
+    mockOffline;
   const listeners = new Set<
     (mockState: {
       isConnected?: boolean;
@@ -40,6 +44,16 @@ jest.mock("expo-network", () => {
   >();
   return {
     useNetworkState: () => ({ isConnected: true, isInternetReachable: true }),
+    getNetworkStateAsync: async () => mockCurrent,
+    __setState: (mockState: {
+      isConnected?: boolean;
+      isInternetReachable?: boolean;
+    }) => {
+      mockCurrent = mockState;
+    },
+    __reset: () => {
+      mockCurrent = mockOffline;
+    },
     addNetworkStateListener: (
       listener: (mockState: {
         isConnected?: boolean;
@@ -123,4 +137,5 @@ beforeAll(async () => {
 
 beforeEach(() => {
   require("expo-secure-store").__items.clear();
+  require("expo-network").__reset();
 });

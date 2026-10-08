@@ -21,15 +21,13 @@ export async function startApp() {
   await render(<App />);
 }
 
-// Presses the keypad; after the last number the pad waits a moment before checking.
+// Presses the keypad to enter the pin
 export async function typePin(pin: string) {
   for (const digit of pin)
     await fireEvent.press(screen.getByRole("button", { name: digit }));
 }
 
-// A phone that already signed in for this person: it holds their session, their details and a PIN check,
-// in the shape a Phase 1 phone saved them (no wrong-PIN policy yet, so it reads as 5 tries and 15 minutes).
-// `lastOnlineAt` left out keeps the Phase 1 shape, where the phone has no record of when it was last online.
+// A phone that already signed in for this person: it holds their session, their details and a PIN check
 export async function trustPhone(
   person: (typeof people)[keyof typeof people] = people.owner,
   phoneNumber = "0733520614",

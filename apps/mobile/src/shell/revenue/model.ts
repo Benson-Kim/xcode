@@ -28,6 +28,11 @@ export const OFFLINE_EMPTY =
   "No internet. Revenue needs a connection to load. Captures already on this phone are kept and sent when you are back online.";
 export const OFFLINE_SAVED =
   "No internet. Showing what this phone loaded earlier. Captures are kept on this phone and sent when you are back online.";
+// The same notices for a phone that is connected while the server does not answer.
+export const UNREACHABLE_EMPTY =
+  "Can't reach the XCODE server. Revenue needs it to load. Captures already on this phone are kept until it answers.";
+export const UNREACHABLE_SAVED =
+  "Can't reach the XCODE server. Showing what this phone loaded earlier. Captures are kept on this phone until it answers.";
 
 export type Waiting = ReadonlyMap<string, QueuedCapture>;
 
