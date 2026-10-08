@@ -5,9 +5,11 @@ on:
   push:
     branches: [develop, master]
 
+# A newer push to a branch never cancels a run that may be deploying (a migration or upload cut off halfway);
+# pull requests still cancel their older runs.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -147,3 +149,147 @@ jobs:
           grep -i '^content-security-policy:' headers.txt
       - if: failure()
         run: docker logs web || true
+
+  # Staging: a push to develop that passes every job above deploys. The API goes to MonsterASP, beside its database.
+  # The web build and the Android app are published as GitHub releases; the cPanel account installs the web build
+  # itself (deploy/cpanel/update.sh), so nothing has to reach into the account past its bot protection.
+  deploy-api:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    needs: [js, mobile, api, api-sqlserver, web-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: ${{ vars.WEB_URL }}
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    env:
+      API_URL: ${{ vars.API_URL }}
+    steps:
+      # The web app and the phones send PINs and tokens to the API: nothing changes until its address answers over
+      # HTTPS with a valid certificate.
+      - name: The API's address answers over HTTPS
+        run: |
+          case "$API_URL" in https://*) ;; *) echo "::error::API_URL must start with https://"; exit 1 ;; esac
+          curl -sS -o /dev/null --max-time 60 "$API_URL/health"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+      - run: dotnet publish apps/api/Auth.Api.csproj -c Release -p:RestoreLockedMode=true -o "$RUNNER_TEMP/api"
+      - name: Migrate the staging database
+        working-directory: ${{ runner.temp }}/api
+        env:
+          ASPNETCORE_ENVIRONMENT: Production
+          ConnectionStrings__Auth: ${{ secrets.DB_CONNECTION }}
+          Auth__SigningKey: ${{ secrets.AUTH_SIGNING_KEY }}
+          Email__Host: ${{ secrets.SMTP_HOST }}
+          Email__From: ${{ secrets.SMTP_FROM }}
+        run: dotnet Auth.Api.dll --migrate
+      - run: sudo apt-get install -y -qq lftp
+      - name: Upload to MonsterASP
+        env:
+          SFTP_HOST: ${{ secrets.SFTP_HOST }}
+          SFTP_PORT: ${{ secrets.SFTP_PORT }}
+          SFTP_USER: ${{ secrets.SFTP_USER }}
+          SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+          SFTP_KNOWN_HOSTS: ${{ secrets.SFTP_KNOWN_HOSTS }}
+          ConnectionStrings__Auth: ${{ secrets.DB_CONNECTION }}
+          Auth__SigningKey: ${{ secrets.AUTH_SIGNING_KEY }}
+          Email__Host: ${{ secrets.SMTP_HOST }}
+          Email__Port: ${{ secrets.SMTP_PORT }}
+          Email__From: ${{ secrets.SMTP_FROM }}
+          Email__Username: ${{ secrets.SMTP_USER }}
+          Email__Password: ${{ secrets.SMTP_PASSWORD }}
+          Cors__Origins__0: ${{ vars.WEB_URL }}
+        run: bash deploy/monsterasp/upload.sh "$RUNNER_TEMP/api"
+      - name: The API is up and reaches its database
+        run: curl --retry 30 --retry-delay 5 --retry-all-errors -fsS --max-time 30 "$API_URL/health/ready"
+
+  deploy-web:
+    needs: deploy-api
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    environment:
+      name: staging
+      url: ${{ vars.WEB_URL }}
+    concurrency:
+      group: deploy-staging-web
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w apps/web
+        env:
+          NEXT_OUTPUT: standalone
+      - run: bash deploy/cpanel/package.sh "$GITHUB_SHA" "$API_URL" "$RUNNER_TEMP/web"
+        env:
+          API_URL: ${{ vars.API_URL }}
+      - name: Publish for the cPanel account to install
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete staging-web --yes --cleanup-tag || true
+          gh release create staging-web "$RUNNER_TEMP/web/xcode-web.tar.gz" "$RUNNER_TEMP/web/xcode-web.tar.gz.sha256" \
+            --target "$GITHUB_SHA" --prerelease --title "Staging web" \
+            --notes "Web build of $GITHUB_SHA. The cPanel account installs it within five minutes (deploy/cpanel/update.sh)."
+
+  android:
+    needs: deploy-api
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    environment:
+      name: staging
+    concurrency:
+      group: deploy-staging-android
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: npm ci
+      - name: Generate the Android project, signed with the staging key
+        working-directory: apps/mobile
+        run: |
+          npx expo prebuild --platform android --no-install
+          echo 'apply from: file("../../../../deploy/android/release-signing.gradle")' >> android/app/build.gradle
+      - name: Build the APK against the staging API
+        working-directory: apps/mobile/android
+        env:
+          EXPO_PUBLIC_API_URL: ${{ vars.API_URL }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+          ANDROID_VERSION_NAME: 1.0.0-staging.${{ github.run_number }}
+        run: |
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/staging.p12"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ANDROID_KEYSTORE_PATH"
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+          rm -f "$ANDROID_KEYSTORE_PATH"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/xcode-staging.apk"
+      - name: Publish the APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete staging-android --yes --cleanup-tag || true
+          gh release create staging-android "$RUNNER_TEMP/xcode-staging.apk" \
+            --target "$GITHUB_SHA" --prerelease --title "Staging Android app" \
+            --notes "Android app for staging, built from $GITHUB_SHA. Open this page on the phone, download xcode-staging.apk and install it."

@@ -1,0 +1,22 @@
+// Applied to the generated android/app/build.gradle by the staging deploy: signs release builds with the staging key
+// (a PKCS12 keystore) and numbers each build, so a newer APK installs over the one before it.
+android {
+    defaultConfig {
+        versionCode Integer.parseInt(System.getenv("ANDROID_VERSION_CODE") ?: "1")
+        versionName System.getenv("ANDROID_VERSION_NAME") ?: "1.0.0"
+    }
+    signingConfigs {
+        staging {
+            storeFile file(System.getenv("ANDROID_KEYSTORE_PATH"))
+            storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias System.getenv("ANDROID_KEY_ALIAS")
+            keyPassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            storeType "pkcs12"
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.staging
+        }
+    }
+}

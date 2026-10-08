@@ -122,8 +122,13 @@ export default [
     },
   },
   {
-    // CommonJS config files, and jest.mock factories, which are hoisted above imports and must require.
-    files: ["**/*.cjs", "apps/mobile/tests/**/*.{ts,tsx}"],
+    // CommonJS config files, jest.mock factories, which are hoisted above imports and must require, and the cPanel
+    // startup file, which Passenger loads with require.
+    files: [
+      "**/*.cjs",
+      "apps/mobile/tests/**/*.{ts,tsx}",
+      "deploy/cpanel/start.js",
+    ],
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
 ];
