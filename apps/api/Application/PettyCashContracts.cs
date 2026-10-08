@@ -139,7 +139,9 @@ public interface IPettyCashRepository
     // People who record spending today, and anyone who already has entries.
     Task<IReadOnlyList<PettyCashHolderDto>> Holders(CancellationToken ct);
     Task<decimal?> ApprovalLimit(Guid userId, CancellationToken ct);
-    Task<IReadOnlyList<PettyCashTally>> Tallies(IReadOnlyCollection<Guid> holderIds, DateOnly from, DateOnly through, CancellationToken ct);
+    // Only the entries the actor may see, so figures never count what the list hides.
+    Task<IReadOnlyList<PettyCashTally>> Tallies(SetupActor actor, IReadOnlyCollection<Guid> holderIds, DateOnly from, DateOnly through,
+        CancellationToken ct);
     Task<decimal> Balance(Guid holderId, CancellationToken ct);
     Task<Page<PettyCashEntryRow>> Entries(SetupActor actor, IReadOnlyCollection<Guid> holderIds, PettyCashFilter filter, int page, int pageSize,
         CancellationToken ct);

@@ -1,8 +1,9 @@
-import { expect, expectTypeOf, it } from "vitest";
+import { expect, expectTypeOf, it, vi } from "vitest";
 
 import {
   awaitsCapture,
   isRecorded,
+  loadWholeWeek,
   mergeWeekPages,
   parseRevenueAmount,
   remainingWeekPages,
@@ -14,6 +15,7 @@ import {
   type RevenueVehicle,
   type RevenueWeek,
   type StatusMeta,
+  WeekChangedError,
 } from "@xcode/shared/revenue";
 
 it("parses positive revenue amounts up to twelve digits and two decimals", () => {
@@ -122,6 +124,66 @@ it("merges the pages in order, once per vehicle, and keeps the first page's figu
   expect(merged.truncated).toBe(false);
   expect(merged.totalAmount).toBe(99);
   expect(mergeWeekPages(first, [])).toBe(first);
+  // Without counts there is nothing to check the pages against.
+  expect(
+    mergeWeekPages(week(fleet(0, 2)), [week(fleet(2, 1))]).vehicles,
+  ).toHaveLength(3);
+});
+
+it("refuses pages that do not add up to one fleet", () => {
+  const first = week(fleet(0, 500), { truncated: true, totalVehicles: 650 });
+  // A vehicle added between requests: the later page counts a different fleet.
+  expect(() =>
+    mergeWeekPages(first, [
+      week(fleet(500, 100), { totalVehicles: 651 }),
+      week(fleet(600, 50), { totalVehicles: 651 }),
+    ]),
+  ).toThrow(WeekChangedError);
+  // A rename moved v499 onto page 6 and pushed v600 onto a page already fetched: same count, one vehicle missing.
+  expect(() =>
+    mergeWeekPages(first, [
+      week(["v499", ...fleet(500, 99)], { totalVehicles: 650 }),
+      week(fleet(601, 50), { totalVehicles: 650 }),
+    ]),
+  ).toThrow(WeekChangedError);
+});
+
+it("loads the week again from its first answer when the fleet changed between pages", async () => {
+  const stale = week(fleet(0, 500), { truncated: true, totalVehicles: 650 });
+  const fresh = week(fleet(0, 500), { truncated: true, totalVehicles: 651 });
+  const seen: number[] = [];
+  const loadPages = async (first: RevenueWeek) => {
+    seen.push(first.totalVehicles!);
+    return [
+      week(fleet(500, 100), { totalVehicles: 651 }),
+      week(fleet(600, 51), { totalVehicles: 651 }),
+    ];
+  };
+  const reloadFirst = vi.fn(async () => fresh);
+
+  const whole = await loadWholeWeek(stale, loadPages, reloadFirst);
+
+  expect(reloadFirst).toHaveBeenCalledTimes(1);
+  expect(seen).toEqual([650, 651]);
+  expect(whole.vehicles.map((item) => item.id)).toEqual(fleet(0, 651));
+});
+
+it("stops after the last attempt and passes any other failure straight on", async () => {
+  const first = week(fleet(0, 500), { truncated: true, totalVehicles: 650 });
+  const moving = async () => [week(fleet(500, 100), { totalVehicles: 651 })];
+  const reloadFirst = vi.fn(async () => first);
+  await expect(loadWholeWeek(first, moving, reloadFirst, 2)).rejects.toThrow(
+    WeekChangedError,
+  );
+  expect(reloadFirst).toHaveBeenCalledTimes(1);
+
+  const failing = vi.fn(async () => {
+    throw new Error("offline");
+  });
+  await expect(loadWholeWeek(first, failing, reloadFirst)).rejects.toThrow(
+    "offline",
+  );
+  expect(failing).toHaveBeenCalledTimes(1);
 });
 
 it("describes every revenue status, so a new one fails typechecking until it is described", () => {

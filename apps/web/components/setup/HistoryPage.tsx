@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { isDate } from "@xcode/shared/dates";
 import type { Formatter } from "@xcode/shared/format";
@@ -226,6 +226,9 @@ const rowKey = (row: HistoryRow) => `${row.version}-${row.entityId}`;
 function useHistoryPages(query: string) {
   const [loaded, setLoaded] = useState<Loaded>(() => nothingYet(query));
   const [pending, setPending] = useState<number | null>(1);
+  // An answer for a filter that has since changed is dropped, even when it arrives after the current one.
+  const latestQuery = useRef(query);
+  const stale = useCallback(() => latestQuery.current !== query, [query]);
 
   const receive = useCallback(
     (page: number, before: number | null) =>
@@ -234,6 +237,7 @@ function useHistoryPages(query: string) {
       )
         .then(
           (result) =>
+            !stale() &&
             setLoaded((current) => {
               const kept =
                 page === 1 || current.query !== query ? [] : current.items;
@@ -253,18 +257,22 @@ function useHistoryPages(query: string) {
             }),
           // The query is stamped here too, so a first page that fails stops being "still loading" and says why.
           (error: Error) =>
+            !stale() &&
             setLoaded((current) => ({
               ...(current.query === query ? current : nothingYet(query)),
               error: error.message,
             })),
         )
-        .finally(() => setPending(null)),
-    [query],
+        .finally(() => {
+          if (!stale()) setPending(null);
+        }),
+    [query, stale],
   );
 
   useEffect(() => {
+    latestQuery.current = query;
     void receive(1, null);
-  }, [receive]);
+  }, [query, receive]);
 
   function more() {
     if (pending !== null || loaded.next === null) return;

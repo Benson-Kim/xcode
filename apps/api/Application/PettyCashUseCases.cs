@@ -32,7 +32,7 @@ public sealed class PettyCashUseCases(ISetupExecution execution, IPettyCashRepos
             var to = week ? from.AddDays(6) : day;
             var holders = await VisibleHolders(actor, ct);
             var selected = Selected(holders, holderId);
-            var tallies = await repository.Tallies([.. selected.Select(h => h.Id)], from, to, ct);
+            var tallies = await repository.Tallies(actor, [.. selected.Select(h => h.Id)], from, to, ct);
             var limit = await repository.ApprovalLimit(actor.UserId, ct);
             return new PettyCashOverviewDto(actor.Today, day, week ? "week" : "day", from, to, Permissions(actor, limit), holders,
                 Figures(tallies), [.. selected.Select(h => Float(h, tallies))]);
@@ -72,7 +72,7 @@ public sealed class PettyCashUseCases(ISetupExecution execution, IPettyCashRepos
             if (Holds(actor, PermissionKeys.DashFloat))
             {
                 var monthStart = new DateOnly(actor.Today.Year, actor.Today.Month, 1);
-                var tallies = await repository.Tallies([actor.UserId], monthStart, actor.Today, ct);
+                var tallies = await repository.Tallies(actor, [actor.UserId], monthStart, actor.Today, ct);
                 var state = Float(new PettyCashHolderDto(actor.UserId, "", true), tallies);
                 own = new PettyCashDashboardFloat(state.Balance, state.WaitingCount, state.Waiting,
                     tallies.Where(t => t.Status == PettyCashStatus.SentBack).Sum(t => t.Count),
@@ -222,14 +222,16 @@ public sealed class PettyCashUseCases(ISetupExecution execution, IPettyCashRepos
     private static bool WithinLimit(decimal total, decimal? limit) => limit is null || Math.Abs(total) <= limit.Value;
 
     // Cash is changed by issuers only. The person whose float it is changes their own entries until they are approved,
-    // and so does an issuer for a credit note they recorded. Someone who approves changes anyone else's at any time.
+    // and so does an issuer for a credit note they recorded. Someone who approves changes anyone else's at any time,
+    // except an approved entry they recorded themselves.
     private static bool CanChange(SetupActor actor, PettyCashEntry entry)
     {
         if (entry.Kind == PettyCashKind.Cash) return Holds(actor, Issue);
-        var own = entry.Status != PettyCashStatus.Approved &&
+        var approved = entry.Status == PettyCashStatus.Approved;
+        var own = !approved &&
             ((entry.HolderId == actor.UserId && Holds(actor, Spend)) ||
              (entry.Kind == PettyCashKind.Credit && entry.RecordedBy == actor.UserId && Holds(actor, Issue)));
-        return own || (Holds(actor, ApproveItem) && entry.HolderId != actor.UserId);
+        return own || (Holds(actor, ApproveItem) && entry.HolderId != actor.UserId && !(approved && entry.RecordedBy == actor.UserId));
     }
 
     // Nobody reviews their own float or an entry they recorded, or an entry above their approval limit.

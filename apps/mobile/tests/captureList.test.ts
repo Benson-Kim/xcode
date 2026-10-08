@@ -193,6 +193,46 @@ it("loads every page of a fleet past the API's whole-grid limit, and writes all 
   });
 });
 
+it("loads the week again when the fleet changed between its pages, so no vehicle is skipped", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  // vehicle-10 left after the first answer, so every later page starts one vehicle further on.
+  const before = largeFleet(api, 730);
+  const after = before.filter((vehicle) => vehicle.id !== "vehicle-10");
+  const first = (fleet: typeof before) => ({
+    ...revenueWeek,
+    vehicles: fleet.slice(0, 500),
+    totalVehicles: fleet.length,
+    pageNumber: 1,
+    pageSize: 500,
+    truncated: true,
+  });
+  let firstAnswers = 0;
+  api.on("setup/revenue", () => [
+    200,
+    first(firstAnswers++ === 0 ? before : after),
+  ]);
+  for (let number = 6; number <= 8; number++)
+    api.on(`setup/revenue?weekStart=2026-09-28&page=${number}&pageSize=100`, [
+      200,
+      {
+        ...revenueWeek,
+        vehicles: after.slice((number - 1) * 100, number * 100),
+        totalVehicles: after.length,
+        pageNumber: number,
+        pageSize: 100,
+        truncated: false,
+      },
+    ]);
+
+  const result = await (await freshLoadWeek())(OWNER);
+
+  expect(firstAnswers).toBe(2);
+  const ids = after.map((vehicle) => vehicle.id);
+  expect(result.week.vehicles.map((vehicle) => vehicle.id)).toEqual(ids);
+  expect((await stored())?.vehicles.map((vehicle) => vehicle.id)).toEqual(ids);
+});
+
 it("never writes down part of a fleet when a later page cannot be fetched", async () => {
   await trustPhone();
   const api = fakeApi();

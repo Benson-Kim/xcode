@@ -10,13 +10,9 @@ export type RevenueStatus = (typeof REVENUE_STATUSES)[number];
 export type StatusTone = "muted" | "normal" | "alert";
 
 export interface StatusMeta {
-  // In service that day: counts toward "x of y captured" and has an expected figure.
   inFleet: boolean;
-  // Holds an amount or a no-revenue reason.
   recorded: boolean;
-  // Still needs a record.
   awaitsCapture: boolean;
-  // What a cell with nothing else to show says.
   label: string;
   tone: StatusTone;
 }
@@ -137,8 +133,6 @@ export interface RevenueGap {
   date: string;
 }
 
-// The totals, day totals and first gap cover the whole grid; vehicles may be one page of it. The paging fields are
-// absent from a week rebuilt on the phone from its saved capture list.
 export interface RevenueWeek {
   weekStart: string;
   weekThrough: string;
@@ -159,8 +153,6 @@ export interface RevenueWeek {
 
 export const REVENUE_WEEK_PAGE_SIZE = 100;
 
-// A week asked for without paging lists the grid up to the API's limit and says when it stopped there. The pages
-// still to fetch, at REVENUE_WEEK_PAGE_SIZE vehicles each, carry on from the last vehicle listed.
 export function remainingWeekPages(week: RevenueWeek): number[] {
   if (!week.truncated || !week.totalVehicles) return [];
   const from = Math.floor(week.vehicles.length / REVENUE_WEEK_PAGE_SIZE) + 1;
@@ -171,8 +163,13 @@ export function remainingWeekPages(week: RevenueWeek): number[] {
   );
 }
 
-// The whole grid from its first response and the pages after it. A vehicle listed twice (the fleet changed between
-// requests) is kept once.
+export class WeekChangedError extends Error {
+  constructor() {
+    super("The fleet changed while this week was loading. Load it again.");
+    this.name = "WeekChangedError";
+  }
+}
+
 export function mergeWeekPages(
   first: RevenueWeek,
   rest: RevenueWeek[],
@@ -184,7 +181,35 @@ export function mergeWeekPages(
     .filter(
       (vehicle) => !seen.has(vehicle.id) && Boolean(seen.add(vehicle.id)),
     );
+  const total = first.totalVehicles;
+  if (
+    rest.some(
+      (page) =>
+        page.totalVehicles !== undefined && page.totalVehicles !== total,
+    ) ||
+    (total !== undefined && vehicles.length !== total)
+  )
+    throw new WeekChangedError();
   return { ...first, vehicles, truncated: false };
+}
+
+// Pages are fetched by offset, so a fleet that changes between requests can shift a vehicle past them; the week is
+// then loaded again from a fresh first answer, a few times at most.
+export async function loadWholeWeek(
+  first: RevenueWeek,
+  loadPages: (first: RevenueWeek) => Promise<RevenueWeek[]>,
+  reloadFirst: () => Promise<RevenueWeek>,
+  attempts = 3,
+): Promise<RevenueWeek> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return mergeWeekPages(first, await loadPages(first));
+    } catch (error) {
+      if (!(error instanceof WeekChangedError) || attempt >= attempts)
+        throw error;
+      first = await reloadFirst();
+    }
+  }
 }
 
 // Each figure is null for a viewer who may not see the card it belongs to.

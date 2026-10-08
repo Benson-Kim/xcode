@@ -34,6 +34,11 @@ namespace Auth.Api.Infrastructure.Migrations
             END
             """;
 
+        public const string AddVehicleIdSql = """
+            IF COL_LENGTH(N'[OrganizationSettingsVersion]', N'VehicleId') IS NULL
+                ALTER TABLE [OrganizationSettingsVersion] ADD [VehicleId] uniqueidentifier NULL;
+            """;
+
         // Online builds keep the change log writable, but only Enterprise (3), Azure SQL Database (5) and Managed
         // Instance (8) offer them.
         private static string CreateIndex(string name, string columns) => $"""
@@ -49,11 +54,9 @@ namespace Auth.Api.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<Guid>(
-                name: "VehicleId",
-                table: "OrganizationSettingsVersion",
-                type: "uniqueidentifier",
-                nullable: true);
+            // The first statement run outside a transaction commits this one before the migration is recorded, so a run
+            // stopped after it starts again here: every step checks before it changes anything.
+            migrationBuilder.Sql(AddVehicleIdSql);
 
             // Outside the migration's transaction, so each batch commits and locks stay short on a large change log.
             migrationBuilder.Sql(Batched(BackfillVehiclesSql), suppressTransaction: true);

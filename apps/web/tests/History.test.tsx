@@ -1,4 +1,10 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { HistoryPage } from "../components/setup";
@@ -459,6 +465,52 @@ it("narrows the log through the server and starts again at the first page", asyn
     ),
   );
   expect(await screen.findByText("Showing all 3 changes")).toBeInTheDocument();
+});
+
+it("keeps the newer filter's answer when an older request finishes last", async () => {
+  const rows = [
+    change(2, { section: "people", reason: "Invited someone" }),
+    change(1, { section: "companies", reason: "Renamed Metro Trans" }),
+  ];
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let oldAnswered = false;
+  const fetchMock = vi.fn(async (input: string) => {
+    const section = new URL(input, "http://app").searchParams.get("section");
+    const items = section
+      ? rows.filter((row) => row.section === section)
+      : rows;
+    if (!section) {
+      await held;
+      oldAnswered = true;
+    }
+    return new Response(
+      JSON.stringify(pageOf(items, 25, items.length, false)),
+      { status: 200 },
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderInApp(<HistoryPage />);
+
+  fireEvent.change(screen.getByLabelText("Section"), {
+    target: { value: "people" },
+  });
+  expect(
+    await screen.findByText("People and access: Invited someone"),
+  ).toBeInTheDocument();
+
+  await act(async () => {
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(oldAnswered).toBe(true);
+  expect(
+    screen.getByText("People and access: Invited someone"),
+  ).toBeInTheDocument();
+  expect(screen.getByText("1 change matches")).toBeInTheDocument();
+  expect(
+    screen.queryByText("PSV companies: Renamed Metro Trans"),
+  ).not.toBeInTheDocument();
 });
 
 it("says that nothing matches rather than that there is nothing", async () => {

@@ -1262,6 +1262,54 @@ it("loads a fleet beyond the API's whole-grid limit in pages of the same week, a
   ).toBeInTheDocument();
 }, 30_000);
 
+it("loads the week again when the fleet changed between its pages, so no vehicle is skipped", async () => {
+  const before = Array.from({ length: 730 }, (_, index) =>
+    vehicle(
+      `vehicle-${index}`,
+      `KDA ${String(index).padStart(3, "0")}A`,
+      {},
+      { earliestMissing: null },
+    ),
+  );
+  // vehicle-10 left after the first answer, so every later page starts one vehicle further on.
+  const after = before.filter((item) => item.id !== "vehicle-10");
+  let firstAnswers = 0;
+  const fetcher = serve((path) => {
+    const url = new URL(path, "http://web");
+    if (!url.pathname.startsWith("/api/setup/revenue")) return undefined;
+    const page = Number(url.searchParams.get("page") ?? 0);
+    if (!page) {
+      const fleet = firstAnswers++ === 0 ? before : after;
+      return json(
+        week(fleet.slice(0, 500), {
+          truncated: true,
+          totalVehicles: fleet.length,
+        }),
+      );
+    }
+    return json(
+      week(after.slice((page - 1) * 100, page * 100), {
+        pageNumber: page,
+        pageSize: 100,
+        totalVehicles: after.length,
+      }),
+    );
+  });
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+
+  const grid = await screen.findByRole("table", {
+    name: /Revenue by vehicle and day/,
+  });
+  const pages = [
+    "/api/setup/revenue",
+    "/api/setup/revenue?weekStart=2026-09-28&page=6&pageSize=100",
+    "/api/setup/revenue?weekStart=2026-09-28&page=7&pageSize=100",
+    "/api/setup/revenue?weekStart=2026-09-28&page=8&pageSize=100",
+  ];
+  expect(gets(fetcher, "/api/setup/revenue")).toEqual([...pages, ...pages]);
+  expect(grid).toHaveAttribute("aria-rowcount", String(after.length + 2));
+}, 30_000);
+
 const fleetOf = (count: number) =>
   Array.from({ length: count }, (_, index) =>
     vehicle(

@@ -1,5 +1,5 @@
 import {
-  mergeWeekPages,
+  loadWholeWeek,
   remainingWeekPages,
   REVENUE_WEEK_PAGE_SIZE,
 } from "@xcode/shared/revenue";
@@ -29,16 +29,21 @@ export const weekPath = (weekStart?: string, vehicleId?: string) => {
 };
 
 // A fleet beyond the API's whole-grid limit comes in pages after the first answer, all for the week it settled on.
-// Capture needs every vehicle, so the week is whole or not loaded at all.
-async function wholeWeek(first: RevenueWeek) {
-  const pages = await Promise.all(
-    remainingWeekPages(first).map((page) =>
-      apiGet<RevenueWeek>(
-        `setup/revenue?weekStart=${encodeURIComponent(first.weekStart)}&page=${page}&pageSize=${REVENUE_WEEK_PAGE_SIZE}`,
+// Capture needs every vehicle, so the week is whole or not loaded at all; pages that do not add up to one fleet
+// are loaded again from the first answer.
+function wholeWeek(first: RevenueWeek, path: string) {
+  return loadWholeWeek(
+    first,
+    (week) =>
+      Promise.all(
+        remainingWeekPages(week).map((page) =>
+          apiGet<RevenueWeek>(
+            `setup/revenue?weekStart=${encodeURIComponent(week.weekStart)}&page=${page}&pageSize=${REVENUE_WEEK_PAGE_SIZE}`,
+          ),
+        ),
       ),
-    ),
+    () => apiGet<RevenueWeek>(path),
   );
-  return mergeWeekPages(first, pages);
 }
 
 // D9: what the phone writes down so capture still works after an offline cold start, when nothing is in
@@ -111,7 +116,7 @@ export async function loadWeek(
   const path = weekPath(weekStart, vehicleId);
   try {
     const first = await apiGet<RevenueWeek>(path);
-    const week = vehicleId ? first : await wholeWeek(first);
+    const week = vehicleId ? first : await wholeWeek(first, path);
     kept.delete(path);
     kept.set(path, week);
     // The current week asked for without a date is also that week asked for by date.

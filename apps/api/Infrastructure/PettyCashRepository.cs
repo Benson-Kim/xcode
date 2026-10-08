@@ -50,9 +50,10 @@ public sealed class PettyCashRepository(AuthDb db, IUnitOfWork unitOfWork, Setti
     public Task<decimal?> ApprovalLimit(Guid userId, CancellationToken ct) =>
         db.Memberships.AsNoTracking().Where(m => m.UserId == userId).Select(m => m.ApprovalLimit).SingleOrDefaultAsync(ct);
 
-    public async Task<IReadOnlyList<PettyCashTally>> Tallies(IReadOnlyCollection<Guid> holderIds, DateOnly from, DateOnly through, CancellationToken ct) =>
-        await db.Set<PettyCashEntry>().AsNoTracking()
-            .Where(e => e.RemovedAt == null && holderIds.Contains(e.HolderId))
+    public async Task<IReadOnlyList<PettyCashTally>> Tallies(SetupActor actor, IReadOnlyCollection<Guid> holderIds, DateOnly from,
+        DateOnly through, CancellationToken ct) =>
+        await Visible(actor).AsNoTracking()
+            .Where(e => holderIds.Contains(e.HolderId))
             .GroupBy(e => new
             {
                 e.HolderId,

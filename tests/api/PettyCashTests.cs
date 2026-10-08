@@ -277,6 +277,15 @@ public sealed class PettyCashTests : IDisposable
             Expense(w.Today, w.Vehicle, w.Item, 1300m, version: approved.Version)));
         Assert.Equal(("waiting", 8700m), (corrected.Status, corrected.Balance));
         Assert.True(corrected.Version > approved.Version);
+
+        // Approving too does not let the issuer who recorded a credit note change it once someone else approved it.
+        var issued = await Saved(await Post(owner, Credit(w.Today, 300m, "Kamau Motors", "Paid for the clerk", holder: w.Clerk)));
+        var issuedApproved = await Saved(await Approve(admin, issued));
+        var row = (await Entries(owner, $"holderId={w.Clerk}&kind=credit")).Items.Single();
+        Assert.Equal((false, false), (row.CanEdit, row.CanRemove));
+        await AssertForbidden(await owner.PostAsJsonAsync($"/setup/pettycash/entries/{issued.Id}/remove",
+                new { version = issuedApproved.Version, reason = "Wrong" }),
+            "An approved entry can only be changed by someone else who approves petty cash.");
     }
 
     [Fact]
@@ -403,6 +412,9 @@ public sealed class PettyCashTests : IDisposable
         });
         using var admin = await app.SignIn(Admin);
         Assert.Equal(["cash"], (await Entries(admin, "")).Items.Select(x => x.Kind));
+        // Nor do the figures count what the list hides.
+        var ownersFloat = (await Overview(admin, w.Today)).Floats.Single(f => f.HolderId == w.Owner);
+        Assert.Equal((0m, 0m), (ownersFloat.Expenses, ownersFloat.Balance));
     }
 
     [Fact]
