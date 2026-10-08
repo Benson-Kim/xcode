@@ -12,11 +12,12 @@ internal static class RevenueTestData
     public const string Admin = "peter.otieno@zurigenesis.co.ke";
     public const string Clerk = "wanjiru.kamau@zurigenesis.co.ke";
 
-    // A Thursday at least a week back keeps week boundaries and "today" independent of the day the tests run.
+    // A Thursday at least a week back, whose Monday falls in the same month, keeps week and month boundaries and
+    // "today" independent of the day the tests run.
     public static DateOnly PinnedThursday(AuthFactory app)
     {
         var date = CalendarDate(app).AddDays(-7);
-        while (date.DayOfWeek != DayOfWeek.Thursday) date = date.AddDays(-1);
+        while (date.DayOfWeek != DayOfWeek.Thursday || date.Day < 4) date = date.AddDays(-1);
         return date;
     }
 

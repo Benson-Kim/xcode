@@ -5,7 +5,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
 
 import type { PettyCashDashboard } from "@xcode/shared/pettyCash";
 
@@ -17,6 +17,8 @@ import {
   servePettyCash,
 } from "./pettyCashServer";
 
+// The shell loads the page lazily; a cold first import on a busy machine can outlast findBy's one-second wait.
+beforeAll(() => import("../components/pettycash/PettyCashPage"));
 afterEach(() => vi.unstubAllGlobals());
 
 const dashboard: PettyCashDashboard = {
