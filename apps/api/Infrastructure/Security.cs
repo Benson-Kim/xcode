@@ -102,10 +102,19 @@ public sealed class LogEmailSender(ILogger<LogEmailSender> logger) : IEmailSende
 
 public sealed class SmtpEmailSender(IConfiguration config) : IEmailSender
 {
+    // Mail goes encrypted. Email:EnableSsl=false is honoured only for a relay on this machine (the host's own mail
+    // server), which may not offer TLS; a password never crosses the network in the clear.
+    public static bool UsesTls(IConfiguration config) =>
+        config.GetValue("Email:EnableSsl", true) || !IsLoopback(config["Email:Host"]);
+
+    private static bool IsLoopback(string? host) =>
+        string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+        (System.Net.IPAddress.TryParse(host, out var address) && System.Net.IPAddress.IsLoopback(address));
+
     public async Task SendCode(string email, string code, CodePurpose purpose, CancellationToken cancellationToken)
     {
         using var client = new System.Net.Mail.SmtpClient(config["Email:Host"] ?? throw new InvalidOperationException("Email:Host required"), config.GetValue("Email:Port", 587));
-        client.EnableSsl = true;
+        client.EnableSsl = UsesTls(config);
         client.Credentials = new System.Net.NetworkCredential(config["Email:Username"], config["Email:Password"]);
         using var message = new System.Net.Mail.MailMessage(config["Email:From"] ?? throw new InvalidOperationException("Email:From required"), email,
             "Your verification code", $"Your {purpose} code is {code}. It expires in 10 minutes.");
