@@ -2,19 +2,37 @@
 
 import { useState } from "react";
 
-import { apiRequest, useStreamedList } from "../../lib/data";
+import { apiRequest, streamError, useStreamedList } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
-import { Banner, Button, DataTable, Field, FormActions, PageHeader, StatusBadge, Td, TextInput, Toolbar, Tr, useToast } from "../ui";
+import {
+  Banner,
+  Button,
+  DataTable,
+  Field,
+  FormActions,
+  PageHeader,
+  StatusBadge,
+  Td,
+  TextInput,
+  Toolbar,
+  Tr,
+  useToast,
+} from "../ui";
 import type { Company } from "./shared";
 
 // Whether the company carries an archive date, even one still ahead of the business date. Older rows had none, so inactive counts too.
-const archivedOnRecord = (company: Company) => Boolean(company.archivedOn) || company.active === false;
+const archivedOnRecord = (company: Company) =>
+  Boolean(company.archivedOn) || company.active === false;
 
 export function CompaniesPage() {
   const [name, setName] = useState("");
   const [addError, setAddError] = useState("");
   // Changes carry no typed reason: the server writes one for the change log.
-  const [renaming, setRenaming] = useState<{ id: string; name: string; error: string } | null>(null);
+  const [renaming, setRenaming] = useState<{
+    id: string;
+    name: string;
+    error: string;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const companies = useStreamedList<Company>("setup/companies");
@@ -86,11 +104,16 @@ export function CompaniesPage() {
   async function setArchived(company: Company, archived: boolean) {
     setBusy(true);
     try {
-      await apiRequest(`setup/companies/${company.id}/${archived ? "archive" : "restore"}`, {
-        method: "POST",
-        body: "{}",
-      });
-      toast(archived ? `${company.name} archived.` : `${company.name} restored.`);
+      await apiRequest(
+        `setup/companies/${company.id}/${archived ? "archive" : "restore"}`,
+        {
+          method: "POST",
+          body: "{}",
+        },
+      );
+      toast(
+        archived ? `${company.name} archived.` : `${company.name} restored.`,
+      );
       companies.reload();
     } catch (value) {
       setAddError((value as Error).message);
@@ -101,8 +124,13 @@ export function CompaniesPage() {
 
   return (
     <section>
-      <PageHeader title="PSV companies" description="Every vehicle belongs to one company. Archive a company after its vehicles have left the fleet." />
-      {(companies.error || addError) && <Banner className="mt-5">{companies.error || addError}</Banner>}
+      <PageHeader
+        title="PSV companies"
+        description="Every vehicle belongs to one company. Archive a company after its vehicles have left the fleet."
+      />
+      {(companies.error || addError) && (
+        <Banner className="mt-5">{streamError(companies) || addError}</Banner>
+      )}
       <Toolbar align="start">
         <Field
           id="new-company"
@@ -122,12 +150,22 @@ export function CompaniesPage() {
             }}
           />
         </Field>
-        <Button tone="ok" className="mt-6.5 max-[480px]:mt-0" disabled={busy} onClick={() => void add()}>
+        <Button
+          tone="ok"
+          className="mt-6.5 max-[480px]:mt-0"
+          disabled={busy}
+          onClick={() => void add()}
+        >
           Add company
         </Button>
       </Toolbar>
       <DataTable
-        columns={[{ label: "Company" }, { label: "Status" }, { label: "Vehicles", numeric: true }, { label: "Actions", hidden: true }]}
+        columns={[
+          { label: "Company" },
+          { label: "Status" },
+          { label: "Vehicles", numeric: true },
+          { label: "Actions", hidden: true },
+        ]}
         loading={companies.loading}
         pendingRows={companies.pendingRows}
         loadingLabel="Loading companies"
@@ -162,10 +200,19 @@ export function CompaniesPage() {
                       }}
                     />
                   </Field>
-                  <Button tone="ok" className="mt-6.5" disabled={busy} onClick={() => void saveRename(company)}>
+                  <Button
+                    tone="ok"
+                    className="mt-6.5"
+                    disabled={busy}
+                    onClick={() => void saveRename(company)}
+                  >
                     Save
                   </Button>
-                  <Button className="mt-6.5" tone="quiet" onClick={() => setRenaming(null)}>
+                  <Button
+                    className="mt-6.5"
+                    tone="quiet"
+                    onClick={() => setRenaming(null)}
+                  >
                     Cancel
                   </Button>
                 </div>
@@ -177,11 +224,25 @@ export function CompaniesPage() {
                 <strong>{company.name}</strong>
               </Td>
               <Td label="Status">
-                <StatusBadge tone={company.active === false ? "off" : company.archivedOn ? "warn" : "ok"}>
-                  {company.active === false ? "Archived" : company.archivedOn ? `Archives on ${formatDateOnly(company.archivedOn)}` : "Active"}
+                <StatusBadge
+                  tone={
+                    company.active === false
+                      ? "off"
+                      : company.archivedOn
+                        ? "warn"
+                        : "ok"
+                  }
+                >
+                  {company.active === false
+                    ? "Archived"
+                    : company.archivedOn
+                      ? `Archives on ${formatDateOnly(company.archivedOn)}`
+                      : "Active"}
                 </StatusBadge>
               </Td>
-              <Td label="Vehicles" numeric>{company.vehicleCount}</Td>
+              <Td label="Vehicles" numeric>
+                {company.vehicleCount}
+              </Td>
               <Td>
                 {/* Every row ends with its actions, side by side at the end of the row (.row-acts). */}
                 <FormActions className="justify-end gap-2">
@@ -189,7 +250,13 @@ export function CompaniesPage() {
                     <Button
                       tone="outline"
                       disabled={busy}
-                      onClick={() => setRenaming({ id: company.id, name: company.name, error: "" })}
+                      onClick={() =>
+                        setRenaming({
+                          id: company.id,
+                          name: company.name,
+                          error: "",
+                        })
+                      }
                       aria-label={`Rename ${company.name}`}
                     >
                       Rename
@@ -200,7 +267,9 @@ export function CompaniesPage() {
                     tone={archivedOnRecord(company) ? "ok" : "warn"}
                     disabled={busy}
                     aria-label={`${archivedOnRecord(company) ? "Restore" : "Archive"} ${company.name}`}
-                    onClick={() => void setArchived(company, !archivedOnRecord(company))}
+                    onClick={() =>
+                      void setArchived(company, !archivedOnRecord(company))
+                    }
                   >
                     {archivedOnRecord(company) ? "Restore" : "Archive"}
                   </Button>

@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SessionEndedError, apiGet } from "../lib/api";
 import type { StoredPerson } from "../lib/storage";
+import type { PettyCashSection } from "../pettycash/PettyCashScreen";
 import { queueCounts, useRevenueQueue } from "../revenue/queue";
 import { Icon, Text, useTheme } from "../ui";
 import { allowedTabs, type PermissionGroup, type Tab } from "./access";
@@ -22,10 +23,19 @@ type Props = {
 
 // The signed-in app: one screen at a time above the bottom menu. Menus show only what the person may use;
 // the server checks every action.
-export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, onSessionEnded }: Props) {
+export function AppShell({
+  person,
+  offline,
+  businessDate,
+  onLock,
+  onSwitchUser,
+  onSessionEnded,
+}: Props) {
   const { colors, fontScale } = useTheme();
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("home");
+  // Which part of Spend a Home card opened; the menu opens the first part the person has.
+  const [spendStart, setSpendStart] = useState<PettyCashSection | undefined>();
   const [catalog, setCatalog] = useState<Catalog>({ groups: null, error: "" });
   const [switching, setSwitching] = useState(false);
   const scroll = useRef<ScrollView>(null);
@@ -41,7 +51,9 @@ export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, 
   const counts = queueCounts(queue.entries);
   const unsent = [
     counts.waiting ? `${counts.waiting} waiting to send` : "",
-    counts.conflicts ? `${counts.conflicts} ${counts.conflicts === 1 ? "conflict" : "conflicts"}` : "",
+    counts.conflicts
+      ? `${counts.conflicts} ${counts.conflicts === 1 ? "conflict" : "conflicts"}`
+      : "",
     counts.failed ? `${counts.failed} not saved` : "",
   ].filter(Boolean);
 
@@ -53,15 +65,21 @@ export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, 
       .catch((error: Error) => {
         if (!active) return;
         if (error instanceof SessionEndedError) return sessionEnded();
-        setCatalog({ groups: null, error: offline ? "Connect to the internet to see your permissions." : error.message });
+        setCatalog({
+          groups: null,
+          error: offline
+            ? "Connect to the internet to see your permissions."
+            : error.message,
+        });
       });
     return () => {
       active = false;
     };
   }, [offline, sessionEnded]);
 
-  function open(next: Tab) {
+  function open(next: Tab, section?: PettyCashSection) {
     setTab(next);
+    setSpendStart(section);
     scroll.current?.scrollTo({ y: 0, animated: false });
   }
 
@@ -69,9 +87,18 @@ export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, 
     <View style={[styles.shell, { backgroundColor: colors.cream }]}>
       {tab === "revenue" ? (
         // The revenue lists scroll themselves (FlatList), so only the rows on screen are drawn.
-        <RevenueScreen person={person} queue={queue} businessDate={businessDate} onSessionEnded={sessionEnded} />
+        <RevenueScreen
+          person={person}
+          queue={queue}
+          businessDate={businessDate}
+          onSessionEnded={sessionEnded}
+        />
       ) : (
-        <ScrollView ref={scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          ref={scroll}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
           {tab === "home" ? (
             <HomeScreen
               person={person}
@@ -94,41 +121,97 @@ export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, 
               }}
             />
           ) : (
-            <ModuleScreen tab={tab} person={person} catalog={catalog} />
+            <ModuleScreen
+              tab={tab}
+              person={person}
+              catalog={catalog}
+              offline={offline}
+              businessDate={businessDate}
+              start={spendStart}
+              onSessionEnded={sessionEnded}
+            />
           )}
         </ScrollView>
       )}
-      <View accessibilityRole="tablist" accessibilityLabel="Main" style={[styles.nav, { borderTopColor: colors.cardLine, backgroundColor: colors.surface, paddingBottom: insets.bottom }]}>
+      <View
+        accessibilityRole="tablist"
+        accessibilityLabel="Main"
+        style={[
+          styles.nav,
+          {
+            borderTopColor: colors.cardLine,
+            backgroundColor: colors.surface,
+            paddingBottom: insets.bottom,
+          },
+        ]}
+      >
         {tabs.map((item) => {
           const current = item.id === tab;
-          const badge = item.id === "revenue" && unsent.length ? counts.waiting + counts.conflicts + counts.failed : 0;
+          const badge =
+            item.id === "revenue" && unsent.length
+              ? counts.waiting + counts.conflicts + counts.failed
+              : 0;
           return (
             <Pressable
               key={item.id}
               accessibilityRole="tab"
-              accessibilityLabel={badge ? `${item.label}, ${unsent.join(", ")}` : item.label}
+              accessibilityLabel={
+                badge ? `${item.label}, ${unsent.join(", ")}` : item.label
+              }
               accessibilityState={{ selected: current }}
               onPress={() => open(item.id)}
-              style={[styles.navItem, current && { borderTopColor: colors.blue }]}
+              style={[
+                styles.navItem,
+                current && { borderTopColor: colors.blue },
+              ]}
             >
               <View>
-                <Icon name={item.icon} size={24} color={current ? colors.blue : colors.grey} />
+                <Icon
+                  name={item.icon}
+                  size={24}
+                  color={current ? colors.blue : colors.grey}
+                />
                 {badge ? (
                   <View
                     style={[
                       styles.badge,
                       // The count grows with the person's text size, and its circle with it.
-                      { top: -6 * fontScale, minWidth: 18 * fontScale, height: 18 * fontScale, borderRadius: 9 * fontScale },
-                      { backgroundColor: counts.conflicts || counts.failed ? colors.red : colors.amberText },
+                      {
+                        top: -6 * fontScale,
+                        minWidth: 18 * fontScale,
+                        height: 18 * fontScale,
+                        borderRadius: 9 * fontScale,
+                      },
+                      {
+                        backgroundColor:
+                          counts.conflicts || counts.failed
+                            ? colors.red
+                            : colors.amberText,
+                      },
                     ]}
                   >
-                    <Text weight="bold" style={{ fontSize: 11, lineHeight: 14, color: colors.onFill }}>
+                    <Text
+                      weight="bold"
+                      style={{
+                        fontSize: 11,
+                        lineHeight: 14,
+                        color: colors.onFill,
+                      }}
+                    >
                       {badge > 99 ? "99+" : String(badge)}
                     </Text>
                   </View>
                 ) : null}
               </View>
-              <Text weight="semibold" style={{ fontSize: 12, lineHeight: 16, color: current ? colors.blue : colors.grey, textDecorationLine: current ? "underline" : "none" }}>
+              <Text
+                weight="semibold"
+                style={{
+                  fontSize: 12,
+                  lineHeight: 16,
+                  color: current ? colors.blue : colors.grey,
+                  textDecorationLine: current ? "underline" : "none",
+                }}
+              >
                 {item.label}
               </Text>
             </Pressable>
@@ -141,8 +224,33 @@ export function AppShell({ person, offline, businessDate, onLock, onSwitchUser, 
 
 const styles = StyleSheet.create({
   shell: { flex: 1 },
-  content: { width: "100%", maxWidth: 420, alignSelf: "center", paddingTop: 28, paddingHorizontal: 24, paddingBottom: 32 },
+  content: {
+    width: "100%",
+    maxWidth: 420,
+    alignSelf: "center",
+    paddingTop: 28,
+    paddingHorizontal: 24,
+    paddingBottom: 32,
+  },
   nav: { flexDirection: "row", borderTopWidth: 1 },
-  badge: { position: "absolute", top: -6, left: 14, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, alignItems: "center", justifyContent: "center" },
-  navItem: { flex: 1, minHeight: 64, alignItems: "center", justifyContent: "center", gap: 3, borderTopWidth: 3, borderTopColor: "transparent" },
+  badge: {
+    position: "absolute",
+    top: -6,
+    left: 14,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navItem: {
+    flex: 1,
+    minHeight: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    borderTopWidth: 3,
+    borderTopColor: "transparent",
+  },
 });

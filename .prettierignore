@@ -8,4 +8,7 @@ design
 package-lock.json
 **/packages.lock.json
 **/tsconfig.tsbuildinfo
+**/coverage
+**/.expo
+apps/web/next-env.d.ts
 apps/web/AGENTS.md

@@ -1,7 +1,12 @@
 import type { AuthenticatedPerson } from "@xcode/shared/auth";
 
 import { apiGet } from "./lib/api";
-import { DEFAULT_PIN_POLICY, loadPerson, savePerson, type StoredPerson } from "./lib/storage";
+import {
+  DEFAULT_PIN_POLICY,
+  loadPerson,
+  savePerson,
+  type StoredPerson,
+} from "./lib/storage";
 
 // The signed-in person from their session
 export async function fetchPerson(
@@ -12,7 +17,13 @@ export async function fetchPerson(
 
   const kept = await loadPerson();
 
-  const policy = kept && (kept.userId ? kept.userId === session.userId : kept.phoneNumber === phoneNumber) ? kept : DEFAULT_PIN_POLICY;
+  const policy =
+    kept &&
+    (kept.userId
+      ? kept.userId === session.userId
+      : kept.phoneNumber === phoneNumber)
+      ? kept
+      : DEFAULT_PIN_POLICY;
 
   const person = {
     userId: session.userId,

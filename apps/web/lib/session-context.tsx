@@ -3,12 +3,16 @@
 import { createContext, useContext } from "react";
 
 import type { AuthenticatedPerson } from "@xcode/shared/auth";
+import type { PermissionCheck } from "@xcode/shared/permissions";
 
 export type Session = AuthenticatedPerson;
 
-type SessionState = { session: Session | null; can: (permission: string) => boolean };
+type SessionState = { session: Session | null; can: PermissionCheck };
 
-const SessionContext = createContext<SessionState>({ session: null, can: () => false });
+const SessionContext = createContext<SessionState>({
+  session: null,
+  can: () => false,
+});
 
 export const SessionProvider = SessionContext.Provider;
 

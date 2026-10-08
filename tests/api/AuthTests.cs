@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Auth.Application;
+using Auth.Application.Authentication;
 using Auth.Domain;
 using Auth.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -112,7 +113,7 @@ public sealed class AuthTests : IDisposable
     public async Task PastTheAccountLimitAnUntrustedDeviceLearnsNothingFromThePin()
     {
         await app.Seed();
-        for (var i = 0; i < AuthService.UntrustedAttemptLimit; i++)
+        for (var i = 0; i < SignInService.UntrustedAttemptLimit; i++)
             Assert.Equal(HttpStatusCode.Unauthorized, (await Post("sign-in", Request(pin: "9998", device: $"stranger-{i}"))).Status);
 
         Assert.Equal(await Post("sign-in", Request(phoneNumber: Unknown, device: "stranger")), await Post("sign-in", Request(device: "stranger")));
@@ -540,6 +541,57 @@ public sealed class AuthTests : IDisposable
     }
 
     [Fact]
+    public async Task ACodeFromARolledBackAttemptIsNeverSent()
+    {
+        await app.Seed(trusted: false);
+        app.ExecutionStrategy = d => new RetryOnSimulatedFailure(d);
+        app.Database.FailNextCommit = true;
+        // The retry finds the person removed, so it issues no code of its own.
+        app.Database.BetweenAttempts("UPDATE \"Users\" SET \"Status\" = 1");
+        app.Database.Reset();
+
+        var (status, _) = await Post("sign-in");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, status);
+        Assert.Equal(2, app.Database.Transactions);
+        Assert.Equal(0, app.Email.Count);
+        await app.WithDb(async db => Assert.Empty(await db.VerificationCodes.ToListAsync()));
+    }
+
+    [Fact]
+    public async Task ARetriedAttemptStartsFromTheDatabase()
+    {
+        await app.Seed();
+        app.ExecutionStrategy = d => new RetryOnSimulatedFailure(d);
+        app.Database.FailNextCommit = true;
+        app.Database.Reset();
+
+        var (status, _) = await Post("sign-in", Request(pin: "9998"));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, status);
+        Assert.Equal(2, app.Database.Transactions);
+        await app.WithDb(async db => Assert.Equal(1, (await db.Users.SingleAsync()).FailedAttempts));
+    }
+
+    [Fact]
+    public async Task RevokingADeviceWaitsForTheAccountsOtherAuthWork()
+    {
+        await app.Seed();
+        var signedIn = await Post("sign-in");
+        client.DefaultRequestHeaders.Authorization = new("Bearer", signedIn.Body.AccessToken);
+        var account = app.Services.GetRequiredService<AuthGate>().For(PhoneNumber.Normalize("+254712345678"));
+        await account.WaitAsync();
+
+        var revoking = client.PostAsJsonAsync("/auth/devices/phone/revoke", new { });
+        await Task.WhenAny(revoking, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.False(revoking.IsCompleted);
+
+        account.Release();
+        using var response = await revoking;
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
     public async Task ASlowEmailDoesNotHoldUpOtherSignIns()
     {
         await app.SeedDemo();
@@ -678,7 +730,7 @@ public sealed class AuthTests : IDisposable
     {
         await app.Seed();
         // Issue codes up to the hourly limit.
-        for (var i = 0; i < AuthService.HourlyCodeLimit; i++)
+        for (var i = 0; i < AuthCodes.HourlyCodeLimit; i++)
         {
             app.Clock.Advance(TimeSpan.FromMinutes(2)); // past the 1-minute resend cooldown
             Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);
@@ -701,7 +753,7 @@ public sealed class AuthTests : IDisposable
     {
         await app.Seed();
         // Issue codes up to the daily limit, spacing them past the hourly window.
-        for (var i = 0; i < AuthService.DailyCodeLimit; i++)
+        for (var i = 0; i < AuthCodes.DailyCodeLimit; i++)
         {
             app.Clock.Advance(TimeSpan.FromHours(2)); // past resend cooldown and spread across hours
             Assert.Equal(HttpStatusCode.Accepted, (await Post("pin-reset/request")).Status);

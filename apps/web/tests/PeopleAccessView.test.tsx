@@ -1,67 +1,29 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, expect, it } from "vitest";
 
 import { PeopleAccessView } from "../components/PeopleAccessView";
+import { fakeApi } from "./fakeApi";
+import {
+  catalogFixture,
+  peoplePage,
+  personFixture,
+  problem,
+  rolesFixture,
+  scopeOptionsFixture,
+} from "./fixtures";
 import { renderInApp } from "./renderInApp";
 
-const responses: Record<string, unknown> = {
-  "/api/setup/people?page=1&pageSize=25": {
-    items: [],
-    pageNumber: 1,
-    pageSize: 25,
-    total: 0,
-  },
-  "/api/setup/access/catalog": [
-    {
-      name: "Revenue",
-      items: [
-        { key: "revenue.view", label: "View revenue records", needs: [] },
-        {
-          key: "revenue.capture",
-          label: "Capture revenue",
-          needs: ["revenue.view"],
-        },
-        { key: "reports.view", label: "View reports", needs: [] },
-      ],
-    },
-  ],
+const PEOPLE = "setup/people?page=1&pageSize=25";
 
-  "/api/setup/access/roles": [
-    {
-      id: "role-1",
-      name: "Revenue clerk",
-      permissions: ["revenue.view", "revenue.capture"],
-    },
-    {
-      id: "role-2",
-      name: "Fleet manager",
-      permissions: ["fleet.view", "fleet.manage"],
-    },
-  ],
-
-  "/api/setup/access/scope-options": {
-    companies: [{ id: "company-1", name: "North Star" }],
-    vehicles: [
-      { id: "vehicle-1", registration: "KDA 482M", companyId: "company-1" },
-    ],
-  },
-};
-
+let fake: ReturnType<typeof fakeApi>;
 beforeEach(() => {
-  responses["/api/setup/people?page=1&pageSize=25"] = {
-    items: [],
-    pageNumber: 1,
-    pageSize: 25,
-    total: 0,
-  };
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: string, init?: RequestInit) =>
-      init?.method === "POST"
-        ? new Response(JSON.stringify({ id: "person-1" }), { status: 200 })
-        : new Response(JSON.stringify(responses[input]), { status: 200 }),
-    ),
-  );
+  fake = fakeApi();
+  fake.on(PEOPLE, [200, peoplePage([])]);
+  fake.on("setup/access/catalog", [200, catalogFixture]);
+  fake.on("setup/access/roles", [200, rolesFixture]);
+  fake.on("setup/access/scope-options", [200, scopeOptionsFixture]);
+  fake.on("POST setup/people", [200, { id: "person-1" }]);
+  fake.on("POST setup/people/*", [200, { ok: true }]);
 });
 
 async function openNewPerson(canManageAccess: boolean) {
@@ -100,10 +62,10 @@ it("limits a person to chosen vehicles and sends the role's own defaults", async
   expect(screen.getByLabelText("View reports")).toBeDisabled();
 
   fireEvent.click(screen.getByRole("button", { name: "Save person" }));
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "Fix the highlighted field to save.",
-  );
-  expect(screen.getByText("Tick at least one vehicle.")).toBeInTheDocument();
+  const alerts = screen.getAllByRole("alert");
+  expect(alerts).toHaveLength(2);
+  expect(alerts[0]).toHaveTextContent("Fix the highlighted field to save.");
+  expect(alerts[1]).toHaveTextContent("Tick at least one vehicle.");
   expect(fetch).not.toHaveBeenCalledWith(
     "/api/setup/people",
     expect.objectContaining({ method: "POST" }),
@@ -118,10 +80,8 @@ it("limits a person to chosen vehicles and sends the role's own defaults", async
       expect.objectContaining({ method: "POST" }),
     ),
   );
-  const post = vi
-    .mocked(fetch)
-    .mock.calls.find(([, init]) => init?.method === "POST")!;
-  expect(JSON.parse(String(post[1]!.body))).toMatchObject({
+  const post = fake.sent("POST setup/people")[0];
+  expect(post).toMatchObject({
     scopeMode: "vehicles",
     vehicleIds: ["vehicle-1"],
     companyIds: [],
@@ -172,10 +132,8 @@ it("ticking a permission ticks what it needs, wherever it sits in the catalogue"
       expect.objectContaining({ method: "POST" }),
     ),
   );
-  const post = vi
-    .mocked(fetch)
-    .mock.calls.find(([, init]) => init?.method === "POST")!;
-  expect(JSON.parse(String(post[1]!.body)).permissions).toEqual(
+  const post = fake.sent("POST setup/people")[0];
+  expect(post.permissions).toEqual(
     expect.arrayContaining(["revenue.view", "revenue.capture"]),
   );
 });
@@ -193,10 +151,8 @@ it("offers companies when the scope is chosen companies", async () => {
       expect.objectContaining({ method: "POST" }),
     ),
   );
-  const post = vi
-    .mocked(fetch)
-    .mock.calls.find(([, init]) => init?.method === "POST")!;
-  expect(JSON.parse(String(post[1]!.body))).toMatchObject({
+  const post = fake.sent("POST setup/people")[0];
+  expect(post).toMatchObject({
     scopeMode: "companies",
     companyIds: ["company-1"],
     vehicleIds: [],
@@ -207,20 +163,9 @@ it("offers companies when the scope is chosen companies", async () => {
 it("says why the server refused to save a person", async () => {
   const detail =
     "You can only give access to the companies you can see yourself.";
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: string, init?: RequestInit) =>
-      init?.method === "POST"
-        ? new Response(
-            JSON.stringify({
-              title: "Not permitted in this organization or data scope.",
-              status: 403,
-              detail,
-            }),
-            { status: 403 },
-          )
-        : new Response(JSON.stringify(responses[input]), { status: 200 }),
-    ),
+  fake.on(
+    "POST setup/people",
+    problem(403, "Not permitted in this organization or data scope.", detail),
   );
   await openNewPerson(false);
   fireEvent.click(await screen.findByLabelText("KDA 482M"));
@@ -233,34 +178,8 @@ it("says why the server refused to save a person", async () => {
 });
 
 it("asks for the reason beside its field before removing someone's access", async () => {
-  const grace = {
-    id: "person-2",
-    firstName: "Grace",
-    lastName: "Achieng",
-    email: "grace@example.com",
-    phoneNumber: "+254711222333",
-    role: "Revenue clerk",
-    active: true,
-    scopeMode: "companies",
-    companyIds: ["company-1"],
-    vehicleIds: [],
-    permissions: ["revenue.view", "revenue.capture"],
-    hasPin: true,
-    version: 3,
-  };
-  const fetcher = vi.fn(async (input: string, init?: RequestInit) =>
-    init?.method === "POST"
-      ? new Response(JSON.stringify({ ok: true }), { status: 200 })
-      : new Response(
-          JSON.stringify(
-            input.startsWith("/api/setup/people?")
-              ? { items: [grace], pageNumber: 1, pageSize: 25, total: 1 }
-              : responses[input],
-          ),
-          { status: 200 },
-        ),
-  );
-  vi.stubGlobal("fetch", fetcher);
+  const fetcher = fake.fetch;
+  fake.on(PEOPLE, [200, peoplePage([personFixture()])]);
   renderInApp(<PeopleAccessView canManageAccess />, {
     role: "Owner",
     permissions: ["people.view", "people.manage", "access.manage"],
@@ -323,20 +242,7 @@ it("filters the list by role and by where each person is with signing in", async
     person("b", "Baraka", "Owner", { hasPin: false }),
     person("c", "Chebet", "Revenue clerk", { active: false }),
   ];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(
-      async (input: string) =>
-        new Response(
-          JSON.stringify(
-            input.startsWith("/api/setup/people?")
-              ? { items: people, pageNumber: 1, pageSize: 25, total: 3 }
-              : responses[input],
-          ),
-          { status: 200 },
-        ),
-    ),
-  );
+  fake.on(PEOPLE, [200, peoplePage(people)]);
   renderInApp(<PeopleAccessView />, { permissions: ["people.view"] });
   expect(await screen.findByText("3 people")).toBeInTheDocument();
 
@@ -371,19 +277,13 @@ it("filters the list by role and by where each person is with signing in", async
 });
 
 it("offers only roles whose defaults the editor can grant", async () => {
-  responses["/api/setup/access/roles"] = [
-    {
-      id: "role-1",
-      name: "Revenue clerk",
-      permissions: ["revenue.view", "revenue.capture"],
-    },
-    {
-      id: "role-2",
-      name: "Fleet manager",
-      permissions: ["fleet.view", "fleet.manage"],
-    },
-    { id: "role-3", name: "People viewer", permissions: ["people.view"] },
-  ];
+  fake.on("setup/access/roles", [
+    200,
+    [
+      ...rolesFixture,
+      { id: "role-3", name: "People viewer", permissions: ["people.view"] },
+    ],
+  ]);
   renderInApp(<PeopleAccessView canManageAccess />, {
     role: "Office admin",
     permissions: ["people.view", "people.manage", "access.manage"],
@@ -404,47 +304,50 @@ it("offers only roles whose defaults the editor can grant", async () => {
 });
 
 it("includes hidden companies and vehicles in each person's scope summary", async () => {
-  responses["/api/setup/people?page=1&pageSize=25"] = {
-    items: [
-      {
-        id: "person-1",
-        firstName: "Alex",
-        lastName: "Kim",
-        email: "alex@example.com",
-        phoneNumber: "0711000001",
-        role: "Revenue clerk",
-        active: true,
-        scopeMode: "companies",
-        companyIds: [],
-        vehicleIds: [],
-        otherCompanies: 2,
-        otherVehicles: 0,
-        permissions: [],
-        hasPin: true,
-        version: 1,
-      },
-      {
-        id: "person-2",
-        firstName: "Sam",
-        lastName: "Lee",
-        email: "sam@example.com",
-        phoneNumber: "0711000002",
-        role: "Revenue clerk",
-        active: true,
-        scopeMode: "vehicles",
-        companyIds: [],
-        vehicleIds: ["vehicle-1"],
-        otherCompanies: 0,
-        otherVehicles: 1,
-        permissions: [],
-        hasPin: true,
-        version: 1,
-      },
-    ],
-    pageNumber: 1,
-    pageSize: 25,
-    total: 2,
-  };
+  fake.on(PEOPLE, [
+    200,
+    {
+      items: [
+        {
+          id: "person-1",
+          firstName: "Alex",
+          lastName: "Kim",
+          email: "alex@example.com",
+          phoneNumber: "0711000001",
+          role: "Revenue clerk",
+          active: true,
+          scopeMode: "companies",
+          companyIds: [],
+          vehicleIds: [],
+          otherCompanies: 2,
+          otherVehicles: 0,
+          permissions: [],
+          hasPin: true,
+          version: 1,
+        },
+        {
+          id: "person-2",
+          firstName: "Sam",
+          lastName: "Lee",
+          email: "sam@example.com",
+          phoneNumber: "0711000002",
+          role: "Revenue clerk",
+          active: true,
+          scopeMode: "vehicles",
+          companyIds: [],
+          vehicleIds: ["vehicle-1"],
+          otherCompanies: 0,
+          otherVehicles: 1,
+          permissions: [],
+          hasPin: true,
+          version: 1,
+        },
+      ],
+      pageNumber: 1,
+      pageSize: 25,
+      total: 2,
+    },
+  ]);
 
   renderInApp(<PeopleAccessView />, {
     permissions: ["people.view"],
@@ -453,3 +356,96 @@ it("includes hidden companies and vehicles in each person's scope summary", asyn
   expect(await screen.findByText("2 companies (2 hidden)")).toBeInTheDocument();
   expect(screen.getByText("2 vehicles (1 hidden)")).toBeInTheDocument();
 });
+
+const STALE = "Settings changed. Reload before saving.";
+
+async function openGrace() {
+  fake.on(PEOPLE, [200, peoplePage([personFixture()])]);
+  renderInApp(<PeopleAccessView canManageAccess />, {
+    role: "Owner",
+    permissions: ["people.view", "people.manage", "access.manage"],
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Grace Achieng" }));
+  const save = screen.getByRole("button", { name: "Save changes" });
+  await waitFor(() => expect(save).toBeEnabled());
+  return save;
+}
+
+it("keeps the edit and sends the version it was based on when someone else saved first", async () => {
+  const save = await openGrace();
+  fake.on("PUT setup/people/person-2", problem(409, STALE));
+  const first = screen.getByLabelText("First name");
+  fireEvent.change(first, { target: { value: "Gracie" } });
+  fireEvent.click(save);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(STALE);
+  expect(first).toHaveValue("Gracie");
+  expect(save).toBeEnabled();
+  expect(fake.sent("PUT setup/people/person-2")).toHaveLength(1);
+  expect(fake.sent("PUT setup/people/person-2")[0].version).toBe(3);
+  expect(screen.queryByText(/Changes saved for/)).not.toBeInTheDocument();
+  expect(fake.sent(PEOPLE)).toHaveLength(1);
+});
+
+it("shows the server's reason when signing someone out everywhere is refused", async () => {
+  await openGrace();
+  const why = "You cannot sign out someone with more access than you.";
+  fake.on(
+    "POST setup/people/person-2/sign-out",
+    problem(403, "Not permitted in this organization or data scope.", why),
+  );
+  const signOut = screen.getByRole("button", {
+    name: "Sign out of all devices",
+  });
+  fireEvent.click(signOut);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(why);
+  expect(signOut).toBeEnabled();
+  expect(
+    screen.queryByText(/is signed out of every device/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText("Not permitted in this organization or data scope."),
+  ).not.toBeInTheDocument();
+});
+
+it.each([
+  [
+    "a passing outage at the proxy",
+    [503, { status: "service_unavailable" }],
+    "The request could not be completed.",
+  ],
+  [
+    "no connection",
+    "offline",
+    "Unable to reach the server. Check your connection.",
+  ],
+] as const)(
+  "keeps a new person's details when adding fails with %s, and adds them on the next try",
+  async (_name, reply, message) => {
+    fake.on("POST setup/people", reply);
+    await openNewPerson(false);
+    fireEvent.click(await screen.findByLabelText("KDA 482M"));
+    const save = screen.getByRole("button", { name: "Save person" });
+    fireEvent.click(save);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByLabelText("First name")).toHaveValue("Jane");
+    expect(screen.getByLabelText("Mobile number")).toHaveValue("0711000001");
+    expect(screen.getByLabelText("KDA 482M")).toBeChecked();
+    expect(save).toBeEnabled();
+    expect(screen.queryByText(/added\. They sign in/)).not.toBeInTheDocument();
+    expect(fake.sent("POST setup/people")).toHaveLength(1);
+
+    fake.on("POST setup/people", [200, { id: "person-1" }]);
+    fireEvent.click(save);
+    await waitFor(() => expect(fake.sent("POST setup/people")).toHaveLength(2));
+    expect(fake.sent("POST setup/people")[1]).toMatchObject({
+      firstName: "Jane",
+      vehicleIds: ["vehicle-1"],
+    });
+    expect(
+      await screen.findByText(/Jane Njeri added\. They sign in/),
+    ).toBeInTheDocument();
+  },
+);

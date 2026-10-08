@@ -10,18 +10,23 @@ Remediation program status, verified findings per phase and the phase prompts li
 
 | Task | Command |
 |---|---|
-| Shared tests | `npm run test:shared` |
+| All JS tests | `npm test` (lint-rule tests, shared, web, mobile) |
+| Shared tests | `npm run test:shared` (coverage thresholds apply when `CI=true` or with `-- --coverage`) |
 | Web tests | `npm run test:web` |
-| Mobile tests | `cd apps/mobile && npm test` |
-| API tests (local) | `dotnet test tests/api/ --filter "Category!=SqlServer"` |
+| Mobile tests | `npm run test:mobile` |
+| Lint-rule tests | `npm run test:lint-rules` (module boundaries, toolchain pins) |
+| API tests (local) | `npm run test:api` |
+| API tests (SQL Server) | `npm run test:api:sqlserver` (needs `SQLSERVER_TEST_CONNECTION`) |
 | API tests (targeted) | `dotnet test tests/api/ --filter "FullyQualifiedName~ClassOrTest"` |
-| Shared typecheck | `cd packages/shared && npx tsc --noEmit` |
-| Web typecheck | `cd apps/web && npx tsc --noEmit` |
-| Mobile typecheck | `cd apps/mobile && npx tsc --noEmit` |
-| Lint | `npm run lint` (one known `<img>` warning in OrganizationSettingsView.tsx) |
+| All typechecks | `npm run typecheck` (shared, web, mobile) |
+| Shared typecheck | `npm run typecheck:shared` |
+| Web typecheck | `npm run typecheck:web` |
+| Mobile typecheck | `npm run typecheck:mobile` |
+| Format | `npm run format:check` (CI); `npm run format` rewrites |
+| Lint | `npm run lint` (0 errors; warnings: the known `<img>` in OrganizationSettingsView.tsx and the over-150-line functions the README lists) |
 | API build | `cd apps/api && dotnet build` |
 
-Full validation = all three typechecks + lint + shared/web/mobile tests + API tests. The mobile typecheck is not optional: a type error survived two phases because it was skipped.
+Full validation = `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:api`: the same scripts CI runs (`.github/workflows/ci.yml`). The mobile typecheck is not optional: a type error survived two phases because it was skipped.
 
 API test practicalities:
 - The full suite takes 10–12 minutes. Run targeted classes first, the full suite once at the end.
@@ -63,8 +68,8 @@ Several sessions may edit this worktree at the same time (one phase each). Befor
 - **Formatting:** `createFormatter(formats)` provided through `useFormats()` (`apps/web/lib/formats.ts`, `apps/mobile/src/lib/formats.ts`). Non-component helpers take a `Formatter` argument. No module-level mutable formatter state (it leaks across SSR requests).
 - **Auth lockout model:**
   - Wrong PINs on a trusted device pause the account (policy threshold and minutes).
-  - Wrong PINs on untrusted devices hit a per-account cap, `AuthService.UntrustedAttemptLimit`. Past the cap, untrusted devices get the same answer as an unknown number.
-  - The cap resets only on a PIN change (`User.SetPin`) or a verified new device. `ClearLockout` never resets it, and `IssueTokens` does not clear lockout (callers do).
+  - Wrong PINs on untrusted devices hit a per-account cap, `SignInService.UntrustedAttemptLimit`. Past the cap, untrusted devices get the same answer as an unknown number.
+  - The cap resets only on a PIN change (`User.SetPin`) or a verified new device. `ClearLockout` never resets it, and `SessionTokens.Issue` does not clear lockout (callers do).
 - **Byte-for-byte checks:** AuthTests' `Seen` compares whole responses. Any new per-request header (for example `X-Request-ID`) must be excluded there.
 - **Caches:** any cache touching auth or permissions needs explicit invalidation on SecurityVersion change and revocation, plus a test that a revoked token stops working immediately. `VehicleReportTests` asserts exact query counts; change them deliberately.
 - **Next.js 16:** it differs from training data. Read `apps/web/node_modules/next/dist/docs/` before using an unfamiliar API.

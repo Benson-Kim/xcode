@@ -339,11 +339,12 @@ public sealed class Phase1AppearanceAndCatalogContractTests : IDisposable
         foreach (var name in new[] { "displayName", "logoAlt", "primary", "secondary", "accent" })
             Phase1.Has(branding, name, J.Str);
         Phase1.Has(branding, "logo", J.Str, J.Null);
-        // apps/mobile/src/lib/format.ts Formats (useGroupping is spelled so), plus the web's extra three.
+        // packages/shared/src/format.ts Formats, plus the web's extra three. Apps released before the rename read useGroupping.
         var formats = Phase1.Has(appearance, "formats", J.Obj);
         foreach (var name in new[] { "locale", "timeZone", "datePattern", "currency", "weekNumbering", "direction" })
             Phase1.Has(formats, name, J.Str);
         Phase1.Has(formats, "hour12", J.Bool);
+        Phase1.Has(formats, "useGrouping", J.Bool);
         Phase1.Has(formats, "useGroupping", J.Bool);
         Phase1.Has(formats, "numberDecimals", J.Num);
         Phase1.Has(formats, "firstDayOfWeek", J.Num);
@@ -698,7 +699,7 @@ public sealed class Phase1WebSettingsContractTests : IDisposable
         var localization = Phase1.Has(settings, "localization", J.Obj);
         foreach (var name in new[] { "locale", "timeZone", "currency", "datePattern", "weekNumbering" })
             Phase1.Has(localization, name, J.Str);
-        foreach (var name in new[] { "hour12", "useGroupping", "allowLocaleOverride", "allowTimeZoneOverride", "allowHour12Override", "allowThemeOverride" })
+        foreach (var name in new[] { "hour12", "useGrouping", "allowLocaleOverride", "allowTimeZoneOverride", "allowHour12Override", "allowThemeOverride" })
             Phase1.Has(localization, name, J.Bool);
         Phase1.Has(localization, "firstDayOfWeek", J.Num);
         Phase1.Has(localization, "numberDecimals", J.Num);

@@ -5,7 +5,7 @@ import {
   Figtree_700Bold,
   useFonts,
 } from "@expo-google-fonts/figtree";
-import { addNetworkStateListener } from "expo-network";
+import { addNetworkStateListener, getNetworkStateAsync } from "expo-network";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -30,6 +30,7 @@ import {
 import { AuthFlow } from "./src/auth/AuthFlow";
 import { SessionEndedError, forgetThisPhone } from "./src/lib/api";
 import { FormatsContext } from "./src/lib/formats";
+import { hasConnection } from "./src/lib/network";
 import { loadPerson, loadSession, type StoredPerson } from "./src/lib/storage";
 import { fetchPerson } from "./src/session";
 import { AppShell } from "./src/shell/AppShell";
@@ -40,6 +41,8 @@ type State =
   // trusted: the person this phone is trusted for, whose unlock pad opens; null for the sign-in screens.
   | { phase: "signed-out"; trusted: StoredPerson | null }
   | { phase: "signed-in"; person: StoredPerson; offline: boolean };
+
+const RETRY_MS = 30_000;
 
 export default function App() {
   const [fontsLoaded, fontError] = useFonts({
@@ -108,32 +111,55 @@ export default function App() {
     };
   }, [signedIn]);
 
-  // Unlocked offline, the app goes back online when the connection returns rather than at the next unlock: the API
+  // Unlocked offline, the app goes back online when the API answers rather than at the next unlock: the API
   // checks the session (with the tokens the revenue queue already sends), and a session it has ended locks the app.
+  // The network listener only fires on a change, so a phone that was online all along (the server was down or
+  // unreachable) is tried again every RETRY_MS and when the app returns to the foreground.
   const offlinePerson =
     state.phase === "signed-in" && state.offline ? state.person : null;
   useEffect(() => {
     if (!offlinePerson) return;
     let active = true;
-    const listener = addNetworkStateListener((network) => {
-      if (!network.isConnected || network.isInternetReachable === false) return;
-      fetchPerson(offlinePerson.phoneNumber, offlinePerson.pinLength).then(
-        (person) =>
-          active &&
+    let trying = false;
+    async function attempt() {
+      if (!active || trying) return;
+      trying = true;
+      try {
+        const person = await fetchPerson(
+          offlinePerson!.phoneNumber,
+          offlinePerson!.pinLength,
+        );
+        if (active)
           setState((current) =>
             current.phase === "signed-in" && current.offline
               ? { phase: "signed-in", person, offline: false }
               : current,
-          ),
-        (error) => {
-          if (active && error instanceof SessionEndedError)
-            setState({ phase: "signed-out", trusted: offlinePerson });
-        },
-      );
+          );
+      } catch (error) {
+        if (active && error instanceof SessionEndedError)
+          setState({ phase: "signed-out", trusted: offlinePerson });
+      } finally {
+        trying = false;
+      }
+    }
+    async function attemptIfConnected() {
+      if (!active || trying) return;
+      const network = await getNetworkStateAsync().catch(() => null);
+      if (network && !hasConnection(network)) return;
+      void attempt();
+    }
+    const listener = addNetworkStateListener((network) => {
+      if (hasConnection(network)) void attempt();
     });
+    const appState = AppState.addEventListener("change", (next) => {
+      if (next === "active") void attemptIfConnected();
+    });
+    const timer = setInterval(() => void attemptIfConnected(), RETRY_MS);
     return () => {
       active = false;
       listener.remove();
+      appState.remove();
+      clearInterval(timer);
     };
   }, [offlinePerson]);
 
@@ -173,7 +199,9 @@ export default function App() {
             <SafeAreaView
               style={[styles.safe, { backgroundColor: theme.colors.cream }]}
               edges={
-                state.phase === "signed-in" ? ["top", "left", "right"] : undefined
+                state.phase === "signed-in"
+                  ? ["top", "left", "right"]
+                  : undefined
               }
             >
               {!ready ? (

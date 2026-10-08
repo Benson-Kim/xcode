@@ -3,7 +3,9 @@ import {
   formatCalendarDate,
   formatCalendarDateRange,
   formatTimestamp,
+  weekdayShortName,
 } from "./dates";
+import { numberFormat } from "./intlCache";
 
 export type Formats = {
   locale: string;
@@ -11,7 +13,7 @@ export type Formats = {
   datePattern: string;
   hour12: boolean;
   currency: string;
-  useGroupping: boolean;
+  useGrouping: boolean;
   numberDecimals: number;
   firstDayOfWeek: number;
 };
@@ -22,35 +24,58 @@ const defaults: Formats = {
   datePattern: "medium",
   hour12: false,
   currency: "KES",
-  useGroupping: true,
+  useGrouping: true,
   numberDecimals: 2,
   firstDayOfWeek: 1,
 };
 
-export function createFormatter(next?: Partial<Formats> | null) {
-  const formats: Formats = { ...defaults, ...next };
+// Spelling used before the rename; read for one release, never written.
+export type FormatsInput = Partial<Formats> & { useGroupping?: boolean };
+
+export function currentFormats<T extends FormatsInput>(
+  next: T,
+): Omit<T, "useGroupping"> {
+  const { useGroupping, ...rest } = next;
+  return useGroupping === undefined || rest.useGrouping !== undefined
+    ? rest
+    : { ...rest, useGrouping: useGroupping };
+}
+
+export function createFormatter(next?: FormatsInput | null) {
+  const given = next ? currentFormats(next) : {};
+  const formats: Formats = {
+    ...defaults,
+    ...given,
+    useGrouping: given.useGrouping ?? defaults.useGrouping,
+  };
 
   function firstDayOfWeek() {
     const first = formats.firstDayOfWeek;
     return Number.isInteger(first) && first >= 0 && first <= 6 ? first : 1;
   }
 
-  function kes(amount: number) {
-    const number = amount.toLocaleString(formats.locale, {
-      minimumFractionDigits: Number.isInteger(amount)
-        ? 0
-        : formats.numberDecimals,
-      maximumFractionDigits: formats.numberDecimals,
-      useGrouping: formats.useGroupping,
-    });
-    return `${formats.currency} ${number}`;
+  function formatNumber(amount: number) {
+    return numberFormat(
+      formats.locale,
+      Number.isInteger(amount) ? 0 : formats.numberDecimals,
+      formats.numberDecimals,
+      formats.useGrouping,
+    ).format(amount);
   }
+
+  function kes(amount: number) {
+    return `${formats.currency} ${formatNumber(amount)}`;
+  }
+
+  const formatDateOnly = (value: string) =>
+    formatDateOnlyWithSettings(value, formats);
 
   return {
     formats,
     currencyCode: () => formats.currency,
     datePattern: () => formats.datePattern,
     firstDayOfWeek,
+    formatNumber,
     kes,
     money: (amount: number) =>
       amount < 0 ? `${kes(-amount)} loss` : kes(amount),
@@ -58,11 +83,19 @@ export function createFormatter(next?: Partial<Formats> | null) {
     plural,
     formatDate: (date: Date, timeZone = "UTC") =>
       formatCalendarDate(date, { ...formats, timeZone }),
-    formatDateOnly: (value: string) =>
-      formatDateOnlyWithSettings(value, formats),
+    formatDateOnly,
+    formatWeekdayDate: (value: string) =>
+      `${weekdayShortName(value)} ${formatDateOnly(value)}`,
     formatDateRange: (from: string, through: string) =>
       formatCalendarDateRange(from, through, formats),
     formatDateTime: (value: string) => formatTimestamp(value, formats),
+    // Words, not a minus sign: "KES 1,200 below", "KES 350 above", "On target".
+    formatDifference: (actual: number, expected: number) => {
+      const gap = Math.round((actual - expected) * 100) / 100;
+      return gap === 0
+        ? "On target"
+        : `${kes(Math.abs(gap))} ${gap > 0 ? "above" : "below"}`;
+    },
   };
 }
 

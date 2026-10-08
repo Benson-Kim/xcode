@@ -3,7 +3,10 @@ import { ApiError } from "./request";
 const DELAYS = [1000, 3000];
 
 function transient(error: unknown) {
-  return error instanceof TypeError || (error instanceof ApiError && (error.status === 503 || error.status === 0));
+  return (
+    error instanceof TypeError ||
+    (error instanceof ApiError && (error.status === 503 || error.status === 0))
+  );
 }
 
 function wait(ms: number, signal: AbortSignal) {
@@ -21,12 +24,16 @@ function wait(ms: number, signal: AbortSignal) {
   });
 }
 
-export async function withRetry<T>(run: () => Promise<T>, signal: AbortSignal): Promise<T> {
+export async function withRetry<T>(
+  run: () => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await run();
     } catch (error) {
-      if (signal.aborted || attempt >= DELAYS.length || !transient(error)) throw error;
+      if (signal.aborted || attempt >= DELAYS.length || !transient(error))
+        throw error;
       await wait(DELAYS[attempt], signal);
     }
   }

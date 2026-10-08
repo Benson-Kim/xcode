@@ -16,6 +16,9 @@ public sealed record AwayPeriodDto(DateOnly LeftOn, DateOnly ReturnedOn);
 // One change-log line: who changed which setup record, and the reason they gave.
 public sealed record HistoryEntry(long Version, string Section, Guid EntityId, string Reason, DateTimeOffset OccurredAt, Guid ActorId, string ActorName,
     string? Before = null, string? After = null);
+// A page of the change log. It keeps Page's fields; Total is null only when the caller asked to skip the count.
+// NextBefore continues after this page through `before`, which stays stable while new changes arrive.
+public sealed record HistoryPage(IReadOnlyList<HistoryEntry> Items, int PageNumber, int PageSize, int? Total, bool HasMore, long? NextBefore);
 // What the change log is narrowed to; every part is optional and nothing set means the whole log.
 // Section is one of the keys the log records ("vehicles", "people", ...). From and To are days in the
 // organization's own calendar and both are included. Text matches the reason or the person's name, which
@@ -63,8 +66,10 @@ public sealed record RecurringDto(Guid Id, Guid VersionId, int Revision, string 
 public sealed record AllocationDto(Guid VehicleId, decimal Amount, string? Registration, bool Active = true);
 // What a recurring-item editor needs to pick vehicles, without the vehicle-management view.
 public sealed record VehicleOption(Guid Id, Guid CompanyId, string CompanyName, string Registration, bool Active = true);
+// Source is "pettycash" for approved petty cash spending, whose ItemId and VersionId are the entry's id; null for a
+// scheduled item.
 public sealed record PostingDto(Guid ItemId, Guid VersionId, DateOnly Date, string Name, RecurringKind Kind, decimal Amount,
-    ExpenseBucket? Bucket = null);
+    ExpenseBucket? Bucket = null, string? Source = null);
 // Contract C6: money in against the target, money out in its three buckets, and what is left before and after savings.
 // MoneyOut is the three buckets and nothing else (investment never counts); Costs repeats it for Phase 1 clients.
 public sealed record VehicleReport(Guid VehicleId, DateOnly From, DateOnly Through, decimal MoneyIn, decimal Target,

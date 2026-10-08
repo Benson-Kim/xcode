@@ -1,5 +1,7 @@
 using Auth.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Xunit;
 
 namespace Auth.Tests;
@@ -17,6 +19,23 @@ public sealed class MigrationSnapshotTests
     {
         using var db = SqlServerModel();
         Assert.False(db.Database.HasPendingModelChanges());
+    }
+
+    // Each organization's saved grouping choice survives the spelling fix: the column is renamed in place, never dropped.
+    [Fact]
+    public void TheGroupingColumnIsRenamedInPlace()
+    {
+        using var db = SqlServerModel();
+        var migrations = db.Database.GetMigrations().ToList();
+        var rename = migrations.FindIndex(x => x.EndsWith("_RenameUseGrouping", StringComparison.Ordinal));
+        Assert.True(rename > 0, string.Join(", ", migrations));
+        var migrator = db.GetService<IMigrator>();
+        var up = migrator.GenerateScript(migrations[rename - 1], migrations[rename]);
+        Assert.Contains("EXEC sp_rename N'[Localizations].[UseGroupping]', N'UseGrouping', 'COLUMN';", up);
+        Assert.DoesNotContain("DROP", up, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ADD", up, StringComparison.Ordinal);
+        var down = migrator.GenerateScript(migrations[rename], migrations[rename - 1]);
+        Assert.Contains("EXEC sp_rename N'[Localizations].[UseGrouping]', N'UseGroupping', 'COLUMN';", down);
     }
 
     [Fact]

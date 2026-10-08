@@ -15,7 +15,14 @@ export function SegmentedControl<T extends string>({
   className?: string;
 }) {
   return (
-    <div role="group" aria-label={label} className={cn("inline-flex gap-0.5 rounded-full bg-divider p-1", className)}>
+    <div
+      role="group"
+      aria-label={label}
+      className={cn(
+        "inline-flex gap-0.5 rounded-full bg-divider p-1",
+        className,
+      )}
+    >
       {options.map((option) => (
         <button
           key={option.value}

@@ -7,19 +7,29 @@ import {
   plural,
   type Formatter,
 } from "@xcode/shared/format";
+import {
+  canSee,
+  permissionChecker,
+  startsOnToday,
+  type DashboardKey,
+} from "@xcode/shared/permissions";
+import {
+  canOpenPettyCash,
+  type PettyCashDashboard,
+} from "@xcode/shared/pettyCash";
 import { REVENUE_PERIODS } from "@xcode/shared/revenue";
 
 import { VERSION } from "../auth/AuthLayout";
 import { apiGet, SessionEndedError } from "../lib/api";
 import { useFormats } from "../lib/formats";
+import { useConnected } from "../lib/network";
 import type { StoredPerson } from "../lib/storage";
+import { PETTY_CASH_CARDS, pettyFigures } from "../pettycash/dashboard";
 import {
-  dayLabel,
-  firstOfMonth,
-  isDate,
-  rangeLabel,
-  shiftDate,
-} from "../revenue/dates";
+  PettyCashScreen,
+  type PettyCashSection,
+} from "../pettycash/PettyCashScreen";
+import { firstOfMonth, isDate, shiftDate } from "../revenue/dates";
 import type { RevenueDashboard } from "../revenue/types";
 import { Banner, Button, Text, useTheme } from "../ui";
 import {
@@ -50,12 +60,20 @@ import {
 export type Catalog = { groups: PermissionGroup[] | null; error: string };
 
 // The cards backed by revenue records; the others keep their "not available yet" state until their data exists.
-const REVENUE_CARDS = [
+const REVENUE_CARDS: readonly DashboardKey[] = [
   "dash.capture",
   "dash.revenue",
   "dash.gaps",
   "dash.edits",
 ];
+
+type Figures = {
+  value?: string;
+  bad?: boolean;
+  bar?: number;
+  note?: string;
+  list?: string[];
+};
 
 // What a revenue card shows, from that card's own figures only, or null when the API left them out (null: not shown
 // to this person). A note never speaks for a figure that is null.
@@ -65,7 +83,7 @@ function revenueFigures(
   permission: string,
   dashboard: RevenueDashboard,
   period: Period,
-): { value?: string; bad?: boolean; bar?: number; note?: string } | null {
+): Figures | null {
   const {
     capturedToday,
     vehiclesToday,
@@ -125,12 +143,12 @@ function revenueFigures(
 }
 
 // Missing days count the month up to yesterday: today is not a gap before it is captured.
-function gapsSub(businessDate?: string) {
+function gapsSub(formats: Formatter, businessDate?: string) {
   if (!isDate(businessDate)) return "This month. No record and no reason.";
   const first = firstOfMonth(businessDate);
   const yesterday = shiftDate(businessDate, -1);
   return first <= yesterday
-    ? `${rangeLabel(first, yesterday)}. No record and no reason.`
+    ? `${formats.formatDateRange(first, yesterday)}. No record and no reason.`
     : "No record and no reason.";
 }
 
@@ -147,19 +165,20 @@ export function HomeScreen({
   offline: boolean;
   businessDate?: string;
   canOpen: (tab: Tab) => boolean;
-  onOpen: (tab: Tab) => void;
+  onOpen: (tab: Tab, section?: PettyCashSection) => void;
   onLock: () => void;
   onSessionEnded: () => void;
 }) {
   const { colors } = useTheme();
   const formats = useFormats();
-  const has = (permission: string) => person.permissions.includes(permission);
+  const connected = useConnected();
+  const has = permissionChecker(person.permissions);
   // People who capture or spend start on today; everyone else on the month so far.
   const [period, setPeriod] = useState<Period>(
-    has("dash.capture") || has("dash.float") ? "today" : "month",
+    startsOnToday(has) ? "today" : "month",
   );
   const cards = DASHBOARD_CARDS.filter((card) => has(card.permission));
-  const label = periodLabel(period, businessDate, formats.firstDayOfWeek());
+  const label = periodLabel(formats, period, businessDate);
   // Each revenue card reads the dashboard for its period: the one picked, or its own (missing days: the month).
   const periodOf = (card: (typeof cards)[number]) => card.period ?? period;
   const needed = [
@@ -194,6 +213,28 @@ export function HomeScreen({
       active = false;
     };
   }, [needed, offline, onSessionEnded]);
+  const wantsPetty = cards.some((card) =>
+    PETTY_CASH_CARDS.includes(card.permission),
+  );
+  const [petty, setPetty] = useState<PettyCashDashboard | null>(null);
+  const [pettyError, setPettyError] = useState("");
+  useEffect(() => {
+    setPetty(null);
+    setPettyError("");
+    if (!wantsPetty || offline) return;
+    let active = true;
+    apiGet<PettyCashDashboard>("setup/pettycash/dashboard").then(
+      (value) => active && setPetty(value),
+      (reason: Error) => {
+        if (!active) return;
+        if (reason instanceof SessionEndedError) return onSessionEnded();
+        setPettyError(reason.message);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [wantsPetty, offline, onSessionEnded]);
   return (
     <View style={styles.screen}>
       <WhoRow
@@ -204,8 +245,7 @@ export function HomeScreen({
       />
       {offline && (
         <Banner tone="offline">
-          No internet. You are seeing what this phone saved at your last sign
-          in.
+          {`${connected ? "Can't reach the XCODE server." : "No internet."} You are seeing what this phone saved at your last sign in.`}
         </Banner>
       )}
       <Segmented
@@ -221,11 +261,17 @@ export function HomeScreen({
       </View>
       {cards.length ? (
         cards.map((card) => {
-          // Revenue cards show the API's figures, never placeholder zeros while loading, offline or refused.
+          // Live cards show the API's figures, never placeholder zeros while loading, offline or refused.
           const live = REVENUE_CARDS.includes(card.permission);
+          const isPetty = PETTY_CASH_CARDS.includes(card.permission);
           const dashboard = dashboards[periodOf(card)];
-          const figures =
-            live && dashboard
+          const loaded = isPetty ? petty : dashboard;
+          const failed = isPetty ? pettyError : dashboardError;
+          const figures: Figures | null = isPetty
+            ? petty
+              ? pettyFigures(formats, card.permission, petty)
+              : null
+            : live && dashboard
               ? revenueFigures(
                   formats,
                   card.permission,
@@ -235,9 +281,9 @@ export function HomeScreen({
               : null;
           const sub =
             card.permission === "dash.capture"
-              ? `Your vehicles, ${isDate(businessDate) ? dayLabel(businessDate) : "today"}`
+              ? `Your vehicles, ${isDate(businessDate) ? formats.formatDateOnly(businessDate) : "today"}`
               : card.permission === "dash.gaps"
-                ? gapsSub(businessDate)
+                ? gapsSub(formats, businessDate)
                 : (card.sub ?? "").replace("{period}", label);
           const action =
             card.action &&
@@ -260,22 +306,25 @@ export function HomeScreen({
                     <ProgressBar percent={figures.bar} />
                   ) : null}
                   {figures.note ? <CardNote>{figures.note}</CardNote> : null}
+                  {figures.list?.length ? (
+                    <Bullets items={figures.list} />
+                  ) : null}
                 </>
-              ) : dashboard ? (
+              ) : loaded ? (
                 <CardNote>Not shown with your access.</CardNote>
               ) : offline ? (
                 <CardNote>
-                  Connect to the internet to see revenue figures.
+                  {`Connect to the internet to see ${isPetty ? "petty cash" : "revenue"} figures.`}
                 </CardNote>
-              ) : dashboardError ? (
-                <CardNote>{dashboardError}</CardNote>
+              ) : failed ? (
+                <CardNote>{failed}</CardNote>
               ) : (
                 <LineSkeleton lines={2} />
               )}
               {action ? (
                 <CardAction
                   primary={card.primary}
-                  onPress={() => onOpen(card.tab!)}
+                  onPress={() => onOpen(card.tab!, card.section)}
                 >
                   {card.action!}
                 </CardAction>
@@ -294,15 +343,24 @@ export function HomeScreen({
   );
 }
 
-// Revenue and Spend: what the person may do there, from their permissions, until those screens are built.
+// Spend: petty cash for people with any petty cash permission; what else they may do there (office bills), from
+// their permissions, until that screen is built.
 export function ModuleScreen({
   tab,
   person,
   catalog,
+  offline,
+  businessDate,
+  start,
+  onSessionEnded,
 }: {
   tab: Tab;
   person: StoredPerson;
   catalog: Catalog;
+  offline: boolean;
+  businessDate?: string;
+  start?: PettyCashSection;
+  onSessionEnded: () => void;
 }) {
   const definition = TABS.find((item) => item.id === tab)!;
   const labels = (catalog.groups ?? [])
@@ -312,19 +370,32 @@ export function ModuleScreen({
         .filter((item) => person.permissions.includes(item.key))
         .map((item) => item.label),
     );
+  const petty = tab === "spend" && canOpenPettyCash(person.permissions);
+  const others =
+    tab !== "spend" || permissionChecker(person.permissions)("bills.view");
   return (
     <View style={styles.screen}>
       <ScreenTitle>{definition.label}</ScreenTitle>
-      <Card title="What you can do here" sub="Based on your permissions">
-        {catalog.groups ? (
-          <Bullets items={labels} />
-        ) : catalog.error ? (
-          <CardNote>{catalog.error}</CardNote>
-        ) : (
-          <LineSkeleton />
-        )}
-        <CardNote>{definition.unavailable ?? ""}</CardNote>
-      </Card>
+      {petty ? (
+        <PettyCashScreen
+          offline={offline}
+          businessDate={businessDate}
+          start={start}
+          onSessionEnded={onSessionEnded}
+        />
+      ) : null}
+      {others ? (
+        <Card title="What you can do here" sub="Based on your permissions">
+          {catalog.groups ? (
+            <Bullets items={labels} />
+          ) : catalog.error ? (
+            <CardNote>{catalog.error}</CardNote>
+          ) : (
+            <LineSkeleton />
+          )}
+          <CardNote>{definition.unavailable ?? ""}</CardNote>
+        </Card>
+      ) : null}
     </View>
   );
 }
@@ -343,9 +414,8 @@ export function MoreScreen({
   onSwitchUser: () => void;
 }) {
   const { colors } = useTheme();
-  const links = SETUP_LINKS.filter((link) =>
-    person.permissions.includes(link.permission),
-  );
+  const has = permissionChecker(person.permissions);
+  const links = SETUP_LINKS.filter((link) => canSee(link, has));
   return (
     <View style={styles.screen}>
       <ScreenTitle>More</ScreenTitle>

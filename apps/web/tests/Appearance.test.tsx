@@ -6,40 +6,87 @@ import { OrganizationSettingsView } from "../components/OrganizationSettingsView
 import { ToastProvider } from "../components/ui";
 import { AppearanceProvider, type Appearance } from "../lib/appearance";
 
-const appearance = (overrides: Partial<Appearance["branding"]> = {}): Appearance => ({
+const appearance = (
+  overrides: Partial<Appearance["branding"]> = {},
+): Appearance => ({
   organizationName: "Demo Fleet",
   settingsVersion: 3,
-  branding: { displayName: "North Star", logoAlt: "North Star", primary: "#0B5CAD", secondary: "#1B2A4A", accent: "#1E6B3A", logo: null, ...overrides },
-  formats: { locale: "en-GB", timeZone: "UTC", datePattern: "medium", hour12: false, firstDayOfWeek: 1, weekNumbering: "iso8601", currency: "USD", useGroupping: true, numberDecimals: 2, direction: "ltr" },
+  branding: {
+    displayName: "North Star",
+    logoAlt: "North Star",
+    primary: "#0B5CAD",
+    secondary: "#1B2A4A",
+    accent: "#1E6B3A",
+    logo: null,
+    ...overrides,
+  },
+  formats: {
+    locale: "en-GB",
+    timeZone: "UTC",
+    datePattern: "medium",
+    hour12: false,
+    firstDayOfWeek: 1,
+    weekNumbering: "iso8601",
+    currency: "USD",
+    useGrouping: true,
+    numberDecimals: 2,
+    direction: "ltr",
+  },
   themeMode: "system",
   reducedMotion: true,
   fontScale: 1,
 });
 
-const dashboard = { period: "month", from: "2026-09-01", through: "2026-09-30", businessDate: "2026-09-30", revenue: 1200, expected: null, percent: null, capturedToday: null, vehiclesToday: null, missingDays: null, missingVehicles: null, editedRecords: null };
+const dashboard = {
+  period: "month",
+  from: "2026-09-01",
+  through: "2026-09-30",
+  businessDate: "2026-09-30",
+  revenue: 1200,
+  expected: null,
+  percent: null,
+  capturedToday: null,
+  vehiclesToday: null,
+  missingDays: null,
+  missingVehicles: null,
+  editedRecords: null,
+};
 
 it("applies the organization's branding, formats and preferences across the app", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string) =>
-      new Response(
-        JSON.stringify(
-          input.includes("appearance")
-            ? appearance()
-            : input.includes("dashboard")
-              ? dashboard
-              : { userId: "me", firstName: "Test", lastName: "User", role: "Owner", permissions: ["dash.revenue"] },
+    vi.fn(
+      async (input: string) =>
+        new Response(
+          JSON.stringify(
+            input.includes("appearance")
+              ? appearance()
+              : input.includes("dashboard")
+                ? dashboard
+                : {
+                    userId: "me",
+                    firstName: "Test",
+                    lastName: "User",
+                    role: "Owner",
+                    permissions: ["dash.revenue"],
+                  },
+          ),
+          { status: 200 },
         ),
-        { status: 200 },
-      ),
     ),
   );
   render(<AppShell onSignOut={() => {}} />);
 
   expect(await screen.findByText("North Star")).toBeInTheDocument();
   expect(screen.getByText("Demo Fleet")).toBeInTheDocument();
-  await waitFor(() => expect(document.documentElement.style.getPropertyValue("--color-blue")).toBe("#0B5CAD"));
-  expect(document.documentElement.style.getPropertyValue("--color-brand")).toBe("#1B2A4A");
+  await waitFor(() =>
+    expect(
+      document.documentElement.style.getPropertyValue("--color-blue"),
+    ).toBe("#0B5CAD"),
+  );
+  expect(document.documentElement.style.getPropertyValue("--color-brand")).toBe(
+    "#1B2A4A",
+  );
   expect(document.documentElement.dataset.reducedMotion).toBe("true");
   expect(document.title).toBe("North Star");
   expect(await screen.findByText("USD 1,200")).toBeInTheDocument();
@@ -47,18 +94,58 @@ it("applies the organization's branding, formats and preferences across the app"
 
 const settings = {
   organization: { name: "Demo Fleet", slug: "demo-fleet" },
-  localization: { locale: "en-GB", timeZone: "UTC", currency: "KES", datePattern: "medium", hour12: false, firstDayOfWeek: 1, weekNumbering: "iso8601", useGroupping: true, numberDecimals: 2, allowLocaleOverride: true, allowTimeZoneOverride: false, allowHour12Override: true, allowThemeOverride: true },
-  branding: { displayName: "XCODE", legalName: "XCODE", logoAlt: "XCODE", primary: "#1D5FD6", secondary: "#14213D", accent: "#1E6B3A" },
-  securityPolicy: { passwordMinLength: 12, passwordComplexity: true, passwordHistory: 5, pinLength: 4, lockoutThreshold: 5, lockoutMinutes: 15, accessTokenMinutes: 10, refreshTokenDays: 30, idleUnlockSeconds: 300, allowPinSignIn: true },
+  localization: {
+    locale: "en-GB",
+    timeZone: "UTC",
+    currency: "KES",
+    datePattern: "medium",
+    hour12: false,
+    firstDayOfWeek: 1,
+    weekNumbering: "iso8601",
+    useGrouping: true,
+    numberDecimals: 2,
+    allowLocaleOverride: true,
+    allowTimeZoneOverride: false,
+    allowHour12Override: true,
+    allowThemeOverride: true,
+  },
+  branding: {
+    displayName: "XCODE",
+    legalName: "XCODE",
+    logoAlt: "XCODE",
+    primary: "#1D5FD6",
+    secondary: "#14213D",
+    accent: "#1E6B3A",
+  },
+  securityPolicy: {
+    passwordMinLength: 12,
+    passwordComplexity: true,
+    passwordHistory: 5,
+    pinLength: 4,
+    lockoutThreshold: 5,
+    lockoutMinutes: 15,
+    accessTokenMinutes: 10,
+    refreshTokenDays: 30,
+    idleUnlockSeconds: 300,
+    allowPinSignIn: true,
+  },
 };
 
 function renderSettings(refresh: () => void) {
-  const fetcher = vi.fn(async (input: string, init?: RequestInit) =>
-    new Response(JSON.stringify(init?.method ? { logo: "data:image/png;base64,AAAA" } : settings), { status: 200 }),
+  const fetcher = vi.fn(
+    async (input: string, init?: RequestInit) =>
+      new Response(
+        JSON.stringify(
+          init?.method ? { logo: "data:image/png;base64,AAAA" } : settings,
+        ),
+        { status: 200 },
+      ),
   );
   vi.stubGlobal("fetch", fetcher);
   render(
-    <AppearanceProvider value={{ appearance: appearance(), loading: false, refresh }}>
+    <AppearanceProvider
+      value={{ appearance: appearance(), loading: false, refresh }}
+    >
       <ToastProvider>
         <OrganizationSettingsView />
       </ToastProvider>
@@ -70,29 +157,58 @@ function renderSettings(refresh: () => void) {
 it("shows saved brand changes straight away by refreshing the app's appearance", async () => {
   const refresh = vi.fn();
   const fetcher = renderSettings(refresh);
-  fireEvent.change(await screen.findByLabelText("Display name"), { target: { value: "North Star" } });
-  fireEvent.change(screen.getByLabelText("Primary colour"), { target: { value: "#0B5CAD" } });
+  fireEvent.change(await screen.findByLabelText("Display name"), {
+    target: { value: "North Star" },
+  });
+  fireEvent.change(screen.getByLabelText("Primary colour"), {
+    target: { value: "#0B5CAD" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Save brand" }));
 
   await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
-  const put = fetcher.mock.calls.find(([input]) => input.endsWith("/branding"))!;
-  expect(JSON.parse(String(put[1]!.body)).value).toMatchObject({ displayName: "North Star", primary: "#0B5CAD" });
+  const put = fetcher.mock.calls.find(([input]) =>
+    input.endsWith("/branding"),
+  )!;
+  expect(JSON.parse(String(put[1]!.body)).value).toMatchObject({
+    displayName: "North Star",
+    primary: "#0B5CAD",
+  });
   expect(JSON.parse(String(put[1]!.body))).not.toHaveProperty("reason");
 });
 
 it("uploads a logo from the settings page and shows it at once", async () => {
   const refresh = vi.fn();
   const fetcher = renderSettings(refresh);
-  const input = (await screen.findByText("Upload logo")).querySelector("input")!;
-  fireEvent.change(input, { target: { files: [new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "logo.png", { type: "image/png" })] } });
+  const input = (await screen.findByText("Upload logo")).querySelector(
+    "input",
+  )!;
+  fireEvent.change(input, {
+    target: {
+      files: [
+        new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "logo.png", {
+          type: "image/png",
+        }),
+      ],
+    },
+  });
 
   await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
-  const put = fetcher.mock.calls.find(([path]) => path.endsWith("/organization/logo"))!;
+  const put = fetcher.mock.calls.find(([path]) =>
+    path.endsWith("/organization/logo"),
+  )!;
   expect(put[1]!.method).toBe("PUT");
   expect(Object.keys(JSON.parse(String(put[1]!.body)))).toEqual(["dataUrl"]);
-  expect(JSON.parse(String(put[1]!.body)).dataUrl).toMatch(/^data:image\/png;base64,/);
+  expect(JSON.parse(String(put[1]!.body)).dataUrl).toMatch(
+    /^data:image\/png;base64,/,
+  );
   expect(await screen.findByRole("status")).toHaveTextContent("Logo updated.");
 
-  fireEvent.change(input, { target: { files: [new File(["<svg/>"], "logo.svg", { type: "image/svg+xml" })] } });
-  expect(await screen.findByRole("alert")).toHaveTextContent("Upload a PNG, JPEG or WebP image.");
+  fireEvent.change(input, {
+    target: {
+      files: [new File(["<svg/>"], "logo.svg", { type: "image/svg+xml" })],
+    },
+  });
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Upload a PNG, JPEG or WebP image.",
+  );
 });

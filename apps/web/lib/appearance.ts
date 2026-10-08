@@ -2,29 +2,15 @@
 
 import { createContext, useContext } from "react";
 
-import type { Formats } from "@xcode/shared/format";
+import {
+  BRAND_TOKEN_NAMES,
+  deriveBrandTokens,
+  resolveTheme,
+  type Appearance,
+  type BrandTowards,
+} from "@xcode/shared/appearance";
 
-export type Appearance = {
-  organizationName: string;
-  settingsVersion: number;
-  businessDate?: string;
-  branding: {
-    displayName: string;
-    logoAlt: string;
-    primary: string;
-    secondary: string;
-    accent: string;
-    logo: string | null;
-  };
-  formats: Formats & {
-    firstDayOfWeek: number;
-    weekNumbering: string;
-    direction: string;
-  };
-  themeMode: string;
-  reducedMotion: boolean;
-  fontScale: number;
-};
+export type { Appearance } from "@xcode/shared/appearance";
 
 type AppearanceState = {
   appearance: Appearance | null;
@@ -46,21 +32,23 @@ export function useAppearance() {
   return useContext(AppearanceContext);
 }
 
-const mix = (colour: string, amount: number, towards: string) =>
-  `color-mix(in srgb, ${colour} ${amount}%, ${towards})`;
-
 // The person's Theme preference, already resolved by the API: "light", "dark", or "system" to follow the device.
 // An organization that locks the theme is sent "light", so the device is never consulted for it.
 const DEVICE_DARK = "(prefers-color-scheme: dark)";
 const THEME_KEY = "xcode.theme";
 
-const deviceIsDark = () => typeof window !== "undefined" && window.matchMedia?.(DEVICE_DARK).matches === true;
+const deviceIsDark = () =>
+  typeof window !== "undefined" &&
+  window.matchMedia?.(DEVICE_DARK).matches === true;
 
-export function resolveTheme(mode: string | null | undefined, device = deviceIsDark()): "light" | "dark" {
-  if (mode === "dark") return "dark";
-  if (mode === "light") return "light";
-  return device ? "dark" : "light";
-}
+const TOWARDS: Record<BrandTowards, string> = {
+  white: "white",
+  black: "black",
+  surface: "var(--color-paper)",
+};
+
+const cssVar = (token: string) =>
+  `--color-${token.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
 
 // The appearance the page was last painted with, so a device that switches to dark while the app is open can be
 // repainted with the same organization colours mixed for the other surface.
@@ -68,15 +56,18 @@ let painted: Appearance | null = null;
 let watchingDevice = false;
 
 function watchDevice() {
-  if (watchingDevice || typeof window === "undefined" || !window.matchMedia) return;
+  if (watchingDevice || typeof window === "undefined" || !window.matchMedia)
+    return;
   watchingDevice = true;
-  window.matchMedia(DEVICE_DARK).addEventListener("change", () => applyAppearance(painted));
+  window
+    .matchMedia(DEVICE_DARK)
+    .addEventListener("change", () => applyAppearance(painted));
 }
 
 // Writes the theme onto the document, where the tokens in globals.css pick it up, and remembers it so the next
 // first paint is already in it (app/layout.tsx reads it before React runs).
 function applyTheme(mode: string | null | undefined) {
-  const theme = resolveTheme(mode);
+  const theme = resolveTheme(mode, deviceIsDark());
   document.documentElement.dataset.theme = theme;
   try {
     window.localStorage.setItem(THEME_KEY, theme);
@@ -95,29 +86,21 @@ export function applyAppearance(appearance: Appearance | null) {
   painted = appearance;
   const root = document.documentElement;
   const branding = appearance?.branding;
-  const dark = applyTheme(appearance ? appearance.themeMode : root.dataset.theme) === "dark";
-  // A brand colour has to be read against the surface it sits on. On a dark surface the organization's primary
-  // is lightened, because the ink on a filled button goes dark there (--color-on-fill), and its tints are mixed
-  // towards that surface instead of towards white. The pressed shade lightens for the same reason.
-  const surface = "var(--color-paper)";
-  const lighter = (colour: string, amount: number) => mix(colour, amount, "white");
-  const tint = (colour: string, light: number, deep: number) =>
-    dark ? mix(colour, deep, surface) : mix(colour, light, "white");
-  const tokens: Record<string, string | undefined> = {
-    "--color-blue": branding && (dark ? lighter(branding.primary, 60) : branding.primary),
-    "--color-blue-dark": branding && (dark ? lighter(branding.primary, 40) : mix(branding.primary, 80, "black")),
-    "--color-blue-busy": branding && (dark ? lighter(branding.primary, 80) : mix(branding.primary, 80, "white")),
-    "--color-blue-soft": branding && tint(branding.primary, 10, 28),
-    "--color-blue-tint": branding && tint(branding.primary, 7, 18),
-    "--color-blue-wash": branding && tint(branding.primary, 4, 10),
-    "--color-brand": branding?.secondary,
-    "--color-green": branding && (dark ? lighter(branding.accent, 55) : branding.accent),
-    "--color-green-bg": branding && tint(branding.accent, 12, 22),
-    "--color-green-line": branding && tint(branding.accent, 30, 40),
-  };
-  for (const [name, value] of Object.entries(tokens)) {
-    if (value) root.style.setProperty(name, value);
-    else root.style.removeProperty(name);
+  const dark =
+    applyTheme(appearance ? appearance.themeMode : root.dataset.theme) ===
+    "dark";
+  // The tokens are derived in @xcode/shared/appearance, which reads each brand colour against the surface it sits on.
+  const specs = branding ? deriveBrandTokens(branding, dark) : [];
+  for (const token of BRAND_TOKEN_NAMES) {
+    const spec = specs.find((candidate) => candidate.token === token);
+    if (!spec) root.style.removeProperty(cssVar(token));
+    else if (spec.amount >= 100)
+      root.style.setProperty(cssVar(token), spec.colour);
+    else
+      root.style.setProperty(
+        cssVar(token),
+        `color-mix(in srgb, ${spec.colour} ${spec.amount}%, ${TOWARDS[spec.towards]})`,
+      );
   }
   root.style.setProperty(
     "zoom",

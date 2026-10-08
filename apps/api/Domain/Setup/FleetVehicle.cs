@@ -110,12 +110,17 @@ public sealed class FleetVehicle : IOrganizationEntity
           return true;
      }
 
-     public decimal TargetOn(DateOnly date) => !ActiveOn(date) ? 0 : Targets
-         .Where(t => t.EffectiveFrom <= date)
-         .OrderByDescending(t => t.EffectiveFrom)
-         .ThenByDescending(t => t.Revision)
-         .Select(t => t.WeeklyAmount)
-         .FirstOrDefault();
+     // The latest target in effect on the date, the highest revision on a tie. One pass: grids ask for every day.
+     public decimal TargetOn(DateOnly date)
+     {
+          if (!ActiveOn(date)) return 0;
+          VehicleTarget? current = null;
+          foreach (var target in Targets)
+               if (target.EffectiveFrom <= date && (current is null || target.EffectiveFrom > current.EffectiveFrom
+                       || (target.EffectiveFrom == current.EffectiveFrom && target.Revision > current.Revision)))
+                    current = target;
+          return current?.WeeklyAmount ?? 0;
+     }
 }
 
 public sealed class VehicleTarget : IOrganizationEntity

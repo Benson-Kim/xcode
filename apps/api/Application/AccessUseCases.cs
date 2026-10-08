@@ -1,19 +1,20 @@
 using System.Text.Json;
 using Auth.Domain;
 using Auth.Domain.Setup;
+using Auth.Application.Settings;
 using Auth.Application.Setup;
 using Auth.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Application;
 
-public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrganizationRepository organizations, IClock clock)
+public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrganizationRepository organizations, IClock clock, SettingsChangeLog log)
 {
     // Labels only, so every member can read them (for "Your access").
     public Task<IReadOnlyList<PermissionGroup>> Catalog(CancellationToken ct) => execution.Read("", _ => Task.FromResult(PermissionCatalog.Groups), ct);
 
     // A write, although it only lists roles: EnsureRoles may add a catalog role the organization is missing.
-    public Task<IReadOnlyList<AccessRole>> Roles(CancellationToken ct) => execution.Write("people.view", async actor =>
+    public Task<IReadOnlyList<AccessRole>> Roles(CancellationToken ct) => execution.Write(PermissionKeys.PeopleView, async actor =>
     {
         var roles = await UserProvisioning.EnsureRoles(db, actor.OrganizationId, ct);
         return (IReadOnlyList<AccessRole>)roles
@@ -23,7 +24,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     }, ct);
 
     // Mirrors ValidateScope: only the companies and vehicles the editor may hand on.
-    public Task<ScopeOptions> ScopeOptions(CancellationToken ct) => execution.Read("people.manage", async actor =>
+    public Task<ScopeOptions> ScopeOptions(CancellationToken ct) => execution.Read(PermissionKeys.PeopleManage, async actor =>
     {
         var companies = await db.Set<PsvCompany>()
             .AsNoTracking()
@@ -62,7 +63,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     }, ct);
 
     // Visibility, order and paging run in the database; only the page's own related rows are loaded.
-    public Task<Page<PersonDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read("people.view", async actor =>
+    public Task<Page<PersonDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read(PermissionKeys.PeopleView, async actor =>
     {
         SetupPagination.Validate(page, pageSize);
         var visible = Visible(actor);
@@ -76,10 +77,10 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         return new Page<PersonDto>(await ToDtos(actor, rows, ct), page, pageSize, total);
     }, ct);
 
-    public Task<PersonDto> Get(Guid id, CancellationToken ct) => execution.Read("people.view", async actor =>
+    public Task<PersonDto> Get(Guid id, CancellationToken ct) => execution.Read(PermissionKeys.PeopleView, async actor =>
         (await ToDtos(actor, [await LoadPerson(actor, id, ct) ?? throw new KeyNotFoundException()], ct))[0], ct);
 
-    public Task<Guid> Save(Guid? id, SavePerson input, CancellationToken ct) => execution.Write("people.manage", async actor =>
+    public Task<Guid> Save(Guid? id, SavePerson input, CancellationToken ct) => execution.Write(PermissionKeys.PeopleManage, async actor =>
     {
         Validate(input);
         var role = await EnsureRole(input.Role, actor.OrganizationId, ct);
@@ -195,7 +196,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         return target.User.Id;
     }, ct);
 
-    public Task<Guid> SetActive(Guid id, bool active, PersonLifecycleRequest? input, CancellationToken ct) => execution.Write("people.manage", async actor =>
+    public Task<Guid> SetActive(Guid id, bool active, PersonLifecycleRequest? input, CancellationToken ct) => execution.Write(PermissionKeys.PeopleManage, async actor =>
     {
         input ??= new();
         if (id == actor.UserId)
@@ -232,7 +233,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
         return id;
     }, ct);
 
-    public Task<Guid> SignOut(Guid id, CancellationToken ct) => execution.Write("people.manage", async actor =>
+    public Task<Guid> SignOut(Guid id, CancellationToken ct) => execution.Write(PermissionKeys.PeopleManage, async actor =>
     {
         if (id == actor.UserId)
             throw new ArgumentException("Use sign out for your own session.");
@@ -503,7 +504,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
 
         if (actorIsOwner)
             return;
-        if (!held.Contains("access.manage"))
+        if (!held.Contains(PermissionKeys.AccessManage))
             throw new UnauthorizedAccessException("Changing single permissions or an approval limit needs \"Change single permissions and approval limits for a person\".");
         if (after.Granted.Except(before.Granted).Any(x => !held.Contains(x)))
             throw new UnauthorizedAccessException("You can only grant permissions you hold.");
@@ -529,7 +530,7 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
 
         var held = await organizations.Permissions(actor.UserId, ct);
         if (target.Permissions.Any(x => !held.Contains(x)) ||
-            (target.Membership.ApprovalLimit is not null && !held.Contains("access.manage")))
+            (target.Membership.ApprovalLimit is not null && !held.Contains(PermissionKeys.AccessManage)))
             throw new UnauthorizedAccessException("Only an Owner, or someone who holds everything this person holds, can change their email or mobile number.");
     }
 
@@ -585,13 +586,9 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     });
 
     // People and access changes join the change log beside setup and settings changes, so audit.view sees them.
-    private async Task RecordHistory(SetupActor actor, Guid personId, PersonSnapshot? before, PersonSnapshot after, string reason, CancellationToken ct)
-    {
-        var organization = await organizations.Get(ct) ?? throw new UnauthorizedAccessException();
-        organization.SettingsChanged();
-        db.Set<OrganizationSettingsVersion>().Add(new(actor.OrganizationId, actor.UserId, organization.SettingsVersion, "people", personId,
-            clock.UtcNow, JsonSerializer.Serialize(before), JsonSerializer.Serialize(after), reason, actor.CorrelationId));
-    }
+    private Task RecordHistory(SetupActor actor, Guid personId, PersonSnapshot? before, PersonSnapshot after, string reason, CancellationToken ct) =>
+        log.Record(actor.OrganizationId, actor.UserId, actor.CorrelationId, "people", personId,
+            JsonSerializer.Serialize(before), JsonSerializer.Serialize(after), reason, ct: ct);
 
     // "role", "role and data scope", "name, role and data scope".
     private static string JoinWords(IReadOnlyList<string> words) =>

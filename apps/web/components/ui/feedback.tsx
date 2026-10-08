@@ -21,7 +21,11 @@ export function Banner({
     <div
       {...props}
       role={role ?? (tone === "error" ? "alert" : "status")}
-      className={cn("flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-[15px]", BANNER[tone], className)}
+      className={cn(
+        "flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-[15px]",
+        BANNER[tone],
+        className,
+      )}
     >
       <Icon size={18} className="mt-0.5 shrink-0" />
       <span>{children}</span>
@@ -32,17 +36,29 @@ export function Banner({
 // "Fix the highlighted fields" summary shown above a form that failed validation.
 export function ErrorSummary({ count }: { count: number }) {
   if (!count) return null;
-  return <Banner>{count === 1 ? "Fix the highlighted field to save." : `Fix the ${count} highlighted fields to save.`}</Banner>;
+  return (
+    <Banner>
+      {count === 1
+        ? "Fix the highlighted field to save."
+        : `Fix the ${count} highlighted fields to save.`}
+    </Banner>
+  );
 }
 
 // A short explanation inside a form (.note): amber for limits, blue for information.
-export function Note({ tone = "warn", className, ...props }: ComponentProps<"p"> & { tone?: "warn" | "info" }) {
+export function Note({
+  tone = "warn",
+  className,
+  ...props
+}: ComponentProps<"p"> & { tone?: "warn" | "info" }) {
   return (
     <p
       {...props}
       className={cn(
         "m-0 rounded-[10px] px-3 py-2.5 text-sm",
-        tone === "info" ? "bg-blue-soft text-blue-dark" : "bg-amber-bg text-amber-text",
+        tone === "info"
+          ? "bg-blue-soft text-blue-dark"
+          : "bg-amber-bg text-amber-text",
         className,
       )}
     />
@@ -57,7 +73,13 @@ const STATUS = {
 } as const;
 
 // A dot-and-label state in a list (.status).
-export function StatusBadge({ tone = "neutral", children }: { tone?: keyof typeof STATUS; children: ReactNode }) {
+export function StatusBadge({
+  tone = "neutral",
+  children,
+}: {
+  tone?: keyof typeof STATUS;
+  children: ReactNode;
+}) {
   return (
     <span
       className={cn(
@@ -72,7 +94,11 @@ export function StatusBadge({ tone = "neutral", children }: { tone?: keyof typeo
 }
 
 // Running total against a target, e.g. an allocation (.balance).
-export function BalancePanel({ ok, className, ...props }: ComponentProps<"div"> & { ok: boolean }) {
+export function BalancePanel({
+  ok,
+  className,
+  ...props
+}: ComponentProps<"div"> & { ok: boolean }) {
   return (
     <div
       role="status"

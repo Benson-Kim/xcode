@@ -201,11 +201,13 @@ export function CodeStep({
 
 export function PausedStep({
   remaining,
+  error,
   busy,
   onReset,
   onSwitch,
 }: {
   remaining: number;
+  error: string;
   busy: boolean;
   onReset: () => void;
   onSwitch: () => void;
@@ -228,6 +230,7 @@ export function PausedStep({
         </Text>
         . Nothing you captured has been lost.
       </Heading>
+      {error ? <Banner>{error}</Banner> : null}
       <Button busy={busy} busyText="Sending…" onPress={onReset}>
         Reset PIN
       </Button>

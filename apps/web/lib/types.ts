@@ -19,16 +19,16 @@ export type Page<T> = {
   total: number;
 };
 
-export type Permission = {
-  key: string;
-  label: string;
-  needs: string[];
+export type ChangeLogPage<T> = Omit<Page<T>, "total"> & {
+  total: number | null;
+  hasMore: boolean;
+  nextBefore: number | null;
 };
 
-export type PermissionGroup = {
-  name: string;
-  items: Permission[];
-};
+export type {
+  PermissionGroup,
+  PermissionItem as Permission,
+} from "@xcode/shared/permissions";
 
 export type Role = {
   id: string;

@@ -15,6 +15,8 @@ public sealed class OrganizationSettingsVersion : IOrganizationEntity
      public long Version { get; private set; }
      public string Section { get; private set; } = "";
      public Guid EntityId { get; private set; }
+     // The vehicle a revenue, vehicle or investment change belongs to, so visibility needs no join to the record.
+     public Guid? VehicleId { get; private set; }
      public DateTimeOffset OccurredAt { get; private set; }
      public DateTimeOffset? EffectiveFrom { get; private set; }
      public string Before { get; private set; } = "";
@@ -22,7 +24,7 @@ public sealed class OrganizationSettingsVersion : IOrganizationEntity
      public string Reason { get; private set; } = "";
      public string CorrelationId { get; private set; } = "";
      public OrganizationSettingsVersion(Guid organizationId, Guid actorId, long version, string section, Guid entityId,
-    DateTimeOffset occurredAt, string before, string after, string reason, string correlationId, DateTimeOffset? effectiveFrom = null)
+    DateTimeOffset occurredAt, string before, string after, string reason, string correlationId, DateTimeOffset? effectiveFrom = null, Guid? vehicleId = null)
      {
           if (organizationId == Guid.Empty || actorId == Guid.Empty || entityId == Guid.Empty || version < 1)
                throw new ArgumentException("Organization, actor, entity and a positive version are required.");
@@ -31,7 +33,9 @@ public sealed class OrganizationSettingsVersion : IOrganizationEntity
           if (occurredAt.Offset != TimeSpan.Zero || (effectiveFrom is not null && effectiveFrom.Value.Offset != TimeSpan.Zero))
                throw new ArgumentException("History instants must be UTC.");
 
-          (OrganizationId, ActorId, Version, Section, EntityId) = (organizationId, actorId, version, SetupValue.Name(section), entityId);
+          if (vehicleId == Guid.Empty)
+               throw new ArgumentException("A vehicle id cannot be empty.");
+          (OrganizationId, ActorId, Version, Section, EntityId, VehicleId) = (organizationId, actorId, version, SetupValue.Name(section), entityId, vehicleId);
           (OccurredAt, EffectiveFrom, Before, After, Reason, CorrelationId) = (occurredAt, effectiveFrom, before, after, reason.Trim(), correlationId);
      }
 

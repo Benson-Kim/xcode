@@ -21,6 +21,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       { id: Date.now() + Math.random(), message },
     ]);
   }, []);
+  const dismiss = useCallback((id: number) => {
+    setToasts((current) => current.filter((item) => item.id !== id));
+  }, []);
   return (
     <ToastContext.Provider value={show}>
       {children}
@@ -28,12 +31,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((toast) => (
           <ToastMessage
             key={toast.id}
+            id={toast.id}
             message={toast.message}
-            onDone={() =>
-              setToasts((current) =>
-                current.filter((item) => item.id !== toast.id),
-              )
-            }
+            onDone={dismiss}
           />
         ))}
       </div>
@@ -42,16 +42,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastMessage({
+  id,
   message,
   onDone,
 }: {
+  id: number;
   message: string;
-  onDone: () => void;
+  onDone: (id: number) => void;
 }) {
   useEffect(() => {
-    const timer = setTimeout(onDone, 4000);
+    const timer = setTimeout(() => onDone(id), 4000);
     return () => clearTimeout(timer);
-  }, [onDone]);
+  }, [id, onDone]);
   return (
     <div
       role="status"

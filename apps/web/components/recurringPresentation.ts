@@ -47,9 +47,7 @@ export function recurringNextPostings(
       Date.UTC(candidate.getUTCFullYear(), candidate.getUTCMonth() + 1, 0),
     ).getUTCDate();
     const dayOfMonth = candidate.getUTCDate();
-    const targetDay = item.lastDay
-      ? lastDay
-      : Math.min(item.day ?? 1, lastDay);
+    const targetDay = item.lastDay ? lastDay : Math.min(item.day ?? 1, lastDay);
     const onDay = dayOfMonth === targetDay;
     const isDue =
       item.frequency === RECURRING_FREQUENCY.daily ||

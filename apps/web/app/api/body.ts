@@ -4,7 +4,11 @@ import { isIP } from "node:net";
 function secureOrLocal(url: string) {
   try {
     const { protocol, hostname } = new URL(url);
-    return protocol === "https:" || (protocol === "http:" && (hostname === "localhost" || hostname === "127.0.0.1"));
+    return (
+      protocol === "https:" ||
+      (protocol === "http:" &&
+        (hostname === "localhost" || hostname === "127.0.0.1"))
+    );
   } catch {
     return false;
   }
@@ -14,7 +18,9 @@ export function upstreamUrl(): string {
   const url = process.env.API_URL;
   if (url) {
     if (process.env.NODE_ENV === "production" && !secureOrLocal(url))
-      throw new Error("API_URL must use HTTPS in production, unless it is a local address.");
+      throw new Error(
+        "API_URL must use HTTPS in production, unless it is a local address.",
+      );
     return url;
   }
   if (process.env.NODE_ENV === "production")
@@ -27,7 +33,9 @@ export const MAX_BODY_BYTES = 1024 * 1024;
 
 // Reads a request body as text, or returns null once it is over the limit: by its declared Content-Length before
 // reading anything, and by the bytes actually read, so a missing or false length cannot get past it.
-export async function readLimitedBody(request: NextRequest): Promise<string | null> {
+export async function readLimitedBody(
+  request: NextRequest,
+): Promise<string | null> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null;
   if (!request.body) return "";
@@ -55,7 +63,11 @@ export function forwardedFor(request: NextRequest): Record<string, string> {
   const setting = process.env.TRUSTED_PROXY_HOPS?.trim() || "0";
   const hops = /^\d+$/.test(setting) ? Number(setting) : 0;
   if (hops === 0) return {};
-  const entries = request.headers.get("x-forwarded-for")?.split(",").map((entry) => entry.trim()) ?? [];
+  const entries =
+    request.headers
+      .get("x-forwarded-for")
+      ?.split(",")
+      .map((entry) => entry.trim()) ?? [];
   const address = entries.length >= hops ? entries[entries.length - hops] : "";
   return isIP(address) ? { "X-Forwarded-For": address } : {};
 }
@@ -76,11 +88,18 @@ export function logProxyError(id: string, operation: string, error: unknown) {
   );
 }
 
-export function sameOrigin(origin: string, host: string | null, expectedOrigin: string) {
+export function sameOrigin(
+  origin: string,
+  host: string | null,
+  expectedOrigin: string,
+) {
   try {
     const parsed = new URL(origin);
     const expected = new URL(expectedOrigin);
-    return parsed.protocol === expected.protocol && parsed.host === (host || expected.host);
+    return (
+      parsed.protocol === expected.protocol &&
+      parsed.host === (host || expected.host)
+    );
   } catch {
     return false;
   }

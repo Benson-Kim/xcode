@@ -1,11 +1,17 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Reflection;
+using System.Security.Claims;
 using System.Text.Json;
 using Auth.Application;
+using Auth.Application.Settings;
 using Auth.Domain;
+using Auth.Domain.Setup;
 using Auth.Infrastructure;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Auth.Tests;
@@ -44,7 +50,7 @@ public sealed class OrganizationSettingsTests : IDisposable
                 hour12 = true,
                 firstDayOfWeek = 0,
                 weekNumbering = "local",
-                useGroupping = false,
+                useGrouping = false,
                 numberDecimals = 0,
                 allowLocaleOverride = false,
                 allowTimeZoneOverride = true,
@@ -64,6 +70,34 @@ public sealed class OrganizationSettingsTests : IDisposable
         Assert.Equal("fr-FR", root.GetProperty("localization").GetProperty("locale").GetString());
         Assert.Equal("USD", root.GetProperty("localization").GetProperty("currency").GetString());
         Assert.Equal("long", root.GetProperty("localization").GetProperty("datePattern").GetString());
+        Assert.False(root.GetProperty("localization").GetProperty("useGrouping").GetBoolean());
+        Assert.False(root.GetProperty("localization").TryGetProperty("useGroupping", out _));
+    }
+
+    [Fact]
+    public async Task GroupingSentUnderItsOldNameIsSavedAndBothNamesAreServed()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(DemoSeed.Logins[0].Email);
+        async Task<JsonElement> Save(object value)
+        {
+            using var response = await owner.PutAsJsonAsync("/setup/organization/settings/localization", new { value });
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var settings = await owner.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+            return settings.GetProperty("localization");
+        }
+
+        Assert.False((await Save(new { useGroupping = false })).GetProperty("useGrouping").GetBoolean());
+        var formats = (await owner.GetFromJsonAsync<JsonElement>("/setup/appearance")).GetProperty("formats");
+        Assert.False(formats.GetProperty("useGrouping").GetBoolean());
+        Assert.False(formats.GetProperty("useGroupping").GetBoolean());
+
+        // Both names sent: the current one wins.
+        Assert.True((await Save(new { useGrouping = true, useGroupping = false })).GetProperty("useGrouping").GetBoolean());
+
+        var history = await owner.GetFromJsonAsync<JsonElement>("/setup/history?pageSize=100");
+        var reasons = history.GetProperty("items").EnumerateArray().Reverse().Select(x => x.GetProperty("reason").GetString()).ToList();
+        Assert.Equal(["Changed digit grouping to off", "Changed digit grouping to on"], reasons);
     }
 
     [Fact]
@@ -160,6 +194,94 @@ public sealed class OrganizationSettingsTests : IDisposable
 
         organization.ChangeTimeZone(localization, targetZone, today);
         Assert.Equal("UTC", localization.TimeZone);
+        // The save's change-log entry moves the version; the time zone change itself does not.
+        Assert.Equal(1, organization.SettingsVersion);
+        // The held-date check runs only as part of a time zone change.
+        Assert.True(typeof(Organization).GetMethod("EnsureBusinessDateWithin", BindingFlags.Instance | BindingFlags.NonPublic)?.IsPrivate);
+    }
+
+    [Fact]
+    public async Task ALocalizationSaveMovesTheVersionOnce()
+    {
+        using var client = await CreateOwnerClient();
+        async Task<long> Version() => (await client.GetFromJsonAsync<JsonElement>("/setup/appearance")).GetProperty("settingsVersion").GetInt64();
+        var before = await Version();
+
+        (await client.PutAsJsonAsync("/setup/organization/settings/localization", new { value = new { timeZone = "UTC", currency = "USD" }, reason = "Report in dollars" }))
+            .EnsureSuccessStatusCode();
+
+        Assert.Equal(before + 1, await Version());
+        await app.WithDb(async db => Assert.Equal(before + 1,
+            (await db.Set<OrganizationSettingsVersion>().IgnoreQueryFilters().SingleAsync(x => x.Section == "localization")).Version));
+    }
+
+    // The organization section's own refusals are a plain { detail }, not a problem, and save nothing.
+    [Fact]
+    public async Task ASlugAnotherOrganizationUsesIsRefused()
+    {
+        using var client = await CreateOwnerClient();
+        await app.WithDb(async db =>
+        {
+            db.Provisioning = true;
+            db.Organizations.Add(new Organization { Slug = "taken", Name = "Other Fleet" });
+            await db.SaveChangesAsync();
+        });
+
+        using var refused = await client.PutAsJsonAsync("/setup/organization/settings/organization",
+            new { value = new { name = "Demo Fleet", slug = "Taken" }, reason = "Use the short name" });
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Equal("application/json", refused.Content.Headers.ContentType?.MediaType);
+        var body = await refused.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("This organization slug is already in use.", body.GetProperty("detail").GetString());
+        Assert.False(body.TryGetProperty("title", out _));
+
+        var settings = await client.GetFromJsonAsync<JsonElement>("/setup/organization/settings");
+        Assert.Equal("demo-fleet", settings.GetProperty("organization").GetProperty("slug").GetString());
+        var history = await client.GetFromJsonAsync<JsonElement>("/setup/history?pageSize=100");
+        Assert.DoesNotContain(history.GetProperty("items").EnumerateArray(), item => item.GetProperty("section").GetString() == "organization");
+    }
+
+    // The use cases are the application layer: they run, authorize and log a save with no HTTP request at all.
+    [Fact]
+    public async Task SettingsUseCasesSaveASectionWithoutHttp()
+    {
+        await app.SeedDemo();
+        Guid organizationId = default, ownerId = default;
+        long version = 0;
+        await app.WithDb(async db =>
+        {
+            var organization = await db.Organizations.IgnoreQueryFilters().SingleAsync();
+            (organizationId, version) = (organization.Id, organization.SettingsVersion);
+            ownerId = (await db.Users.SingleAsync(x => x.Email == DemoSeed.Logins[0].Email)).Id;
+        });
+        var accessor = app.Services.GetRequiredService<IHttpContextAccessor>();
+        accessor.HttpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("org", organizationId.ToString()), new Claim("sub", ownerId.ToString())], "test"))
+        };
+        try
+        {
+            using var scope = app.Services.CreateScope();
+            var settings = scope.ServiceProvider.GetRequiredService<OrganizationSettingsUseCases>();
+            app.Database.Reset();
+            var saved = await settings.Save("branding", new SaveOrganizationSettings(JsonSerializer.SerializeToElement(new { displayName = "North Star" }), "Rebrand"),
+                CancellationToken.None);
+
+            Assert.Equal(new SettingsSaveResult("branding"), saved);
+            Assert.Equal(1, app.Database.Transactions);
+        }
+        finally
+        {
+            accessor.HttpContext = null;
+        }
+
+        await app.WithDb(async db =>
+        {
+            Assert.Equal("North Star", (await db.Brandings.IgnoreQueryFilters().SingleAsync()).DisplayName);
+            Assert.Equal(version + 1, (await db.Organizations.IgnoreQueryFilters().SingleAsync()).SettingsVersion);
+            var entry = await db.Set<OrganizationSettingsVersion>().IgnoreQueryFilters().SingleAsync(x => x.Section == "branding");
+            Assert.Equal((version + 1, ownerId, "Changed the display name to North Star. Reason: Rebrand."), (entry.Version, entry.ActorId, entry.Reason));
+        });
     }
 
     // Organization settings keep the automatic reason; a typed one is optional but still checked.

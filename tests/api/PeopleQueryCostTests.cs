@@ -1,10 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Claims;
 using Auth.Application;
 using Auth.Application.Setup;
 using Auth.Domain;
 using Auth.Domain.Setup;
 using Auth.Infrastructure;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -168,7 +170,8 @@ public sealed class PeopleQueryCostTests(ITestOutputHelper output) : IDisposable
         await app.SeedDemo();
         using var owner = await app.SignIn(Owner);
 
-        foreach (var path in new[] { "/setup/people", "/setup/access/catalog", "/setup/access/scope-options", "/setup/companies", "/setup/vehicles", "/setup/recurring", "/setup/history" })
+        foreach (var path in new[] { "/setup/people", "/setup/access/catalog", "/setup/access/scope-options", "/setup/companies", "/setup/vehicles", "/setup/recurring", "/setup/history",
+            "/setup/organization/settings", "/setup/appearance", "/setup/preferences" })
         {
             app.Database.Reset();
             (await owner.GetAsync(path)).EnsureSuccessStatusCode();
@@ -179,6 +182,62 @@ public sealed class PeopleQueryCostTests(ITestOutputHelper output) : IDisposable
         app.Database.Reset();
         (await owner.GetAsync("/setup/access/roles")).EnsureSuccessStatusCode();
         Assert.Equal(1, app.Database.Transactions);
+    }
+
+    // Every client loads these at start. They cost what they did before they ran through the use-case pipeline: two
+    // commands check the token, one the membership, and the rest read the settings themselves.
+    [Fact]
+    public async Task SettingsReadsStayCheap()
+    {
+        await app.SeedDemo();
+        using var clerk = await app.SignIn("wanjiru.kamau@zurigenesis.co.ke");
+
+        foreach (var (path, commands) in new[] { ("/setup/appearance", 10), ("/setup/preferences", 5) })
+        {
+            app.Database.Reset();
+            (await clerk.GetAsync(path)).EnsureSuccessStatusCode();
+            output.WriteLine($"GET {path}: {app.Database.Commands} commands, {app.Database.Transactions} transactions");
+            Assert.Equal(commands, app.Database.Commands);
+            Assert.Equal(0, app.Database.Transactions);
+        }
+    }
+
+    // Resolving settings validates and canonicalizes what it read; tracked, that would count as a change and trip the
+    // read path's guard.
+    [Fact]
+    public async Task SettingsReadsTrackNothing()
+    {
+        await app.SeedDemo();
+        Guid organizationId = default, clerkId = default;
+        await app.WithDb(async db =>
+        {
+            db.Provisioning = true;
+            organizationId = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
+            clerkId = (await db.Users.SingleAsync(x => x.Email == "wanjiru.kamau@zurigenesis.co.ke")).Id;
+            db.UserPreferences.Add(new UserPreference { OrganizationId = organizationId, UserId = clerkId, ThemeMode = "dark", FontScale = 1.25 });
+            await db.SaveChangesAsync();
+        });
+        var accessor = app.Services.GetRequiredService<IHttpContextAccessor>();
+        accessor.HttpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("org", organizationId.ToString()), new Claim("sub", clerkId.ToString())], "test"))
+        };
+        try
+        {
+            using var scope = app.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AuthDb>();
+            var settings = await scope.ServiceProvider.GetRequiredService<IOrganizationRepository>().Settings(clerkId, CancellationToken.None);
+
+            // The organization's and the person's rows were really read...
+            Assert.Equal(("UTC", "dark", 1.25), (settings.Formats.TimeZone, settings.ThemeMode, settings.FontScale));
+            Assert.Equal("XCODE", settings.Branding.DisplayName);
+            // ...and none of them is tracked.
+            Assert.Empty(db.ChangeTracker.Entries());
+        }
+        finally
+        {
+            accessor.HttpContext = null;
+        }
     }
 
     [Fact]

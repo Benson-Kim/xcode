@@ -14,7 +14,8 @@ const TONES = {
   ok: "border-green bg-green text-on-fill hover:enabled:border-green-dark hover:enabled:bg-green-dark aria-busy:opacity-80",
   warn: "border-amber bg-amber-bg text-amber-text hover:enabled:bg-amber-hover",
   danger: "border-red bg-red-bg text-red-text hover:enabled:bg-red-hover",
-  quiet: "border-line bg-transparent text-grey hover:enabled:bg-hover hover:enabled:text-navy",
+  quiet:
+    "border-line bg-transparent text-grey hover:enabled:bg-hover hover:enabled:text-navy",
 } as const;
 
 // pill button .
@@ -84,6 +85,34 @@ export function Chip({
       type={type}
       className={cn(
         "min-h-9 rounded-full border border-line bg-surface px-3.5 text-sm font-semibold text-navy hover:enabled:border-blue hover:enabled:text-blue-dark disabled:cursor-not-allowed disabled:opacity-50",
+        className,
+      )}
+    />
+  );
+}
+
+const ACT_TONES = {
+  plain:
+    "border-line bg-surface text-navy hover:enabled:border-blue hover:enabled:text-blue-dark",
+  ok: "border-green bg-green-bg text-green",
+  warn: "border-amber bg-amber-bg text-amber-text",
+  bad: "border-red bg-red-bg text-red-text",
+} as const;
+
+// A row's own action (.act): smaller and quieter than the page's pill buttons, coloured the same way.
+export function RowAction({
+  tone = "plain",
+  className,
+  type = "button",
+  ...props
+}: ComponentProps<"button"> & { tone?: keyof typeof ACT_TONES }) {
+  return (
+    <button
+      {...props}
+      type={type}
+      className={cn(
+        "min-h-9 rounded-full border px-2.5 text-sm font-semibold whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50",
+        ACT_TONES[tone],
         className,
       )}
     />

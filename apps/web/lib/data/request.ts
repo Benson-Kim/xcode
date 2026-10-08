@@ -1,4 +1,5 @@
 import { fetchWithSession } from "../session";
+import { invalidateDataCache } from "./cache";
 
 // A refused request. The message is what to show; the status and body let a screen handle one refusal itself
 // (for example a 409 that carries the record now saved).
@@ -12,7 +13,8 @@ export class ApiError extends Error {
   }
 }
 
-const NOT_PERMITTED = "Your access does not include this. Ask your admin if you need it.";
+const NOT_PERMITTED =
+  "Your access does not include this. Ask your admin if you need it.";
 
 // Calls the app's API through its Next.js proxy routes: `path` is relative to /api, for example "setup/companies".
 // An expired access token is refreshed once on the way.
@@ -28,7 +30,11 @@ export async function apiRequest<T>(
     });
   } catch (error) {
     if (error instanceof TypeError)
-      throw new ApiError("Unable to reach the server. Check your connection.", 0, {});
+      throw new ApiError(
+        "Unable to reach the server. Check your connection.",
+        0,
+        {},
+      );
     throw error;
   }
   const body = await response.json().catch(() => ({}));
@@ -43,5 +49,7 @@ export async function apiRequest<T>(
       response.status,
       body,
     );
+  if ((init?.method ?? "GET").toUpperCase() !== "GET")
+    invalidateDataCache("setup/");
   return body as T;
 }

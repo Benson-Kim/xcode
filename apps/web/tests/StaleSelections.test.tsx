@@ -10,7 +10,11 @@ import { renderInApp } from "./renderInApp";
 // A selection must always be one of the options on screen, or say what it holds: never a value the control
 // cannot show, which reads as something else and is saved as it is.
 
-const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+const json = (body: unknown) =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 
 function serve(routes: Record<string, unknown>) {
   const fetcher = vi.fn(async (input: RequestInfo | URL) => {
@@ -24,7 +28,13 @@ function serve(routes: Record<string, unknown>) {
 
 afterEach(() => vi.unstubAllGlobals());
 
-const vehicleRow = (id: string, registration: string, companyId: string, companyName: string, active = true) => ({
+const vehicleRow = (
+  id: string,
+  registration: string,
+  companyId: string,
+  companyName: string,
+  active = true,
+) => ({
   id,
   companyId,
   companyName,
@@ -41,36 +51,67 @@ it("never starts a new vehicle on an archived company the list is filtered by, o
   // A vehicle manager without companies.manage: the server offers active companies only. Old Fleet is archived and
   // known here only through its retired vehicle.
   serve({
-    "/api/setup/vehicles/company-options": [{ id: "company-1", name: "North Star" }],
+    "/api/setup/vehicles/company-options": [
+      { id: "company-1", name: "North Star" },
+    ],
     "/api/setup/vehicles": {
-      items: [vehicleRow("vehicle-1", "KDA 482M", "company-1", "North Star"), vehicleRow("vehicle-3", "KAA 100A", "company-3", "Old Fleet", false)],
+      items: [
+        vehicleRow("vehicle-1", "KDA 482M", "company-1", "North Star"),
+        vehicleRow("vehicle-3", "KAA 100A", "company-3", "Old Fleet", false),
+      ],
       pageNumber: 1,
       pageSize: 25,
       total: 2,
     },
   });
-  renderInApp(<VehiclesPage />, { permissions: ["vehicles.manage"] }, { businessDate: "2026-09-30" });
+  renderInApp(
+    <VehiclesPage />,
+    { permissions: ["vehicles.manage"] },
+    { businessDate: "2026-09-30" },
+  );
 
   await screen.findByRole("button", { name: "KAA 100A" });
-  fireEvent.change(screen.getByLabelText("Company"), { target: { value: "company-3" } });
-  expect(screen.queryByRole("button", { name: "KDA 482M" })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Company"), {
+    target: { value: "company-3" },
+  });
+  expect(
+    screen.queryByRole("button", { name: "KDA 482M" }),
+  ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Add vehicle" }));
 
   const company = screen.getByLabelText("PSV company");
   expect(company).toHaveValue("");
-  expect(within(company).queryByRole("option", { name: "Old Fleet" })).not.toBeInTheDocument();
-  expect(within(company).getByRole("option", { name: "North Star" })).toBeInTheDocument();
+  expect(
+    within(company).queryByRole("option", { name: "Old Fleet" }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(company).getByRole("option", { name: "North Star" }),
+  ).toBeInTheDocument();
 });
 
 it("still starts a new vehicle on the company the list is filtered by when it is active", async () => {
   serve({
-    "/api/setup/vehicles/company-options": [{ id: "company-1", name: "North Star" }, { id: "company-2", name: "Metro Link" }],
-    "/api/setup/vehicles": { items: [vehicleRow("vehicle-1", "KDA 482M", "company-1", "North Star")], pageNumber: 1, pageSize: 25, total: 1 },
+    "/api/setup/vehicles/company-options": [
+      { id: "company-1", name: "North Star" },
+      { id: "company-2", name: "Metro Link" },
+    ],
+    "/api/setup/vehicles": {
+      items: [vehicleRow("vehicle-1", "KDA 482M", "company-1", "North Star")],
+      pageNumber: 1,
+      pageSize: 25,
+      total: 1,
+    },
   });
-  renderInApp(<VehiclesPage />, { permissions: ["vehicles.manage"] }, { businessDate: "2026-09-30" });
+  renderInApp(
+    <VehiclesPage />,
+    { permissions: ["vehicles.manage"] },
+    { businessDate: "2026-09-30" },
+  );
 
   await screen.findByRole("button", { name: "KDA 482M" });
-  fireEvent.change(screen.getByLabelText("Company"), { target: { value: "company-2" } });
+  fireEvent.change(screen.getByLabelText("Company"), {
+    target: { value: "company-2" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Add vehicle" }));
   expect(screen.getByLabelText("PSV company")).toHaveValue("company-2");
 });
@@ -97,8 +138,20 @@ const person = (over: Partial<Person>): Person => ({
 
 function servePeople(people: Person[]) {
   return serve({
-    "/api/setup/people": { items: people, pageNumber: 1, pageSize: 25, total: people.length },
-    "/api/setup/access/catalog": [{ name: "Revenue", items: [{ key: "revenue.view", label: "View revenue records", needs: [] }] }],
+    "/api/setup/people": {
+      items: people,
+      pageNumber: 1,
+      pageSize: 25,
+      total: people.length,
+    },
+    "/api/setup/access/catalog": [
+      {
+        name: "Revenue",
+        items: [
+          { key: "revenue.view", label: "View revenue records", needs: [] },
+        ],
+      },
+    ],
     "/api/setup/access/roles": [
       { id: "role-0", name: "Owner", permissions: ["revenue.view"] },
       { id: "role-1", name: "Revenue clerk", permissions: ["revenue.view"] },
@@ -106,39 +159,80 @@ function servePeople(people: Person[]) {
     ],
     "/api/setup/access/scope-options": {
       companies: [{ id: "company-1", name: "North Star" }],
-      vehicles: [{ id: "vehicle-1", registration: "KDA 482M", companyId: "company-1" }],
+      vehicles: [
+        { id: "vehicle-1", registration: "KDA 482M", companyId: "company-1" },
+      ],
     },
   });
 }
 
 it("shows an owner's role as Owner to someone who may not give that role", async () => {
-  servePeople([person({ id: "owner-1", firstName: "Antony", lastName: "Maina", role: "Owner", scopeMode: "all" })]);
-  renderInApp(<PeopleAccessView />, { role: "Office admin", permissions: ["people.view", "people.manage"] });
+  servePeople([
+    person({
+      id: "owner-1",
+      firstName: "Antony",
+      lastName: "Maina",
+      role: "Owner",
+      scopeMode: "all",
+    }),
+  ]);
+  renderInApp(<PeopleAccessView />, {
+    role: "Office admin",
+    permissions: ["people.view", "people.manage"],
+  });
 
   fireEvent.click(await screen.findByRole("button", { name: "Antony Maina" }));
   const role = await screen.findByLabelText("Role");
   expect(role).toBeDisabled();
   expect(role).toHaveValue("Owner");
-  expect(within(role).getByRole("option", { name: "Owner" })).toBeInTheDocument();
+  expect(
+    within(role).getByRole("option", { name: "Owner" }),
+  ).toBeInTheDocument();
 });
 
 it("says what a person's scope holds beyond the companies and vehicles listed", async () => {
   // company-9 is archived or outside the editor's own scope; vehicle-9 has left the fleet.
   servePeople([
-    person({ id: "person-1", firstName: "Jane", lastName: "Njeri", scopeMode: "companies", companyIds: ["company-1", "company-9"] }),
-    person({ id: "person-2", firstName: "Peter", lastName: "Otieno", scopeMode: "vehicles", vehicleIds: ["vehicle-9"] }),
+    person({
+      id: "person-1",
+      firstName: "Jane",
+      lastName: "Njeri",
+      scopeMode: "companies",
+      companyIds: ["company-1", "company-9"],
+    }),
+    person({
+      id: "person-2",
+      firstName: "Peter",
+      lastName: "Otieno",
+      scopeMode: "vehicles",
+      vehicleIds: ["vehicle-9"],
+    }),
   ]);
-  const { unmount } = renderInApp(<PeopleAccessView />, { role: "Office admin", permissions: ["people.view", "people.manage"] });
+  const { unmount } = renderInApp(<PeopleAccessView />, {
+    role: "Office admin",
+    permissions: ["people.view", "people.manage"],
+  });
 
   fireEvent.click(await screen.findByRole("button", { name: "Jane Njeri" }));
   expect(await screen.findByLabelText("North Star")).toBeChecked();
-  expect(screen.getByText("Also 1 company that is not listed here: archived, or outside what you can see. It is kept as it is.")).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "Also 1 company that is not listed here: archived, or outside what you can see. It is kept as it is.",
+    ),
+  ).toBeInTheDocument();
   unmount();
 
-  renderInApp(<PeopleAccessView />, { role: "Office admin", permissions: ["people.view", "people.manage"] });
+  renderInApp(<PeopleAccessView />, {
+    role: "Office admin",
+    permissions: ["people.view", "people.manage"],
+  });
   fireEvent.click(await screen.findByRole("button", { name: "Peter Otieno" }));
   expect(await screen.findByLabelText("KDA 482M")).not.toBeChecked();
-  expect(screen.getByText("Also 1 vehicle that is not listed here: out of the fleet, or outside what you can see. It is kept as it is.")).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "Also 1 vehicle that is not listed here: out of the fleet, or outside what you can see. It is kept as it is.",
+    ),
+  ).toBeInTheDocument();
 });
 
 it("shows a first day of the week the server holds even when it is not one of the usual three", async () => {
@@ -146,9 +240,35 @@ it("shows a first day of the week the server holds even when it is not one of th
   serve({
     "/api/setup/organization/settings": {
       organization: { name: "Demo Fleet", slug: "demo-fleet" },
-      localization: { locale: "en-GB", timeZone: "Africa/Nairobi", currency: "KES", datePattern: "medium", hour12: false, firstDayOfWeek: 2, weekNumbering: "iso8601", useGroupping: true, numberDecimals: 2 },
-      branding: { displayName: "XCODE", legalName: "XCODE", logoAlt: "XCODE", primary: "#1647A6", secondary: "#14213D", accent: "#1E6B3A" },
-      securityPolicy: { passwordMinLength: 12, pinLength: 4, lockoutThreshold: 5, lockoutMinutes: 15, accessTokenMinutes: 10, refreshTokenDays: 30, idleUnlockSeconds: 300, allowPinSignIn: true },
+      localization: {
+        locale: "en-GB",
+        timeZone: "Africa/Nairobi",
+        currency: "KES",
+        datePattern: "medium",
+        hour12: false,
+        firstDayOfWeek: 2,
+        weekNumbering: "iso8601",
+        useGrouping: true,
+        numberDecimals: 2,
+      },
+      branding: {
+        displayName: "XCODE",
+        legalName: "XCODE",
+        logoAlt: "XCODE",
+        primary: "#1647A6",
+        secondary: "#14213D",
+        accent: "#1E6B3A",
+      },
+      securityPolicy: {
+        passwordMinLength: 12,
+        pinLength: 4,
+        lockoutThreshold: 5,
+        lockoutMinutes: 15,
+        accessTokenMinutes: 10,
+        refreshTokenDays: 30,
+        idleUnlockSeconds: 300,
+        allowPinSignIn: true,
+      },
       effective: {},
     },
   });
@@ -156,6 +276,10 @@ it("shows a first day of the week the server holds even when it is not one of th
 
   const firstDay = await screen.findByLabelText("First day of week");
   expect(firstDay).toHaveValue("2");
-  expect(within(firstDay).getByRole("option", { name: "Tuesday" })).toBeInTheDocument();
-  expect(within(firstDay).getByRole("option", { name: "Monday" })).toBeInTheDocument();
+  expect(
+    within(firstDay).getByRole("option", { name: "Tuesday" }),
+  ).toBeInTheDocument();
+  expect(
+    within(firstDay).getByRole("option", { name: "Monday" }),
+  ).toBeInTheDocument();
 });

@@ -8,7 +8,9 @@ it("global error shows a reload button", () => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   render(<GlobalError />);
   expect(screen.getByText("Something went wrong")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Reload the app" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Reload the app" }),
+  ).toBeInTheDocument();
 });
 
 it("page error offers to try again", () => {

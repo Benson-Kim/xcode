@@ -51,7 +51,7 @@ export function Button({
           : {
               borderWidth: 2,
               borderColor: colors.blue,
-              backgroundColor: pressed ? colors.blueWash : "transparent",
+              backgroundColor: pressed ? colors.blueTint : "transparent",
             },
         disabled && !busy && styles.disabled,
         style,

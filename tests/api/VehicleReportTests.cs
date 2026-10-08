@@ -117,8 +117,10 @@ public sealed class VehicleReportTests : IDisposable
         var report = await owner.GetFromJsonAsync<JsonElement>($"/setup/vehicles/{vehicle}/report?period=month");
         Assert.Equal(["vehicleId", "from", "through", "moneyIn", "target", "repairs", "charges", "loans", "moneyOut", "net", "savings", "afterSavings", "costs", "postings"],
             report.EnumerateObject().Select(x => x.Name));
-        Assert.Equal(["itemId", "versionId", "date", "name", "kind", "amount", "bucket"],
+        // Source was added last, so released clients read the rest unchanged; it is null for a scheduled item.
+        Assert.Equal(["itemId", "versionId", "date", "name", "kind", "amount", "bucket", "source"],
             report.GetProperty("postings")[0].EnumerateObject().Select(x => x.Name));
+        Assert.Equal(JsonValueKind.Null, report.GetProperty("postings")[0].GetProperty("source").ValueKind);
     }
 
     [Fact]

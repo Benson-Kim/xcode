@@ -1,4 +1,5 @@
 using Auth.Domain;
+using Auth.Infrastructure;
 
 namespace Auth.Application;
 
@@ -28,6 +29,8 @@ public sealed record AuthResponse(string Status, string? AccessToken = null, str
 public sealed record AuthSessionResponse(Guid UserId, string FirstName, string LastName, string Role, IReadOnlyList<string> Permissions);
 public sealed record AuthResult(int HttpStatus, AuthResponse Body)
 {
+    // The code this attempt issued; sent only after the attempt commits.
+    public VerificationMailer.Message? Mail { get; init; }
     public static AuthResult Failure() => new(401, new("authentication_failed"));
     public static AuthResult Accepted() => new(202, new("check_email"));
     public static AuthResult InvalidPin(int minimumLength) => new(400, new("invalid_pin", MinimumPinLength: minimumLength));

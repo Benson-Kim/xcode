@@ -23,7 +23,11 @@ export function ErrorText({
   children: ReactNode;
 }) {
   return (
-    <p id={id} className="m-0 flex items-start gap-1.5 text-[13px] text-red">
+    <p
+      id={id}
+      role="alert"
+      className="m-0 flex items-start gap-1.5 text-[13px] text-red"
+    >
       <AlertIcon className="mt-px shrink-0" />
       <span>{children}</span>
     </p>
@@ -266,6 +270,10 @@ export function ChoiceField({
   children: ReactNode;
 }) {
   const id = useId();
+  const hintId = `${id}-hint`;
+  const errorId = `${id}-error`;
+  const describedBy =
+    [hint && hintId, error && errorId].filter(Boolean).join(" ") || undefined;
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <span id={id} className="text-sm font-semibold">
@@ -274,12 +282,17 @@ export function ChoiceField({
       <div
         role={role}
         aria-labelledby={id}
+        aria-describedby={describedBy}
         className="flex flex-wrap gap-x-5 gap-y-1"
       >
         {children}
       </div>
-      {hint && <p className="m-0 text-[13px] text-grey">{hint}</p>}
-      {error && <ErrorText>{error}</ErrorText>}
+      {hint && (
+        <p id={hintId} className="m-0 text-[13px] text-grey">
+          {hint}
+        </p>
+      )}
+      {error && <ErrorText id={errorId}>{error}</ErrorText>}
     </div>
   );
 }

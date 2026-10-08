@@ -1,3 +1,4 @@
+import { getNetworkStateAsync } from "expo-network";
 import { Platform } from "react-native";
 
 import {
@@ -8,6 +9,7 @@ import {
   type AuthResponse,
 } from "@xcode/shared/auth";
 
+import { hasConnection } from "./network";
 import {
   forgetPerson,
   getDeviceId,
@@ -17,20 +19,14 @@ import {
 } from "./storage";
 
 const fallbackUrl =
-  Platform.OS === "android"
-    ? "http://10.0.2.2:5000"
-    : "http://localhost:5000";
+  Platform.OS === "android" ? "http://10.0.2.2:5000" : "http://localhost:5000";
 
 export const apiUrl = (() => {
   const url = process.env.EXPO_PUBLIC_API_URL || (__DEV__ ? fallbackUrl : "");
   if (!url)
-    throw new Error(
-      "EXPO_PUBLIC_API_URL must be set for release builds.",
-    );
+    throw new Error("EXPO_PUBLIC_API_URL must be set for release builds.");
   if (!__DEV__ && !url.startsWith("https://"))
-    throw new Error(
-      "EXPO_PUBLIC_API_URL must use HTTPS in release builds.",
-    );
+    throw new Error("EXPO_PUBLIC_API_URL must use HTTPS in release builds.");
   return url;
 })();
 
@@ -40,6 +36,20 @@ export class OfflineError extends Error {
     super("No internet connection.");
   }
 }
+
+// The phone has a connection but the API did not answer: wrong address, server down or too slow.
+export class ServerUnreachableError extends OfflineError {
+  constructor() {
+    super();
+    this.message = "Can't reach the XCODE server right now. Try again shortly.";
+  }
+}
+
+// The phone itself has no internet, as opposed to a server that is down, out of reach or failing.
+export const isNoInternet = (error: unknown) =>
+  error instanceof OfflineError &&
+  !(error instanceof ServerUnreachableError) &&
+  !(error instanceof ServerError);
 
 // The API answered with a failure that is not the person's to fix. Treated as unreachable.
 export class ServerError extends OfflineError {
@@ -65,15 +75,24 @@ async function reach(input: RequestInfo | URL, init?: RequestInit) {
   const caller = init?.signal;
   if (caller) {
     if (caller.aborted) controller.abort();
-    else caller.addEventListener("abort", () => controller.abort(), { once: true });
+    else
+      caller.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
   }
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } catch {
-    throw new OfflineError();
+    throw caller?.aborted || !(await phoneIsOnline())
+      ? new OfflineError()
+      : new ServerUnreachableError();
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function phoneIsOnline() {
+  return getNetworkStateAsync().then(hasConnection, () => false);
 }
 
 const authClient = createAuthClient(`${apiUrl}/auth`, reach as typeof fetch);
@@ -107,10 +126,12 @@ export async function keepSession(
   phoneNumber: string,
   result: AuthResponse,
 ): Promise<StoredSession> {
+  if (!result.accessToken || !result.refreshToken)
+    throw new AuthError({ status: "unexpected_response" }, 200);
   const session = {
     phoneNumber,
-    accessToken: result.accessToken || "",
-    refreshToken: result.refreshToken || "",
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
     // Every sign-in and every renewal passes through here, so this is the last time the phone reached
     // the server: what the 72-hour offline unlock window is measured from (D7).
     lastOnlineAt: Date.now(),
@@ -150,7 +171,10 @@ async function authorized(path: string, init: RequestInit = {}) {
   const call = (token: string) =>
     reach(`${apiUrl}/${path}`, {
       ...init,
-      headers: { ...(init.headers as Record<string, string>), Authorization: `Bearer ${token}` },
+      headers: {
+        ...(init.headers as Record<string, string>),
+        Authorization: `Bearer ${token}`,
+      },
     });
   let response = await call(session.accessToken);
   if (response.status === 401)
@@ -180,6 +204,23 @@ export async function apiPutResult<T>(
 ): Promise<{ status: number; body: T }> {
   const response = await authorized(path, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    body: (await response.json().catch(() => ({}))) as T,
+  };
+}
+
+// POST or PUT JSON as the signed-in person with the same result shape as apiPutResult.
+export async function apiSendResult<T>(
+  method: "POST" | "PUT",
+  path: string,
+  body: unknown,
+): Promise<{ status: number; body: T }> {
+  const response = await authorized(path, {
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });

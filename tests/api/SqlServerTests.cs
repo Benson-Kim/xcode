@@ -1,6 +1,8 @@
 using Auth.Infrastructure;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Xunit;
 
 namespace Auth.Tests;
@@ -26,5 +28,30 @@ public sealed class SqlServerTests
         await db.Database.MigrateAsync();
         Assert.Empty(await db.Database.GetPendingMigrationsAsync());
         Assert.True(await db.Database.CanConnectAsync());
+    }
+
+    // ChangeLogVehicle commits its new column before it is recorded as applied; a run stopped there must be rerunnable.
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    public async Task AnInterruptedChangeLogVehicleMigrationResumes()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("SQLSERVER_TEST_CONNECTION");
+        Assert.False(string.IsNullOrEmpty(connectionString), "SQLSERVER_TEST_CONNECTION is required for the SQL Server test category.");
+        var scratch = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = $"XCodeResume_{Guid.NewGuid():N}" };
+        await using var db = new AuthDb(new DbContextOptionsBuilder<AuthDb>().UseSqlServer(scratch.ConnectionString).Options);
+        try
+        {
+            var migrator = db.GetService<IMigrator>();
+            await migrator.MigrateAsync("20261006084351_UntrustedFailedAttempts");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE [OrganizationSettingsVersion] ADD [VehicleId] uniqueidentifier NULL");
+
+            await db.Database.MigrateAsync();
+
+            Assert.Empty(await db.Database.GetPendingMigrationsAsync());
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
     }
 }

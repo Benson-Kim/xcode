@@ -8,7 +8,9 @@ public static class RevenueEndpoints
 {
     public static IServiceCollection AddRevenue(this IServiceCollection services)
     {
-        services.AddScoped<IRevenueRepository, Auth.Infrastructure.RevenueRepository>();
+        services.AddSingleton<Auth.Infrastructure.RevenueDashboardCache>();
+        services.AddScoped<Auth.Infrastructure.RevenueRepository>();
+        services.AddScoped<IRevenueRepository, Auth.Infrastructure.CachedRevenueRepository>();
         services.AddScoped<RevenueUseCases>();
         return services;
     }
@@ -35,8 +37,9 @@ public static class RevenueEndpoints
             }
         });
 
-        group.MapGet("", (RevenueUseCases useCases, CancellationToken ct, DateOnly? weekStart = null, Guid? companyId = null, Guid? vehicleId = null) =>
-                useCases.Week(weekStart, companyId, vehicleId, ct))
+        group.MapGet("", (RevenueUseCases useCases, CancellationToken ct, DateOnly? weekStart = null, Guid? companyId = null, Guid? vehicleId = null,
+                    int? page = null, int? pageSize = null) =>
+                useCases.Week(weekStart, companyId, vehicleId, page, pageSize, ct))
             .Produces<RevenueWeekDto>()
             .WithName("GetRevenueWeek");
 

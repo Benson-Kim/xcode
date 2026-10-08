@@ -194,7 +194,7 @@ namespace Auth.Api.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<bool>("UseGroupping")
+                    b.Property<bool>("UseGrouping")
                         .HasColumnType("bit");
 
                     b.Property<string>("WeekNumbering")
@@ -363,6 +363,104 @@ namespace Auth.Api.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("PersonRoles");
+                });
+
+            modelBuilder.Entity("Auth.Domain.PettyCashEntry", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("ExpenseItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("HolderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<string>("Payee")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("RecordedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("Reimbursable")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("RemovalReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("RemovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("RemovedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("ReviewedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SentBackNote")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Total")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("decimal(14,2)");
+
+                    b.Property<decimal>("UnitAmount")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("decimal(14,2)");
+
+                    b.Property<decimal>("Units")
+                        .HasPrecision(12, 3)
+                        .HasColumnType("decimal(12,3)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("UpdatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("OrganizationId", "Id");
+
+                    b.HasIndex("OrganizationId", "ExpenseItemId");
+
+                    b.HasIndex("OrganizationId", "HolderId", "Date");
+
+                    b.HasIndex("OrganizationId", "Status", "Date");
+
+                    b.HasIndex("OrganizationId", "VehicleId", "Date");
+
+                    b.ToTable("PettyCashEntries");
                 });
 
             modelBuilder.Entity("Auth.Domain.RefreshToken", b =>
@@ -668,6 +766,9 @@ namespace Auth.Api.Infrastructure.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("nvarchar(160)");
 
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<long>("Version")
                         .HasColumnType("bigint");
 
@@ -675,8 +776,12 @@ namespace Auth.Api.Infrastructure.Migrations
 
                     b.HasIndex("OrganizationId", "ActorId");
 
+                    b.HasIndex("OrganizationId", "OccurredAt");
+
                     b.HasIndex("OrganizationId", "Version")
                         .IsUnique();
+
+                    b.HasIndex("OrganizationId", "Section", "VehicleId");
 
                     b.ToTable("OrganizationSettingsVersion");
                 });
@@ -1284,6 +1389,31 @@ namespace Auth.Api.Infrastructure.Migrations
                         .HasForeignKey("OrganizationId", "UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Auth.Domain.PettyCashEntry", b =>
+                {
+                    b.HasOne("Auth.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Domain.Setup.ExpenseItem", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ExpenseItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Auth.Domain.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "HolderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Domain.Setup.FleetVehicle", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "VehicleId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Auth.Domain.RefreshToken", b =>

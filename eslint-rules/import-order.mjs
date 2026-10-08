@@ -62,7 +62,9 @@ export default {
 
         for (const item of ordered) {
           const group = groupFor(item.source);
-          if (replacement) replacement += group === previousGroup ? newline : newline + newline;
+          if (replacement)
+            replacement +=
+              group === previousGroup ? newline : newline + newline;
           replacement += sourceCode.getText(item.node);
           previousGroup = group;
         }
@@ -73,7 +75,11 @@ export default {
         context.report({
           node: first,
           messageId: "order",
-          fix: (fixer) => fixer.replaceTextRange([first.range[0], last.range[1]], replacement),
+          fix: (fixer) =>
+            fixer.replaceTextRange(
+              [first.range[0], last.range[1]],
+              replacement,
+            ),
         });
       },
     };

@@ -1,29 +1,16 @@
-import type { Formats } from "@xcode/shared/format";
+import {
+  deriveBrandTokens,
+  resolveTheme,
+  type Appearance,
+} from "@xcode/shared/appearance";
+import { currentFormats } from "@xcode/shared/format";
 
 import { apiGet } from "./lib/api";
 import { savePinPolicy, validPinPolicy, type PinPolicy } from "./lib/storage";
 import { vault } from "./lib/vault";
 import { darkPalette, defaultTheme, mix, palette, type Theme } from "./ui";
 
-export type Appearance = {
-  organizationName: string;
-  settingsVersion: number;
-  businessDate?: string;
-  branding: {
-    displayName: string;
-    logoAlt: string;
-    primary: string;
-    secondary: string;
-    accent: string;
-    logo: string | null;
-  };
-  formats: Formats;
-  themeMode: string;
-  reducedMotion: boolean;
-  fontScale: number;
-  lockoutThreshold?: number;
-  lockoutMinutes?: number;
-};
+export type { Appearance } from "@xcode/shared/appearance";
 
 export const pinPolicyOf = (appearance: Appearance): PinPolicy | null =>
   validPinPolicy(appearance)
@@ -35,19 +22,28 @@ export const pinPolicyOf = (appearance: Appearance): PinPolicy | null =>
 
 const KEY = "xcode.appearance";
 
+function withCurrentNames(appearance: Appearance): Appearance {
+  return {
+    ...appearance,
+    formats: currentFormats(appearance.formats ?? {}) as Appearance["formats"],
+  };
+}
+
 export async function loadSavedAppearance(): Promise<Appearance | null> {
   try {
     const saved = JSON.parse(
       (await vault.get(KEY)) || "null",
     ) as Appearance | null;
-    return saved?.branding ? saved : null;
+    return saved?.branding ? withCurrentNames(saved) : null;
   } catch {
     return null;
   }
 }
 
 export async function fetchAppearance(): Promise<Appearance> {
-  const appearance = await apiGet<Appearance>("setup/appearance");
+  const appearance = withCurrentNames(
+    await apiGet<Appearance>("setup/appearance"),
+  );
   await vault.set(KEY, JSON.stringify(appearance));
   const policy = pinPolicyOf(appearance);
   if (policy) await savePinPolicy(policy);
@@ -56,18 +52,6 @@ export async function fetchAppearance(): Promise<Appearance> {
 
 export async function forgetAppearance() {
   await vault.remove(KEY);
-}
-
-const hex = (value: string | undefined): value is string =>
-  /^#[0-9a-fA-F]{6}$/.test(value ?? "");
-
-export function resolveTheme(
-  mode: string | null | undefined,
-  deviceDark: boolean,
-): "light" | "dark" {
-  if (mode === "dark") return "dark";
-  if (mode === "light") return "light";
-  return deviceDark ? "dark" : "light";
 }
 
 export function themeFor(
@@ -83,24 +67,13 @@ export function themeFor(
       dark,
     };
   }
-  const { primary, secondary, accent } = appearance.branding;
   const colors = { ...base };
-  const tint = (colour: string, light: number, deep: number) =>
-    dark ? mix(colour, deep, base.field) : mix(colour, light, "#FFFFFF");
-  if (hex(primary))
-    Object.assign(colors, {
-      blue: dark ? mix(primary, 60, "#FFFFFF") : primary,
-      blueDark: mix(primary, dark ? 40 : 80, dark ? "#FFFFFF" : "#000000"),
-      blueBusy: mix(primary, 80, "#FFFFFF"),
-      blueTint: tint(primary, 10, 18),
-      blueWash: tint(primary, 4, 10),
-    });
-  if (hex(secondary)) colors.brand = secondary;
-  if (hex(accent))
-    Object.assign(colors, {
-      green: dark ? mix(accent, 55, "#FFFFFF") : accent,
-      greenBg: tint(accent, 12, 22),
-    });
+  const towards = { white: "#FFFFFF", black: "#000000", surface: base.field };
+  for (const { token, colour, amount, towards: to } of deriveBrandTokens(
+    appearance.branding,
+    dark,
+  ))
+    colors[token] = amount >= 100 ? colour : mix(colour, amount, towards[to]);
   return {
     colors,
     dark,

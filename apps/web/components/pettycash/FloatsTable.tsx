@@ -1,0 +1,80 @@
+"use client";
+
+import type { PettyCashFloat } from "@xcode/shared/pettyCash";
+
+import { useFormats } from "../../lib/formats";
+import { CellNote, DataTable, SubHeading, Td, Tr } from "../ui";
+
+const COLUMNS = [
+  { label: "Manager" },
+  { label: "Cash received", numeric: true },
+  { label: "Money out", numeric: true },
+  { label: "Cash in hand", numeric: true },
+  { label: "Waiting", numeric: true },
+  { label: "Approved", numeric: true },
+  { label: "Last cash" },
+];
+
+// Each float to date: cash in hand is cash received less every expense and credit note, approved or not.
+export function FloatsTable({
+  floats,
+  loading,
+}: {
+  floats?: PettyCashFloat[];
+  loading: boolean;
+}) {
+  const formats = useFormats();
+  return (
+    <>
+      <SubHeading className="mt-6">Floats</SubHeading>
+      <DataTable
+        columns={COLUMNS}
+        loading={loading}
+        loadingLabel="Loading floats"
+        isEmpty={!floats?.length}
+        emptyMessage="No floats yet."
+        className="mt-2"
+      >
+        {floats?.map((float) => (
+          <Tr key={float.holderId}>
+            <Td label="Manager">
+              <strong>{float.name}</strong>
+              {!float.active && <CellNote>Not active</CellNote>}
+            </Td>
+            <Td label="Cash received" numeric>
+              {formats.kes(float.cashReceived)}
+            </Td>
+            <Td label="Money out" numeric>
+              {formats.kes(float.expenses + float.creditNotes)}
+            </Td>
+            <Td
+              label="Cash in hand"
+              numeric
+              className={float.balance < 0 ? "text-red" : undefined}
+            >
+              <strong>{formats.kes(float.balance)}</strong>
+            </Td>
+            <Td label="Waiting" numeric>
+              {formats.kes(float.waiting)}
+              {float.waitingCount > 0 && (
+                <CellNote>
+                  {float.waitingCount === 1
+                    ? "1 entry"
+                    : `${float.waitingCount} entries`}
+                </CellNote>
+              )}
+            </Td>
+            <Td label="Approved" numeric>
+              {formats.kes(float.approved)}
+            </Td>
+            <Td label="Last cash">
+              {float.lastCashOn
+                ? formats.formatDateOnly(float.lastCashOn)
+                : "None"}
+            </Td>
+          </Tr>
+        ))}
+      </DataTable>
+    </>
+  );
+}

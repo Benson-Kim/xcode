@@ -1,20 +1,21 @@
 using System.Globalization;
+using Auth.Domain;
 using Auth.Domain.Setup;
 
 namespace Auth.Application.Setup;
 
 public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepository repository)
 {
-    public Task<Page<RecurringDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read("commitments.view", actor =>
+    public Task<Page<RecurringDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read(PermissionKeys.CommitmentsView, actor =>
     {
         SetupPagination.Validate(page, pageSize);
         return repository.Recurring(actor, page, pageSize, ct);
     }, ct);
 
     public Task<IReadOnlyList<VehicleOption>> VehicleOptions(CancellationToken ct) =>
-        execution.Read("commitments.manage", actor => repository.VehicleOptions(actor, ct), ct);
+        execution.Read(PermissionKeys.CommitmentsManage, actor => repository.VehicleOptions(actor, ct), ct);
 
-    public Task<Guid> Save(Guid? id, SaveRecurring input, CancellationToken ct) => execution.Write("commitments.manage", async actor =>
+    public Task<Guid> Save(Guid? id, SaveRecurring input, CancellationToken ct) => execution.Write(PermissionKeys.CommitmentsManage, async actor =>
     {
         var typed = SetupPagination.OptionalReason(input.Reason);
         var definition = await Definition(actor, input, ct);
@@ -57,7 +58,7 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
         return item.Id;
     }, ct);
 
-    public Task<Guid> Stop(Guid id, StopRecurring input, CancellationToken ct) => execution.Write("commitments.manage", async actor =>
+    public Task<Guid> Stop(Guid id, StopRecurring input, CancellationToken ct) => execution.Write(PermissionKeys.CommitmentsManage, async actor =>
     {
         var typed = SetupPagination.Reason(input.Reason);
         if (!input.Confirmed) throw new ArgumentException("Confirm stopping this item. Past postings are retained; no posting occurs from today.");
@@ -78,7 +79,7 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
 
     // Cancelling a stop that has not taken effect yet is not one of the four places that ask for a typed reason
     // (contract C7), so it writes an automatic one. The vehicle check is the same as stopping.
-    public Task<Guid> CancelStop(Guid id, CancellationToken ct) => execution.Write("commitments.manage", async actor =>
+    public Task<Guid> CancelStop(Guid id, CancellationToken ct) => execution.Write(PermissionKeys.CommitmentsManage, async actor =>
     {
         var item = await repository.RecurringItem(actor, id, ct) ?? throw new KeyNotFoundException();
         var latest = item.Versions.OrderByDescending(v => v.Revision).First();

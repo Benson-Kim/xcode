@@ -1,5 +1,7 @@
 using System.Data.Common;
 using Auth.Application;
+using Auth.Application.Revenue;
+using Auth.Application.Settings;
 using Auth.Application.Setup;
 using Auth.Domain;
 using Auth.Domain.Setup;
@@ -8,14 +10,55 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using Xunit.Abstractions;
 using static Auth.Tests.RevenueTestData;
 
 namespace Auth.Tests;
 
 // Evidence for the revenue complexity claims: commands issued and rows read by the repository, as fleet size V and history D grow.
-public sealed class RevenueComplexityTests : IDisposable
+public sealed class RevenueComplexityTests(ITestOutputHelper output) : IDisposable
 {
     private readonly AuthFactory app = new();
+
+    // From 2 to 500 vehicles: the same commands, rows that grow with the fleet but never with its history, and a page
+    // that lists its own vehicles while carrying the whole fleet's figures.
+    [Fact]
+    public async Task WeekAndDashboardCommandsStayFlatFromTwoToFiveHundredVehicles()
+    {
+        var today = await Arrange();
+        var fleets = new[]
+        {
+            (Vehicles: 2, Company: await Fleet("Small Fleet", "KAB", vehicles: 2, days: 10, today)),
+            (Vehicles: 100, Company: await BulkFleet("Hundred Fleet", "KBA", vehicles: 100, days: 10, today)),
+            (Vehicles: 500, Company: await BulkFleet("Five Hundred Fleet", "KBB", vehicles: 500, days: 10, today)),
+        };
+
+        var commands = new HashSet<(int Week, int Page, int Month)>();
+        foreach (var (vehicles, company) in fleets)
+        {
+            var week = await Measure((repository, actor) => repository.Week(actor, null, company, null, null, CancellationToken.None));
+            var page = await Measure((repository, actor) => repository.Week(actor, null, company, null, new RevenueWeekPage(1, 10), CancellationToken.None));
+            var month = await Measure((repository, actor) => repository.Dashboard(actor, "month", company, CancellationToken.None));
+            output.WriteLine($"V={vehicles}: week {week.Commands} commands, {week.Reads} rows; page of 10 {page.Commands} commands, {page.Reads} rows; " +
+                $"month dashboard {month.Commands} commands, {month.Reads} rows");
+            commands.Add((week.Commands, page.Commands, month.Commands));
+
+            Assert.Equal(vehicles, week.Result.Vehicles.Count);
+            Assert.Equal(Math.Min(vehicles, 10), page.Result.Vehicles.Count);
+            Assert.Equal(vehicles, page.Result.TotalVehicles);
+            Assert.Equal((week.Result.TotalAmount, week.Result.TotalExpected, week.Result.Percent),
+                (page.Result.TotalAmount, page.Result.TotalExpected, page.Result.Percent));
+            // Every vehicle has three records this week before today. A page reads the records of its own ten vehicles
+            // and nothing else of the others': its figures come from a few summed rows.
+            Assert.Equal(3 * (vehicles - Math.Min(vehicles, 10)), week.Reads - page.Reads);
+            Assert.True(page.Reads <= 3 * vehicles + 7 * 10 + 10, $"A page of 10 read {page.Reads} rows for {vehicles} vehicles.");
+            // Each vehicle, its target, its aggregate row and at most seven records, plus a few option rows.
+            Assert.True(week.Reads <= 10 * vehicles + 10, $"Read {week.Reads} rows for a week of {vehicles} vehicles.");
+            // Each vehicle, its target and one summed row: never a row per recorded day.
+            Assert.True(month.Reads <= 3 * vehicles + 10, $"Read {month.Reads} rows for a month of {vehicles} vehicles.");
+        }
+        Assert.Single(commands);
+    }
 
     [Fact]
     public async Task SaveFindsTheEarliestMissingDayFromOneAggregateRowWhateverTheHistoryLength()
@@ -47,8 +90,8 @@ public sealed class RevenueComplexityTests : IDisposable
         var small = await Fleet("Small Fleet", "KAB", vehicles: 2, days: 10, today);
         var large = await Fleet("Large Fleet", "KAC", vehicles: 12, days: 150, today);
 
-        var smallWeek = await Measure((repository, actor) => repository.Week(actor, null, small, null, CancellationToken.None));
-        var largeWeek = await Measure((repository, actor) => repository.Week(actor, null, large, null, CancellationToken.None));
+        var smallWeek = await Measure((repository, actor) => repository.Week(actor, null, small, null, null, CancellationToken.None));
+        var largeWeek = await Measure((repository, actor) => repository.Week(actor, null, large, null, null, CancellationToken.None));
         Assert.Equal(smallWeek.Commands, largeWeek.Commands);
         Assert.All(largeWeek.Result.Vehicles, x => Assert.Null(x.EarliestMissing));
         // Vehicles with targets, one aggregate row each, at most seven records each and a few option rows: O(V), not O(V·D).
@@ -79,6 +122,28 @@ public sealed class RevenueComplexityTests : IDisposable
         return company;
     }
 
+    // The same fleet as Fleet, written in one save so hundreds of vehicles and thousands of records seed quickly.
+    private async Task<Guid> BulkFleet(string name, string prefix, int vehicles, int days, DateOnly today)
+    {
+        var company = await Company(app, name);
+        await app.WithDb(async db =>
+        {
+            db.Provisioning = true;
+            var organizationId = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).Id;
+            var actor = (await db.Users.SingleAsync(x => x.Email == Owner)).Id;
+            for (var i = 0; i < vehicles; i++)
+            {
+                var vehicle = new FleetVehicle(organizationId, company, new VehicleRegistration($"{prefix} {i:000}A"), today.AddDays(-days), 7000m);
+                db.Set<FleetVehicle>().Add(vehicle);
+                for (var date = today.AddDays(-days); date < today; date = date.AddDays(1))
+                    db.Set<RevenueRecord>().Add(new(organizationId, vehicle.Id, date, new(1000m, null, null), app.Clock.UtcNow.ToUniversalTime(), actor));
+            }
+            await db.SaveChangesAsync();
+            db.Provisioning = false;
+        });
+        return company;
+    }
+
     private async Task<FleetVehicle> LoadVehicle(Guid id)
     {
         FleetVehicle vehicle = null!;
@@ -104,7 +169,7 @@ public sealed class RevenueComplexityTests : IDisposable
         var context = new FixedOrganization(organizationId, ownerId);
         using var db = new AuthDb(new DbContextOptionsBuilder<AuthDb>().UseSqlite(connection).AddInterceptors(counter).Options, context);
         var organizations = new OrganizationRepository(db, app.Services.GetRequiredService<EffectiveSettingsResolver>(), app.Services.GetRequiredService<EffectivePermissionResolver>());
-        var repository = new RevenueRepository(db, organizations, new UnitOfWork(db, context, app.Clock, organizations), app.Clock);
+        var repository = new RevenueRepository(db, new UnitOfWork(db, context, app.Clock, organizations), new SettingsChangeLog(db, organizations, app.Clock));
         var actor = new SetupActor(organizationId, ownerId, today, true, [], [], "complexity",
             new HashSet<string>(["revenue.view", "revenue.capture", "revenue.no_earnings", "revenue.correct"]));
         var result = await action(repository, actor);

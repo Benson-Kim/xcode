@@ -1,6 +1,72 @@
-export type RevenueStatus = "none" | "future" | "missing" | "amount" | "reason";
+export const REVENUE_STATUSES = [
+  "none",
+  "future",
+  "missing",
+  "amount",
+  "reason",
+] as const;
+export type RevenueStatus = (typeof REVENUE_STATUSES)[number];
 
-export const REVENUE_REASONS = ["Garage", "Arrest", "No Crew", "Other"] as const;
+export type StatusTone = "muted" | "normal" | "alert";
+
+export interface StatusMeta {
+  inFleet: boolean;
+  recorded: boolean;
+  awaitsCapture: boolean;
+  label: string;
+  tone: StatusTone;
+}
+
+export const STATUS_META: Record<RevenueStatus, StatusMeta> = {
+  none: {
+    inFleet: false,
+    recorded: false,
+    awaitsCapture: false,
+    label: "Not counted",
+    tone: "muted",
+  },
+  future: {
+    inFleet: true,
+    recorded: false,
+    awaitsCapture: false,
+    label: "Not yet",
+    tone: "muted",
+  },
+  missing: {
+    inFleet: true,
+    recorded: false,
+    awaitsCapture: true,
+    label: "Missing",
+    tone: "alert",
+  },
+  amount: {
+    inFleet: true,
+    recorded: true,
+    awaitsCapture: false,
+    label: "Recorded",
+    tone: "normal",
+  },
+  reason: {
+    inFleet: true,
+    recorded: true,
+    awaitsCapture: false,
+    label: "No revenue",
+    tone: "normal",
+  },
+};
+
+export const isRecorded = (cell?: Pick<RevenueCell, "status">): boolean =>
+  Boolean(cell && STATUS_META[cell.status].recorded);
+
+export const awaitsCapture = (cell?: Pick<RevenueCell, "status">): boolean =>
+  Boolean(cell && STATUS_META[cell.status].awaitsCapture);
+
+export const REVENUE_REASONS = [
+  "Garage",
+  "Arrest",
+  "No Crew",
+  "Other",
+] as const;
 export type RevenueReason = (typeof REVENUE_REASONS)[number];
 
 export const REVENUE_NOTE_LIMIT = 80;
@@ -56,6 +122,17 @@ export interface RevenueVehicle {
   percent: number | null;
 }
 
+export interface RevenueDayTotal {
+  date: string;
+  amount: number;
+  expected: number;
+}
+
+export interface RevenueGap {
+  vehicleId: string;
+  date: string;
+}
+
 export interface RevenueWeek {
   weekStart: string;
   weekThrough: string;
@@ -66,6 +143,73 @@ export interface RevenueWeek {
   totalAmount: number;
   totalExpected: number;
   percent: number | null;
+  pageNumber?: number;
+  pageSize?: number;
+  totalVehicles?: number;
+  truncated?: boolean;
+  dayTotals?: RevenueDayTotal[];
+  firstGap?: RevenueGap | null;
+}
+
+export const REVENUE_WEEK_PAGE_SIZE = 100;
+
+export function remainingWeekPages(week: RevenueWeek): number[] {
+  if (!week.truncated || !week.totalVehicles) return [];
+  const from = Math.floor(week.vehicles.length / REVENUE_WEEK_PAGE_SIZE) + 1;
+  const last = Math.ceil(week.totalVehicles / REVENUE_WEEK_PAGE_SIZE);
+  return Array.from(
+    { length: Math.max(last - from + 1, 0) },
+    (_, index) => from + index,
+  );
+}
+
+export class WeekChangedError extends Error {
+  constructor() {
+    super("The fleet changed while this week was loading. Load it again.");
+    this.name = "WeekChangedError";
+  }
+}
+
+export function mergeWeekPages(
+  first: RevenueWeek,
+  rest: RevenueWeek[],
+): RevenueWeek {
+  if (rest.length === 0) return first;
+  const seen = new Set<string>();
+  const vehicles = [first, ...rest]
+    .flatMap((page) => page.vehicles)
+    .filter(
+      (vehicle) => !seen.has(vehicle.id) && Boolean(seen.add(vehicle.id)),
+    );
+  const total = first.totalVehicles;
+  if (
+    rest.some(
+      (page) =>
+        page.totalVehicles !== undefined && page.totalVehicles !== total,
+    ) ||
+    (total !== undefined && vehicles.length !== total)
+  )
+    throw new WeekChangedError();
+  return { ...first, vehicles, truncated: false };
+}
+
+// Pages are fetched by offset, so a fleet that changes between requests can shift a vehicle past them; the week is
+// then loaded again from a fresh first answer, a few times at most.
+export async function loadWholeWeek(
+  first: RevenueWeek,
+  loadPages: (first: RevenueWeek) => Promise<RevenueWeek[]>,
+  reloadFirst: () => Promise<RevenueWeek>,
+  attempts = 3,
+): Promise<RevenueWeek> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return mergeWeekPages(first, await loadPages(first));
+    } catch (error) {
+      if (!(error instanceof WeekChangedError) || attempt >= attempts)
+        throw error;
+      first = await reloadFirst();
+    }
+  }
 }
 
 // Each figure is null for a viewer who may not see the card it belongs to.
@@ -107,6 +251,10 @@ export const REVENUE_REPORT_PERIODS = [
 export type RevenueReportPeriod =
   (typeof REVENUE_REPORT_PERIODS)[number]["value"];
 
+const REVENUE_PERIOD_LABELS = new Map<string, string>(
+  REVENUE_PERIODS.map(({ value, label }) => [value, label]),
+);
+
 export function revenuePeriodLabel(period: RevenuePeriod): string {
-  return REVENUE_PERIODS.find((option) => option.value === period)?.label ?? period;
+  return REVENUE_PERIOD_LABELS.get(period) ?? period;
 }

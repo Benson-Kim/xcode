@@ -247,6 +247,20 @@ public sealed class DomainRuleTests
         Assert.Equal(9000m, vehicle.TargetOn(Today));
     }
 
+    // Each edit on the same day adds a revision, and the last one holds from that day.
+    [Fact]
+    public void TheLastTargetSetOnADayHoldsFromThatDay()
+    {
+        var company = Guid.NewGuid();
+        var vehicle = new FleetVehicle(Organization, company, new VehicleRegistration("KDA 482M"), Today.AddDays(-10), 7000m);
+        vehicle.Update(company, Today.AddDays(-10), 9000m, Today);
+        vehicle.Update(company, Today.AddDays(-10), 8000m, Today);
+
+        Assert.Equal(3, vehicle.Targets.Count);
+        Assert.Equal(7000m, vehicle.TargetOn(Today.AddDays(-1)));
+        Assert.Equal(8000m, vehicle.TargetOn(Today));
+    }
+
     [Theory]
     [InlineData(0, true)]
     [InlineData(1, true)]

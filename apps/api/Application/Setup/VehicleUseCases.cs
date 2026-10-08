@@ -1,4 +1,5 @@
 using System.Globalization;
+using Auth.Domain;
 using Auth.Domain.Setup;
 
 namespace Auth.Application.Setup;
@@ -6,7 +7,7 @@ namespace Auth.Application.Setup;
 public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository repository, IOrganizationRepository organizations)
 {
     // Someone who may only see investment still has to find the vehicle it belongs to; every change stays vehicles.manage.
-    private static readonly string[] Listers = ["vehicles.manage", "invest.view"];
+    private static readonly string[] Listers = [PermissionKeys.VehiclesManage, PermissionKeys.InvestView];
 
     public Task<Page<VehicleDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read("", async actor =>
     {
@@ -15,16 +16,16 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
         var vehicles = await repository.Vehicles(actor, page, pageSize, ct);
         // Reaching a vehicle's investment needs its registration and company, not the targets it is run against or
         // its scheduled items.
-        return actor.Permissions.Contains("vehicles.manage") ? vehicles : vehicles with
+        return actor.Permissions.Contains(PermissionKeys.VehiclesManage) ? vehicles : vehicles with
         {
             Items = [.. vehicles.Items.Select(v => v with { WeeklyTarget = null, Targets = [], RecurringItems = null })]
         };
     }, ct);
 
     public Task<IReadOnlyList<CompanyOption>> CompanyOptions(CancellationToken ct) =>
-        execution.Read("vehicles.manage", actor => repository.CompanyOptions(actor, ct), ct);
+        execution.Read(PermissionKeys.VehiclesManage, actor => repository.CompanyOptions(actor, ct), ct);
 
-    public Task<Guid> Save(Guid? id, SaveVehicle input, CancellationToken ct) => execution.Write("vehicles.manage", async actor =>
+    public Task<Guid> Save(Guid? id, SaveVehicle input, CancellationToken ct) => execution.Write(PermissionKeys.VehiclesManage, async actor =>
     {
         var typed = SetupPagination.OptionalReason(input.Reason);
         var registration = new VehicleRegistration(input.Registration);
@@ -70,7 +71,7 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
         return vehicle.Id;
     }, ct);
 
-    public Task<Guid> Retire(Guid id, VehicleLifecycleRequest input, CancellationToken ct) => execution.Write("vehicles.manage", async actor =>
+    public Task<Guid> Retire(Guid id, VehicleLifecycleRequest input, CancellationToken ct) => execution.Write(PermissionKeys.VehiclesManage, async actor =>
     {
         var typed = SetupPagination.OptionalReason(input.Reason);
         var vehicle = await repository.Vehicle(actor, id, ct) ?? throw new KeyNotFoundException();
@@ -87,7 +88,7 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
         return vehicle.Id;
     }, ct);
 
-    public Task<Guid> Restore(Guid id, VehicleRestoreRequest input, CancellationToken ct) => execution.Write("vehicles.manage", async actor =>
+    public Task<Guid> Restore(Guid id, VehicleRestoreRequest input, CancellationToken ct) => execution.Write(PermissionKeys.VehiclesManage, async actor =>
     {
         var typed = SetupPagination.OptionalReason(input.Reason);
         var vehicle = await repository.Vehicle(actor, id, ct) ?? throw new KeyNotFoundException();
@@ -109,7 +110,7 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
         return vehicle.Id;
     }, ct);
 
-    public Task<VehicleReport> Report(Guid id, DateOnly? start, DateOnly? end, string? period, CancellationToken ct) => execution.Read("vehicles.manage", async actor =>
+    public Task<VehicleReport> Report(Guid id, DateOnly? start, DateOnly? end, string? period, CancellationToken ct) => execution.Read(PermissionKeys.VehiclesManage, async actor =>
     {
         var (from, through) = period is not null
             ? ReportPeriod.Current(period, actor.Today, await repository.FirstDayOfWeek(ct))

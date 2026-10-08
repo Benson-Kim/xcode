@@ -1,3 +1,4 @@
+using Auth.Domain;
 using Auth.Domain.Setup;
 
 namespace Auth.Application.Setup;
@@ -7,8 +8,8 @@ namespace Auth.Application.Setup;
 public sealed class ExpenseCatalogUseCases(ISetupExecution execution, ISetupRepository repository, IOrganizationRepository organizations)
 {
     private const string Section = "expenses";
-    private static readonly string[] CategoryReaders = ["expenses.view", "expenses.setup", "commitments.view"];
-    private static readonly string[] OptionReaders = ["expenses.view", "expenses.setup", "commitments.view", "commitments.manage"];
+    private static readonly string[] CategoryReaders = [PermissionKeys.ExpensesView, PermissionKeys.ExpensesSetup, PermissionKeys.CommitmentsView];
+    private static readonly string[] OptionReaders = [PermissionKeys.ExpensesView, PermissionKeys.ExpensesSetup, PermissionKeys.CommitmentsView, PermissionKeys.CommitmentsManage];
 
     public Task<Page<ExpenseCategoryDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read("", async actor =>
     {
@@ -23,7 +24,7 @@ public sealed class ExpenseCatalogUseCases(ISetupExecution execution, ISetupRepo
         return await repository.ExpenseItemOptions(actor.Today, ct);
     }, ct);
 
-    public Task<Guid> SaveCategory(Guid? id, SaveExpenseCategory input, CancellationToken ct) => execution.Write("expenses.setup", async actor =>
+    public Task<Guid> SaveCategory(Guid? id, SaveExpenseCategory input, CancellationToken ct) => execution.Write(PermissionKeys.ExpensesSetup, async actor =>
     {
         var name = SetupValue.Name(input.Name, ExpenseCategory.NameLength);
         var category = id is null ? new ExpenseCategory(actor.OrganizationId, name, input.Bucket)
@@ -45,7 +46,7 @@ public sealed class ExpenseCatalogUseCases(ISetupExecution execution, ISetupRepo
         return category.Id;
     }, ct);
 
-    public Task<Guid> SetCategoryStopped(Guid id, bool stopped, CancellationToken ct) => execution.Write("expenses.setup", async actor =>
+    public Task<Guid> SetCategoryStopped(Guid id, bool stopped, CancellationToken ct) => execution.Write(PermissionKeys.ExpensesSetup, async actor =>
     {
         var category = await repository.ExpenseCategory(id, ct) ?? throw new KeyNotFoundException();
         var before = Snapshot(category);
@@ -55,7 +56,7 @@ public sealed class ExpenseCatalogUseCases(ISetupExecution execution, ISetupRepo
         return category.Id;
     }, ct);
 
-    public Task<Guid> AddItem(Guid categoryId, SaveExpenseItem input, CancellationToken ct) => execution.Write("expenses.setup", async actor =>
+    public Task<Guid> AddItem(Guid categoryId, SaveExpenseItem input, CancellationToken ct) => execution.Write(PermissionKeys.ExpensesSetup, async actor =>
     {
         var category = await repository.ExpenseCategory(categoryId, ct) ?? throw new KeyNotFoundException();
         var item = new ExpenseItem(category, input.Name!);
@@ -65,7 +66,7 @@ public sealed class ExpenseCatalogUseCases(ISetupExecution execution, ISetupRepo
         return item.Id;
     }, ct);
 
-    public Task<Guid> RenameItem(Guid id, SaveExpenseItem input, CancellationToken ct) => execution.Write("expenses.setup", async actor =>
+    public Task<Guid> RenameItem(Guid id, SaveExpenseItem input, CancellationToken ct) => execution.Write(PermissionKeys.ExpensesSetup, async actor =>
     {
         var name = SetupValue.Name(input.Name, ExpenseCategory.NameLength);
         var item = await repository.ExpenseItem(id, ct) ?? throw new KeyNotFoundException();
@@ -77,7 +78,7 @@ public sealed class ExpenseCatalogUseCases(ISetupExecution execution, ISetupRepo
         return item.Id;
     }, ct);
 
-    public Task<Guid> SetItemStopped(Guid id, bool stopped, CancellationToken ct) => execution.Write("expenses.setup", async actor =>
+    public Task<Guid> SetItemStopped(Guid id, bool stopped, CancellationToken ct) => execution.Write(PermissionKeys.ExpensesSetup, async actor =>
     {
         var item = await repository.ExpenseItem(id, ct) ?? throw new KeyNotFoundException();
         var before = Snapshot(item);
