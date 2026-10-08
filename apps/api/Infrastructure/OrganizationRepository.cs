@@ -33,14 +33,15 @@ public sealed class OrganizationRepository(AuthDb db, EffectiveSettingsResolver 
                await db.PermissionOverrides.Where(x => x.UserId == userId).ToListAsync(ct), member is { Active: true });
      }
 
-     // The security policy is read untracked and brought into the current bounds, so a row saved under wider bounds
-     // neither fails validation for every member nor reaches their screens out of range.
+     // Everything is read untracked: resolving validates and canonicalizes the copies, which must never reach a save.
+     // The security policy is also brought into the current bounds, so a row saved under wider bounds neither fails
+     // validation for every member nor reaches their screens out of range.
      public async Task<EffectiveSettings> Settings(Guid userId, CancellationToken ct) =>
           settings.Resolve(
-               await db.Localizations.SingleOrDefaultAsync(ct),
-               await db.Brandings.SingleOrDefaultAsync(ct),
+               await db.Localizations.AsNoTracking().SingleOrDefaultAsync(ct),
+               await db.Brandings.AsNoTracking().SingleOrDefaultAsync(ct),
                SecurityPolicyBounds.Clamp(await db.SecurityPolicies.AsNoTracking().SingleOrDefaultAsync(ct)),
-               await db.UserPreferences.SingleOrDefaultAsync(x => x.UserId == userId, ct)
+               await db.UserPreferences.AsNoTracking().SingleOrDefaultAsync(x => x.UserId == userId, ct)
           );
 }
 

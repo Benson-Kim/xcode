@@ -5,7 +5,8 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 import { IconButton } from "./button";
 import { CloseIcon } from "./icons";
 
-// A modal panel with a sticky title bar (.access-dialog). Escape and the close button both call onClose.
+// A modal panel with a sticky title bar (.access-dialog). Escape and the close button both call onClose, once.
+// The native close event that follows a close the parent asked for is ignored.
 export function Dialog({
   open,
   title,
@@ -18,8 +19,10 @@ export function Dialog({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const openRef = useRef(open);
   const titleId = useId();
   useEffect(() => {
+    openRef.current = open;
     const dialog = ref.current;
     if (!dialog) return;
     if (open && !dialog.open) {
@@ -34,8 +37,9 @@ export function Dialog({
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      onClose={onClose}
-      onCancel={onClose}
+      onClose={() => {
+        if (openRef.current) onClose();
+      }}
       className="m-auto max-h-[calc(100%-64px)] w-[min(520px,calc(100%-32px))] rounded-2xl border border-card-line p-0 text-navy backdrop:bg-navy/40"
     >
       <div className="sticky top-0 flex items-center justify-between border-b border-card-line bg-surface px-5 py-4">

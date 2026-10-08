@@ -16,8 +16,9 @@ export function ErrorText({
   if (!children) return null;
   return (
     <View
+      accessible
       accessibilityRole="alert"
-      accessibilityLiveRegion="polite"
+      accessibilityLiveRegion="assertive"
       style={[styles.error, center && styles.center]}
     >
       <View style={styles.icon}>
@@ -47,8 +48,9 @@ export function Banner({
   const offline = tone === "offline";
   return (
     <View
-      accessibilityRole={offline ? undefined : "alert"}
-      accessibilityLiveRegion="polite"
+      accessible
+      role={offline ? "status" : "alert"}
+      accessibilityLiveRegion={offline ? "polite" : "assertive"}
       style={[
         styles.banner,
         offline

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Auth.Application;
+using Auth.Application.Settings;
 using Auth.Application.Setup;
 using Auth.Domain;
 using Auth.Domain.Setup;
@@ -8,7 +9,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Infrastructure.Setup;
 
-public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizations, IUnitOfWork unitOfWork, IClock clock) : ISetupRepository
+public sealed class SetupRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsChangeLog log,
+    HistoryCountCache? counts = null) : ISetupRepository
 {
     private IQueryable<FleetVehicle> VisibleVehicles(SetupActor actor) => db
         .Set<FleetVehicle>()
@@ -249,6 +251,14 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             .Where(r => r.VehicleId == vehicle.Id && r.BusinessDate >= first && r.BusinessDate <= last)
             .Select(r => new { r.BusinessDate, r.Amount })
             .ToListAsync(ct);
+        // Petty cash reaches the vehicle once it is approved, under its item's category.
+        var pettyCash = await db.Set<PettyCashEntry>().AsNoTracking()
+            .Where(e => e.VehicleId == vehicle.Id && e.Kind == PettyCashKind.Expense && e.Status == PettyCashStatus.Approved &&
+                e.RemovedAt == null && e.Date >= first && e.Date <= last)
+            .Join(db.Set<ExpenseItem>(), e => e.ExpenseItemId, i => i.Id, (e, i) => new { e.Id, e.Date, e.Total, i.Name, i.CategoryId })
+            .Join(db.Set<ExpenseCategory>(), x => x.CategoryId, c => c.Id, (x, c) => new PostingDto(x.Id, x.Id, x.Date, x.Name,
+                RecurringKind.Cost, x.Total, c.Bucket, "pettycash"))
+            .ToListAsync(ct);
 
         var postings = items
             .SelectMany(item => item.DueBetween(first, last)
@@ -256,6 +266,7 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
                 .Where(x => x.Share is not null)
                 .Select(x => new PostingDto(item.Id, x.Due.Version.Id, x.Due.Date, x.Due.Version.Name, x.Due.Version.Kind,
                     x.Share!.Amount, x.Due.Version.ReportedBucket())))
+            .Concat(pettyCash)
             .OrderBy(p => p.Date).ThenBy(p => p.Name, StringComparer.Ordinal).ThenBy(p => p.ItemId)
             .ToList();
 
@@ -277,32 +288,51 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             savings, net - savings, moneyOut, postings);
     }
 
-    public async Task<Page<HistoryEntry>> History(SetupActor actor, HistoryFilter filter, int page, int pageSize, CancellationToken ct)
+    public async Task<HistoryPage> History(SetupActor actor, HistoryFilter filter, int page, int pageSize, long? before, bool includeTotal, CancellationToken ct)
     {
-        var vehicles = VisibleVehicles(actor).Select(v => v.Id);
-        var companies = VisibleCompanies(actor).Select(c => c.Id);
-        var completeItems = db.Set<RecurringItem>().Where(i => !i.Versions.Any(v => v.Allocations.Any(a => !vehicles.Contains(a.VehicleId)))).Select(i => i.Id);
-        var revenueRecords = db.Set<RevenueRecord>().Where(r => vehicles.Contains(r.VehicleId)).Select(r => r.Id);
-        // People changes follow the people list's own visibility rules.
-        var people = PeopleVisibility.People(db, actor).Select(m => m.UserId);
         // D11: people entries carry contact details and permissions, so the section needs permission to view
         // people as well as to read the log. This holds for an organization-wide viewer too.
-        var seesPeople = actor.Permissions.Contains("people.view");
-        // The expense catalog is organization-wide; investment changes are logged against their vehicle.
+        var seesPeople = actor.Permissions.Contains(PermissionKeys.PeopleView);
         var query = db.Set<OrganizationSettingsVersion>().AsNoTracking()
-            .Where(v => v.Section != "people" || seesPeople)
-            .Where(v => actor.AllCompanies ||
-            (v.Section == "companies" && companies.Contains(v.EntityId)) || (v.Section == "vehicles" && vehicles.Contains(v.EntityId)) ||
-            (v.Section == "recurring" && completeItems.Contains(v.EntityId)) || v.Section == "expenses" ||
-            (v.Section == "investment" && vehicles.Contains(v.EntityId)) || (v.Section == "people" && people.Contains(v.EntityId)) ||
-            (v.Section == "revenue" && revenueRecords.Contains(v.EntityId)));
+            .Where(v => v.Section != "people" || seesPeople);
+        if (!actor.AllCompanies)
+        {
+            var vehicles = VisibleVehicles(actor).Select(v => v.Id);
+            var companies = VisibleCompanies(actor).Select(c => c.Id);
+            var completeItems = db.Set<RecurringItem>().Where(i => !i.Versions.Any(v => v.Allocations.Any(a => !vehicles.Contains(a.VehicleId)))).Select(i => i.Id);
+            // People changes follow the people list's own visibility rules.
+            var people = PeopleVisibility.People(db, actor).Select(m => m.UserId);
+            // Revenue, vehicle and investment changes follow the vehicle's current company. The expense catalog is
+            // organization-wide.
+            query = query.Where(v =>
+                (v.Section == "companies" && companies.Contains(v.EntityId)) ||
+                ((v.Section == "vehicles" || v.Section == "investment" || v.Section == "revenue" || v.Section == "pettycash") &&
+                    v.VehicleId != null && vehicles.Contains(v.VehicleId.Value)) ||
+                (v.Section == "recurring" && completeItems.Contains(v.EntityId)) || v.Section == "expenses" ||
+                (v.Section == "people" && people.Contains(v.EntityId)));
+        }
         query = await Narrow(query, filter, ct);
-        var entries = await query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(v => new HistoryEntry(v.Version, v.Section, v.EntityId, v.Reason, v.OccurredAt, v.ActorId,
-                db.Memberships.Where(m => m.UserId == v.ActorId).Select(m => m.FirstName + " " + m.LastName).FirstOrDefault() ?? "",
-                v.Before, v.After))
+
+        // A version is unique and only grows, so "older than the last one shown" pages without OFFSET and without
+        // skipping or repeating rows when changes arrive meanwhile.
+        var window = before is null
+            ? query.OrderByDescending(v => v.Version).Skip((page - 1) * pageSize)
+            : query.Where(v => v.Version < before.Value).OrderByDescending(v => v.Version);
+        var rows = await (
+                from v in window.Take(pageSize + 1)
+                join m in db.Memberships on v.ActorId equals m.UserId into actors
+                from m in actors.DefaultIfEmpty()
+                orderby v.Version descending
+                select new HistoryEntry(v.Version, v.Section, v.EntityId, v.Reason, v.OccurredAt, v.ActorId,
+                    m == null ? "" : m.FirstName + " " + m.LastName, v.Before, v.After))
             .ToListAsync(ct);
-        return new(actor.AllCompanies ? entries : await WithoutHiddenScope(actor, entries, ct), page, pageSize, await query.CountAsync(ct));
+        var hasMore = rows.Count > pageSize;
+        if (hasMore) rows.RemoveAt(rows.Count - 1);
+        var entries = actor.AllCompanies ? rows : await WithoutHiddenScope(actor, rows, ct);
+        int? total = includeTotal
+            ? counts is null ? await query.CountAsync(ct) : await counts.Count(actor, seesPeople, filter, () => query.CountAsync(ct))
+            : null;
+        return new(entries, page, pageSize, total, hasMore, hasMore ? entries[^1].Version : null);
     }
 
     // The log narrowed to what the person asked for. It is applied before paging, so the count and Load more
@@ -339,8 +369,10 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
             // The reason or the person who did it: the two things a line shows. Matching is the database's own,
             // which is case-insensitive under the collations XCODE runs on.
             var pattern = $"%{filter.Text.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]")}%";
-            query = query.Where(v => EF.Functions.Like(v.Reason, pattern)
-                || db.Memberships.Any(m => m.UserId == v.ActorId && EF.Functions.Like(m.FirstName + " " + m.LastName, pattern)));
+            // The few people whose name matches are found first, so the log is not searched person by person.
+            var actors = await db.Memberships.AsNoTracking()
+                .Where(m => EF.Functions.Like(m.FirstName + " " + m.LastName, pattern)).Select(m => m.UserId).ToListAsync(ct);
+            query = query.Where(v => EF.Functions.Like(v.Reason, pattern) || actors.Contains(v.ActorId));
         }
         return query;
     }
@@ -442,11 +474,9 @@ public sealed class SetupRepository(AuthDb db, IOrganizationRepository organizat
 
     public async Task RecordChange(SetupActor actor, string section, Guid entityId, object? before, object? after, string reason, CancellationToken ct)
     {
-        var organization = await organizations.Get(ct) ?? throw new UnauthorizedAccessException();
-        organization.SettingsChanged();
-        db.Set<OrganizationSettingsVersion>()
-            .Add(new(actor.OrganizationId, actor.UserId, organization.SettingsVersion, section, entityId,
-            clock.UtcNow, JsonSerializer.Serialize(before), JsonSerializer.Serialize(after), reason, actor.CorrelationId));
+        await log.Record(actor.OrganizationId, actor.UserId, actor.CorrelationId, section, entityId,
+            JsonSerializer.Serialize(before), JsonSerializer.Serialize(after), reason,
+            SetupValue.Name(section) is "vehicles" or "investment" ? entityId : null, ct);
         unitOfWork.Audit("setup." + section, entityId.ToString(), before, after);
     }
 }

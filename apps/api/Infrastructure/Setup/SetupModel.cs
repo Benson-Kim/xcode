@@ -78,6 +78,8 @@ public sealed partial class AuthDb
           var history = model.Entity<OrganizationSettingsVersion>();
           history.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(history);
           history.HasIndex(x => new { x.OrganizationId, x.Version }).IsUnique();
+          history.HasIndex(x => new { x.OrganizationId, x.Section, x.VehicleId });
+          history.HasIndex(x => new { x.OrganizationId, x.OccurredAt });
           // Both instants are UTC already (the entity refuses anything else), so they are stored as plain UTC
           // datetimes. That keeps them comparable inside a query on every provider XCODE runs on: SQL Server, and
           // the SQLite the tests use, which cannot compare a datetimeoffset at all. The change log is filtered by

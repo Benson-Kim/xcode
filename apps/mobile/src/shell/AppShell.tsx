@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SessionEndedError, apiGet } from "../lib/api";
 import type { StoredPerson } from "../lib/storage";
+import type { PettyCashSection } from "../pettycash/PettyCashScreen";
 import { queueCounts, useRevenueQueue } from "../revenue/queue";
 import { Icon, Text, useTheme } from "../ui";
 import { allowedTabs, type PermissionGroup, type Tab } from "./access";
@@ -33,6 +34,8 @@ export function AppShell({
   const { colors, fontScale } = useTheme();
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("home");
+  // Which part of Spend a Home card opened; the menu opens the first part the person has.
+  const [spendStart, setSpendStart] = useState<PettyCashSection | undefined>();
   const [catalog, setCatalog] = useState<Catalog>({ groups: null, error: "" });
   const [switching, setSwitching] = useState(false);
   const scroll = useRef<ScrollView>(null);
@@ -74,8 +77,9 @@ export function AppShell({
     };
   }, [offline, sessionEnded]);
 
-  function open(next: Tab) {
+  function open(next: Tab, section?: PettyCashSection) {
     setTab(next);
+    setSpendStart(section);
     scroll.current?.scrollTo({ y: 0, animated: false });
   }
 
@@ -117,7 +121,15 @@ export function AppShell({
               }}
             />
           ) : (
-            <ModuleScreen tab={tab} person={person} catalog={catalog} />
+            <ModuleScreen
+              tab={tab}
+              person={person}
+              catalog={catalog}
+              offline={offline}
+              businessDate={businessDate}
+              start={spendStart}
+              onSessionEnded={sessionEnded}
+            />
           )}
         </ScrollView>
       )}

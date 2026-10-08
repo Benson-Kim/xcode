@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [develop, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI: "true"
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  js:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # Fails when package-lock.json is out of step with any workspace's package.json.
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:lint-rules
+      - run: npm run test:shared
+      - run: npm run test:web
+
+  mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test:mobile
+
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+      # Locked mode: a packages.lock.json out of step with its project fails the restore.
+      - run: npm run restore:api
+      - run: npm run build:api -- -c Release --no-restore
+      - run: npm run test:api -- -c Release --no-build --blame-hang-timeout 10m --logger "trx;LogFileName=api.trx"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: api-test-results
+          path: tests/api/TestResults
+
+  # Migrations meet a real SQL Server only here: the api job's tests build their schema on SQLite with EnsureCreated.
+  api-sqlserver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SQLSERVER_TEST_CONNECTION: "Server=localhost,1433;Database=XCodeCiTests;User Id=sa;Password=CiOnly_Sql_2026;Encrypt=True;TrustServerCertificate=True"
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          # A throwaway for this job's private container, not a secret.
+          MSSQL_SA_PASSWORD: CiOnly_Sql_2026
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P CiOnly_Sql_2026 -Q 'SELECT 1' -b"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+          --health-start-period 20s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+      - run: npm run restore:api
+      - run: npm run build:api -- -c Release --no-restore
+      - name: Every migration applies to an empty SQL Server database
+        run: npm run test:api:sqlserver -- -c Release --no-build
+      - name: Build the API image
+        run: docker build -t xcode-api:ci apps/api
+      - name: The image migrates with --migrate, a second run is a no-op, and the migrated API reports ready
+        env:
+          ASPNETCORE_ENVIRONMENT: Production
+          ConnectionStrings__Auth: "Server=localhost,1433;Database=XCodeCiDeploy;User Id=sa;Password=CiOnly_Sql_2026;Encrypt=True;TrustServerCertificate=True"
+          Auth__SigningKey: ci-only-signing-key-0123456789-abcdefghij
+          Email__Host: localhost
+          Email__From: ci@example.test
+        run: |
+          settings="-e ASPNETCORE_ENVIRONMENT -e ConnectionStrings__Auth -e Auth__SigningKey -e Email__Host -e Email__From"
+          docker run --rm --network host $settings xcode-api:ci --migrate
+          docker run --rm --network host $settings xcode-api:ci --migrate
+          docker run -d --name api --network host $settings xcode-api:ci
+          curl --retry 20 --retry-delay 2 --retry-all-errors -fsS http://localhost:8080/health/ready
+      - if: failure()
+        run: docker logs api || true
+
+  web-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+          load: true
+          tags: xcode-web:ci
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+      - name: The image starts and serves the sign-in page with its security policy
+        run: |
+          docker run -d --name web -p 3000:3000 -e API_URL=https://api.example.test xcode-web:ci
+          curl --retry 15 --retry-delay 2 --retry-all-errors -fsS -D headers.txt -o /dev/null http://localhost:3000/
+          grep -i '^content-security-policy:' headers.txt
+      - if: failure()
+        run: docker logs web || true

@@ -1,3 +1,4 @@
+export { clearDataCache } from "./cache";
 export { ApiError, apiRequest } from "./request";
 export { useResource } from "./useResource";
-export { useStreamedList } from "./useStreamedList";
+export { streamError, useStreamedList } from "./useStreamedList";

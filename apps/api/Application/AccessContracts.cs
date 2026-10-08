@@ -29,93 +29,99 @@ public static class PermissionCatalog
     [
         new("Dashboard",
         [
-            new("dash.capture", "See today's capture for my vehicles"),
-            new("dash.float", "See my petty cash float"),
-            new("dash.revenue", "See revenue totals"),
-            new("dash.net", "See net contribution and weakest vehicles"),
-            new("dash.costs", "See cost totals"),
-            new("dash.gaps", "See missing revenue days"),
-            new("dash.pettycash", "See petty cash waiting for approval"),
-            new("dash.commitments", "See renewals due"),
-            new("dash.investment", "See money invested and how much is back"),
-            new("dash.edits", "See records edited after capture")
+            new(PermissionKeys.DashCapture, "See today's capture for my vehicles"),
+            new(PermissionKeys.DashFloat, "See my petty cash float"),
+            new(PermissionKeys.DashRevenue, "See revenue totals"),
+            new(PermissionKeys.DashNet, "See net contribution and weakest vehicles"),
+            new(PermissionKeys.DashCosts, "See cost totals"),
+            new(PermissionKeys.DashGaps, "See missing revenue days"),
+            new(PermissionKeys.DashPettyCash, "See petty cash waiting for approval"),
+            new(PermissionKeys.DashCommitments, "See renewals due"),
+            new(PermissionKeys.DashInvestment, "See money invested and how much is back"),
+            new(PermissionKeys.DashEdits, "See records edited after capture")
         ]),
         new("Revenue",
         [
-            new("revenue.view", "View revenue records"),
-            new("revenue.capture", "Capture revenue"),
-            new("revenue.no_earnings", "Record a no earnings reason"),
-            new("revenue.correct", "Correct revenue after the day")
+            new(PermissionKeys.RevenueView, "View revenue records"),
+            new(PermissionKeys.RevenueCapture, "Capture revenue"),
+            new(PermissionKeys.RevenueNoEarnings, "Record a no earnings reason"),
+            new(PermissionKeys.RevenueCorrect, "Correct revenue after the day")
         ]),
         new("Expenses",
         [
-            new("expenses.view", "View expenses"),
-            new("expenses.capture", "Record an expense straight onto a vehicle"),
-            new("expenses.correct", "Change an expense after the day"),
-            new("expenses.setup", "Set up expense categories and items")
+            new(PermissionKeys.ExpensesView, "View expenses"),
+            new(PermissionKeys.ExpensesCapture, "Record an expense straight onto a vehicle"),
+            new(PermissionKeys.ExpensesCorrect, "Change an expense after the day"),
+            new(PermissionKeys.ExpensesSetup, "Set up expense categories and items")
         ]),
         new("Petty cash",
         [
-            new("pettycash.spend", "Record spending from my float"),
-            new("pettycash.view_all", "View every float"),
-            new("pettycash.approve_item", "Approve single entries"),
-            new("pettycash.approve_day", "Approve a whole day"),
-            new("pettycash.issue", "Record money sent to a float"),
-            new("pettycash.issue_negative", "Send money that takes a float below zero")
+            new(PermissionKeys.PettyCashSpend, "Record spending from my float"),
+            new(PermissionKeys.PettyCashViewAll, "View every float"),
+            new(PermissionKeys.PettyCashApproveItem, "Approve single entries"),
+            new(PermissionKeys.PettyCashApproveDay, "Approve a whole day"),
+            new(PermissionKeys.PettyCashIssue, "Record money sent to a float"),
+            new(PermissionKeys.PettyCashIssueNegative, "Send money that takes a float below zero")
         ]),
         new("Office bills",
         [
-            new("bills.view", "View office bills"),
-            new("bills.capture", "Capture office bills"),
-            new("bills.approve", "Approve office bills")
+            new(PermissionKeys.BillsView, "View office bills"),
+            new(PermissionKeys.BillsCapture, "Capture office bills"),
+            new(PermissionKeys.BillsApprove, "Approve office bills")
         ]),
         new("Scheduled expenses and savings",
         [
-            new("commitments.view", "View scheduled expenses and savings"),
-            new("commitments.manage", "Set up, change and stop scheduled expenses and savings")
+            new(PermissionKeys.CommitmentsView, "View scheduled expenses and savings"),
+            new(PermissionKeys.CommitmentsManage, "Set up, change and stop scheduled expenses and savings")
         ]),
         new("Reports",
         [
-            new("reports.view", "View reports"),
-            new("reports.export", "Export reports")
+            new(PermissionKeys.ReportsView, "View reports"),
+            new(PermissionKeys.ReportsExport, "Export reports")
         ]),
         new("Setup",
         [
-            new("companies.manage", "Set up PSV companies"),
-            new("vehicles.manage", "Set up vehicles and weekly targets"),
-            new("invest.view", "See what was invested in a vehicle"),
-            new("invest.manage", "Record what was invested in a vehicle"),
-            new("people.view", "View people"),
-            new("people.manage", "Add people, choose their role and what they can see, remove access"),
-            new("access.manage", "Change single permissions and approval limits for a person"),
-            new("audit.view", "View the change log"),
-            new("organization.manage", "Manage organization settings")
+            new(PermissionKeys.CompaniesManage, "Set up PSV companies"),
+            new(PermissionKeys.VehiclesManage, "Set up vehicles and weekly targets"),
+            new(PermissionKeys.InvestView, "See what was invested in a vehicle"),
+            new(PermissionKeys.InvestManage, "Record what was invested in a vehicle"),
+            new(PermissionKeys.PeopleView, "View people"),
+            new(PermissionKeys.PeopleManage, "Add people, choose their role and what they can see, remove access"),
+            new(PermissionKeys.AccessManage, "Change single permissions and approval limits for a person"),
+            new(PermissionKeys.AuditView, "View the change log"),
+            new(PermissionKeys.OrganizationManage, "Manage organization settings")
         ])
     ];
 
     public static IReadOnlyList<string> All => Groups.SelectMany(x => x.Items).Select(x => x.Key).ToArray();
 
+    private static readonly IReadOnlyDictionary<string, string> Labels = Groups.SelectMany(x => x.Items).ToDictionary(x => x.Key, x => x.Label);
+
+    // A refusal names the permission it needs, as People and access labels it, so the phone and the web can say so.
+    public static UnauthorizedAccessException Refusal(string action, string permission) =>
+        new($"{action} needs the permission \"{Labels.GetValueOrDefault(permission, permission)}\".");
+
     public static readonly IReadOnlyDictionary<string, string[]> RolePermissions = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
     {
-        ["Owner"] = All.Where(x => x is not "dash.capture").ToArray(),
+        ["Owner"] = All.Where(x => x is not PermissionKeys.DashCapture).ToArray(),
         ["Office admin"] =
         [
-            "dash.revenue", "dash.costs", "dash.gaps", "dash.commitments", "dash.edits",
-            "revenue.view", "revenue.correct",
-            "expenses.view", "expenses.capture", "expenses.correct", "expenses.setup",
-            "bills.view", "bills.capture",
-            "commitments.view", "commitments.manage",
-            "reports.view", "reports.export",
-            "invest.view", "invest.manage",
-            "companies.manage", "vehicles.manage", "people.view", "people.manage", "audit.view"
+            PermissionKeys.DashRevenue, PermissionKeys.DashCosts, PermissionKeys.DashGaps, PermissionKeys.DashCommitments, PermissionKeys.DashEdits,
+            PermissionKeys.RevenueView, PermissionKeys.RevenueCorrect,
+            PermissionKeys.ExpensesView, PermissionKeys.ExpensesCapture, PermissionKeys.ExpensesCorrect, PermissionKeys.ExpensesSetup,
+            PermissionKeys.BillsView, PermissionKeys.BillsCapture,
+            PermissionKeys.CommitmentsView, PermissionKeys.CommitmentsManage,
+            PermissionKeys.ReportsView, PermissionKeys.ReportsExport,
+            PermissionKeys.InvestView, PermissionKeys.InvestManage,
+            PermissionKeys.CompaniesManage, PermissionKeys.VehiclesManage, PermissionKeys.PeopleView, PermissionKeys.PeopleManage, PermissionKeys.AuditView
         ],
         ["Fleet manager"] =
         [
-            "dash.float", "dash.revenue", "dash.costs", "dash.gaps",
-            "revenue.view", "revenue.capture", "revenue.no_earnings", "revenue.correct",
-            "pettycash.spend", "expenses.view", "reports.view"
+            PermissionKeys.DashFloat, PermissionKeys.DashRevenue, PermissionKeys.DashCosts, PermissionKeys.DashGaps,
+            PermissionKeys.RevenueView, PermissionKeys.RevenueCapture, PermissionKeys.RevenueNoEarnings, PermissionKeys.RevenueCorrect,
+            PermissionKeys.PettyCashSpend, PermissionKeys.ExpensesView, PermissionKeys.ReportsView
         ],
-        ["Revenue clerk"] = ["dash.capture", "dash.gaps", "revenue.view", "revenue.capture", "revenue.no_earnings"]
+        ["Revenue clerk"] = [PermissionKeys.DashCapture, PermissionKeys.DashGaps, PermissionKeys.RevenueView, PermissionKeys.RevenueCapture, PermissionKeys.RevenueNoEarnings]
     };
 
     public static IReadOnlyList<string> DefaultsFor(string roleName) => WithDependencies(RolePermissions.GetValueOrDefault(roleName, []));

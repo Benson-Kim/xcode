@@ -91,6 +91,34 @@ export function Chip({
   );
 }
 
+const ACT_TONES = {
+  plain:
+    "border-line bg-surface text-navy hover:enabled:border-blue hover:enabled:text-blue-dark",
+  ok: "border-green bg-green-bg text-green",
+  warn: "border-amber bg-amber-bg text-amber-text",
+  bad: "border-red bg-red-bg text-red-text",
+} as const;
+
+// A row's own action (.act): smaller and quieter than the page's pill buttons, coloured the same way.
+export function RowAction({
+  tone = "plain",
+  className,
+  type = "button",
+  ...props
+}: ComponentProps<"button"> & { tone?: keyof typeof ACT_TONES }) {
+  return (
+    <button
+      {...props}
+      type={type}
+      className={cn(
+        "min-h-9 rounded-full border px-2.5 text-sm font-semibold whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50",
+        ACT_TONES[tone],
+        className,
+      )}
+    />
+  );
+}
+
 export function ChipGroup({ className, ...props }: ComponentProps<"div">) {
   return <div {...props} className={cn("flex flex-wrap gap-2", className)} />;
 }

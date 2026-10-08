@@ -375,11 +375,14 @@ public sealed class RevenueCaptureTests : IDisposable
         Assert.Equal(1, (await Dashboard(owner, "week")).GetProperty("editedRecords").GetInt32());
 
         // Leaving the fleet from that day takes the corrected record out of the revenue, the target and the edits alike.
+        // The API refuses a leave date on or before a recorded day, so only data from before that rule holds such a
+        // record; it is written directly here, moving the settings version as every audited write does.
         await app.WithDb(async db =>
         {
             db.Provisioning = true;
             var fleetVehicle = await db.Set<Auth.Domain.Setup.FleetVehicle>().IgnoreQueryFilters().SingleAsync(x => x.Id == vehicle);
             fleetVehicle.Retire(today.AddDays(-1), today);
+            (await db.Organizations.IgnoreQueryFilters().SingleAsync()).SettingsChanged();
             await db.SaveChangesAsync();
         });
         var dashboard = await Dashboard(owner, "week");

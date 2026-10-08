@@ -200,6 +200,131 @@ export const revenueDashboard = {
   editedRecords: 0,
 };
 
+export const pettyEntry = (over: Record<string, unknown> = {}) => ({
+  id: "entry-1",
+  kind: "expense",
+  holderId: "u-brian",
+  holderName: "Brian Mwangi",
+  date: "2026-09-29",
+  vehicleId: "vehicle-1",
+  registration: "KDA 482M",
+  expenseItemId: "item-1",
+  expenseItemName: "Tyre repair",
+  bucket: 2,
+  units: 2,
+  unitAmount: 750,
+  total: 1500,
+  payee: null,
+  note: null,
+  reimbursable: false,
+  status: "waiting",
+  sentBackNote: null,
+  reviewedByName: null,
+  reviewedAt: null,
+  recordedByName: "Brian Mwangi",
+  recordedAt: "2026-09-29T08:00:00Z",
+  updatedAt: "2026-09-29T08:00:00Z",
+  version: 1,
+  canEdit: true,
+  canRemove: true,
+  canReview: false,
+  aboveLimit: false,
+  ...over,
+});
+
+export const pettyPermissions = (over: Record<string, unknown> = {}) => ({
+  holderId: "u-brian",
+  canSpend: true,
+  canViewAll: false,
+  canIssue: false,
+  canIssueNegative: false,
+  canApproveItem: false,
+  canApproveDay: false,
+  approvalLimit: null,
+  ...over,
+});
+
+export const pettyOverview = (over: Record<string, unknown> = {}) => ({
+  businessDate: "2026-09-29",
+  date: "2026-09-29",
+  permissions: pettyPermissions(),
+  holders: [{ id: "u-brian", name: "Brian Mwangi", active: true }],
+  period: "day",
+  from: "2026-09-29",
+  to: "2026-09-29",
+  figures: {
+    openingBalance: 5000,
+    cashReceived: 1000,
+    expenses: 1500,
+    creditNotes: 0,
+    moneyOut: 1500,
+    closingBalance: 4500,
+  },
+  floats: [
+    {
+      holderId: "u-brian",
+      name: "Brian Mwangi",
+      active: true,
+      cashReceived: 6000,
+      creditNotes: 0,
+      expenses: 1500,
+      waiting: 1500,
+      waitingCount: 1,
+      approved: 0,
+      sentBack: 0,
+      balance: 4500,
+      lastCashOn: "2026-09-28",
+    },
+  ],
+  ...over,
+});
+
+export const pettyOptions = {
+  vehicles: [
+    {
+      id: "vehicle-1",
+      companyId: "company-1",
+      companyName: "North Star",
+      registration: "KDA 482M",
+      active: true,
+    },
+    {
+      id: "vehicle-2",
+      companyId: "company-1",
+      companyName: "North Star",
+      registration: "KDB 100X",
+      active: true,
+    },
+  ],
+  items: [
+    {
+      id: "item-1",
+      name: "Tyre repair",
+      categoryId: "cat-1",
+      categoryName: "Repairs",
+      bucket: 2,
+    },
+    {
+      id: "item-2",
+      name: "Diesel",
+      categoryId: "cat-2",
+      categoryName: "Running",
+      bucket: 1,
+    },
+  ],
+  holders: [
+    { id: "u-brian", name: "Brian Mwangi", active: true },
+    { id: "u-grace", name: "Grace Njeri", active: true },
+  ],
+};
+
+export const pettyPage = (items: unknown[], total = items.length) => ({
+  items,
+  pageNumber: 1,
+  pageSize: 100,
+  total,
+});
+
 export const tokens = (n = 1) => ({
   status: "authenticated",
   accessToken: `access-${n}`,
@@ -210,6 +335,7 @@ export function fakeApi() {
   const routes = new Map<string, Handler>();
   const calls: {
     path: string;
+    method: string;
     body: Record<string, string>;
     headers: Record<string, string>;
   }[] = [];
@@ -217,7 +343,7 @@ export function fakeApi() {
     const path = url.replace(/^https?:\/\/[^/]+\//, "");
     const body = init.body ? JSON.parse(String(init.body)) : {};
     const headers = (init.headers ?? {}) as Record<string, string>;
-    calls.push({ path, body, headers });
+    calls.push({ path, method: init.method ?? "GET", body, headers });
     const answer = routes.get(path)?.(body, headers);
     const reply = (answer instanceof Promise ? await answer : answer) ?? [
       404,

@@ -9,16 +9,25 @@ public sealed class SetupExecution(IOrganizationContext context, IOrganizationRe
 {
     // Reads run the same authorization as writes, but with no serializable transaction and no SaveChanges.
     public Task<T> Read<T>(string permission, Func<SetupActor, Task<T>> query, CancellationToken ct) =>
-        ReadAny(string.IsNullOrEmpty(permission) ? Array.Empty<string>() : [permission], query, ct);
+        ReadAny(Required(permission), query, ct);
 
     public Task<T> ReadAny<T>(IReadOnlyCollection<string> permissions, Func<SetupActor, Task<T>> query, CancellationToken ct) =>
         new Invocation<T>(context, organizations, unitOfWork, permissions, true, async () => await query(await Actor(ct))).Run(true, ct);
 
     public Task<T> Write<T>(string permission, Func<SetupActor, Task<T>> command, CancellationToken ct) =>
-        WriteAny(string.IsNullOrEmpty(permission) ? Array.Empty<string>() : [permission], command, ct);
+        WriteAny(Required(permission), command, ct);
 
     public Task<T> WriteAny<T>(IReadOnlyCollection<string> permissions, Func<SetupActor, Task<T>> command, CancellationToken ct) =>
         new Invocation<T>(context, organizations, unitOfWork, permissions, false, async () => await command(await Actor(ct))).Run(true, ct);
+
+    public Task<T> Read<T>(string permission, Func<Task<T>> query, CancellationToken ct) =>
+        new Invocation<T>(context, organizations, unitOfWork, Required(permission), true, query).Run(true, ct);
+
+    public Task<T> Write<T>(string permission, Func<Task<T>> command, CancellationToken ct) =>
+        new Invocation<T>(context, organizations, unitOfWork, Required(permission), false, command).Run(true, ct);
+
+    private static IReadOnlyCollection<string> Required(string permission) =>
+        string.IsNullOrEmpty(permission) ? Array.Empty<string>() : [permission];
 
     private async Task<SetupActor> Actor(CancellationToken ct)
     {
@@ -34,13 +43,14 @@ public sealed class SetupExecution(IOrganizationContext context, IOrganizationRe
             .SingleOrDefaultAsync(ct) ?? "Africa/Nairobi";
         var calendarDate = DateOnly.FromDateTime(
             TimeZoneInfo.ConvertTime(clock.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone)).DateTime);
-        var businessDate = await db.Organizations.AsNoTracking().Select(x => x.BusinessDate).SingleAsync(ct);
+        var organization = await db.Organizations.AsNoTracking()
+            .Select(x => new { x.BusinessDate, x.SettingsVersion }).SingleAsync(ct);
         // All setup calculations use the organization's accounting date, never a browser or user-local date.
-        var today = businessDate ?? calendarDate;
+        var today = organization.BusinessDate ?? calendarDate;
         var permissions = await organizations.Permissions(context.ActorId, ct);
 
         return new(context.OrganizationId, context.ActorId, today, scope?.AllCompanies == true,
-            companies, vehicles, context.CorrelationId, permissions);
+            companies, vehicles, context.CorrelationId, permissions, organization.SettingsVersion);
     }
 
     private sealed class Invocation<T>(

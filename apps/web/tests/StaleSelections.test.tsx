@@ -248,7 +248,7 @@ it("shows a first day of the week the server holds even when it is not one of th
         hour12: false,
         firstDayOfWeek: 2,
         weekNumbering: "iso8601",
-        useGroupping: true,
+        useGrouping: true,
         numberDecimals: 2,
       },
       branding: {

@@ -7,7 +7,7 @@ import type { Formatter } from "@xcode/shared/format";
 
 import { apiRequest } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
-import type { Page } from "../../lib/types";
+import type { ChangeLogPage } from "../../lib/types";
 import {
   Banner,
   Button,
@@ -38,6 +38,7 @@ const sections: Record<string, string> = {
   logo: "Logo",
   people: "People and access",
   revenue: "Revenue",
+  pettycash: "Petty cash",
 };
 
 type FieldChange = {
@@ -202,7 +203,7 @@ type Loaded = {
   items: HistoryRow[];
   total: number;
   pages: number;
-  done: boolean;
+  next: number | null;
   error: string;
 };
 
@@ -211,7 +212,7 @@ const nothingYet = (query: string): Loaded => ({
   items: [],
   total: 0,
   pages: 0,
-  done: false,
+  next: null,
   error: "",
 });
 
@@ -220,15 +221,16 @@ const rowKey = (row: HistoryRow) => `${row.version}-${row.entityId}`;
 // The change log a page at a time: the first page when it opens, and the next only when the person asks for it.
 // Changes saved meanwhile push older rows down a page, so rows already shown are not added twice.
 // The filter is part of the request, so the server counts the narrowed log and "Load more" means more of it;
-// changing the filter starts again at page 1.
+// changing the filter starts again at the newest change. Each later page asks for the changes older than the last
+// one received, so changes saved meanwhile cannot shift it.
 function useHistoryPages(query: string) {
   const [loaded, setLoaded] = useState<Loaded>(() => nothingYet(query));
   const [pending, setPending] = useState<number | null>(1);
 
   const receive = useCallback(
-    (page: number) =>
-      apiRequest<Page<HistoryRow>>(
-        `setup/history?page=${page}&pageSize=${PAGE_SIZE}${query}`,
+    (page: number, before: number | null) =>
+      apiRequest<ChangeLogPage<HistoryRow>>(
+        `setup/history?pageSize=${PAGE_SIZE}${before === null ? "" : `&before=${before}`}${query}`,
       )
         .then(
           (result) =>
@@ -243,11 +245,9 @@ function useHistoryPages(query: string) {
               return {
                 query,
                 items,
-                total: result.total,
+                total: result.total ?? items.length,
                 pages: page,
-                done:
-                  result.items.length < PAGE_SIZE ||
-                  items.length >= result.total,
+                next: result.hasMore ? result.nextBefore : null,
                 error: "",
               };
             }),
@@ -263,13 +263,13 @@ function useHistoryPages(query: string) {
   );
 
   useEffect(() => {
-    void receive(1);
+    void receive(1, null);
   }, [receive]);
 
   function more() {
-    if (pending !== null) return;
+    if (pending !== null || loaded.next === null) return;
     setPending(loaded.pages + 1);
-    void receive(loaded.pages + 1);
+    void receive(loaded.pages + 1, loaded.next);
   }
 
   // Rows from an earlier filter are not this filter's answer, so they are not shown while its first page is on
@@ -280,7 +280,7 @@ function useHistoryPages(query: string) {
     ...shown,
     loading: changed || (shown.pages === 0 && pending !== null),
     loadingMore: !changed && shown.pages > 0 && pending !== null,
-    hasMore: !changed && shown.pages > 0 && !shown.done,
+    hasMore: !changed && shown.pages > 0 && shown.next !== null,
     more,
   };
 }

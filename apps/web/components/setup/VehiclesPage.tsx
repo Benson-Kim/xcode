@@ -10,7 +10,12 @@ import {
 } from "@xcode/shared/revenue";
 
 import { useAppearance } from "../../lib/appearance";
-import { apiRequest, useResource, useStreamedList } from "../../lib/data";
+import {
+  apiRequest,
+  streamError,
+  useResource,
+  useStreamedList,
+} from "../../lib/data";
 import { useFormats } from "../../lib/formats";
 import { useSession } from "../../lib/session-context";
 import type { ExpenseBucket } from "../../lib/types";
@@ -144,7 +149,7 @@ export function VehiclesPage({
       />
       {(vehicles.error || companyOptions.error) && (
         <Banner className="mt-5">
-          {vehicles.error || companyOptions.error}
+          {streamError(vehicles) || companyOptions.error}
         </Banner>
       )}
       <Toolbar>

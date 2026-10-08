@@ -28,12 +28,14 @@ public sealed partial class AuthDb(DbContextOptions<AuthDb> options, Auth.Applic
     public DbSet<TrustedDevice> TrustedDevices => Set<TrustedDevice>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<RevenueRecord> RevenueRecords => Set<RevenueRecord>();
+    public DbSet<PettyCashEntry> PettyCashEntries => Set<PettyCashEntry>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
         ConfigureOrganizations(model);
         ConfigureSetup(model);
         ConfigureRevenue(model);
+        ConfigurePettyCash(model);
 
         model.Entity<User>().Property(x => x.Email).HasMaxLength(320);
         model.Entity<User>().HasIndex(x => x.Email).IsUnique();

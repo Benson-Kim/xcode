@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { apiRequest, useStreamedList } from "../../lib/data";
+import { apiRequest, streamError, useStreamedList } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
 import {
   Banner,
@@ -129,7 +129,7 @@ export function CompaniesPage() {
         description="Every vehicle belongs to one company. Archive a company after its vehicles have left the fleet."
       />
       {(companies.error || addError) && (
-        <Banner className="mt-5">{companies.error || addError}</Banner>
+        <Banner className="mt-5">{streamError(companies) || addError}</Banner>
       )}
       <Toolbar align="start">
         <Field

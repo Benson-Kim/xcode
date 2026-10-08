@@ -241,7 +241,7 @@ it("keeps every refused capture with the reason, and drops one only on a 200 or 
   });
   expect(byDate["2026-09-27"]).toMatchObject({
     state: "blocked",
-    message: "Capture 20 Sep 2026 first.",
+    message: "Capture the earlier day first.",
     earliestMissing: "2026-09-20",
   });
   // The API struggling stops the round; later days wait and are not sent.

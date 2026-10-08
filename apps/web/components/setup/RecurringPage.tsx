@@ -5,7 +5,7 @@ import { useState } from "react";
 import { plural } from "@xcode/shared/format";
 
 import { useAppearance } from "../../lib/appearance";
-import { useResource, useStreamedList } from "../../lib/data";
+import { streamError, useResource, useStreamedList } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
 import type { ExpenseItemOption } from "../../lib/types";
 import { RecurringEditor } from "../RecurringEditor";
@@ -161,7 +161,9 @@ export function RecurringPage({
         description="Set once. Each posts to its vehicles on its own dates and shows in their reports."
       />
       {(recurring.error || options.error) && (
-        <Banner className="mt-5">{recurring.error || options.error}</Banner>
+        <Banner className="mt-5">
+          {streamError(recurring) || options.error}
+        </Banner>
       )}
       <Toolbar>
         <SegmentedControl

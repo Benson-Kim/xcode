@@ -58,3 +58,32 @@ it("shows rows as each page arrives, with fewer placeholders every time", async 
   expect(placeholders()).toHaveLength(0);
   expect(table()).not.toHaveAttribute("aria-busy");
 });
+
+it("says how much of the list is shown when a later page fails", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      const page = Number(
+        new URL(input, "http://app").searchParams.get("page"),
+      );
+      if (page > 1)
+        return new Response(JSON.stringify({ title: "Refused" }), {
+          status: 400,
+        });
+      const items = Array.from({ length: 25 }, (_, index) =>
+        company(index + 1),
+      );
+      return new Response(
+        JSON.stringify({ items, pageNumber: 1, pageSize: 25, total: 60 }),
+        { status: 200 },
+      );
+    }),
+  );
+  renderInApp(<CompaniesPage />);
+
+  expect(
+    await screen.findByText("Refused Showing 25 of 60."),
+  ).toBeInTheDocument();
+  expect(rows()).toHaveLength(25);
+  expect(placeholders()).toHaveLength(0);
+});

@@ -2,7 +2,7 @@ import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "./cn";
 
-// The white panel every screen is built from (.card). Form cards space their fields a little wider.
+// The white panel every screen is built from. Form cards space their fields a little wider.
 export function Card({
   density = "standard",
   className,
@@ -76,7 +76,7 @@ export function ProgressBar({ value }: { value: number }) {
   );
 }
 
-// Label/value rows inside a card (.card-list).
+// Label/value rows inside a card
 export function CardList({ className, ...props }: ComponentProps<"ul">) {
   return <ul {...props} className={cn("mt-1 mb-0 list-none p-0", className)} />;
 }
@@ -127,7 +127,7 @@ export function CardListItem({
   );
 }
 
-// Report figures (.report-grid / .stat).
+// Report figures
 export function StatGrid({ className, ...props }: ComponentProps<"div">) {
   return (
     <div

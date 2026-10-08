@@ -54,38 +54,38 @@ public static class PermissionDependencies
      // This is the one dependency graph used by the catalog, role defaults and request-time authorization.
      private static readonly IReadOnlyDictionary<string, string[]> DirectDependencies = new Dictionary<string, string[]>(StringComparer.Ordinal)
      {
-          ["dash.capture"] = ["revenue.capture"],
-          ["dash.float"] = ["pettycash.spend"],
-          ["dash.revenue"] = ["revenue.view"],
-          ["dash.net"] = ["revenue.view", "expenses.view", "commitments.view"],
-          ["dash.costs"] = ["expenses.view", "commitments.view"],
-          ["dash.gaps"] = ["revenue.view"],
-          ["dash.pettycash"] = ["pettycash.view_all"],
-          ["dash.commitments"] = ["commitments.view"],
-          ["dash.investment"] = ["invest.view"],
-          ["dash.edits"] = ["audit.view"],
+          [PermissionKeys.DashCapture] = [PermissionKeys.RevenueCapture],
+          [PermissionKeys.DashFloat] = [PermissionKeys.PettyCashSpend],
+          [PermissionKeys.DashRevenue] = [PermissionKeys.RevenueView],
+          [PermissionKeys.DashNet] = [PermissionKeys.RevenueView, PermissionKeys.ExpensesView, PermissionKeys.CommitmentsView],
+          [PermissionKeys.DashCosts] = [PermissionKeys.ExpensesView, PermissionKeys.CommitmentsView],
+          [PermissionKeys.DashGaps] = [PermissionKeys.RevenueView],
+          [PermissionKeys.DashPettyCash] = [PermissionKeys.PettyCashViewAll],
+          [PermissionKeys.DashCommitments] = [PermissionKeys.CommitmentsView],
+          [PermissionKeys.DashInvestment] = [PermissionKeys.InvestView],
+          [PermissionKeys.DashEdits] = [PermissionKeys.AuditView],
 
-          ["revenue.capture"] = ["revenue.view"],
-          ["revenue.no_earnings"] = ["revenue.capture"],
-          ["revenue.correct"] = ["revenue.view"],
+          [PermissionKeys.RevenueCapture] = [PermissionKeys.RevenueView],
+          [PermissionKeys.RevenueNoEarnings] = [PermissionKeys.RevenueCapture],
+          [PermissionKeys.RevenueCorrect] = [PermissionKeys.RevenueView],
 
-          ["expenses.capture"] = ["expenses.view"],
-          ["expenses.correct"] = ["expenses.view"],
-          ["expenses.setup"] = ["expenses.view"],
+          [PermissionKeys.ExpensesCapture] = [PermissionKeys.ExpensesView],
+          [PermissionKeys.ExpensesCorrect] = [PermissionKeys.ExpensesView],
+          [PermissionKeys.ExpensesSetup] = [PermissionKeys.ExpensesView],
 
-          ["pettycash.approve_item"] = ["pettycash.view_all"],
-          ["pettycash.approve_day"] = ["pettycash.approve_item"],
-          ["pettycash.issue"] = ["pettycash.view_all"],
-          ["pettycash.issue_negative"] = ["pettycash.issue"],
+          [PermissionKeys.PettyCashApproveItem] = [PermissionKeys.PettyCashViewAll],
+          [PermissionKeys.PettyCashApproveDay] = [PermissionKeys.PettyCashApproveItem],
+          [PermissionKeys.PettyCashIssue] = [PermissionKeys.PettyCashViewAll],
+          [PermissionKeys.PettyCashIssueNegative] = [PermissionKeys.PettyCashIssue],
 
-          ["bills.capture"] = ["bills.view"],
-          ["bills.approve"] = ["bills.view"],
+          [PermissionKeys.BillsCapture] = [PermissionKeys.BillsView],
+          [PermissionKeys.BillsApprove] = [PermissionKeys.BillsView],
 
-          ["commitments.manage"] = ["commitments.view"],
-          ["reports.export"] = ["reports.view"],
-          ["invest.manage"] = ["invest.view"],
-          ["people.manage"] = ["people.view"],
-          ["access.manage"] = ["people.manage"]
+          [PermissionKeys.CommitmentsManage] = [PermissionKeys.CommitmentsView],
+          [PermissionKeys.ReportsExport] = [PermissionKeys.ReportsView],
+          [PermissionKeys.InvestManage] = [PermissionKeys.InvestView],
+          [PermissionKeys.PeopleManage] = [PermissionKeys.PeopleView],
+          [PermissionKeys.AccessManage] = [PermissionKeys.PeopleManage]
      };
 
      public static IReadOnlyList<string> DirectFor(string permission) =>

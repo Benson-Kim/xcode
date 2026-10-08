@@ -4,6 +4,7 @@ import {
   AuthError,
   createAuthClient,
   pauseSeconds,
+  pinHelp,
   validatePin,
 } from "@xcode/shared/auth";
 
@@ -28,6 +29,31 @@ describe("AUTH-10/11 PIN rules shared by web and mobile", () => {
   it.each(["5826", "6942", "0193", "1122", "58269104"])("accepts %j", (pin) =>
     expect(validatePin(pin)).toBeNull(),
   );
+});
+
+describe("PIN minimum length", () => {
+  it.each([
+    ["5826", 6],
+    ["58269", 6],
+    ["58269", 8],
+  ])("rejects %j when the organization needs %i numbers", (pin, minimum) => {
+    expect(validatePin(pin, minimum)).toBe(pinHelp(minimum));
+  });
+  it.each([
+    ["593718", 6],
+    ["58269104", 8],
+    ["5826", 4],
+  ])("accepts %j when the organization needs %i numbers", (pin, minimum) => {
+    expect(validatePin(pin, minimum)).toBeNull();
+  });
+  it("keeps the wording of the default rule", () => {
+    expect(validatePin("1111")).toBe(
+      "Use 4-8 digits, not all the same or an ascending/descending sequence.",
+    );
+    expect(validatePin("1111", 6)).toBe(
+      "Use 6-8 digits, not all the same or an ascending/descending sequence.",
+    );
+  });
 });
 
 it("pause countdown includes the last partial second and stops at zero", () => {
@@ -114,4 +140,85 @@ it("says the service is unavailable on a 503, as when a new-device email cannot 
   expect(new AuthError({ status: "authentication_failed" }, 503).message).toBe(
     "The service is not available right now. Try again shortly.",
   );
+});
+
+describe("answers the client cannot trust", () => {
+  const answer = (body: BodyInit | null, status: number) =>
+    createAuthClient(
+      "/auth",
+      vi.fn().mockResolvedValue(new Response(body, { status })),
+    )("sign-in", {});
+
+  it("rejects a 2xx answer that is not JSON", async () => {
+    await expect(
+      answer("<html>captive portal</html>", 200),
+    ).rejects.toMatchObject({
+      response: { status: "unexpected_response" },
+      httpStatus: 200,
+      message:
+        "The service answered in a way this app does not understand. Try again shortly.",
+    });
+    await expect(answer(null, 204)).rejects.toMatchObject({
+      response: { status: "unexpected_response" },
+    });
+  });
+
+  it.each([
+    "teapot",
+    "paused",
+    "invalid_pin",
+    "authentication_failed",
+    "service_unavailable",
+  ])("rejects a 2xx answer with status %s", async (status) => {
+    await expect(answer(JSON.stringify({ status }), 200)).rejects.toMatchObject(
+      {
+        response: { status: "unexpected_response" },
+        httpStatus: 200,
+      },
+    );
+  });
+
+  it("rejects a 2xx answer with no status at all", async () => {
+    await expect(
+      answer(JSON.stringify({ ok: true }), 200),
+    ).rejects.toBeInstanceOf(AuthError);
+    await expect(answer("null", 200)).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it.each([
+    "authenticated",
+    "verification_required",
+    "check_email",
+    "code_verified",
+    "signed_out",
+    "device_revoked",
+  ])("passes %s through on a 2xx answer", async (status) => {
+    const body = { status, accessToken: "a", refreshToken: "r" };
+    await expect(answer(JSON.stringify(body), 200)).resolves.toEqual(body);
+  });
+
+  it("names an unknown status on a failed answer as a failed authentication", async () => {
+    await expect(
+      answer(JSON.stringify({ status: "teapot" }), 500),
+    ).rejects.toMatchObject({
+      response: { status: "authentication_failed" },
+      httpStatus: 500,
+      message: "The service is not available right now. Try again shortly.",
+    });
+    await expect(answer("<html>", 401)).rejects.toMatchObject({
+      response: { status: "authentication_failed" },
+    });
+  });
+
+  it("keeps a known status and its details on a failed answer", async () => {
+    await expect(
+      answer(
+        JSON.stringify({ status: "invalid_pin", minimumPinLength: 6 }),
+        400,
+      ),
+    ).rejects.toMatchObject({
+      response: { status: "invalid_pin", minimumPinLength: 6 },
+      message: pinHelp(6),
+    });
+  });
 });

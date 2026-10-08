@@ -7,13 +7,25 @@
     "packages/shared"
   ],
   "scripts": {
-    "build:shared": "npm run build -w @xcode/shared",
+    "typecheck:shared": "npm run typecheck -w @xcode/shared",
+    "typecheck:web": "npm run typecheck -w @xcode/web",
+    "typecheck:mobile": "npm run typecheck -w @xcode/mobile",
+    "typecheck": "npm run typecheck:shared && npm run typecheck:web && npm run typecheck:mobile",
     "test:shared": "npm run test -w @xcode/shared",
+    "test:web": "npm run test -w @xcode/web",
+    "test:mobile": "npm run test -w @xcode/mobile",
+    "test:lint-rules": "node --test \"eslint-rules/tests/*.test.mjs\"",
+    "test": "npm run test:lint-rules && npm run test:shared && npm run test:web && npm run test:mobile",
+    "lint": "eslint .",
+    "format": "prettier --write \"{apps/web,apps/mobile,packages/shared,eslint-rules,.github}/**/*.{ts,tsx,js,mjs,cjs,json,css,yml}\" \"*.{mjs,json,yml}\"",
+    "format:check": "prettier --check \"{apps/web,apps/mobile,packages/shared,eslint-rules,.github}/**/*.{ts,tsx,js,mjs,cjs,json,css,yml}\" \"*.{mjs,json,yml}\"",
+    "restore:api": "dotnet restore tests/api/Auth.Tests.csproj --locked-mode",
+    "build:api": "dotnet build tests/api/Auth.Tests.csproj",
+    "test:api": "dotnet test tests/api/Auth.Tests.csproj --filter \"Category!=SqlServer\"",
+    "test:api:sqlserver": "dotnet test tests/api/Auth.Tests.csproj --filter \"Category=SqlServer\"",
     "dev:web": "npm run dev -w @xcode/web",
     "build:web": "npm run build -w @xcode/web",
-    "test:web": "npm run test -w @xcode/web",
-    "dev:mobile": "npm run start -w @xcode/mobile",
-    "lint": "eslint ."
+    "dev:mobile": "npm run start -w @xcode/mobile"
   },
   "engines": {
     "node": ">=22.23.3"
@@ -21,6 +33,9 @@
   "devDependencies": {
     "eslint": "^10.11.0",
     "eslint-config-next": "^16.3.6",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "3.9.9",
+    "typescript": "~6.0.3",
     "typescript-eslint": "^8.70.1"
   }
 }

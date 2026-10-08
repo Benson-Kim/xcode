@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import {
   calendarDate,
@@ -12,11 +12,12 @@ import {
   shiftDate,
   shortMonthName,
   startOfWeek,
+  weekDays,
   WEEKDAYS,
   weekdayName,
   weekdayIndex,
   weekdayShortName,
-} from "../src/dates";
+} from "@xcode/shared/dates";
 
 it("works with date-only values in UTC across leap days", () => {
   expect(isDate("2024-02-29")).toBe(true);
@@ -90,4 +91,78 @@ it("compacts a date range without hiding a month or year boundary", () => {
   expect(compactDateRange("2025-12-29", "2026-01-04", label)).toBe(
     "29 Dec 2025 to 4 Jan 2026",
   );
+});
+
+it("does its date arithmetic without Date objects and agrees with Date", () => {
+  const dateConstructed = vi.spyOn(globalThis, "Date");
+  let day = "2000-01-01";
+  for (let i = 0; i < 5000; i++) {
+    day = shiftDate(day, 1);
+    startOfWeek(day, 1);
+    weekdayShortName(day);
+    dayOfMonth(day);
+    daysBetween("2000-01-01", day);
+    isDate(day);
+  }
+  expect(dateConstructed).not.toHaveBeenCalled();
+  dateConstructed.mockRestore();
+
+  for (let offset = -800; offset < 800; offset += 3) {
+    const reference = new Date(Date.UTC(2024, 1, 29 + offset));
+    const iso = reference.toISOString().slice(0, 10);
+    expect(shiftDate("2024-02-29", offset)).toBe(iso);
+    expect(weekdayIndex(iso)).toBe(reference.getUTCDay());
+    expect(dayOfMonth(iso)).toBe(reference.getUTCDate());
+    expect(daysBetween("2024-02-29", iso)).toBe(offset);
+    expect(isDate(iso)).toBe(true);
+  }
+  expect(shiftDate("0001-01-01", 365)).toBe("0002-01-01");
+  expect(shiftDate("1999-12-31", 1)).toBe("2000-01-01");
+  expect(shiftDate("2100-02-28", 1)).toBe("2100-03-01");
+  expect(shiftDate("2000-02-28", 1)).toBe("2000-02-29");
+});
+
+it("keeps the Date-compatible answers for impossible or malformed dates", () => {
+  expect(dayOfMonth("2024-02-30")).toBe(1);
+  expect(weekdayIndex("2024-02-30")).toBe(
+    calendarDate("2024-02-30").getUTCDay(),
+  );
+  expect(dayOfMonth("2024-13-01")).toBeNaN();
+  expect(weekdayIndex("garbage")).toBeNaN();
+  expect(daysBetween("garbage", "2024-01-01")).toBeNaN();
+  expect(startOfWeek("garbage", 1)).toBe("garbage");
+});
+
+it("describes a week as primitives for screens to precompute once", () => {
+  const week = weekDays("2026-09-28");
+  expect(week.map(({ date }) => date)).toEqual([
+    "2026-09-28",
+    "2026-09-29",
+    "2026-09-30",
+    "2026-10-01",
+    "2026-10-02",
+    "2026-10-03",
+    "2026-10-04",
+  ]);
+  expect(week.map(({ shortName }) => shortName)).toEqual([
+    "Mon",
+    "Tue",
+    "Wed",
+    "Thu",
+    "Fri",
+    "Sat",
+    "Sun",
+  ]);
+  expect(week.map(({ weekday }) => weekday)).toEqual([1, 2, 3, 4, 5, 6, 0]);
+  expect(week.map(({ dayOfMonth: day }) => day)).toEqual([
+    28, 29, 30, 1, 2, 3, 4,
+  ]);
+  for (const day of week) {
+    expect(day.weekday).toBe(weekdayIndex(day.date));
+    expect(day.shortName).toBe(weekdayShortName(day.date));
+    expect(day.dayOfMonth).toBe(dayOfMonth(day.date));
+  }
+  expect(weekDays("2026-09-28", 3)).toHaveLength(3);
+  expect(weekDays("2026-09-28")).not.toBe(weekDays("2026-09-28"));
+  expect(weekDays("nope")).toEqual([]);
 });

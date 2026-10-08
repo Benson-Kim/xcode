@@ -1,5 +1,6 @@
 using Auth.Application.Setup;
 using Auth.Application;
+using Auth.Domain;
 using Auth.Infrastructure.Setup;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,6 +12,7 @@ public static class SetupEndpoints
     {
         services.AddScoped<ISetupExecution, SetupExecution>();
         services.AddScoped<ISetupRepository, SetupRepository>();
+        services.AddSingleton<HistoryCountCache>();
         services.AddScoped<CompanyUseCases>();
         services.AddScoped<VehicleUseCases>();
         services.AddScoped<RecurringUseCases>();
@@ -128,13 +130,14 @@ public static class SetupEndpoints
         group.MapPost("/recurring/{id:guid}/restore", async (Guid id, RecurringUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.CancelStop(id, ct))))
             .Produces<IdResponse>().WithName("CancelSetupRecurringStop");
         group.MapGet("/history", (ISetupExecution execution, ISetupRepository repository, CancellationToken ct, int page = 1, int pageSize = 25,
-            string? section = null, DateOnly? from = null, DateOnly? to = null, string? text = null) =>
-            execution.Read("audit.view", actor =>
+            string? section = null, DateOnly? from = null, DateOnly? to = null, string? text = null, long? before = null, bool includeTotal = true) =>
+            execution.Read(PermissionKeys.AuditView, actor =>
             {
                 SetupPagination.Validate(page, pageSize);
-                return repository.History(actor, HistoryFilter.Of(section, from, to, text), page, pageSize, ct);
+                if (before is < 1) throw new ArgumentException("Before must be a change log version.");
+                return repository.History(actor, HistoryFilter.Of(section, from, to, text), page, pageSize, before, includeTotal, ct);
             }, ct))
-            .Produces<Page<HistoryEntry>>().WithName("ListSetupHistory");
+            .Produces<HistoryPage>().WithName("ListSetupHistory");
 
         // Expense categories and items (contract C3).
         group.MapGet("/expense-categories", (ExpenseCatalogUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))

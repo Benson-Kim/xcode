@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
+import { canOpen } from "@xcode/shared/capture";
 import type {
   RevenueCell,
   RevenueVehicle,
@@ -14,7 +15,19 @@ import type {
 } from "@xcode/shared/revenue";
 
 import { RevenuePage } from "../components/RevenuePage";
+import { useFormats } from "../lib/formats";
 import { renderInApp } from "./renderInApp";
+
+// Render counters: every part of the grid reads the formatter once per render, and each day cell (and each day of
+// an open week detail) asks once whether it opens capture.
+vi.mock("../lib/formats", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/formats")>();
+  return { ...actual, useFormats: vi.fn(actual.useFormats) };
+});
+vi.mock("@xcode/shared/capture", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@xcode/shared/capture")>();
+  return { ...actual, canOpen: vi.fn(actual.canOpen) };
+});
 
 // Monday to Sunday; the organization's business date is the Wednesday.
 const DATES = [
@@ -85,6 +98,35 @@ function vehicle(
   };
 }
 
+// The API works out the day totals and the first gap over the whole grid: a day's recorded amounts, and the earliest
+// day a vehicle can be captured (its earliest gap, or today while today has no record), the first vehicle on a tie.
+function wholeGrid(
+  vehicles: RevenueVehicle[],
+): Pick<RevenueWeek, "dayTotals" | "firstGap" | "totalVehicles"> {
+  let firstGap: RevenueWeek["firstGap"] = null;
+  for (const item of vehicles) {
+    const date =
+      item.earliestMissing ??
+      (item.days.find((day) => day.date === TODAY)?.status === "missing"
+        ? TODAY
+        : null);
+    if (date && (!firstGap || date < firstGap.date))
+      firstGap = { vehicleId: item.id, date };
+  }
+  const dayTotals = DATES.map((date) => ({
+    date,
+    amount: vehicles.reduce(
+      (sum, item) =>
+        sum +
+        (item.days.find((day) => day.date === date && day.status === "amount")
+          ?.amount ?? 0),
+      0,
+    ),
+    expected: 0,
+  }));
+  return { dayTotals, firstGap, totalVehicles: vehicles.length };
+}
+
 function week(
   vehicles: RevenueVehicle[],
   over: Partial<RevenueWeek> = {},
@@ -102,6 +144,10 @@ function week(
     totalAmount: 0,
     totalExpected: 0,
     percent: null,
+    pageNumber: 1,
+    pageSize: 500,
+    truncated: false,
+    ...wholeGrid(vehicles),
     ...over,
   };
 }
@@ -1130,4 +1176,211 @@ it("refuses an amount with more than two decimals, or of zero, and keeps the cen
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(puts(fetcher)).toHaveLength(1));
   expect(puts(fetcher)[0].body).toMatchObject({ amount: 1500.5, reason: null });
+});
+
+it("shows the day totals and opens capture at the first gap the API works out for the whole grid", async () => {
+  // A grid larger than this page: the figures cover vehicles the page does not list.
+  serveWeek(() =>
+    week(
+      [
+        vehicle(
+          "vehicle-1",
+          "KDA 482M",
+          { [DATES[0]]: recorded(850) },
+          { earliestMissing: DATES[1] },
+        ),
+        vehicle("vehicle-2", "KBZ 110A", {}, { earliestMissing: DATES[0] }),
+      ],
+      {
+        dayTotals: DATES.map((date, index) => ({
+          date,
+          amount: index === 0 ? 9150 : 0,
+          expected: 0,
+        })),
+        firstGap: { vehicleId: "vehicle-1", date: DATES[1] },
+      },
+    ),
+  );
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+
+  const grid = await screen.findByRole("table", {
+    name: /Revenue by vehicle and day/,
+  });
+  expect(
+    within(within(grid).getByRole("row", { name: /All vehicles/ })).getByText(
+      "9,150",
+    ),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Capture revenue" }));
+  expect(
+    await screen.findByRole("dialog", { name: "KDA 482M" }),
+  ).toBeInTheDocument();
+});
+
+it("loads a fleet beyond the API's whole-grid limit in pages of the same week, and shows it once all are in", async () => {
+  const fleet = Array.from({ length: 730 }, (_, index) =>
+    vehicle(
+      `vehicle-${index}`,
+      `KDA ${String(index).padStart(3, "0")}A`,
+      {},
+      { earliestMissing: null },
+    ),
+  );
+  const last = fleet[729];
+  const fetcher = serve((path) => {
+    const url = new URL(path, "http://web");
+    if (!url.pathname.startsWith("/api/setup/revenue")) return undefined;
+    const page = Number(url.searchParams.get("page") ?? 0);
+    if (!page)
+      return json(
+        week(fleet.slice(0, 500), {
+          truncated: true,
+          totalVehicles: 730,
+          firstGap: { vehicleId: last.id, date: DATES[0] },
+        }),
+      );
+    return json(
+      week(fleet.slice((page - 1) * 100, page * 100), {
+        pageNumber: page,
+        pageSize: 100,
+        totalVehicles: 730,
+      }),
+    );
+  });
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+
+  await screen.findByRole("table", { name: /Revenue by vehicle and day/ });
+  expect(gets(fetcher, "/api/setup/revenue")).toEqual([
+    "/api/setup/revenue",
+    "/api/setup/revenue?weekStart=2026-09-28&page=6&pageSize=100",
+    "/api/setup/revenue?weekStart=2026-09-28&page=7&pageSize=100",
+    "/api/setup/revenue?weekStart=2026-09-28&page=8&pageSize=100",
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: "Capture revenue" }));
+  expect(
+    await screen.findByRole("dialog", { name: last.registration }),
+  ).toBeInTheDocument();
+}, 30_000);
+
+const fleetOf = (count: number) =>
+  Array.from({ length: count }, (_, index) =>
+    vehicle(
+      `vehicle-${index}`,
+      `KDA ${String(index).padStart(3, "0")}A`,
+      { [DATES[0]]: recorded(100 + index) },
+      { totalAmount: 100 + index },
+    ),
+  );
+
+// jsdom lays nothing out: the grid's body reports where it would sit on the screen, and the page "scrolls" to it.
+function scrollGridTo(top: number) {
+  vi.spyOn(
+    HTMLTableSectionElement.prototype,
+    "getBoundingClientRect",
+  ).mockReturnValue({ top } as DOMRect);
+  fireEvent.scroll(window);
+}
+
+// A vehicle's row in the grid, found by its registration. Role queries work out every row's name, which is slow on
+// a large grid.
+const rowOf = (grid: HTMLElement, registration: string) =>
+  within(grid).queryByText(registration)?.closest("tr") ?? null;
+
+it("renders only the rows near the screen for a large fleet, numbered for screen readers as the whole grid", async () => {
+  serveWeek(() =>
+    week(fleetOf(200), {
+      dayTotals: DATES.map((date, index) => ({
+        date,
+        amount: index === 0 ? 39900 : 0,
+        expected: 0,
+      })),
+    }),
+  );
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+
+  const grid = await screen.findByRole("table", {
+    name: /Revenue by vehicle and day/,
+  });
+  expect(grid).toHaveAttribute("aria-rowcount", "202");
+  const rendered = () => within(grid).getAllByText(/^KDA \d{3}A$/);
+  expect(rendered().length).toBeLessThan(60);
+  expect(rowOf(grid, "KDA 000A")).toHaveAttribute("aria-rowindex", "2");
+  expect(rowOf(grid, "KDA 150A")).toBeNull();
+  // The totals are the API's, for every vehicle, whichever rows are rendered.
+  const totals = within(grid).getByText("All vehicles").closest("tr")!;
+  expect(totals).toHaveAttribute("aria-rowindex", "202");
+  expect(within(totals).getByText("39,900")).toBeInTheDocument();
+
+  // Opening a row's detail adds a row to the count, and moves every row after it down one.
+  fireEvent.click(
+    within(rowOf(grid, "KDA 001A")!).getByRole("button", { name: "KDA 001A" }),
+  );
+  expect(grid).toHaveAttribute("aria-rowcount", "203");
+  expect(rowOf(grid, "KDA 002A")).toHaveAttribute("aria-rowindex", "5");
+
+  scrollGridTo(-150 * 57);
+  await waitFor(() =>
+    expect(rowOf(grid, "KDA 150A")).toHaveAttribute("aria-rowindex", "153"),
+  );
+  expect(rowOf(grid, "KDA 000A")).toBeNull();
+  expect(rendered().length).toBeLessThan(60);
+});
+
+it("gives focus back to the day that opened capture after the grid scrolled it away", async () => {
+  serveWeek(() => week(fleetOf(200)));
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+
+  const grid = await screen.findByRole("table", {
+    name: /Revenue by vehicle and day/,
+  });
+  const day = "KDA 000A, Wed 30 Sep 2026: Missing";
+  fireEvent.click(
+    within(rowOf(grid, "KDA 000A")!).getByRole("button", { name: day }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "KDA 000A" });
+  scrollGridTo(-150 * 57);
+  await waitFor(() => expect(rowOf(grid, "KDA 000A")).toBeNull());
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(
+      within(rowOf(grid, "KDA 000A")!).getByRole("button", { name: day }),
+    ).toHaveFocus(),
+  );
+});
+
+it("re-renders no vehicle row when capture opens or another row's detail opens", async () => {
+  serveWeek(() => week(fleetOf(40)));
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+
+  const grid = await screen.findByRole("table", {
+    name: /Revenue by vehicle and day/,
+  });
+  // The counters see every row and cell of the first render.
+  expect(vi.mocked(useFormats).mock.calls.length).toBeGreaterThanOrEqual(
+    40 + 40 * 7,
+  );
+  expect(vi.mocked(canOpen).mock.calls.length).toBeGreaterThanOrEqual(40 * 7);
+  vi.mocked(useFormats).mockClear();
+  vi.mocked(canOpen).mockClear();
+  fireEvent.click(
+    within(rowOf(grid, "KDA 000A")!).getByRole("button", {
+      name: "KDA 000A, Wed 30 Sep 2026: Missing",
+    }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "KDA 000A" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  // The page and the capture form render; no row does.
+  expect(vi.mocked(useFormats).mock.calls.length).toBeLessThan(40);
+  expect(vi.mocked(canOpen)).not.toHaveBeenCalled();
+
+  // The opened row renders again with its week detail, which asks for its recorded and missing days; none of the
+  // row's seven day cells renders again.
+  fireEvent.click(
+    within(rowOf(grid, "KDA 005A")!).getByRole("button", { name: "KDA 005A" }),
+  );
+  expect(
+    within(grid).getByRole("table", { name: "KDA 005A week detail" }),
+  ).toBeInTheDocument();
+  expect(vi.mocked(canOpen).mock.calls.length).toBeLessThan(7);
 });

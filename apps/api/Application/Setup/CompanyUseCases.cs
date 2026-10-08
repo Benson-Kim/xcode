@@ -1,3 +1,4 @@
+using Auth.Domain;
 using Auth.Domain.Setup;
 
 namespace Auth.Application.Setup;
@@ -5,13 +6,13 @@ namespace Auth.Application.Setup;
 public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository repository)
 {
     public Task<Page<CompanyDto>> List(int page, int pageSize, CancellationToken ct)
-    => execution.Read("companies.manage", actor =>
+    => execution.Read(PermissionKeys.CompaniesManage, actor =>
     {
         SetupPagination.Validate(page, pageSize);
         return repository.Companies(actor, page, pageSize, ct);
     }, ct);
 
-    public Task<Guid> Save(Guid? id, SaveCompany input, CancellationToken ct) => execution.Write("companies.manage", async actor =>
+    public Task<Guid> Save(Guid? id, SaveCompany input, CancellationToken ct) => execution.Write(PermissionKeys.CompaniesManage, async actor =>
     {
         var typed = SetupPagination.OptionalReason(input.Reason);
         var name = SetupValue.Name(input.Name);
@@ -38,7 +39,7 @@ public sealed class CompanyUseCases(ISetupExecution execution, ISetupRepository 
     }, ct);
 
     public Task<Guid> SetArchived(Guid id, bool archived, CompanyLifecycleRequest input, CancellationToken ct)
-        => execution.Write("companies.manage", async actor =>
+        => execution.Write(PermissionKeys.CompaniesManage, async actor =>
         {
             var typed = SetupPagination.OptionalReason(input.Reason);
             var company = await repository.Company(actor, id, ct) ?? throw new KeyNotFoundException();

@@ -1,12 +1,16 @@
 import { addNetworkStateListener } from "expo-network";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { REVENUE_NOTE_LIMIT, REVENUE_REASONS } from "@xcode/shared/revenue";
+import {
+  REVENUE_NOTE_LIMIT,
+  REVENUE_REASONS,
+  isRecorded,
+} from "@xcode/shared/revenue";
 
 import { SessionEndedError, apiGet, apiPutResult } from "../lib/api";
 import { read } from "../lib/storage";
 import { vault } from "../lib/vault";
-import { dayLabel, isDate, shiftDate } from "./dates";
+import { isDate, shiftDate } from "./dates";
 import {
   type QueueState,
   type QueuedCapture,
@@ -269,7 +273,7 @@ export function openQueue(
       const cell = week.vehicles
         .find((vehicle) => vehicle.id === entry.vehicleId)
         ?.days.find((day) => day.date === entry.date);
-      return cell && cell.status !== "missing" ? savedValue(cell) : null;
+      return cell && isRecorded(cell) ? savedValue(cell) : null;
     } catch {
       return null;
     }
@@ -318,7 +322,7 @@ export function openQueue(
     } else if (status === 400 && isDate(problem.earliestMissing)) {
       await update(entry, {
         state: "blocked",
-        message: `Capture ${dayLabel(problem.earliestMissing)} first.`,
+        message: "Capture the earlier day first.",
         earliestMissing: problem.earliestMissing,
       });
     } else if (status === 400 || status === 403 || status === 404) {

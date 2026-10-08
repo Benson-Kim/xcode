@@ -1,98 +1,10 @@
 @import url("https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
+@import "./tokens.css";
 @source "../components";
 
-/* Design tokens from design/XCODE_Web.html. Components style themselves with these utilities. */
 @theme {
   --font-sans: "Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
-
-  --color-cream: #f6f3ec;
-  /* The surface a card, a field or a sheet sits on, white in this theme. */
-  --color-surface: #ffffff;
-  /* The ink on a solid blue or green fill. Dark themes lighten those fills, so the ink goes the other way. */
-  --color-on-fill: #ffffff;
-  --color-navy: #14213d;
-  /* The brand mark, avatar and toast: the organization's secondary colour. */
-  --color-brand: #14213d;
-  --color-grey: #4f5b6b;
-  --color-blue: #1d5fd6;
-  --color-blue-dark: #1647a6;
-  --color-blue-busy: #3f6fc9;
-  --color-blue-soft: #e8effc;
-  --color-blue-tint: #eef3fd;
-  --color-blue-wash: #f7f9fe;
-  --color-line: #cfc8b8;
-  --color-card-line: #e4dfd3;
-  --color-divider: #efebe3;
-  --color-paper: #fbf9f4;
-  --color-hover: #f3f0e8;
-  --color-red: #b42318;
-  --color-red-bg: #fdecea;
-  --color-red-line: #f3c1bb;
-  --color-red-text: #8a1c12;
-  --color-red-hover: #fbd9d4;
-  --color-amber: #c9861c;
-  --color-amber-bg: #fff4de;
-  --color-amber-line: #e7c27a;
-  --color-amber-text: #6b4200;
-  --color-amber-hover: #fbe9c6;
-  --color-green: #1e6b3a;
-  /* Follows the organization's accent colour when branding changes it. */
-  --color-green-dark: color-mix(in srgb, var(--color-green) 80%, black);
-  --color-green-bg: #e3f1e8;
-  --color-green-line: #b8ddc3;
-
-  --shadow-panel: 0 8px 24px rgb(20 33 61 / 6%);
-  --shadow-menu: 0 8px 24px rgb(20 33 61 / 12%);
-  --shadow-drawer: 0 8px 24px rgb(20 33 61 / 18%);
-  --shadow-toast: 0 8px 24px rgb(20 33 61 / 25%);
-  --shadow-seg: 0 1px 3px rgb(20 33 61 / 15%);
-}
-
-/* The dark theme: the same tokens, read off the same design, given values for a dark surface. Components keep
-   using the same utilities, so no screen knows which theme it is in. The attribute is set from the person's Theme
-   preference, not from the operating system alone, because an organization can lock the choice (applyAppearance).
-   Kept in step with the mobile palette in apps/mobile/src/ui/theme.tsx. */
-:root[data-theme="dark"] {
-  --color-cream: #0f1520;
-  --color-surface: #1a222f;
-  --color-paper: #151c27;
-  --color-on-fill: #0f1520;
-  --color-navy: #e9edf3;
-  --color-brand: #223253;
-  --color-grey: #a3aebf;
-  --color-blue: #7fa9f5;
-  --color-blue-dark: #a9c6f9;
-  --color-blue-busy: #5c7fb8;
-  --color-blue-soft: #1b2942;
-  --color-blue-tint: #16202f;
-  --color-blue-wash: #131a26;
-  --color-line: #394657;
-  --color-card-line: #2b3542;
-  --color-divider: #242d3a;
-  --color-hover: #202936;
-  --color-red: #f0776b;
-  --color-red-bg: #2a1512;
-  --color-red-line: #5e2a23;
-  --color-red-text: #ffb4a9;
-  --color-red-hover: #351a15;
-  --color-amber: #e4a33c;
-  --color-amber-bg: #2a2011;
-  --color-amber-line: #5c4520;
-  --color-amber-text: #f6ce86;
-  --color-amber-hover: #342714;
-  --color-green: #5fc183;
-  /* Lighter, not darker, because on a dark surface that is what "pressed" looks like. */
-  --color-green-dark: color-mix(in srgb, var(--color-green) 80%, white);
-  --color-green-bg: #14291c;
-  --color-green-line: #2b4c36;
-
-  /* A shadow is only visible against a dark surface if it is nearly black. */
-  --shadow-panel: 0 8px 24px rgb(0 0 0 / 45%);
-  --shadow-menu: 0 8px 24px rgb(0 0 0 / 55%);
-  --shadow-drawer: 0 8px 24px rgb(0 0 0 / 60%);
-  --shadow-toast: 0 8px 24px rgb(0 0 0 / 65%);
-  --shadow-seg: 0 1px 3px rgb(0 0 0 / 50%);
 }
 
 /* So that the browser's own furniture - scrollbars, the date picker, a select's list - follows the theme too. */

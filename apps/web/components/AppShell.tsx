@@ -19,6 +19,22 @@ import {
   type Formatter,
 } from "@xcode/shared/format";
 import {
+  canSee,
+  NAV,
+  permissionChecker,
+  PRIMARY_NAV,
+  SETUP_NAV,
+  startsOnToday,
+  type DashboardKey,
+  type PermissionCheck,
+  type PermissionKey,
+} from "@xcode/shared/permissions";
+import {
+  canOpenPettyCash,
+  type PettyCashDashboard,
+  type PettyCashStatus,
+} from "@xcode/shared/pettyCash";
+import {
   REVENUE_PERIODS,
   revenuePeriodLabel,
   type RevenueDashboard,
@@ -40,7 +56,12 @@ import {
 } from "../lib/session-context";
 import type { MyScope, PermissionGroup, View } from "../lib/types";
 import { Brand } from "./Brand";
-import { shiftDate, shortDate } from "./revenueFormat";
+import {
+  approvalsFigures,
+  floatFigures,
+  type PettyCashCardFigures,
+} from "./pettycash/dashboardCards";
+import { shiftDate } from "./revenueFormat";
 import {
   Banner,
   Button,
@@ -48,6 +69,8 @@ import {
   CardAction,
   CardGridSkeleton,
   CardHeader,
+  CardList,
+  CardListItem,
   CardNote,
   CardValue,
   ChevronIcon,
@@ -97,6 +120,9 @@ function lazyScreen<P extends object>(load: () => Promise<ComponentType<P>>) {
 
 const RevenuePage = lazyScreen(() =>
   import("./RevenuePage").then((module) => module.RevenuePage),
+);
+const PettyCashPage = lazyScreen(() =>
+  import("./pettycash/PettyCashPage").then((module) => module.PettyCashPage),
 );
 const PeopleAccessView = lazyScreen(() =>
   import("./PeopleAccessView").then((module) => module.PeopleAccessView),
@@ -219,43 +245,27 @@ class PageBoundary extends Component<
   }
 }
 
-type NavItem = { id: View; label: string; permission?: string | string[] };
+// The pages the menu opens: the shared View, and Petty cash, which has no entry there.
+type ShellView = View | "pettycash";
 
-// Every menu entry names the permission that shows it, or the permissions any one of which shows it
-const topLevel: NavItem[] = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "revenue", label: "Revenue", permission: "revenue.view" },
-];
-const setupGroup: NavItem[] = [
-  { id: "companies", label: "PSV companies", permission: "companies.manage" },
-  {
-    id: "vehicles",
-    label: "Vehicles",
-    permission: ["vehicles.manage", "invest.view"],
-  },
-  {
-    id: "expenses",
-    label: "Expense categories",
-    permission: ["expenses.setup", "expenses.view", "commitments.view"],
-  },
-  {
-    id: "recurring",
-    label: "Scheduled expenses and savings",
-    permission: "commitments.view",
-  },
-  { id: "people", label: "People and access", permission: "people.view" },
-  { id: "history", label: "Change log", permission: "audit.view" },
-  {
-    id: "settings",
-    label: "Organization settings",
-    permission: "organization.manage",
-  },
-];
+type NavItem = {
+  id: ShellView;
+  label: string;
+  any?: readonly PermissionKey[];
+};
 
-export type ViewParams = { openItem?: string; newForVehicle?: string };
+// Every menu entry is shown to the people holding any of its permissions, as @xcode/shared/permissions says.
+const topLevel: NavItem[] = PRIMARY_NAV.map((id) => ({ id, ...NAV[id] }));
+const setupGroup: NavItem[] = SETUP_NAV.map((id) => ({ id, ...NAV[id] }));
+
+export type ViewParams = {
+  openItem?: string;
+  newForVehicle?: string;
+  status?: PettyCashStatus;
+};
 
 export function AppShell({ onSignOut }: { onSignOut: () => void }) {
-  const [view, setView] = useState<View>("dashboard");
+  const [view, setView] = useState<ShellView>("dashboard");
   const [params, setParams] = useState<ViewParams>({});
   // Bumped on every navigation so choosing a menu entry always opens that page fresh (its list, not an open editor).
   const [visit, setVisit] = useState(0);
@@ -319,19 +329,17 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const sessionState = useMemo(
     () => ({
       session,
-      can: (permission: string) =>
-        Boolean(session?.permissions.includes(permission)),
+      can: permissionChecker(session?.permissions ?? []),
     }),
     [session],
   );
   const { can } = sessionState;
-  const allowed = (item: NavItem) =>
-    !item.permission || [item.permission].flat().some(can);
+  const allowed = (item: NavItem) => canSee(item, can);
   const displayName = session
     ? `${session.firstName} ${session.lastName}`.trim()
     : "";
 
-  function navigate(next: View, nextParams: ViewParams = {}) {
+  function navigate(next: ShellView, nextParams: ViewParams = {}) {
     retryFailedScreens();
     setView(next);
     setParams(nextParams);
@@ -525,10 +533,10 @@ function Page({
   sessionError,
   onNavigate,
 }: {
-  view: View;
+  view: ShellView;
   params: ViewParams;
   sessionError: string;
-  onNavigate: (view: View, params?: ViewParams) => void;
+  onNavigate: (view: ShellView, params?: ViewParams) => void;
 }) {
   const { session, can } = useSession();
   if (view === "dashboard")
@@ -536,6 +544,8 @@ function Page({
       <Dashboard session={session} error={sessionError} onOpen={onNavigate} />
     );
   if (view === "revenue") return <RevenuePage />;
+  if (view === "pettycash")
+    return <PettyCashPage initialStatus={params.status} />;
   if (view === "companies") return <CompaniesPage />;
   if (view === "vehicles")
     return (
@@ -561,18 +571,25 @@ type Period = RevenuePeriod;
 
 // One dashboard card. A card whose data is not connected yet says so rather than showing zeros.
 type DashboardCard = {
-  permission: string;
+  permission: DashboardKey;
   title: string;
   sub: string;
   value?: string;
   bad?: boolean;
   bar?: number;
   note?: string;
+  list?: PettyCashCardFigures["list"];
   busy?: boolean;
   unavailable?: boolean;
-  action?: { label: string; view: View; primary?: boolean };
+  action?: {
+    label: string;
+    view: ShellView;
+    params?: ViewParams;
+    primary?: boolean;
+  };
 };
 type Figures = { data?: RevenueDashboard; error: string };
+type PettyFigures = { data?: PettyCashDashboard; error: string };
 // What the figures decide: the value and its note, and whether the card's action still applies.
 type Shown = Pick<DashboardCard, "value" | "bad" | "bar" | "note" | "action">;
 
@@ -584,7 +601,8 @@ function periodLabel(
 ) {
   const name = revenuePeriodLabel(period);
   if (!data) return name;
-  if (period === "today") return `${name}, ${shortDate(formats, data.from)}`;
+  if (period === "today")
+    return `${name}, ${formats.formatDateOnly(data.from)}`;
   return `${name}, ${formats.formatDateRange(data.from, period === "week" ? shiftDate(data.from, 6) : data.through)}`;
 }
 
@@ -600,8 +618,38 @@ function revenueCard(
   return { ...card, ...show(figures.data) };
 }
 
+// A card from the petty cash dashboard: null once loaded when the server withholds it from this person.
+function pettyCashCard(
+  card: Pick<DashboardCard, "permission" | "title" | "sub">,
+  figures: PettyFigures,
+  canOpen: boolean,
+  show: (data: PettyCashDashboard) => PettyCashCardFigures | null,
+  actionLabel: (shown: PettyCashCardFigures) => string | null,
+): DashboardCard | null {
+  if (figures.error) return { ...card, note: figures.error };
+  if (!figures.data) return { ...card, busy: true };
+  const shown = show(figures.data);
+  if (!shown) return null;
+  const label = canOpen ? actionLabel(shown) : null;
+  return {
+    ...card,
+    value: shown.value,
+    bad: shown.bad,
+    note: shown.note,
+    list: shown.list,
+    action: label
+      ? {
+          label,
+          view: "pettycash",
+          params: shown.status ? { status: shown.status } : undefined,
+          primary: true,
+        }
+      : undefined,
+  };
+}
+
 const unavailable = (
-  permission: string,
+  permission: DashboardKey,
   title: string,
   sub: string,
   note: string,
@@ -616,12 +664,36 @@ const unavailable = (
 // The cards in the design's order, each shown to the people with its permission.
 function dashboardCards(
   formats: Formatter,
-  can: (permission: string) => boolean,
+  can: PermissionCheck,
   period: Period,
   selected: Figures,
   month: Figures,
+  petty: PettyFigures,
+  canOpenPetty: boolean,
 ) {
   const label = periodLabel(formats, period, selected.data);
+  const floatCard = pettyCashCard(
+    {
+      permission: "dash.float",
+      title: "My petty cash float",
+      sub: "Cash in hand now",
+    },
+    petty,
+    canOpenPetty,
+    (data) => data.float && floatFigures(formats, data.float),
+    () => "Open petty cash",
+  );
+  const approvalsCard = pettyCashCard(
+    {
+      permission: "dash.pettycash",
+      title: "Petty cash to approve",
+      sub: "All managers",
+    },
+    petty,
+    canOpenPetty,
+    (data) => data.approvals && approvalsFigures(formats, data.approvals),
+    (shown) => (shown.status ? "Review entries" : null),
+  );
   const today = selected.data?.businessDate ?? month.data?.businessDate;
   const monthData = month.data;
   const yesterday = monthData && shiftDate(monthData.businessDate, -1);
@@ -635,7 +707,7 @@ function dashboardCards(
         permission: "dash.capture",
         title: "Today's revenue",
         sub: today
-          ? `Your vehicles, ${shortDate(formats, today)}`
+          ? `Your vehicles, ${formats.formatDateOnly(today)}`
           : "Your vehicles, today",
         action: { label: "Capture revenue", view: "revenue", primary: true },
       },
@@ -654,12 +726,7 @@ function dashboardCards(
         };
       },
     ),
-    unavailable(
-      "dash.float",
-      "My petty cash float",
-      "Cash in hand now",
-      "Petty cash is not connected yet.",
-    ),
+    ...(floatCard ? [floatCard] : []),
     revenueCard(
       { permission: "dash.revenue", title: "Revenue", sub: label },
       selected,
@@ -720,12 +787,7 @@ function dashboardCards(
                 : "Every vehicle has a record for every day.",
             },
     ),
-    unavailable(
-      "dash.pettycash",
-      "Petty cash to approve",
-      "All managers",
-      "Petty cash is not connected yet.",
-    ),
+    ...(approvalsCard ? [approvalsCard] : []),
     unavailable(
       "dash.commitments",
       "Yearly items due",
@@ -769,15 +831,16 @@ function Dashboard({
 }: {
   session: Session | null;
   error: string;
-  onOpen: (view: View) => void;
+  onOpen: (view: ShellView, params?: ViewParams) => void;
 }) {
   const { can } = useSession();
   const formats = useFormats();
   const [chosen, setChosen] = useState<Period | null>(null);
   // A capturer starts on today and everyone else on the month, as in the design.
-  const period: Period =
-    chosen ?? (can("dash.capture") || can("dash.float") ? "today" : "month");
-  const periodCards = ["dash.capture", "dash.revenue", "dash.edits"].some(can);
+  const period: Period = chosen ?? (startsOnToday(can) ? "today" : "month");
+  const periodCards = (
+    ["dash.capture", "dash.revenue", "dash.edits"] as const
+  ).some(can);
   // Missing days always cover the month, so the month is asked for once and shared when it is also the period.
   const byPeriod = useResource<RevenueDashboard>(
     periodCards && period !== "month"
@@ -789,12 +852,19 @@ function Dashboard({
       ? "setup/revenue/dashboard?period=month"
       : null,
   );
+  const pettyCash = useResource<PettyCashDashboard>(
+    can("dash.float") || can("dash.pettycash")
+      ? "setup/pettycash/dashboard"
+      : null,
+  );
   const cards = dashboardCards(
     formats,
     can,
     period,
     period === "month" ? byMonth : byPeriod,
     byMonth,
+    pettyCash,
+    canOpenPettyCash(session?.permissions ?? []),
   );
   return (
     <section>
@@ -866,10 +936,23 @@ function Dashboard({
                 )}
                 {card.bar !== undefined && <ProgressBar value={card.bar} />}
                 {card.note && <CardNote>{card.note}</CardNote>}
+                {card.list && card.list.length > 0 && (
+                  <CardList>
+                    {card.list.map((row) => (
+                      <CardListItem
+                        key={row.id}
+                        left={row.left}
+                        leftSub={row.leftSub}
+                        right={row.right}
+                        rightSub={row.rightSub}
+                      />
+                    ))}
+                  </CardList>
+                )}
                 {action && (
                   <CardAction
                     primary={action.primary}
-                    onClick={() => onOpen(action.view)}
+                    onClick={() => onOpen(action.view, action.params)}
                   >
                     {action.label}
                   </CardAction>

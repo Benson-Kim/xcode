@@ -31,21 +31,35 @@ const fields = (table: ReturnType<typeof within>) =>
       [...row.querySelectorAll("th, td")].map((cell) => cell.textContent),
     );
 
+const pageOf = (
+  items: ReturnType<typeof change>[],
+  pageSize: number,
+  total: number | null,
+  hasMore: boolean,
+) => ({
+  items,
+  pageNumber: 1,
+  pageSize,
+  total,
+  hasMore,
+  nextBefore: hasMore ? items[items.length - 1].version : null,
+});
+
 function serveHistory(total: number, rows?: ReturnType<typeof change>[]) {
   const fetchMock = vi.fn(async (input: string) => {
     const url = new URL(input, "http://app");
-    const page = Number(url.searchParams.get("page"));
     const pageSize = Number(url.searchParams.get("pageSize"));
+    const before = url.searchParams.get("before");
     const all =
       rows ??
       Array.from({ length: total }, (_, index) => change(total - index));
+    const older =
+      before === null ? all : all.filter((row) => row.version < Number(before));
+    const items = older.slice(0, pageSize);
     return new Response(
-      JSON.stringify({
-        items: all.slice((page - 1) * pageSize, page * pageSize),
-        pageNumber: page,
-        pageSize,
-        total: all.length,
-      }),
+      JSON.stringify(
+        pageOf(items, pageSize, all.length, older.length > pageSize),
+      ),
       { status: 200 },
     );
   });
@@ -65,7 +79,7 @@ it("asks for only the first page on first render and the next one on Load more",
     await screen.findByText("PSV companies: Change 60"),
   ).toBeInTheDocument();
   expect(fetchMock.mock.calls.map(([input]) => input)).toEqual([
-    "/api/setup/history?page=1&pageSize=25",
+    "/api/setup/history?pageSize=25",
   ]);
   expect(changeRows()).toHaveLength(25);
   expect(screen.getByText("Showing 25 of 60 changes")).toBeInTheDocument();
@@ -75,7 +89,7 @@ it("asks for only the first page on first render and the next one on Load more",
     await screen.findByText("PSV companies: Change 11"),
   ).toBeInTheDocument();
   expect(fetchMock).toHaveBeenLastCalledWith(
-    "/api/setup/history?page=2&pageSize=25",
+    "/api/setup/history?pageSize=25&before=36",
     expect.anything(),
   );
   expect(changeRows()).toHaveLength(50);
@@ -90,6 +104,52 @@ it("asks for only the first page on first render and the next one on Load more",
     screen.queryByRole("button", { name: "Load more" }),
   ).not.toBeInTheDocument();
   expect(screen.getByText("Showing all 60 changes")).toBeInTheDocument();
+});
+
+it("asks for the changes older than the last one it was given and stops when the server says there are no more", async () => {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      urls.push(input);
+      if (!input.includes("before="))
+        return new Response(
+          JSON.stringify({
+            ...pageOf(
+              Array.from({ length: 25 }, (_, index) => change(30 - index)),
+              25,
+              40,
+              true,
+            ),
+            nextBefore: 6,
+          }),
+          { status: 200 },
+        );
+      return new Response(
+        JSON.stringify(pageOf([change(5), change(4)], 25, 40, false)),
+        { status: 200 },
+      );
+    }),
+  );
+  renderInApp(<HistoryPage />);
+
+  expect(
+    await screen.findByText("Showing 25 of 40 changes"),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  expect(
+    await screen.findByText("PSV companies: Change 4"),
+  ).toBeInTheDocument();
+
+  expect(urls).toEqual([
+    "/api/setup/history?pageSize=25",
+    "/api/setup/history?pageSize=25&before=6",
+  ]);
+  expect(changeRows()).toHaveLength(27);
+  expect(
+    screen.queryByRole("button", { name: "Load more" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText("Showing all 27 changes")).toBeInTheDocument();
 });
 
 it("shows each change field by field, with the before and after values side by side", async () => {
@@ -210,12 +270,14 @@ it("keeps the rows it has and says why when the next page fails", async () => {
           { status: 403 },
         );
       return new Response(
-        JSON.stringify({
-          items: Array.from({ length: 25 }, (_, index) => change(30 - index)),
-          pageNumber: 1,
-          pageSize: 25,
-          total: 30,
-        }),
+        JSON.stringify(
+          pageOf(
+            Array.from({ length: 25 }, (_, index) => change(30 - index)),
+            25,
+            30,
+            true,
+          ),
+        ),
         { status: 200 },
       );
     }),
@@ -288,12 +350,7 @@ function serveFiltered(rows: ReturnType<typeof change>[]) {
         (!to || row.occurredAt <= `${to}T23:59:59Z`),
     );
     return new Response(
-      JSON.stringify({
-        items: matches,
-        pageNumber: 1,
-        pageSize: 25,
-        total: matches.length,
-      }),
+      JSON.stringify(pageOf(matches, 25, matches.length, false)),
       { status: 200 },
     );
   });
@@ -332,7 +389,7 @@ it("narrows the log through the server and starts again at the first page", asyn
   });
   await waitFor(() =>
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/setup/history?page=1&pageSize=25&section=people",
+      "/api/setup/history?pageSize=25&section=people",
       expect.anything(),
     ),
   );
@@ -350,7 +407,7 @@ it("narrows the log through the server and starts again at the first page", asyn
   });
   await waitFor(() =>
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/setup/history?page=1&pageSize=25",
+      "/api/setup/history?pageSize=25",
       expect.anything(),
     ),
   );
@@ -361,7 +418,7 @@ it("narrows the log through the server and starts again at the first page", asyn
     });
   await waitFor(() =>
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/setup/history?page=1&pageSize=25&text=antony",
+      "/api/setup/history?pageSize=25&text=antony",
       expect.anything(),
     ),
   );
@@ -380,7 +437,7 @@ it("narrows the log through the server and starts again at the first page", asyn
   });
   await waitFor(() =>
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/setup/history?page=1&pageSize=25&from=2026-09-21&to=2026-09-21",
+      "/api/setup/history?pageSize=25&from=2026-09-21&to=2026-09-21",
       expect.anything(),
     ),
   );
@@ -397,7 +454,7 @@ it("narrows the log through the server and starts again at the first page", asyn
   fireEvent.click(screen.getByRole("button", { name: "Clear" }));
   await waitFor(() =>
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/setup/history?page=1&pageSize=25",
+      "/api/setup/history?pageSize=25",
       expect.anything(),
     ),
   );

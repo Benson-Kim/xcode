@@ -104,10 +104,12 @@ export async function keepSession(
   phoneNumber: string,
   result: AuthResponse,
 ): Promise<StoredSession> {
+  if (!result.accessToken || !result.refreshToken)
+    throw new AuthError({ status: "unexpected_response" }, 200);
   const session = {
     phoneNumber,
-    accessToken: result.accessToken || "",
-    refreshToken: result.refreshToken || "",
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
     // Every sign-in and every renewal passes through here, so this is the last time the phone reached
     // the server: what the 72-hour offline unlock window is measured from (D7).
     lastOnlineAt: Date.now(),
@@ -180,6 +182,23 @@ export async function apiPutResult<T>(
 ): Promise<{ status: number; body: T }> {
   const response = await authorized(path, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    body: (await response.json().catch(() => ({}))) as T,
+  };
+}
+
+// POST or PUT JSON as the signed-in person with the same result shape as apiPutResult.
+export async function apiSendResult<T>(
+  method: "POST" | "PUT",
+  path: string,
+  body: unknown,
+): Promise<{ status: number; body: T }> {
+  const response = await authorized(path, {
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });

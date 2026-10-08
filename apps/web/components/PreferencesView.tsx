@@ -3,7 +3,8 @@
 import { useState } from "react";
 
 import { useAppearance } from "../lib/appearance";
-import { apiRequest, useResource } from "../lib/data";
+import { useResource } from "../lib/data";
+import { preferencesApi } from "../lib/endpoints/organization";
 import {
   Banner,
   Button,
@@ -44,7 +45,7 @@ const description =
 
 // Personal display preferences: open to every active member, separate from organization administration.
 export function PreferencesView() {
-  const loaded = useResource<Preferences>("setup/preferences");
+  const loaded = useResource<Preferences>(preferencesApi.path);
   if (loaded.error)
     return (
       <section>
@@ -80,10 +81,7 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
   async function save() {
     setBusy(true);
     try {
-      await apiRequest("setup/preferences", {
-        method: "PUT",
-        body: JSON.stringify(preferences),
-      });
+      await preferencesApi.save(preferences);
       setError("");
       toast("Your preferences saved.");
       refresh();

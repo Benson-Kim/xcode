@@ -1,30 +1,59 @@
-export const PIN_HELP =
-  "Use 4-8 digits, not all the same or an ascending/descending sequence.";
+export function pinHelp(minimumLength = 4): string {
+  return `Use ${minimumLength}-8 digits, not all the same or an ascending/descending sequence.`;
+}
 
-export function validatePin(pin: string): string | null {
-  if (pin.length < 4 || pin.length > 8 || /[^0-9]/.test(pin)) return PIN_HELP;
-  if ([...pin].every((digit) => digit === pin[0])) return PIN_HELP;
+export const PIN_HELP = pinHelp();
+
+export function validatePin(pin: string, minimumLength = 4): string | null {
+  const help = pinHelp(minimumLength);
+  if (pin.length < minimumLength || pin.length > 8 || /[^0-9]/.test(pin))
+    return help;
+  if ([...pin].every((digit) => digit === pin[0])) return help;
   const steps = [...pin]
     .slice(1)
     .map((digit, i) => Number(digit) - Number(pin[i]));
   if (steps.every((step) => step === 1) || steps.every((step) => step === -1))
-    return PIN_HELP;
+    return help;
   return null;
 }
 
-export type AuthStatus =
-  | "authenticated"
-  | "verification_required"
-  | "check_email"
-  | "code_verified"
-  | "paused"
-  | "authentication_failed"
-  | "invalid_pin"
-  | "invalid_request"
-  | "signed_out"
-  | "device_revoked"
-  // 503: the API could not finish right now, for example a new-device email could not be sent.
-  | "service_unavailable";
+// Every status the API sends. 503 service_unavailable: it could not finish right now, for example a
+// new-device email could not be sent.
+export const AUTH_STATUSES = [
+  "authenticated",
+  "verification_required",
+  "check_email",
+  "code_verified",
+  "paused",
+  "authentication_failed",
+  "invalid_pin",
+  "invalid_request",
+  "signed_out",
+  "device_revoked",
+  "service_unavailable",
+] as const;
+
+// unexpected_response is never sent: the client raises it for an answer it cannot trust.
+export type AuthStatus = (typeof AUTH_STATUSES)[number] | "unexpected_response";
+
+const SUCCESS_STATUSES: readonly string[] = [
+  "authenticated",
+  "verification_required",
+  "check_email",
+  "code_verified",
+  "signed_out",
+  "device_revoked",
+];
+
+function isAuthBody(body: unknown): body is AuthResponse {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    (AUTH_STATUSES as readonly unknown[]).includes(
+      (body as { status?: unknown }).status,
+    )
+  );
+}
 
 export interface AuthRequest {
   email?: string;
@@ -59,12 +88,6 @@ export interface AuthenticatedPerson extends PersonIdentity {
   userId: string;
 }
 
-export function pinHelp(minimumLength = 4): string {
-  return minimumLength > 4
-    ? `Use ${minimumLength}-8 digits, not all the same or an ascending/descending sequence.`
-    : PIN_HELP;
-}
-
 export interface SessionTokens {
   accessToken: string;
   refreshToken: string;
@@ -93,11 +116,13 @@ export class AuthError extends Error {
         ? "Sign-in is paused. Try again when the timer ends, or reset your PIN."
         : response.status === "invalid_pin"
           ? pinHelp(response.minimumPinLength ?? undefined)
-          : httpStatus === 429
-            ? "Too many requests. Please wait a minute."
-            : httpStatus >= 500
-              ? "The service is not available right now. Try again shortly."
-              : "Authentication could not be completed. Check your details and try again.",
+          : response.status === "unexpected_response"
+            ? "The service answered in a way this app does not understand. Try again shortly."
+            : httpStatus === 429
+              ? "Too many requests. Please wait a minute."
+              : httpStatus >= 500
+                ? "The service is not available right now. Try again shortly."
+                : "Authentication could not be completed. Check your details and try again.",
     );
   }
 }
@@ -119,10 +144,14 @@ export function createAuthClient(
       },
       body: JSON.stringify(request),
     });
-    const body = (await response
-      .json()
-      .catch(() => ({ status: "authentication_failed" }))) as AuthResponse;
-    if (!response.ok) throw new AuthError(body, response.status);
+    const body: unknown = await response.json().catch(() => null);
+    if (!response.ok)
+      throw new AuthError(
+        isAuthBody(body) ? body : { status: "authentication_failed" },
+        response.status,
+      );
+    if (!isAuthBody(body) || !SUCCESS_STATUSES.includes(body.status))
+      throw new AuthError({ status: "unexpected_response" }, response.status);
     return body;
   };
 }

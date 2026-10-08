@@ -74,6 +74,11 @@ public interface IOrganizationEntity
      Guid OrganizationId { get; set; }
 }
 
+public interface IValidatable
+{
+     void Validate();
+}
+
 
 public sealed class Organization
 {
@@ -95,18 +100,18 @@ public sealed class Organization
      }
      // The time zone sets the organization's calendar date, the latest a held business date may be. Anything that moves
      // that date must leave a held business date on or before it.
-     public void EnsureBusinessDateWithin(DateOnly organizationCalendarDate)
+     private void EnsureBusinessDateWithin(DateOnly organizationCalendarDate)
      {
           if (BusinessDate > organizationCalendarDate)
                throw new ArgumentException("The held business date would be in the future in that time zone. Change the business date first.");
      }
+     // Leaves SettingsVersion alone: the change-log entry for the save moves it, once.
      public void ChangeTimeZone(OrganizationLocalization localization, TimeZoneId timeZone, DateOnly calendarDateInThatZone)
      {
           if (localization.OrganizationId != Id)
                throw new InvalidOperationException("Organization mismatch");
           EnsureBusinessDateWithin(calendarDateInThatZone);
           localization.TimeZone = timeZone.Value;
-          SettingsChanged();
      }
 }
 
@@ -139,7 +144,7 @@ public sealed class OrganizationMembership : IOrganizationEntity
 }
 
 
-public sealed class OrganizationLocalization : IOrganizationEntity
+public sealed class OrganizationLocalization : IOrganizationEntity, IValidatable
 {
      public Guid OrganizationId { get; set; }
      public string Locale { get; set; } = "en-GB";
@@ -149,7 +154,7 @@ public sealed class OrganizationLocalization : IOrganizationEntity
      public int FirstDayOfWeek { get; set; } = 1;
      public string WeekNumbering { get; set; } = "iso8601";
      public string Currency { get; set; } = "KES";
-     public bool UseGroupping { get; set; } = true;
+     public bool UseGrouping { get; set; } = true;
      public int NumberDecimals { get; set; } = 2;
      public bool AllowLocaleOverride { get; set; } = true;
      public bool AllowTimeZoneOverride { get; set; }
@@ -180,7 +185,7 @@ public sealed class OrganizationLocalization : IOrganizationEntity
 
 
 
-public sealed class OrganizationBranding : IOrganizationEntity
+public sealed class OrganizationBranding : IOrganizationEntity, IValidatable
 {
      public Guid OrganizationId { get; set; }
      public string DisplayName { get; set; } = "XCODE";
@@ -272,7 +277,7 @@ public sealed class OrganizationLogo : IOrganizationEntity
      public string ToDataUrl() => $"data:{ContentType};base64,{Convert.ToBase64String(Data)}";
 }
 
-public sealed class OrganizationSecurityPolicy : IOrganizationEntity
+public sealed class OrganizationSecurityPolicy : IOrganizationEntity, IValidatable
 {
      public Guid OrganizationId { get; set; }
      public int PasswordMinLength { get; set; } = 12;
@@ -333,10 +338,14 @@ public sealed record EffectiveFormats
      int FirstDayOfWeek,
      string WeekNumbering,
      string Currency,
-     bool UseGroupping,
+     bool UseGrouping,
      int NumberDecimals,
      string Direction
-);
+)
+{
+     // Apps released before the spelling was fixed read this name; remove it once they are retired.
+     public bool UseGroupping => UseGrouping;
+}
 
 
 public sealed record EffectiveSettings
@@ -373,7 +382,7 @@ public sealed class EffectiveSettingsResolver
                      l.AllowHour12Override ? userPreference?.Hour12 ?? l.Hour12 : l.Hour12, l.FirstDayOfWeek,
                      l.WeekNumbering,
                      l.Currency,
-                     l.UseGroupping,
+                     l.UseGrouping,
                      l.NumberDecimals,
                      new Locale(locale).Direction),
                      b, s, l.AllowThemeOverride ? userPreference?.ThemeMode ?? "system" : "light",

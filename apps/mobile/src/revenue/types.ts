@@ -1,29 +1,13 @@
 // Revenue as the phone sees it
 export type {
   RevenueCell,
+  RevenueDashboard,
   RevenueStatus,
   RevenueVehicle,
   RevenueWeek,
   SaveRevenue,
 } from "@xcode/shared/revenue";
-import type {
-  RevenueCell,
-  RevenueDashboard as SharedDashboard,
-  RevenueReason,
-} from "@xcode/shared/revenue";
-
-type Figures =
-  | "revenue"
-  | "expected"
-  | "percent"
-  | "capturedToday"
-  | "vehiclesToday"
-  | "missingDays"
-  | "missingVehicles"
-  | "editedRecords";
-export type RevenueDashboard = Omit<SharedDashboard, Figures> & {
-  [K in Figures]: number | null;
-};
+import type { RevenueCell, RevenueReason } from "@xcode/shared/revenue";
 
 export type SavedValue = Pick<RevenueCell, "amount" | "reason" | "note"> & {
   version: number | null;

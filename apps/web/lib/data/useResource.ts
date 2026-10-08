@@ -1,43 +1,49 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 
+import {
+  type Loader,
+  type Snapshot,
+  readSnapshot,
+  reloadEntry,
+  subscribeEntry,
+} from "./cache";
 import { apiRequest } from "./request";
 import { withRetry } from "./retry";
 
-type Loaded<T> = { path: string | null; data?: T; error: string };
+const idle: Snapshot<never> = {
+  value: undefined,
+  error: "",
+  validating: false,
+};
 
+// Cached data shows at once and is revalidated in the background; `loading` is true only while there is no data.
+// Components on the same path share one fetch, and it is aborted when the last of them unmounts.
 export function useResource<T>(path: string | null) {
-  const [loaded, setLoaded] = useState<Loaded<T>>({ path: null, error: "" });
-  const [version, setVersion] = useState(0);
-  useEffect(() => {
-    if (path === null) return;
-    let active = true;
-    const controller = new AbortController();
-    withRetry(
-      () => apiRequest<T>(path, { signal: controller.signal }),
-      controller.signal,
-    ).then(
-      (data) => active && setLoaded({ path, data, error: "" }),
-      (error: Error) =>
-        active &&
-        setLoaded((current) => ({
-          path,
-          data: current.path === path ? current.data : undefined,
-          error: error.message,
-        })),
-    );
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [path, version]);
-  const reload = useCallback(() => setVersion((current) => current + 1), []);
-  const current = loaded.path === path;
+  const key = path === null ? null : `r:${path}`;
+  const load = useMemo<Loader<T>>(
+    () => async (signal) => ({
+      value: await withRetry(() => apiRequest<T>(path!, { signal }), signal),
+    }),
+    [path],
+  );
+  const subscribe = useCallback(
+    (notify: () => void) =>
+      key === null ? () => {} : subscribeEntry(key, path!, load, notify),
+    [key, path, load],
+  );
+  const snapshot = useSyncExternalStore(
+    subscribe,
+    () => readSnapshot<T>(key),
+    () => idle as Snapshot<T>,
+  );
+  const reload = useCallback(() => reloadEntry(key), [key]);
   return {
-    data: current ? loaded.data : undefined,
-    error: current ? loaded.error : "",
-    loading: path !== null && !current,
+    data: snapshot.value,
+    error: snapshot.error,
+    loading: path !== null && snapshot.value === undefined && !snapshot.error,
+    isValidating: snapshot.validating,
     reload,
   };
 }

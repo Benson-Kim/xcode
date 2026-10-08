@@ -9,6 +9,8 @@ import {
   catalog,
   fakeApi,
   people,
+  pettyOverview,
+  pettyPage,
   revenueDashboard,
   revenueWeek,
   tokens,
@@ -170,12 +172,36 @@ it("shows nothing for a figure the API leaves out", async () => {
 });
 
 it("shows the Spend tab to people who hold a petty cash permission", async () => {
-  await unlockAs(people.manager, "0700111222");
+  const api = await unlockAs(people.manager, "0700111222");
+  api.on("setup/pettycash/overview", [200, pettyOverview()]);
+  api.on("setup/pettycash/overview?date=2026-09-29&holderId=u-brian", [
+    200,
+    pettyOverview(),
+  ]);
+  api.on(
+    "setup/pettycash/entries?from=2026-09-29&to=2026-09-29&holderId=u-brian",
+    [200, pettyPage([])],
+  );
   expect(tabs()).toEqual(["Home", "Revenue", "Spend", "More"]);
   await fireEvent.press(screen.getByRole("tab", { name: "Spend" }));
-  await screen.findByText(
-    "Petty cash and office bills are not available from the current API yet.",
+  await screen.findByRole("header", { name: "Petty cash" });
+  await screen.findByText("Nothing recorded on this day.");
+  expect(
+    screen.queryByText(/not available from the current API yet/),
+  ).toBeNull();
+});
+
+it("keeps office bills as not available for people who only hold a bills permission", async () => {
+  await unlockAs(
+    { ...people.manager, permissions: ["bills.view"] },
+    "0700111444",
   );
+  expect(tabs()).toEqual(["Home", "Spend", "More"]);
+  await fireEvent.press(screen.getByRole("tab", { name: "Spend" }));
+  await screen.findByText(
+    "Office bills are not available from the current API yet.",
+  );
+  expect(screen.queryByRole("header", { name: "Petty cash" })).toBeNull();
 });
 
 it("names scheduled expenses and savings as XCODE Web does", async () => {
@@ -190,6 +216,37 @@ it("names scheduled expenses and savings as XCODE Web does", async () => {
     ),
   ).toBeTruthy();
   expect(screen.queryByText("Recurring costs and savings")).toBeNull();
+});
+
+it.each([
+  ["Vehicles", ["vehicles.manage"]],
+  ["Vehicles", ["invest.view"]],
+  ["Expense categories", ["expenses.setup"]],
+  ["Expense categories", ["expenses.view"]],
+  ["Expense categories", ["commitments.view"]],
+] as const)(
+  "lists %s on More as XCODE Web does for %j",
+  async (label, permissions) => {
+    await unlockAs(
+      { ...people.manager, permissions: [...permissions] },
+      "0700111555",
+    );
+    await fireEvent.press(screen.getByRole("tab", { name: "More" }));
+    expect(await screen.findByLabelText(`${label}, on XCODE Web`)).toBeTruthy();
+  },
+);
+
+it("leaves Vehicles and Expense categories off More for people holding neither's permissions", async () => {
+  await unlockAs(
+    { ...people.manager, permissions: ["revenue.view"] },
+    "0700111556",
+  );
+  await fireEvent.press(screen.getByRole("tab", { name: "More" }));
+  await screen.findByText("Your access");
+  expect(screen.queryByLabelText("Vehicles, on XCODE Web")).toBeNull();
+  expect(
+    screen.queryByLabelText("Expense categories, on XCODE Web"),
+  ).toBeNull();
 });
 
 it("says so when the person has nothing to see yet", async () => {

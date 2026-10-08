@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { plural } from "@xcode/shared/format";
 
-import { apiRequest, useStreamedList } from "../../lib/data";
+import { apiRequest, streamError, useStreamedList } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
 import type {
   ExpenseBucket,
@@ -325,7 +325,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
         description="Items are what people pick when they record an expense, in petty cash and in other expenses."
       />
       {(categories.error || error) && (
-        <Banner className="mt-5">{categories.error || error}</Banner>
+        <Banner className="mt-5">{streamError(categories) || error}</Banner>
       )}
       {!canManage && (
         <p className="mt-3 mb-0 text-[13px] text-grey">

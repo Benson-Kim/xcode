@@ -133,6 +133,78 @@ it("never hands one person's list to another", async () => {
   );
 });
 
+// A fleet past the API's whole-grid limit: the first answer stops at 500 vehicles and the rest come 100 a page.
+function largeFleet(api: ReturnType<typeof fakeApi>, total: number) {
+  const template = revenueWeek.vehicles[0];
+  const fleet = Array.from({ length: total }, (_, index) => ({
+    ...template,
+    id: `vehicle-${index}`,
+    registration: `KDA ${String(index).padStart(3, "0")}A`,
+  }));
+  const page = (vehicles: typeof fleet) => ({
+    ...revenueWeek,
+    vehicles,
+    totalVehicles: total,
+  });
+  api.on("setup/revenue", [
+    200,
+    {
+      ...page(fleet.slice(0, 500)),
+      pageNumber: 1,
+      pageSize: 500,
+      truncated: true,
+    },
+  ]);
+  for (let number = 6; number <= Math.ceil(total / 100); number++)
+    api.on(`setup/revenue?weekStart=2026-09-28&page=${number}&pageSize=100`, [
+      200,
+      {
+        ...page(fleet.slice((number - 1) * 100, number * 100)),
+        pageNumber: number,
+        pageSize: 100,
+        truncated: false,
+      },
+    ]);
+  return fleet;
+}
+
+it("loads every page of a fleet past the API's whole-grid limit, and writes all of it down", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  const fleet = largeFleet(api, 730);
+
+  const result = await (await freshLoadWeek())(OWNER);
+
+  expect(api.calls.map((call) => call.path)).toEqual([
+    "setup/revenue",
+    "setup/revenue?weekStart=2026-09-28&page=6&pageSize=100",
+    "setup/revenue?weekStart=2026-09-28&page=7&pageSize=100",
+    "setup/revenue?weekStart=2026-09-28&page=8&pageSize=100",
+  ]);
+  expect(result.week.vehicles.map((vehicle) => vehicle.id)).toEqual(
+    fleet.map((vehicle) => vehicle.id),
+  );
+  expect(result.week.truncated).toBe(false);
+  const list = await stored();
+  expect(list?.vehicles).toHaveLength(730);
+  expect(list?.vehicles[729]).toMatchObject({
+    id: "vehicle-729",
+    registration: "KDA 729A",
+  });
+});
+
+it("never writes down part of a fleet when a later page cannot be fetched", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  largeFleet(api, 730);
+  api.on("setup/revenue?weekStart=2026-09-28&page=7&pageSize=100", "offline");
+
+  await expect((await freshLoadWeek())(OWNER)).rejects.toThrow(
+    "No internet connection.",
+  );
+  expect(await stored()).toBeNull();
+});
+
 it("does not answer a single vehicle's week, or another week, from the list", async () => {
   await trustPhone();
   const api = fakeApi();

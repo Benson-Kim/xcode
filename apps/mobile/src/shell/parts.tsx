@@ -86,7 +86,7 @@ export function IconButton({
         styles.iconButton,
         {
           borderColor: colors.keyLine,
-          backgroundColor: pressed ? colors.blueWash : colors.surface,
+          backgroundColor: pressed ? colors.blueTint : colors.surface,
         },
         disabled && { opacity: 0.35 },
       ]}
@@ -251,7 +251,7 @@ export function CardAction({
               ? colors.blueDark
               : colors.blue
             : pressed
-              ? colors.blueWash
+              ? colors.blueTint
               : "transparent",
         },
       ]}

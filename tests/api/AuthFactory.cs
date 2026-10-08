@@ -12,6 +12,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -126,6 +127,13 @@ public sealed class DatabaseProbe : IDbCommandInterceptor, IDbTransactionInterce
         throw new InvalidOperationException("Simulated commit failure.");
     }
 }
+// Retries what DatabaseProbe.FailNextCommit throws, as SQL Server's strategy retries a transient failure.
+public sealed class RetryOnSimulatedFailure(ExecutionStrategyDependencies dependencies)
+    : ExecutionStrategy(dependencies, 3, TimeSpan.FromMilliseconds(1))
+{
+    protected override bool ShouldRetryOn(Exception exception) =>
+        exception is InvalidOperationException { Message: "Simulated commit failure." };
+}
 // Keeps error logs with their structured values, so a test can check what an operator would see.
 public sealed class TestLogs : ILoggerProvider
 {
@@ -151,6 +159,8 @@ public sealed class AuthFactory : WebApplicationFactory<Program>
     public TestEmail Email { get; } = new();
     public DatabaseProbe Database { get; } = new();
     public TestLogs Logs { get; } = new();
+    // SQLite never retries; a test can swap in a strategy that does, to run the API's retry loops.
+    public Func<ExecutionStrategyDependencies, IExecutionStrategy>? ExecutionStrategy { get; set; }
     public AuthFactory() => connection.Open();
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -160,7 +170,11 @@ public sealed class AuthFactory : WebApplicationFactory<Program>
         {
             services.RemoveAll<DbContextOptions<AuthDb>>();
             services.RemoveAll<IDbContextOptionsConfiguration<AuthDb>>();
-            services.AddDbContext<AuthDb>(o => o.UseSqlite(connection).AddInterceptors(Database));
+            services.AddDbContext<AuthDb>(o => o.UseSqlite(connection, sql =>
+            {
+                if (ExecutionStrategy is { } strategy)
+                    sql.ExecutionStrategy(strategy);
+            }).AddInterceptors(Database));
             services.RemoveAll<IClock>();
             services.AddSingleton<IClock>(Clock);
             services.RemoveAll<IEmailSender>();

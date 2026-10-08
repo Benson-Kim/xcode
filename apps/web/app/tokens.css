@@ -1,0 +1,78 @@
+/* Generated from packages/shared/src/tokens.ts. Do not edit by hand: change the tokens, then run `cd apps/web && npx vitest run tests/tokens.test.ts -u`. */
+@theme {
+  --color-cream: #f6f3ec;
+  --color-surface: #ffffff;
+  --color-on-fill: #ffffff;
+  --color-navy: #14213d;
+  --color-brand: #14213d;
+  --color-grey: #4f5b6b;
+  --color-blue: #1d5fd6;
+  --color-blue-dark: #1647a6;
+  --color-blue-busy: #3f6fc9;
+  --color-blue-soft: #e8effc;
+  --color-blue-tint: #eef3fd;
+  --color-blue-wash: #f7f9fe;
+  --color-line: #cfc8b8;
+  --color-card-line: #e4dfd3;
+  --color-divider: #efebe3;
+  --color-paper: #fbf9f4;
+  --color-hover: #f3f0e8;
+  --color-red: #b42318;
+  --color-red-bg: #fdecea;
+  --color-red-line: #f3c1bb;
+  --color-red-text: #8a1c12;
+  --color-red-hover: #fbd9d4;
+  --color-amber: #c9861c;
+  --color-amber-bg: #fff4de;
+  --color-amber-line: #e7c27a;
+  --color-amber-text: #6b4200;
+  --color-amber-hover: #fbe9c6;
+  --color-green: #1e6b3a;
+  --color-green-dark: color-mix(in srgb, var(--color-green) 80%, black);
+  --color-green-bg: #e3f1e8;
+  --color-green-line: #b8ddc3;
+  --shadow-panel: 0 8px 24px rgb(20 33 61 / 6%);
+  --shadow-menu: 0 8px 24px rgb(20 33 61 / 12%);
+  --shadow-drawer: 0 8px 24px rgb(20 33 61 / 18%);
+  --shadow-toast: 0 8px 24px rgb(20 33 61 / 25%);
+  --shadow-seg: 0 1px 3px rgb(20 33 61 / 15%);
+}
+
+:root[data-theme="dark"] {
+  --color-cream: #0f1520;
+  --color-surface: #1a222f;
+  --color-on-fill: #0f1520;
+  --color-navy: #e9edf3;
+  --color-brand: #223253;
+  --color-grey: #a3aebf;
+  --color-blue: #7fa9f5;
+  --color-blue-dark: #a9c6f9;
+  --color-blue-busy: #5c7fb8;
+  --color-blue-soft: #1b2942;
+  --color-blue-tint: #16202f;
+  --color-blue-wash: #131a26;
+  --color-line: #394657;
+  --color-card-line: #2b3542;
+  --color-divider: #242d3a;
+  --color-paper: #151c27;
+  --color-hover: #202936;
+  --color-red: #f0776b;
+  --color-red-bg: #2a1512;
+  --color-red-line: #5e2a23;
+  --color-red-text: #ffb4a9;
+  --color-red-hover: #351a15;
+  --color-amber: #e4a33c;
+  --color-amber-bg: #2a2011;
+  --color-amber-line: #5c4520;
+  --color-amber-text: #f6ce86;
+  --color-amber-hover: #342714;
+  --color-green: #5fc183;
+  --color-green-dark: color-mix(in srgb, var(--color-green) 80%, white);
+  --color-green-bg: #14291c;
+  --color-green-line: #2b4c36;
+  --shadow-panel: 0 8px 24px rgb(0 0 0 / 45%);
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 55%);
+  --shadow-drawer: 0 8px 24px rgb(0 0 0 / 60%);
+  --shadow-toast: 0 8px 24px rgb(0 0 0 / 65%);
+  --shadow-seg: 0 1px 3px rgb(0 0 0 / 50%);
+}

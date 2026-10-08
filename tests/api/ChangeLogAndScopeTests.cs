@@ -139,6 +139,50 @@ public sealed class ChangeLogAndScopeTests : IDisposable
         Assert.Equal(4, app.Database.Transactions);
     }
 
+    // Organization settings and the logo share the organization row with every other change-log writer, so they retry
+    // the same way. The collision inside the first attempt rolls back with it; another writer's entry committed before
+    // the retry stays, and the retry adds exactly one version and one entry on top of it.
+    [Fact]
+    public async Task SettingsWritesRetryWhenOnlyTheChangeLogCollides()
+    {
+        await app.SeedDemo();
+        using var owner = await app.SignIn(Owner);
+        var yesterday = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime).AddDays(-1).ToString("yyyy-MM-dd");
+        const string Png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+        async Task<long> SettingsVersion()
+        {
+            long version = 0;
+            await app.WithDb(async db => version = (await db.Organizations.IgnoreQueryFilters().SingleAsync()).SettingsVersion);
+            return version;
+        }
+
+        foreach (var (section, save) in new (string, Func<Task<HttpResponseMessage>>)[]
+        {
+            ("branding", () => owner.PutAsJsonAsync("/setup/organization/settings/branding", new { value = new { displayName = "North Star" }, reason = "Rebrand" })),
+            ("businessDate", () => owner.PutAsJsonAsync("/setup/organization/settings/businessDate", new { value = yesterday, reason = "Close yesterday" })),
+            ("logo", () => owner.PutAsJsonAsync("/setup/organization/logo", new { dataUrl = Png })),
+        })
+        {
+            var start = await SettingsVersion();
+            app.Database.Reset();
+            app.Database.Interleave("Organizations", BumpChangeLog);
+            app.Database.BetweenAttempts(BumpChangeLog);
+            using var saved = await save();
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+            Assert.Equal(2, app.Database.Transactions);
+            Assert.Equal(start + 2, await SettingsVersion());
+            await app.WithDb(async db => Assert.Equal(start + 2,
+                (await db.Set<OrganizationSettingsVersion>().IgnoreQueryFilters().Where(x => x.Section == section).SingleAsync()).Version));
+        }
+
+        // A collision that keeps happening gives up after three retries.
+        app.Database.Reset();
+        app.Database.Interleave("Organizations", BumpChangeLog, times: 4);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await owner.PutAsJsonAsync("/setup/organization/settings/branding", new { value = new { displayName = "South Line" } })).StatusCode);
+        Assert.Equal(4, app.Database.Transactions);
+    }
+
     // Taken from the Owner after the first attempt rolled back and before the retry: a single permission, or the membership.
     [Theory]
     [InlineData("INSERT INTO \"PermissionOverrides\" (\"OrganizationId\", \"UserId\", \"Permission\", \"Granted\") SELECT \"OrganizationId\", \"UserId\", 'companies.manage', 0 FROM \"Memberships\" WHERE \"UserId\" = (SELECT \"Id\" FROM \"Users\" WHERE \"Email\" = 'antony.maina@shamayah.co.ke')")]

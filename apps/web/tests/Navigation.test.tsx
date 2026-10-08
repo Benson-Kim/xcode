@@ -1,5 +1,13 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+
+import { DASHBOARD_CARDS, PERMISSION_KEYS } from "@xcode/shared/permissions";
 
 import { AppShell } from "../components/AppShell";
 import { appearanceFixture } from "./renderInApp";
@@ -78,4 +86,63 @@ it("names the scheduled items page Scheduled expenses and savings", async () => 
       level: 1,
     }),
   ).toBeInTheDocument();
+});
+
+const MENU = [
+  "Dashboard",
+  "Revenue",
+  "Petty cash",
+  "PSV companies",
+  "Vehicles",
+  "Expense categories",
+  "Scheduled expenses and savings",
+  "People and access",
+  "Change log",
+  "Organization settings",
+];
+
+const menuLabels = () =>
+  within(screen.getByRole("navigation", { name: "Main" }))
+    .getAllByRole("button")
+    .map((button) => button.textContent)
+    .filter((label) => label !== "Setup");
+
+it("shows the whole menu, in order, to someone holding every permission", async () => {
+  signIn([...PERMISSION_KEYS]);
+  const menu = within(screen.getByRole("navigation", { name: "Main" }));
+  await menu.findByRole("button", { name: "Organization settings" });
+  expect(menuLabels()).toEqual(MENU);
+});
+
+it("shows only the Dashboard to someone holding no permissions", async () => {
+  signIn([]);
+  const menu = within(screen.getByRole("navigation", { name: "Main" }));
+  await menu.findByRole("button", { name: "Dashboard" });
+  await waitFor(() =>
+    expect(screen.queryByText(/Loading/)).not.toBeInTheDocument(),
+  );
+  expect(menuLabels()).toEqual(["Dashboard"]);
+  expect(menu.queryByRole("button", { name: "Setup" })).not.toBeInTheDocument();
+});
+
+it.each([
+  ["Vehicles", "invest.view"],
+  ["Vehicles", "vehicles.manage"],
+  ["Petty cash", "pettycash.issue"],
+  ["Organization settings", "organization.manage"],
+])("shows %s for %s alone", async (label, permission) => {
+  signIn([permission]);
+  const menu = within(screen.getByRole("navigation", { name: "Main" }));
+  expect(await menu.findByRole("button", { name: label })).toBeInTheDocument();
+});
+
+it("titles the dashboard cards, in order, as the shared list does", async () => {
+  signIn([...PERMISSION_KEYS]);
+  const expected: string[] = DASHBOARD_CARDS.map((card) => card.title);
+  const titles = () =>
+    screen
+      .queryAllByRole("heading")
+      .map((heading) => heading.textContent ?? "")
+      .filter((text) => expected.includes(text));
+  await waitFor(() => expect(titles()).toEqual(expected));
 });

@@ -1,13 +1,35 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
+using Auth.Application.Setup;
 using Auth.Domain;
 using Auth.Domain.Setup;
 
 namespace Auth.Application.Revenue;
 
 public sealed record RevenueCompanyOption(Guid Id, string Name);
+
+// The columns of a day's record that the grid shows; the grid never loads whole records.
+public sealed record RevenueDayRecord(Guid VehicleId, DateOnly BusinessDate, decimal? Amount, RevenueNoEarningsReason? Reason,
+    string? Note, bool CorrectedAfterDate, long Version)
+{
+    public static RevenueDayRecord Of(RevenueRecord record) =>
+        new(record.VehicleId, record.BusinessDate, record.Amount, record.Reason, record.Note, record.CorrectedAfterDate, record.Version);
+}
+
+// The wire values are the clients' RevenueStatus (packages/shared/src/revenue.ts).
+[JsonConverter(typeof(JsonStringEnumConverter<CellStatus>))]
+public enum CellStatus
+{
+    [JsonStringEnumMemberName("none")] None,
+    [JsonStringEnumMemberName("future")] Future,
+    [JsonStringEnumMemberName("missing")] Missing,
+    [JsonStringEnumMemberName("amount")] Amount,
+    [JsonStringEnumMemberName("reason")] Reason
+}
+
 public sealed record RevenueCellDto(
     DateOnly Date,
-    string Status,
+    CellStatus Status,
     decimal Expected,
     decimal? Amount,
     string? Reason,
@@ -16,21 +38,27 @@ public sealed record RevenueCellDto(
     bool EditedAfterCapture,
     long? Version)
 {
+    public static CellStatus StatusOf(FleetVehicle vehicle, DateOnly date, DateOnly today, RevenueDayRecord? record) =>
+        !vehicle.ActiveOn(date) ? CellStatus.None : date > today ? CellStatus.Future :
+        record is null ? CellStatus.Missing : record.Amount is not null ? CellStatus.Amount : CellStatus.Reason;
+
     // The week grid and a 409's current cell come from here, so clients and the server agree on what may be opened.
-    public static RevenueCellDto For(SetupActor actor, FleetVehicle vehicle, DateOnly date, RevenueRecord? record, DateOnly? earliestMissing)
+    // target is the vehicle's weekly target that day (FleetVehicle.TargetOn), which the caller works out once.
+    public static RevenueCellDto For(SetupActor actor, FleetVehicle vehicle, DateOnly date, decimal target, RevenueDayRecord? record,
+        DateOnly? earliestMissing)
     {
-        var status = !vehicle.ActiveOn(date) ? "none" : date > actor.Today ? "future" :
-            record is null ? "missing" : record.Amount is not null ? "amount" : "reason";
-        var capture = actor.Permissions.Contains("revenue.capture");
-        var correct = actor.Permissions.Contains("revenue.correct");
+        var status = StatusOf(vehicle, date, actor.Today, record);
+        var capture = actor.Permissions.Contains(PermissionKeys.RevenueCapture);
+        var correct = actor.Permissions.Contains(PermissionKeys.RevenueCorrect);
         var canEdit = status switch
         {
             // A later missing day stays shut until the earliest missing day is filled.
-            "missing" => capture && (earliestMissing is null || date <= earliestMissing.Value),
-            "amount" or "reason" => date == actor.Today ? capture || correct : correct,
-            _ => false
+            CellStatus.Missing => capture && (earliestMissing is null || date <= earliestMissing.Value),
+            CellStatus.Amount or CellStatus.Reason => date == actor.Today ? capture || correct : correct,
+            CellStatus.None or CellStatus.Future => false,
+            _ => throw new InvalidOperationException($"Unknown cell status {status}.")
         };
-        return new(date, status, decimal.Round(vehicle.TargetOn(date) / 7m, 2), record?.Amount,
+        return new(date, status, decimal.Round(target / 7m, 2), record?.Amount,
             record?.Reason is null ? null : RevenueEntry.Label(record.Reason), record?.Note, canEdit,
             record?.CorrectedAfterDate == true, record?.Version);
     }
@@ -49,6 +77,8 @@ public sealed record RevenueVehicleDto(
     decimal TotalExpected,
     int? Percent);
 
+// The week's figures (totals, percent, day totals, first gap) cover every vehicle in the grid; Vehicles lists one page
+// of it in registration order. The fields after Percent were added later, so released clients read the rest unchanged.
 public sealed record RevenueWeekDto(
     DateOnly WeekStart,
     DateOnly WeekThrough,
@@ -58,7 +88,37 @@ public sealed record RevenueWeekDto(
     IReadOnlyList<RevenueVehicleDto> Vehicles,
     decimal TotalAmount,
     decimal TotalExpected,
-    int? Percent);
+    int? Percent,
+    int PageNumber,
+    int PageSize,
+    int TotalVehicles,
+    bool Truncated,
+    IReadOnlyList<RevenueDayTotalDto> DayTotals,
+    RevenueGapDto? FirstGap);
+
+// Amount sums the days recorded with an amount; Expected sums each vehicle's expected figure for the days that count.
+public sealed record RevenueDayTotalDto(DateOnly Date, decimal Amount, decimal Expected);
+
+// Where capture starts: the earliest day still missing a record, and the first vehicle in grid order missing it.
+public sealed record RevenueGapDto(Guid VehicleId, DateOnly Date);
+
+// Which of a week grid's vehicles one response lists.
+public sealed record RevenueWeekPage(int Number, int Size)
+{
+    // Released clients ask with neither page nor pageSize and get the whole grid, up to this many vehicles.
+    public const int LegacyLimit = 500;
+    public const int DefaultSize = 100;
+    public static readonly RevenueWeekPage Legacy = new(1, LegacyLimit);
+
+    // Null when neither is given. Either one alone asks for paging, with the other defaulted.
+    public static RevenueWeekPage? Of(int? page, int? pageSize)
+    {
+        if (page is null && pageSize is null) return null;
+        var requested = new RevenueWeekPage(page ?? 1, pageSize ?? DefaultSize);
+        SetupPagination.Validate(requested.Number, requested.Size);
+        return requested;
+    }
+}
 
 public sealed record RevenueDashboardDto(
     string Period,
@@ -112,7 +172,8 @@ public sealed record SaveRevenue(decimal? Amount, string? Reason, string? Note, 
 
 public interface IRevenueRepository
 {
-    Task<RevenueWeekDto> Week(SetupActor actor, DateOnly? weekStart, Guid? companyId, Guid? vehicleId, CancellationToken ct);
+    // A null page lists the whole grid up to RevenueWeekPage.LegacyLimit; a vehicle's own week is never paged.
+    Task<RevenueWeekDto> Week(SetupActor actor, DateOnly? weekStart, Guid? companyId, Guid? vehicleId, RevenueWeekPage? page, CancellationToken ct);
     Task<RevenueDashboardDto> Dashboard(SetupActor actor, string period, Guid? companyId, CancellationToken ct);
     Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct);
     Task<RevenueRecord?> Record(SetupActor actor, Guid vehicleId, DateOnly date, CancellationToken ct);

@@ -1,4 +1,5 @@
 import { fetchWithSession } from "../session";
+import { invalidateDataCache } from "./cache";
 
 // A refused request. The message is what to show; the status and body let a screen handle one refusal itself
 // (for example a 409 that carries the record now saved).
@@ -48,5 +49,7 @@ export async function apiRequest<T>(
       response.status,
       body,
     );
+  if ((init?.method ?? "GET").toUpperCase() !== "GET")
+    invalidateDataCache("setup/");
   return body as T;
 }

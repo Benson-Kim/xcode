@@ -1,8 +1,13 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { AppState } from "react-native";
 
-import { OfflineError, SessionEndedError, apiGet } from "../src/lib/api";
-import { loadSession, saveSession } from "../src/lib/storage";
+import {
+  OfflineError,
+  SessionEndedError,
+  apiGet,
+  keepSession,
+} from "../src/lib/api";
+import { loadSession, saveOfflineTries, saveSession } from "../src/lib/storage";
 import { fakeApi, people, tokens } from "./fakeApi";
 import { startApp, storedText, trustPhone, typePin } from "./helpers";
 
@@ -26,7 +31,7 @@ const appearance = {
     datePattern: "medium",
     hour12: false,
     currency: "KES",
-    useGroupping: true,
+    useGrouping: true,
     numberDecimals: 2,
   },
   themeMode: "system",
@@ -567,14 +572,38 @@ it("stays on the auth screen when fetching the person fails after sign-in", asyn
   expect(screen.queryByText("Hi Wanjiru")).toBeNull();
 });
 
-it("says so on the code step when fetching the person fails after a new phone's code is confirmed", async () => {
+const PROFILE_ERROR =
+  "Signed in, but your profile could not be loaded. Check your connection and try again.";
+const PROFILE_ERROR_AFTER_CODE =
+  "Signed in, but your profile could not be loaded. Enter your PIN to try again.";
+const UNEXPECTED =
+  "The service answered in a way this app does not understand. Try again shortly.";
+
+// The first person fetch fails, the next ones succeed.
+const failsOnce = (person: unknown) => {
+  let fetches = 0;
+  return () =>
+    ++fetches === 1
+      ? ([500, { title: "Internal Server Error" }] as [number, unknown])
+      : ([200, person] as [number, unknown]);
+};
+
+it("asks for the PIN again when fetching the person fails after a new phone's code is confirmed", async () => {
   const api = fakeApi();
-  api.on("auth/sign-in", [
-    202,
-    { status: "verification_required", maskedEmail: "w***@zurigenesis.co.ke" },
-  ]);
+  let signIns = 0;
+  api.on("auth/sign-in", () =>
+    ++signIns === 1
+      ? [
+          202,
+          {
+            status: "verification_required",
+            maskedEmail: "w***@zurigenesis.co.ke",
+          },
+        ]
+      : [200, tokens(2)],
+  );
   api.on("auth/verify-device", [200, tokens()]);
-  api.on("auth/session", [500, { title: "Internal Server Error" }]);
+  api.on("auth/session", failsOnce(people.clerk));
   await startApp();
   await fireEvent.changeText(
     await screen.findByLabelText("Mobile number"),
@@ -586,12 +615,304 @@ it("says so on the code step when fetching the person fails after a new phone's 
     await screen.findByLabelText("6 digit code"),
     "481516",
   );
-  await screen.findByText(
-    "Signed in, but your profile could not be loaded. Check your connection and try again.",
-  );
-  expect(screen.getByText("Check your email")).toBeTruthy();
+
+  await screen.findByText(PROFILE_ERROR_AFTER_CODE);
+  expect(screen.queryByText("Check your email")).toBeNull();
+  expect(screen.getByText("Enter the PIN for this number")).toBeTruthy();
   expect(screen.queryByText("Hi Wanjiru")).toBeNull();
+
+  await typePin("2580");
+  await screen.findByText("Hi Wanjiru");
   expect(api.sent("auth/verify-device")).toHaveLength(1);
+  expect(api.sent("auth/sign-in")).toHaveLength(2);
+  expect(storedText()).toContain("access-2");
+});
+
+it("signs in with the new PIN when fetching the person fails after a first PIN is saved", async () => {
+  const api = fakeApi();
+  api.on("auth/setup-pin/request", [
+    202,
+    { status: "check_email", developmentCode: "123123" },
+  ]);
+  api.on("auth/setup-pin/verify", [200, { status: "code_verified" }]);
+  api.on("auth/setup-pin/complete", [200, tokens()]);
+  api.on("auth/session", failsOnce(people.manager));
+  api.on("auth/sign-in", [200, tokens(2)]);
+  await startApp();
+  await fireEvent.changeText(
+    await screen.findByLabelText("Mobile number"),
+    "0700111222",
+  );
+  await fireEvent.press(screen.getByText("First time here? Set your PIN"));
+  await fireEvent.changeText(
+    await screen.findByLabelText("6 digit code"),
+    "123123",
+  );
+  await screen.findByText("Choose your PIN");
+  await typePin("5937");
+  await screen.findByText("Type it again");
+  await typePin("5937");
+
+  await screen.findByText(PROFILE_ERROR_AFTER_CODE);
+  expect(screen.getByText("Enter the PIN for this number")).toBeTruthy();
+  expect(
+    screen.queryByText("This code no longer works. Tap Send a new code."),
+  ).toBeNull();
+  await typePin("5937");
+  await screen.findByText("Hi Brian");
+  expect(api.sent("auth/setup-pin/verify")).toHaveLength(1);
+  expect(api.sent("auth/setup-pin/complete")).toHaveLength(1);
+  expect(api.sent("auth/sign-in")).toEqual([
+    {
+      email: "",
+      phoneNumber: "0700111222",
+      pin: "5937",
+      code: "",
+      deviceId: DEVICE,
+      refreshToken: "refresh-1",
+    },
+  ]);
+});
+
+it("unlocks with the new PIN when fetching the person fails after a PIN reset", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  api.on("auth/pin-reset/request", [
+    202,
+    { status: "check_email", developmentCode: "222333" },
+  ]);
+  api.on("auth/pin-reset/verify", [200, { status: "code_verified" }]);
+  api.on("auth/pin-reset/complete", [200, tokens(3)]);
+  api.on("auth/session", failsOnce(people.owner));
+  api.on("auth/unlock", [200, tokens(4)]);
+  await startApp();
+  await fireEvent.press(await screen.findByText("Forgot PIN?"));
+  await fireEvent.changeText(
+    await screen.findByLabelText("6 digit code"),
+    "222333",
+  );
+  await screen.findByText("Choose a new PIN");
+  await typePin("5937");
+  await screen.findByText("Type it again");
+  await typePin("5937");
+
+  await screen.findByText(PROFILE_ERROR_AFTER_CODE);
+  await screen.findByText("Welcome back, Antony");
+  await typePin("5937");
+  await screen.findByText("Hi Antony");
+  expect(api.sent("auth/pin-reset/verify")).toHaveLength(1);
+  expect(api.sent("auth/pin-reset/complete")).toHaveLength(1);
+  expect(api.sent("auth/unlock")).toHaveLength(1);
+  expect(api.sent("auth/unlock")[0]).toMatchObject({ pin: "5937", code: "" });
+  expect(storedText()).toContain("access-4");
+});
+
+describe("an answer the app does not expect", () => {
+  async function toThePad() {
+    await startApp();
+    await fireEvent.changeText(
+      await screen.findByLabelText("Mobile number"),
+      "0712345678",
+    );
+    await fireEvent.press(screen.getByText("Continue"));
+    await screen.findByText("Enter the PIN for this number");
+  }
+
+  async function toTheCode(api: ReturnType<typeof fakeApi>) {
+    api.on("auth/setup-pin/request", [202, { status: "check_email" }]);
+    await startApp();
+    await fireEvent.changeText(
+      await screen.findByLabelText("Mobile number"),
+      "0700111222",
+    );
+    await fireEvent.press(screen.getByText("First time here? Set your PIN"));
+    return screen.findByLabelText("6 digit code");
+  }
+
+  it("says so on the pad when a sign-in is answered with another status, and counts no wrong PIN", async () => {
+    const api = fakeApi();
+    api.on("auth/sign-in", [200, { status: "check_email" }]);
+    await toThePad();
+    await typePin("2580");
+    await screen.findByText(UNEXPECTED);
+    expect(screen.getByLabelText("0 of 4 numbers entered")).toBeTruthy();
+
+    api.on("auth/sign-in", [401, { status: "authentication_failed" }]);
+    await typePin("1111");
+    await screen.findByText("Wrong PIN. 4 tries left.");
+  });
+
+  it("says so on the pad when an unlock is answered with another status, and counts no wrong PIN", async () => {
+    await trustPhone();
+    const api = fakeApi();
+    api.on("auth/unlock", [200, { status: "check_email" }]);
+    await startApp();
+    await screen.findByText("Welcome back, Antony");
+    await typePin("4826");
+    await screen.findByText(UNEXPECTED);
+    expect(screen.queryByText("Hi Antony")).toBeNull();
+    expect(screen.getByLabelText("0 of 4 numbers entered")).toBeTruthy();
+
+    api.on("auth/unlock", [401, { status: "authentication_failed" }]);
+    await typePin("1111");
+    await screen.findByText("Wrong PIN. 4 tries left.");
+  });
+
+  it("says so on the number step when a request for a code is answered with another status", async () => {
+    const api = fakeApi();
+    api.on("auth/setup-pin/request", [200, { status: "authenticated" }]);
+    await startApp();
+    await fireEvent.changeText(
+      await screen.findByLabelText("Mobile number"),
+      "0700111222",
+    );
+    await fireEvent.press(screen.getByText("First time here? Set your PIN"));
+    await screen.findByText(UNEXPECTED);
+    expect(screen.queryByText("Check your email")).toBeNull();
+    expect(screen.getByLabelText("Mobile number")).toBeTruthy();
+  });
+
+  it("says so on the code step when a code is verified with another status, and counts no wrong code", async () => {
+    const api = fakeApi();
+    api.on("auth/setup-pin/verify", [200, { status: "check_email" }]);
+    await fireEvent.changeText(await toTheCode(api), "123123");
+    await screen.findByText(UNEXPECTED);
+    expect(screen.queryByText("Choose your PIN")).toBeNull();
+
+    api.on("auth/setup-pin/verify", [401, { status: "authentication_failed" }]);
+    await fireEvent.changeText(screen.getByLabelText("6 digit code"), "000000");
+    await screen.findByText("That code is wrong. 4 tries left.");
+  });
+
+  it("says so on the pad when a new PIN is saved with another status", async () => {
+    const api = fakeApi();
+    api.on("auth/setup-pin/verify", [200, { status: "code_verified" }]);
+    api.on("auth/setup-pin/complete", [200, { status: "code_verified" }]);
+    await fireEvent.changeText(await toTheCode(api), "123123");
+    await screen.findByText("Choose your PIN");
+    await typePin("5937");
+    await screen.findByText("Type it again");
+    await typePin("5937");
+    await screen.findByText(UNEXPECTED);
+    expect(screen.getByLabelText("0 of 4 numbers entered")).toBeTruthy();
+    expect(
+      screen.queryByText("This code no longer works. Tap Send a new code."),
+    ).toBeNull();
+  });
+
+  it("says so on the code step when a new phone's code is confirmed with another status", async () => {
+    const api = fakeApi();
+    api.on("auth/sign-in", [202, { status: "verification_required" }]);
+    api.on("auth/verify-device", [200, { status: "check_email" }]);
+    await toThePad();
+    await typePin("2580");
+    await fireEvent.changeText(
+      await screen.findByLabelText("6 digit code"),
+      "481516",
+    );
+    await screen.findByText(UNEXPECTED);
+    expect(screen.getByText("Check your email")).toBeTruthy();
+    expect(api.sent("auth/verify-device")).toHaveLength(1);
+  });
+
+  it("says so when the sign-in is accepted but carries no tokens", async () => {
+    const api = fakeApi();
+    api.on("auth/sign-in", [200, { status: "authenticated" }]);
+    api.on("auth/session", [200, people.clerk]);
+    await toThePad();
+    await typePin("2580");
+    await screen.findByText(PROFILE_ERROR);
+    expect(screen.queryByText("Hi Wanjiru")).toBeNull();
+    expect(await loadSession()).toBeNull();
+  });
+});
+
+it("refuses to keep a session that has no tokens", async () => {
+  await expect(
+    keepSession("0712345678", { status: "authenticated", accessToken: "a" }),
+  ).rejects.toMatchObject({
+    response: { status: "unexpected_response" },
+  });
+  await expect(
+    keepSession("0712345678", { status: "authenticated", refreshToken: "r" }),
+  ).rejects.toMatchObject({
+    response: { status: "unexpected_response" },
+  });
+  expect(await loadSession()).toBeNull();
+});
+
+it("shows why a reset could not start on the paused screen", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  api.on("auth/unlock", [423, { status: "paused", retryAfterSeconds: 600 }]);
+  api.on("auth/pin-reset/request", "offline");
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+  await typePin("1111");
+  await screen.findByText("Sign in paused");
+
+  await fireEvent.press(screen.getByText("Reset PIN"));
+  await screen.findByText("No internet. Sending a code needs network.");
+  expect(screen.getByText("Sign in paused")).toBeTruthy();
+
+  api.on("auth/pin-reset/request", [429, {}]);
+  await fireEvent.press(screen.getByText("Reset PIN"));
+  await screen.findByText("Too many requests. Please wait a minute.");
+});
+
+it("shows the pause again when a trusted phone starts inside one it kept", async () => {
+  await trustPhone();
+  await saveOfflineTries({
+    count: 0,
+    pausedUntil: Date.now() + 10 * 60 * 1000,
+  });
+  fakeApi();
+  await startApp();
+  await screen.findByText("Sign in paused");
+});
+
+it("does not leave the app busy when switching user fails", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  api.on(`auth/devices/${DEVICE}/revoke`, [200, { status: "device_revoked" }]);
+  const forget = jest
+    .spyOn(require("../src/lib/storage"), "forgetPerson")
+    .mockRejectedValueOnce(new Error("keychain unavailable"));
+  try {
+    await startApp();
+    await fireEvent.press(await screen.findByText("Not you? Switch user"));
+    await screen.findByText("Something went wrong. Please try again.");
+    expect(screen.getByRole("button", { name: "1" })).not.toBeDisabled();
+    expect(screen.getByText("Welcome back, Antony")).toBeTruthy();
+
+    await fireEvent.press(screen.getByText("Not you? Switch user"));
+    await screen.findByText("Sign in");
+  } finally {
+    forget.mockRestore();
+  }
+});
+
+it("holds the keypad while a code is requested from the pad", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  let sent = () => {};
+  api.on(
+    "auth/pin-reset/request",
+    () =>
+      new Promise<[number, unknown]>((resolve) => {
+        sent = () => resolve([202, { status: "check_email" }]);
+      }),
+  );
+  await startApp();
+  await fireEvent.press(await screen.findByText("Forgot PIN?"));
+  await waitFor(() =>
+    expect(api.sent("auth/pin-reset/request")).toHaveLength(1),
+  );
+  expect(screen.getByRole("button", { name: "1" })).toBeDisabled();
+  await fireEvent.press(screen.getByText("Forgot PIN?"));
+  expect(api.sent("auth/pin-reset/request")).toHaveLength(1);
+  await act(async () => sent());
+  await screen.findByText("Check your email");
 });
 
 it("locks again when the app goes to the background", async () => {

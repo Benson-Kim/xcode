@@ -1,3 +1,4 @@
+using Auth.Domain;
 using Auth.Domain.Setup;
 
 namespace Auth.Application.Setup;
@@ -10,7 +11,7 @@ public sealed class InvestmentUseCases(ISetupExecution execution, ISetupReposito
 
     // What has come back is the vehicle's net contribution (money in less money out, as its report counts them) from
     // the day it joined through the business date; it may be negative. The percentage is of what went in.
-    public Task<InvestmentDto> Get(Guid vehicleId, CancellationToken ct) => execution.Read("invest.view", async actor =>
+    public Task<InvestmentDto> Get(Guid vehicleId, CancellationToken ct) => execution.Read(PermissionKeys.InvestView, async actor =>
     {
         var vehicle = await repository.Vehicle(actor, vehicleId, ct) ?? throw new KeyNotFoundException();
         var investment = await repository.Investment(vehicleId, ct);
@@ -23,7 +24,7 @@ public sealed class InvestmentUseCases(ISetupExecution execution, ISetupReposito
         };
     }, ct);
 
-    public Task<Guid> Add(Guid vehicleId, SaveInvestment input, CancellationToken ct) => execution.Write("invest.manage", async actor =>
+    public Task<Guid> Add(Guid vehicleId, SaveInvestment input, CancellationToken ct) => execution.Write(PermissionKeys.InvestManage, async actor =>
     {
         var vehicle = await repository.Vehicle(actor, vehicleId, ct) ?? throw new KeyNotFoundException();
         var entry = new VehicleInvestment(vehicle, input.Date, input.Description!, input.Amount, actor.Today, actor.UserId, clock.UtcNow);
@@ -33,7 +34,7 @@ public sealed class InvestmentUseCases(ISetupExecution execution, ISetupReposito
         return entry.Id;
     }, ct);
 
-    public Task<Guid> Update(Guid id, SaveInvestment input, CancellationToken ct) => execution.Write("invest.manage", async actor =>
+    public Task<Guid> Update(Guid id, SaveInvestment input, CancellationToken ct) => execution.Write(PermissionKeys.InvestManage, async actor =>
     {
         var (entry, vehicle) = await Entry(actor, id, ct);
         var before = Snapshot(entry);
@@ -43,7 +44,7 @@ public sealed class InvestmentUseCases(ISetupExecution execution, ISetupReposito
         return entry.Id;
     }, ct);
 
-    public Task<Guid> Remove(Guid id, CancellationToken ct) => execution.Write("invest.manage", async actor =>
+    public Task<Guid> Remove(Guid id, CancellationToken ct) => execution.Write(PermissionKeys.InvestManage, async actor =>
     {
         var (entry, vehicle) = await Entry(actor, id, ct);
         repository.Remove(entry);

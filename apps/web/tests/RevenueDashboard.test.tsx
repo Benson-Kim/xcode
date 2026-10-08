@@ -30,7 +30,7 @@ const appearance: Appearance = {
     firstDayOfWeek: 1,
     weekNumbering: "iso8601",
     currency: "KES",
-    useGroupping: true,
+    useGrouping: true,
     numberDecimals: 2,
     direction: "ltr",
   },
@@ -88,6 +88,23 @@ function serve(
         permissions,
       });
     if (path === "/api/setup/appearance") return json(appearance);
+    if (path === "/api/setup/pettycash/dashboard")
+      return json({
+        float: {
+          balance: 2400,
+          waitingCount: 2,
+          waitingTotal: 1800,
+          sentBackCount: 0,
+          approvedThisMonth: 9500,
+        },
+        approvals: {
+          count: 3,
+          total: 11000,
+          approvalLimit: null,
+          aboveLimit: 0,
+          holders: [],
+        },
+      });
     const period = /period=(\w+)/.exec(path)?.[1];
     if (path.startsWith("/api/setup/revenue/dashboard") && period)
       return answer(period);
@@ -182,11 +199,15 @@ it("connects the revenue cards from the business date, and keeps the others at '
   const edits = card("Edited after capture");
   expect(within(edits).getByText("1 record")).toBeInTheDocument();
 
+  expect(
+    await within(card("My petty cash float")).findByText("KES 2,400"),
+  ).toBeInTheDocument();
+  expect(
+    await within(card("Petty cash to approve")).findByText("3 entries"),
+  ).toBeInTheDocument();
   for (const name of [
-    "My petty cash float",
     "Net contribution",
     "Money out",
-    "Petty cash to approve",
     "Yearly items due",
     "Money invested",
   ])

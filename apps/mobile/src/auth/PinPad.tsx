@@ -171,7 +171,7 @@ export function PinPad({
                     : {
                         borderColor: pressed ? colors.blue : colors.keyLine,
                         backgroundColor: pressed
-                          ? colors.blueWash
+                          ? colors.blueTint
                           : colors.surface,
                       },
                   busy && styles.disabled,

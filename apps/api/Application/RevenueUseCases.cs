@@ -7,11 +7,13 @@ namespace Auth.Application.Revenue;
 
 public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepository repository, IClock clock)
 {
-    private static readonly string[] WritePermissions = ["revenue.capture", "revenue.correct"];
-    private static readonly string[] DashboardPermissions = ["dash.capture", "dash.revenue", "dash.gaps", "dash.edits"];
+    private static readonly string[] WritePermissions = [PermissionKeys.RevenueCapture, PermissionKeys.RevenueCorrect];
+    private static readonly string[] DashboardPermissions = [PermissionKeys.DashCapture, PermissionKeys.DashRevenue, PermissionKeys.DashGaps, PermissionKeys.DashEdits];
 
-    public Task<RevenueWeekDto> Week(DateOnly? weekStart, Guid? companyId, Guid? vehicleId, CancellationToken ct) =>
-        execution.Read("revenue.view", actor => repository.Week(actor, weekStart, companyId, vehicleId, ct), ct);
+    // Paging applies to the fleet grid only: a vehicle's own week ignores page and pageSize.
+    public Task<RevenueWeekDto> Week(DateOnly? weekStart, Guid? companyId, Guid? vehicleId, int? page, int? pageSize, CancellationToken ct) =>
+        execution.Read(PermissionKeys.RevenueView, actor => repository.Week(actor, weekStart, companyId, vehicleId,
+            vehicleId is null ? RevenueWeekPage.Of(page, pageSize) : null, ct), ct);
 
     // The cards can be narrowed to one PSV company, the same filter the week grid takes (D15). It can only
     // narrow what the person already reaches, never widen it.
@@ -22,10 +24,10 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
     // (the Revenue clerk's card) never opens the revenue totals, and the revenue card never opens the capture counts.
     private static RevenueDashboardDto Visible(SetupActor actor, RevenueDashboardDto dashboard)
     {
-        var revenue = actor.Permissions.Contains("dash.revenue");
-        var capture = actor.Permissions.Contains("dash.capture");
-        var gaps = actor.Permissions.Contains("dash.gaps");
-        var edits = actor.Permissions.Contains("dash.edits");
+        var revenue = actor.Permissions.Contains(PermissionKeys.DashRevenue);
+        var capture = actor.Permissions.Contains(PermissionKeys.DashCapture);
+        var gaps = actor.Permissions.Contains(PermissionKeys.DashGaps);
+        var edits = actor.Permissions.Contains(PermissionKeys.DashEdits);
         return dashboard with
         {
             Revenue = revenue ? dashboard.Revenue : null,
@@ -58,18 +60,18 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
                     : "Revenue can only be recorded while the vehicle is active.");
             // Authorization comes before state disclosure (D5): the conflict below carries the saved record, so
             // whoever reads it must be someone who was allowed to make this change in the first place.
-            if (entry.Reason is not null && !actor.Permissions.Contains("revenue.no_earnings"))
-                throw Needs("Recording a no-earnings reason", "revenue.no_earnings");
-            var canCapture = actor.Permissions.Contains("revenue.capture");
-            var canCorrect = actor.Permissions.Contains("revenue.correct");
+            if (entry.Reason is not null && !actor.Permissions.Contains(PermissionKeys.RevenueNoEarnings))
+                throw PermissionCatalog.Refusal("Recording a no-earnings reason", PermissionKeys.RevenueNoEarnings);
+            var canCapture = actor.Permissions.Contains(PermissionKeys.RevenueCapture);
+            var canCorrect = actor.Permissions.Contains(PermissionKeys.RevenueCorrect);
             if (existing is null && !canCapture)
-                throw Needs("Recording a day that has no record yet", "revenue.capture");
+                throw PermissionCatalog.Refusal("Recording a day that has no record yet", PermissionKeys.RevenueCapture);
             if (existing is not null && date < actor.Today && !canCorrect)
-                throw Needs("Changing a past day", "revenue.correct");
+                throw PermissionCatalog.Refusal("Changing a past day", PermissionKeys.RevenueCorrect);
 
             // Never overwrite what the client did not see.
             if (existing is not null && input.Version != existing.Version)
-                throw new RevenueConflictException(RevenueCellDto.For(actor, vehicle, date, existing, null));
+                throw new RevenueConflictException(RevenueCellDto.For(actor, vehicle, date, vehicle.TargetOn(date), RevenueDayRecord.Of(existing), null));
 
             if (existing is null)
             {
@@ -99,9 +101,6 @@ public sealed class RevenueUseCases(ISetupExecution execution, IRevenueRepositor
             return new RevenueSaved(existing.Id, existing.Version);
         }, ct);
 
-    // A refusal names the permission it needs, as People and access labels it, so the phone and the web can say so.
-    private static UnauthorizedAccessException Needs(string action, string permission) =>
-        new($"{action} needs the permission \"{PermissionCatalog.Groups.SelectMany(g => g.Items).Single(i => i.Key == permission).Label}\".");
 
     private static object Snapshot(RevenueRecord record) => new
     {

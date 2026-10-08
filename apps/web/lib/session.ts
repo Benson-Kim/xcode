@@ -1,4 +1,5 @@
 import { checkedFetch, SecurityCheckError } from "./checkedFetch";
+import { clearDataCache } from "./data/cache";
 
 const SESSION_EXPIRED = "xcode:session-expired";
 
@@ -34,7 +35,10 @@ async function fetchRefreshingOnce(input: string, init?: RequestInit) {
 // fails too, tell the app the session has ended.
 export async function fetchWithSession(input: string, init?: RequestInit) {
   const response = await fetchRefreshingOnce(input, init);
-  if (response.status === 401) window.dispatchEvent(new Event(SESSION_EXPIRED));
+  if (response.status === 401) {
+    clearDataCache();
+    window.dispatchEvent(new Event(SESSION_EXPIRED));
+  }
   return response;
 }
 

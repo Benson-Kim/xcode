@@ -3,7 +3,7 @@ import { StyleSheet, TextInput, View, type TextInputProps } from "react-native";
 
 import { ErrorText } from "./Feedback";
 import { Text } from "./Text";
-import { fonts, useTheme } from "./theme";
+import { alpha, fonts, useTheme } from "./theme";
 
 type FieldProps = TextInputProps & {
   label: string;
@@ -29,6 +29,7 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
         accessibilityLabel={label}
         placeholderTextColor={colors.grey}
         {...props}
+        accessibilityHint={error || props.accessibilityHint}
         onFocus={(event) => {
           setFocused(true);
           props.onFocus?.(event);
@@ -52,7 +53,7 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
             outlineStyle: "solid",
             outlineWidth: focused ? 3 : 0,
             outlineOffset: 1,
-            outlineColor: `${colors.blue}59`,
+            outlineColor: alpha(colors.blue, 0.35),
           },
           spaced && styles.digits,
           style,

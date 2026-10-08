@@ -5,7 +5,8 @@ import { useState, type ReactNode } from "react";
 import { weekdayName } from "@xcode/shared/dates";
 
 import { useAppearance } from "../lib/appearance";
-import { apiRequest, useResource } from "../lib/data";
+import { useResource } from "../lib/data";
+import { organizationApi } from "../lib/endpoints/organization";
 import { useFormats } from "../lib/formats";
 import {
   Banner,
@@ -43,7 +44,7 @@ type Settings = {
     hour12: boolean;
     firstDayOfWeek: number;
     weekNumbering: string;
-    useGroupping: boolean;
+    useGrouping: boolean;
     numberDecimals: number;
     allowLocaleOverride: boolean;
     allowTimeZoneOverride: boolean;
@@ -243,10 +244,7 @@ function SettingsForm({
     }
     setBusy(section);
     try {
-      await apiRequest(`setup/organization/settings/${section}`, {
-        method: "PUT",
-        body: JSON.stringify({ value }),
-      });
+      await organizationApi.saveSection(section, value);
       setErrors({ ...errors, [section]: undefined });
       toast(saved[section]);
       refresh();
@@ -262,10 +260,7 @@ function SettingsForm({
     const value = settings.organization.businessDate || null;
     setBusinessDateBusy(true);
     try {
-      await apiRequest("setup/organization/settings/businessDate", {
-        method: "PUT",
-        body: JSON.stringify({ value }),
-      });
+      await organizationApi.saveBusinessDate(value);
       setBusinessDateError("");
       toast(
         value
@@ -294,12 +289,8 @@ function SettingsForm({
       });
     setLogoBusy(true);
     try {
-      if (file)
-        await apiRequest("setup/organization/logo", {
-          method: "PUT",
-          body: JSON.stringify({ dataUrl: await readAsDataUrl(file) }),
-        });
-      else await apiRequest("setup/organization/logo", { method: "DELETE" });
+      if (file) await organizationApi.uploadLogo(await readAsDataUrl(file));
+      else await organizationApi.removeLogo();
       setErrors({ ...errors, branding: undefined });
       toast(file ? "Logo updated." : "Logo removed.");
       refresh();

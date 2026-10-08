@@ -87,6 +87,35 @@ it("forwards revenue, expense catalog and investment paths, and nothing unlisted
   expect(fetcher).not.toHaveBeenCalled();
 });
 
+it("forwards every petty cash path", async () => {
+  const fetcher = vi.fn(
+    async (url: string) =>
+      new Response(JSON.stringify({ url }), { status: 200 }),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  const allowed = [
+    ["pettycash", "overview"],
+    ["pettycash", "entries"],
+    ["pettycash", "options"],
+    ["pettycash", "dashboard"],
+    ["pettycash", "approve-day"],
+    ["pettycash", "entries", "e-1"],
+    ["pettycash", "entries", "e-1", "approve"],
+    ["pettycash", "entries", "e-1", "send-back"],
+    ["pettycash", "entries", "e-1", "remove"],
+  ];
+  for (const path of allowed)
+    expect((await get(path)).status, path.join("/")).toBe(200);
+  expect(
+    fetcher.mock.calls.map(([url]) => String(url).replace(/^.*\/setup\//, "")),
+  ).toEqual(allowed.map((path) => path.join("/")));
+
+  fetcher.mockClear();
+  for (const path of [["pettycashx"], ["petty-cash", "overview"]])
+    expect((await get(path)).status, path.join("/")).toBe(404);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
 // The largest legitimate body is a logo upload: a data URL of about 350 KB.
 const MB = 1024 * 1024;
 const write = (
@@ -218,4 +247,199 @@ it("answers 503 with no-store and logs when the API cannot be reached", async ()
     requestId: body.requestId,
     operation: "people",
   });
+});
+
+const text = new TextEncoder();
+const decode = (chunk: Uint8Array | undefined) =>
+  new TextDecoder().decode(chunk);
+
+// An upstream body that the test releases piece by piece, and that errors the way fetch does when its signal aborts.
+function controlledBody(signal?: AbortSignal | null) {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const cancelled = vi.fn();
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+      signal?.addEventListener("abort", () => c.error(signal.reason));
+    },
+    cancel: cancelled,
+  });
+  return {
+    body,
+    cancelled,
+    send: (value: string) => controller.enqueue(text.encode(value)),
+    close: () => controller.close(),
+    fail: (error: Error) => controller.error(error),
+  };
+}
+
+it("hands the caller the first chunk before the upstream body has finished", async () => {
+  const upstream = controlledBody();
+  upstream.send("first,");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(upstream.body, {
+        status: 200,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      }),
+    ),
+  );
+  const result = await get(["people"]);
+  expect(result.status).toBe(200);
+  expect(result.headers.get("Content-Type")).toBe(
+    "application/json; charset=utf-8",
+  );
+  expect(result.headers.get("Cache-Control")).toBe("no-store");
+  expect(result.headers.get("X-Request-ID")).toEqual(expect.any(String));
+
+  const reader = result.body!.getReader();
+  expect(decode((await reader.read()).value)).toBe("first,");
+  upstream.send("second");
+  expect(decode((await reader.read()).value)).toBe("second");
+  upstream.close();
+  expect((await reader.read()).done).toBe(true);
+});
+
+it("never forwards the upstream's encoding, length or transfer headers, whose bytes fetch has already decoded", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response('{"ok":true}', {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Encoding": "br",
+          "Content-Length": "9",
+          "Transfer-Encoding": "chunked",
+          "X-Powered-By": "upstream",
+        },
+      }),
+    ),
+  );
+  const result = await get(["people"]);
+  for (const name of [
+    "content-encoding",
+    "content-length",
+    "transfer-encoding",
+    "x-powered-by",
+  ])
+    expect(result.headers.get(name), name).toBeNull();
+  expect(await result.json()).toEqual({ ok: true });
+});
+
+it("passes a status without a body through as one", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+  );
+  const result = await get(["people", "3f2c", "restore"]);
+  expect(result.status).toBe(204);
+  expect(result.body).toBeNull();
+});
+
+it("does not cut off a slow body once the API has answered", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const upstream = {
+      current: undefined as ReturnType<typeof controlledBody> | undefined,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        upstream.current = controlledBody(init.signal);
+        upstream.current.send("early,");
+        return new Response(upstream.current.body, { status: 200 });
+      }),
+    );
+    const result = await get(["people"]);
+    const reader = result.body!.getReader();
+    expect(decode((await reader.read()).value)).toBe("early,");
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    upstream.current!.send("late");
+    upstream.current!.close();
+    expect(decode((await reader.read()).value)).toBe("late");
+    expect((await reader.read()).done).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("answers 503 when the API does not send its headers in 15 seconds", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  try {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) =>
+            init.signal!.addEventListener("abort", () =>
+              reject(init.signal!.reason),
+            ),
+          ),
+      ),
+    );
+    const pending = get(["people"]);
+    await vi.advanceTimersByTimeAsync(14_999);
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await pending;
+    expect(result.status).toBe(503);
+    expect(await result.json()).toEqual({
+      status: "service_unavailable",
+      requestId: expect.any(String),
+    });
+    expect(JSON.parse(log.mock.calls[0][0] as string)).toMatchObject({
+      operation: "people",
+      level: "error",
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("cancels the unread body of an upstream 5xx", async () => {
+  const upstream = controlledBody();
+  upstream.send("stack trace");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(upstream.body, { status: 500 })),
+  );
+  expect((await get(["people"])).status).toBe(503);
+  expect(upstream.cancelled).toHaveBeenCalledOnce();
+});
+
+it("logs a body that fails after the response has started and errors the stream", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const upstream = controlledBody();
+  upstream.send("partial");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(upstream.body, { status: 200 })),
+  );
+  const result = await get(["people"]);
+  const reader = result.body!.getReader();
+  expect(decode((await reader.read()).value)).toBe("partial");
+  upstream.fail(new TypeError("terminated"));
+  await expect(reader.read()).rejects.toThrow("terminated");
+  expect(JSON.parse(log.mock.calls[0][0] as string)).toMatchObject({
+    operation: "people",
+    error: "terminated",
+    level: "error",
+  });
+});
+
+it("stops reading the upstream body when the caller goes away", async () => {
+  const upstream = controlledBody();
+  upstream.send("some");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(upstream.body, { status: 200 })),
+  );
+  const result = await get(["people"]);
+  const reader = result.body!.getReader();
+  await reader.read();
+  await reader.cancel();
+  expect(upstream.cancelled).toHaveBeenCalledOnce();
 });
