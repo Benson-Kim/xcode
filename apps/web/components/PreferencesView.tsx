@@ -74,7 +74,9 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
   const hour12Locked = preferences.allowHour12Override === false;
   const themeLocked = preferences.allowThemeOverride === false;
   const organization = preferences.organization;
-  const clockDefault = organization ? ` (${organization.hour12 ? "12-hour" : "24-hour"})` : "";
+  const clockDefault = organization
+    ? ` (${organization.hour12 ? "12-hour" : "24-hour"})`
+    : "";
   async function save() {
     setBusy(true);
     try {
@@ -99,11 +101,23 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
         <Card density="form">
           <CardHeader title="Display" />
           <Grid2>
-            <Field id="pref-locale" label="Locale override" hint={localeLocked ? LOCKED : undefined}>
+            <Field
+              id="pref-locale"
+              label="Locale override"
+              hint={localeLocked ? LOCKED : undefined}
+            >
               <TextInput
-                value={localeLocked ? (organization?.locale ?? "") : preferences.locale || ""}
+                value={
+                  localeLocked
+                    ? (organization?.locale ?? "")
+                    : preferences.locale || ""
+                }
                 disabled={localeLocked}
-                placeholder={organization ? `Organization default (${organization.locale})` : "Use organization default"}
+                placeholder={
+                  organization
+                    ? `Organization default (${organization.locale})`
+                    : "Use organization default"
+                }
                 onChange={(event) =>
                   setPreferences({
                     ...preferences,
@@ -112,11 +126,23 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
                 }
               />
             </Field>
-            <Field id="pref-zone" label="Time-zone override" hint={zoneLocked ? LOCKED : undefined}>
+            <Field
+              id="pref-zone"
+              label="Time-zone override"
+              hint={zoneLocked ? LOCKED : undefined}
+            >
               <TextInput
-                value={zoneLocked ? (organization?.timeZone ?? "") : preferences.timeZone || ""}
+                value={
+                  zoneLocked
+                    ? (organization?.timeZone ?? "")
+                    : preferences.timeZone || ""
+                }
                 disabled={zoneLocked}
-                placeholder={organization ? `Organization default (${organization.timeZone})` : "Use organization default"}
+                placeholder={
+                  organization
+                    ? `Organization default (${organization.timeZone})`
+                    : "Use organization default"
+                }
                 onChange={(event) =>
                   setPreferences({
                     ...preferences,
@@ -125,9 +151,15 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
                 }
               />
             </Field>
-            <Field id="pref-theme" label="Theme" hint={themeLocked ? LOCKED : undefined}>
+            <Field
+              id="pref-theme"
+              label="Theme"
+              hint={themeLocked ? LOCKED : undefined}
+            >
               <SelectInput
-                value={themeLocked ? "light" : preferences.themeMode || "system"}
+                value={
+                  themeLocked ? "light" : preferences.themeMode || "system"
+                }
                 disabled={themeLocked}
                 onChange={(event) =>
                   setPreferences({
@@ -141,18 +173,35 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
                 <option value="dark">Dark</option>
               </SelectInput>
             </Field>
-            <Field id="pref-clock" label="Clock" hint={hour12Locked ? LOCKED : undefined}>
+            <Field
+              id="pref-clock"
+              label="Clock"
+              hint={hour12Locked ? LOCKED : undefined}
+            >
               <SelectInput
-                value={hour12Locked ? "default" : preferences.hour12 == null ? "default" : preferences.hour12 ? "12" : "24"}
+                value={
+                  hour12Locked
+                    ? "default"
+                    : preferences.hour12 == null
+                      ? "default"
+                      : preferences.hour12
+                        ? "12"
+                        : "24"
+                }
                 disabled={hour12Locked}
                 onChange={(event) =>
                   setPreferences({
                     ...preferences,
-                    hour12: event.target.value === "default" ? null : event.target.value === "12",
+                    hour12:
+                      event.target.value === "default"
+                        ? null
+                        : event.target.value === "12",
                   })
                 }
               >
-                <option value="default">Organization default{clockDefault}</option>
+                <option value="default">
+                  Organization default{clockDefault}
+                </option>
                 <option value="12">12-hour</option>
                 <option value="24">24-hour</option>
               </SelectInput>

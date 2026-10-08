@@ -3,7 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 
 import type { AuthRequest, AuthResponse } from "@xcode/shared/auth";
 
-import { forwardedFor, logProxyError, readLimitedBody, requestId, sameOrigin, upstreamUrl } from "../../body";
+import {
+  forwardedFor,
+  logProxyError,
+  readLimitedBody,
+  requestId,
+  sameOrigin,
+  upstreamUrl,
+} from "../../body";
 
 const allowed = new Set([
   "sign-in",
@@ -37,19 +44,39 @@ export async function GET(
     return NextResponse.json({ status: "invalid_request" }, { status: 404 });
 
   const access = (await cookies()).get("access")?.value;
-  if (!access) return NextResponse.json({ status: "authentication_failed" }, { status: 401 });
+  if (!access)
+    return NextResponse.json(
+      { status: "authentication_failed" },
+      { status: 401 },
+    );
   try {
     const response = await fetch(`${upstreamUrl()}/auth/session`, {
-      headers: { Authorization: `Bearer ${access}`, "X-Request-ID": id, ...forwardedFor(request) },
+      headers: {
+        Authorization: `Bearer ${access}`,
+        "X-Request-ID": id,
+        ...forwardedFor(request),
+      },
       cache: "no-store",
       signal: AbortSignal.timeout(15_000),
     });
     if (response.status >= 500)
-      return NextResponse.json({ status: "service_unavailable", requestId: id }, { status: 503, headers: { "Cache-Control": "no-store" } });
-    return new NextResponse(await response.text(), { status: response.status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+      return NextResponse.json(
+        { status: "service_unavailable", requestId: id },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    return new NextResponse(await response.text(), {
+      status: response.status,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      },
+    });
   } catch (error) {
     logProxyError(id, "session", error);
-    return NextResponse.json({ status: "service_unavailable", requestId: id }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { status: "service_unavailable", requestId: id },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
   }
 }
 
@@ -150,52 +177,57 @@ export async function POST(
       : operation;
 
   try {
-    const response = await fetch(
-      `${upstreamUrl()}/auth/${upstreamOperation}`,
-      {
-        method: "POST",
-        cache: "no-store",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Request-ID": id,
-          ...forwardedFor(request),
-          ...(jar.get("access")
-            ? { Authorization: `Bearer ${jar.get("access")!.value}` }
-            : {}),
-        },
-        body: JSON.stringify({
-          phoneNumber,
-          email,
-          pin,
-          code,
-          deviceId,
-          refreshToken: jar.get("refresh")?.value || "",
-        }),
-        signal: AbortSignal.timeout(15_000),
+    const response = await fetch(`${upstreamUrl()}/auth/${upstreamOperation}`, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Request-ID": id,
+        ...forwardedFor(request),
+        ...(jar.get("access")
+          ? { Authorization: `Bearer ${jar.get("access")!.value}` }
+          : {}),
       },
-    );
+      body: JSON.stringify({
+        phoneNumber,
+        email,
+        pin,
+        code,
+        deviceId,
+        refreshToken: jar.get("refresh")?.value || "",
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
     if (response.status >= 500)
       return NextResponse.json(
         { status: "service_unavailable", requestId: id },
         { status: 503, headers: { "Cache-Control": "no-store" } },
       );
-    const raw = await response
-      .json()
-      .catch(() => null);
+    const raw = await response.json().catch(() => null);
     if (!raw || typeof raw !== "object" || typeof raw.status !== "string")
       return NextResponse.json(
         { status: "service_unavailable", requestId: id },
         { status: 503, headers: { "Cache-Control": "no-store" } },
       );
     const result = raw as AuthResponse;
-    const safeToken = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : undefined);
+    const safeToken = (v: unknown) =>
+      typeof v === "string" && v.length > 0 ? v : undefined;
     const output = NextResponse.json(
       {
         status: result.status,
-        retryAfterSeconds: typeof result.retryAfterSeconds === "number" ? result.retryAfterSeconds : undefined,
-        developmentCode: process.env.NODE_ENV !== "production" ? str(result.developmentCode) || undefined : undefined,
+        retryAfterSeconds:
+          typeof result.retryAfterSeconds === "number"
+            ? result.retryAfterSeconds
+            : undefined,
+        developmentCode:
+          process.env.NODE_ENV !== "production"
+            ? str(result.developmentCode) || undefined
+            : undefined,
         maskedEmail: str(result.maskedEmail) || undefined,
-        minimumPinLength: typeof result.minimumPinLength === "number" ? result.minimumPinLength : undefined,
+        minimumPinLength:
+          typeof result.minimumPinLength === "number"
+            ? result.minimumPinLength
+            : undefined,
       },
       { status: response.status },
     );

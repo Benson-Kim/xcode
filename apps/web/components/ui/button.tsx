@@ -14,7 +14,8 @@ const TONES = {
   ok: "border-green bg-green text-on-fill hover:enabled:border-green-dark hover:enabled:bg-green-dark aria-busy:opacity-80",
   warn: "border-amber bg-amber-bg text-amber-text hover:enabled:bg-amber-hover",
   danger: "border-red bg-red-bg text-red-text hover:enabled:bg-red-hover",
-  quiet: "border-line bg-transparent text-grey hover:enabled:bg-hover hover:enabled:text-navy",
+  quiet:
+    "border-line bg-transparent text-grey hover:enabled:bg-hover hover:enabled:text-navy",
 } as const;
 
 // pill button .

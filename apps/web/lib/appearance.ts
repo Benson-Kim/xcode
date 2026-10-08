@@ -54,9 +54,14 @@ const mix = (colour: string, amount: number, towards: string) =>
 const DEVICE_DARK = "(prefers-color-scheme: dark)";
 const THEME_KEY = "xcode.theme";
 
-const deviceIsDark = () => typeof window !== "undefined" && window.matchMedia?.(DEVICE_DARK).matches === true;
+const deviceIsDark = () =>
+  typeof window !== "undefined" &&
+  window.matchMedia?.(DEVICE_DARK).matches === true;
 
-export function resolveTheme(mode: string | null | undefined, device = deviceIsDark()): "light" | "dark" {
+export function resolveTheme(
+  mode: string | null | undefined,
+  device = deviceIsDark(),
+): "light" | "dark" {
   if (mode === "dark") return "dark";
   if (mode === "light") return "light";
   return device ? "dark" : "light";
@@ -68,9 +73,12 @@ let painted: Appearance | null = null;
 let watchingDevice = false;
 
 function watchDevice() {
-  if (watchingDevice || typeof window === "undefined" || !window.matchMedia) return;
+  if (watchingDevice || typeof window === "undefined" || !window.matchMedia)
+    return;
   watchingDevice = true;
-  window.matchMedia(DEVICE_DARK).addEventListener("change", () => applyAppearance(painted));
+  window
+    .matchMedia(DEVICE_DARK)
+    .addEventListener("change", () => applyAppearance(painted));
 }
 
 // Writes the theme onto the document, where the tokens in globals.css pick it up, and remembers it so the next
@@ -95,23 +103,36 @@ export function applyAppearance(appearance: Appearance | null) {
   painted = appearance;
   const root = document.documentElement;
   const branding = appearance?.branding;
-  const dark = applyTheme(appearance ? appearance.themeMode : root.dataset.theme) === "dark";
+  const dark =
+    applyTheme(appearance ? appearance.themeMode : root.dataset.theme) ===
+    "dark";
   // A brand colour has to be read against the surface it sits on. On a dark surface the organization's primary
   // is lightened, because the ink on a filled button goes dark there (--color-on-fill), and its tints are mixed
   // towards that surface instead of towards white. The pressed shade lightens for the same reason.
   const surface = "var(--color-paper)";
-  const lighter = (colour: string, amount: number) => mix(colour, amount, "white");
+  const lighter = (colour: string, amount: number) =>
+    mix(colour, amount, "white");
   const tint = (colour: string, light: number, deep: number) =>
     dark ? mix(colour, deep, surface) : mix(colour, light, "white");
   const tokens: Record<string, string | undefined> = {
-    "--color-blue": branding && (dark ? lighter(branding.primary, 60) : branding.primary),
-    "--color-blue-dark": branding && (dark ? lighter(branding.primary, 40) : mix(branding.primary, 80, "black")),
-    "--color-blue-busy": branding && (dark ? lighter(branding.primary, 80) : mix(branding.primary, 80, "white")),
+    "--color-blue":
+      branding && (dark ? lighter(branding.primary, 60) : branding.primary),
+    "--color-blue-dark":
+      branding &&
+      (dark
+        ? lighter(branding.primary, 40)
+        : mix(branding.primary, 80, "black")),
+    "--color-blue-busy":
+      branding &&
+      (dark
+        ? lighter(branding.primary, 80)
+        : mix(branding.primary, 80, "white")),
     "--color-blue-soft": branding && tint(branding.primary, 10, 28),
     "--color-blue-tint": branding && tint(branding.primary, 7, 18),
     "--color-blue-wash": branding && tint(branding.primary, 4, 10),
     "--color-brand": branding?.secondary,
-    "--color-green": branding && (dark ? lighter(branding.accent, 55) : branding.accent),
+    "--color-green":
+      branding && (dark ? lighter(branding.accent, 55) : branding.accent),
     "--color-green-bg": branding && tint(branding.accent, 12, 22),
     "--color-green-line": branding && tint(branding.accent, 30, 40),
   };

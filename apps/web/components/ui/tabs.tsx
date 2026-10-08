@@ -20,11 +20,19 @@ export function Tabs<T extends string>({
   function move(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const last = options.length - 1;
     const next =
-      event.key === "ArrowRight" ? (index === last ? 0 : index + 1)
-      : event.key === "ArrowLeft" ? (index === 0 ? last : index - 1)
-      : event.key === "Home" ? 0
-      : event.key === "End" ? last
-      : null;
+      event.key === "ArrowRight"
+        ? index === last
+          ? 0
+          : index + 1
+        : event.key === "ArrowLeft"
+          ? index === 0
+            ? last
+            : index - 1
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? last
+              : null;
     if (next === null) return;
     event.preventDefault();
     onChange(options[next].value);
@@ -32,7 +40,11 @@ export function Tabs<T extends string>({
   }
   return (
     <>
-      <div role="tablist" aria-label={label} className="mt-4.5 flex flex-wrap gap-2">
+      <div
+        role="tablist"
+        aria-label={label}
+        className="mt-4.5 flex flex-wrap gap-2"
+      >
         {options.map((option, index) => (
           <button
             key={option.value}
@@ -50,7 +62,11 @@ export function Tabs<T extends string>({
           </button>
         ))}
       </div>
-      <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab-${value}`}>
+      <div
+        role="tabpanel"
+        id={`${id}-panel`}
+        aria-labelledby={`${id}-tab-${value}`}
+      >
         {children}
       </div>
     </>

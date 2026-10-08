@@ -14,5 +14,5 @@ export {
   palette,
   useTheme,
   type Palette,
-  type Theme
+  type Theme,
 } from "./theme";

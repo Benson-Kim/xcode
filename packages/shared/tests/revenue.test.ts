@@ -1,9 +1,6 @@
 import { expect, it } from "vitest";
 
-import {
-  parseRevenueAmount,
-  REVENUE_AMOUNT_ERROR,
-} from "../src/revenue";
+import { parseRevenueAmount, REVENUE_AMOUNT_ERROR } from "../src/revenue";
 
 it("parses positive revenue amounts up to twelve digits and two decimals", () => {
   expect(parseRevenueAmount("1")).toEqual({ ok: true, amount: 1 });
@@ -46,7 +43,10 @@ it("rejects malformed grouping that would silently change the value", () => {
 
 it("accepts properly grouped amounts", () => {
   expect(parseRevenueAmount("1,500")).toEqual({ ok: true, amount: 1500 });
-  expect(parseRevenueAmount("1,000,000")).toEqual({ ok: true, amount: 1000000 });
+  expect(parseRevenueAmount("1,000,000")).toEqual({
+    ok: true,
+    amount: 1000000,
+  });
   expect(parseRevenueAmount("1,500.50")).toEqual({ ok: true, amount: 1500.5 });
   expect(parseRevenueAmount("49,000")).toEqual({ ok: true, amount: 49000 });
 });

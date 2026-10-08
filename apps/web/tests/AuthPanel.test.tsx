@@ -8,7 +8,6 @@ import { PinInput } from "../components/PinInput";
 import { authApi } from "../lib/api";
 import { restoreSession } from "../lib/session";
 
-
 vi.mock("../lib/api", () => ({ authApi: vi.fn() }));
 vi.mock("../lib/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/session")>()),
@@ -17,11 +16,19 @@ vi.mock("../lib/session", async (importOriginal) => ({
 beforeEach(() => {
   vi.mocked(authApi).mockReset();
   vi.mocked(restoreSession).mockResolvedValue(false);
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-    ok: true,
-    headers: new Headers(),
-    json: async () => ({ firstName: "Test", lastName: "User", role: "Owner", permissions: [] }),
-  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({
+        firstName: "Test",
+        lastName: "User",
+        role: "Owner",
+        permissions: [],
+      }),
+    }),
+  );
 });
 
 it("PIN input validates repeated and sequential new PINs without rejecting existing sign-in PINs", () => {
@@ -126,9 +133,7 @@ it("AUTH-03 displays remaining pause time and keeps PIN reset available", async 
   expect(await screen.findByRole("timer")).toHaveTextContent("15:00");
   expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Forgot PIN?" }));
-  expect(
-    screen.getByRole("button", { name: "Send code" }),
-  ).not.toBeDisabled();
+  expect(screen.getByRole("button", { name: "Send code" })).not.toBeDisabled();
 });
 
 it.each([
@@ -145,9 +150,7 @@ it.each([
   fireEvent.change(screen.getByLabelText("Mobile number"), {
     target: { value: "+254712345678" },
   });
-  fireEvent.click(
-    screen.getByRole("button", { name: "Send code" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Send code" }));
   expect(await screen.findByLabelText("6 digit code")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("6 digit code"), {
     target: { value: "123456" },
@@ -173,11 +176,29 @@ it.each([
 
 it("never keeps or shows a PIN someone just chose", async () => {
   // Signed in, the app shell also loads the organization's appearance; this test has none.
-  vi.stubGlobal("fetch", vi.fn(async (url: string) =>
-    url.includes("/auth/session")
-      ? { ok: true, status: 200, headers: new Headers(), json: async () => ({ firstName: "Test", lastName: "User", role: "Owner", permissions: [] }) }
-      : { ok: false, status: 404, headers: new Headers(), json: async () => ({}) },
-  ));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url.includes("/auth/session")
+        ? {
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: async () => ({
+              firstName: "Test",
+              lastName: "User",
+              role: "Owner",
+              permissions: [],
+            }),
+          }
+        : {
+            ok: false,
+            status: 404,
+            headers: new Headers(),
+            json: async () => ({}),
+          },
+    ),
+  );
   vi.mocked(authApi)
     .mockResolvedValueOnce({ status: "check_email" })
     .mockResolvedValueOnce({ status: "code_verified" })
@@ -186,16 +207,26 @@ it("never keeps or shows a PIN someone just chose", async () => {
   await renderPanel();
   fireEvent.click(screen.getByRole("button", { name: "First time here?" }));
   // One of the demo numbers the sign-in page lists.
-  fireEvent.change(screen.getByLabelText("Mobile number"), { target: { value: "0712 345 678" } });
+  fireEvent.change(screen.getByLabelText("Mobile number"), {
+    target: { value: "0712 345 678" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Send code" }));
-  fireEvent.change(await screen.findByLabelText("6 digit code"), { target: { value: "123456" } });
+  fireEvent.change(await screen.findByLabelText("6 digit code"), {
+    target: { value: "123456" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Confirm code" }));
-  fireEvent.change(await screen.findByLabelText("New PIN"), { target: { value: "6942" } });
-  fireEvent.change(screen.getByLabelText("Type it again"), { target: { value: "6942" } });
+  fireEvent.change(await screen.findByLabelText("New PIN"), {
+    target: { value: "6942" },
+  });
+  fireEvent.change(screen.getByLabelText("Type it again"), {
+    target: { value: "6942" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Save PIN" }));
   await screen.findByRole("heading", { name: "Dashboard" });
 
-  const userMenu = await waitFor(() => document.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!);
+  const userMenu = await waitFor(() =>
+    document.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!,
+  );
   fireEvent.click(userMenu);
   fireEvent.click(await screen.findByRole("menuitem", { name: "Sign out" }));
   await screen.findByRole("heading", { name: "Sign in" });

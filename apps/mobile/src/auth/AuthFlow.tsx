@@ -259,30 +259,34 @@ export function AuthFlow({ trusted, brand, onSignedIn, onForgotten }: Props) {
     setBusy(true);
     setPin("");
     try {
-    if (mode === "choose") {
-      const weak = validatePin(entered);
-      if (weak) {
-        setShake((value) => value + 1);
-        return setPadError("Too easy to guess. Choose different numbers.");
+      if (mode === "choose") {
+        const weak = validatePin(entered);
+        if (weak) {
+          setShake((value) => value + 1);
+          return setPadError("Too easy to guess. Choose different numbers.");
+        }
+        if (
+          flow === "reset" &&
+          trustedHere &&
+          (await matchesPinCheck(entered))
+        ) {
+          setShake((value) => value + 1);
+          return setPadError("Pick a PIN different from your old one.");
+        }
+        setChosen(entered);
+        return openPad("confirm");
       }
-      if (flow === "reset" && trustedHere && (await matchesPinCheck(entered))) {
-        setShake((value) => value + 1);
-        return setPadError("Pick a PIN different from your old one.");
+      if (mode === "confirm") {
+        if (entered !== chosen) {
+          setShake((value) => value + 1);
+          return openPad(
+            "choose",
+            "The two PINs did not match. Choose your PIN again.",
+          );
+        }
+        return await savePin(entered);
       }
-      setChosen(entered);
-      return openPad("confirm");
-    }
-    if (mode === "confirm") {
-      if (entered !== chosen) {
-        setShake((value) => value + 1);
-        return openPad(
-          "choose",
-          "The two PINs did not match. Choose your PIN again.",
-        );
-      }
-      return await savePin(entered);
-    }
-    return await checkPin(entered);
+      return await checkPin(entered);
     } finally {
       completing.current = false;
       setBusy(false);

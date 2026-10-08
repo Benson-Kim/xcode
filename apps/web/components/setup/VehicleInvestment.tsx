@@ -42,7 +42,8 @@ function problem(draft: Draft, date: string, today?: string) {
   if (!draft.description.trim()) return "Say what it was.";
   if (!(Number(draft.amount) > 0)) return "Enter the amount in KES.";
   if (!date) return "Enter the date.";
-  if (today && date > today) return "The date cannot be after the business date.";
+  if (today && date > today)
+    return "The date cannot be after the business date.";
   return "";
 }
 
@@ -60,7 +61,9 @@ export function VehicleInvestmentTab({
   const { formatDateOnly, formatDateRange, kes, money } = useFormats();
   const canManage = can("invest.manage");
   const toast = useToast();
-  const investment = useResource<VehicleInvestment>(`setup/vehicles/${vehicle.id}/investment`);
+  const investment = useResource<VehicleInvestment>(
+    `setup/vehicles/${vehicle.id}/investment`,
+  );
   const [adding, setAdding] = useState<Draft | null>(null);
   const [addError, setAddError] = useState("");
   const [editing, setEditing] = useState<(Draft & { id: string }) | null>(null);
@@ -68,7 +71,9 @@ export function VehicleInvestmentTab({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const data = investment.data;
-  const entries = [...(data?.entries ?? [])].sort((left, right) => left.date.localeCompare(right.date));
+  const entries = [...(data?.entries ?? [])].sort((left, right) =>
+    left.date.localeCompare(right.date),
+  );
 
   async function send(path: string, method: string, draft?: Draft) {
     setBusy(true);
@@ -76,7 +81,13 @@ export function VehicleInvestmentTab({
       await apiRequest(path, {
         method,
         ...(draft
-          ? { body: JSON.stringify({ date: draft.date ?? today, description: draft.description.trim(), amount: Number(draft.amount) }) }
+          ? {
+              body: JSON.stringify({
+                date: draft.date ?? today,
+                description: draft.description.trim(),
+                amount: Number(draft.amount),
+              }),
+            }
           : {}),
       });
       investment.reload();
@@ -92,7 +103,11 @@ export function VehicleInvestmentTab({
     if (!adding) return;
     const invalid = problem(adding, adding.date ?? today ?? "", today);
     if (invalid) return setAddError(invalid);
-    const failed = await send(`setup/vehicles/${vehicle.id}/investment`, "POST", adding);
+    const failed = await send(
+      `setup/vehicles/${vehicle.id}/investment`,
+      "POST",
+      adding,
+    );
     if (failed) return setAddError(failed);
     toast(`${adding.description.trim()} added.`);
     setAdding(null);
@@ -139,16 +154,25 @@ export function VehicleInvestmentTab({
               <Stat
                 label="Back so far"
                 value={data.returned === null ? "—" : money(data.returned)}
-                tone={data.returned !== null && data.returned < 0 ? "bad" : undefined}
+                tone={
+                  data.returned !== null && data.returned < 0
+                    ? "bad"
+                    : undefined
+                }
               />
-              <Stat label="Paid back" value={paidOff === null ? "—" : `${Math.round(paidOff)}%`} />
+              <Stat
+                label="Paid back"
+                value={paidOff === null ? "—" : `${Math.round(paidOff)}%`}
+              />
             </StatGrid>
             {paidOff !== null && <ProgressBar value={paidOff} />}
             <CardNote>
               {data.returned === null
                 ? "Back so far and paid back show once they can be worked out from the revenue records."
                 : `Back so far counts net contribution from the records kept${
-                    vehicle.joinedOn && today && vehicle.joinedOn <= today ? `, ${formatDateRange(vehicle.joinedOn, today)}` : ""
+                    vehicle.joinedOn && today && vehicle.joinedOn <= today
+                      ? `, ${formatDateRange(vehicle.joinedOn, today)}`
+                      : ""
                   }.`}
             </CardNote>
           </>
@@ -193,7 +217,9 @@ export function VehicleInvestmentTab({
                   density="compact"
                   max={today}
                   value={editing.date ?? ""}
-                  onChange={(event) => setEditing({ ...editing, date: event.target.value })}
+                  onChange={(event) =>
+                    setEditing({ ...editing, date: event.target.value })
+                  }
                 />
               </Td>
               <Td label="What it was">
@@ -201,7 +227,9 @@ export function VehicleInvestmentTab({
                   aria-label="What it was"
                   density="compact"
                   value={editing.description}
-                  onChange={(event) => setEditing({ ...editing, description: event.target.value })}
+                  onChange={(event) =>
+                    setEditing({ ...editing, description: event.target.value })
+                  }
                   onKeyDown={(event) => {
                     if (event.key === "Enter") void saveEdit();
                     if (event.key === "Escape") setEditing(null);
@@ -213,12 +241,18 @@ export function VehicleInvestmentTab({
                   aria-label="Amount"
                   density="compact"
                   value={editing.amount}
-                  onChange={(event) => setEditing({ ...editing, amount: event.target.value })}
+                  onChange={(event) =>
+                    setEditing({ ...editing, amount: event.target.value })
+                  }
                 />
               </Td>
               <Td>
                 <FormActions className="justify-end">
-                  <Button tone="ok" disabled={busy} onClick={() => void saveEdit()}>
+                  <Button
+                    tone="ok"
+                    disabled={busy}
+                    onClick={() => void saveEdit()}
+                  >
                     Save
                   </Button>
                   <Button
@@ -254,7 +288,12 @@ export function VehicleInvestmentTab({
                       onClick={() => {
                         setError("");
                         setConfirmRemove(null);
-                        setEditing({ id: entry.id, description: entry.description, amount: String(entry.amount), date: entry.date });
+                        setEditing({
+                          id: entry.id,
+                          description: entry.description,
+                          amount: String(entry.amount),
+                          date: entry.date,
+                        });
                       }}
                     >
                       Edit
@@ -265,7 +304,9 @@ export function VehicleInvestmentTab({
                       aria-label={`${confirmRemove === entry.id ? "Tap again to remove" : "Remove"} ${entry.description}`}
                       onClick={() => void remove(entry.id)}
                     >
-                      {confirmRemove === entry.id ? "Tap again to remove" : "Remove"}
+                      {confirmRemove === entry.id
+                        ? "Tap again to remove"
+                        : "Remove"}
                     </Button>
                   </FormActions>
                 </Td>
@@ -274,7 +315,11 @@ export function VehicleInvestmentTab({
           ),
         )}
       </DataTable>
-      <Dialog open={Boolean(adding)} title="Add investment" onClose={() => setAdding(null)}>
+      <Dialog
+        open={Boolean(adding)}
+        title="Add investment"
+        onClose={() => setAdding(null)}
+      >
         {adding && (
           <div className="flex flex-col gap-3.5">
             <Hint>{vehicle.registration}</Hint>
@@ -283,14 +328,28 @@ export function VehicleInvestmentTab({
                 autoFocus
                 value={adding.description}
                 placeholder="For example Deposit on the unit"
-                onChange={(event) => setAdding({ ...adding, description: event.target.value })}
+                onChange={(event) =>
+                  setAdding({ ...adding, description: event.target.value })
+                }
               />
             </Field>
             <Field id="investment-amount" label="Amount">
-              <CurrencyInput value={adding.amount} onChange={(event) => setAdding({ ...adding, amount: event.target.value })} />
+              <CurrencyInput
+                value={adding.amount}
+                onChange={(event) =>
+                  setAdding({ ...adding, amount: event.target.value })
+                }
+              />
             </Field>
             <Field id="investment-date" label="Date">
-              <TextInput type="date" max={today} value={adding.date ?? today ?? ""} onChange={(event) => setAdding({ ...adding, date: event.target.value })} />
+              <TextInput
+                type="date"
+                max={today}
+                value={adding.date ?? today ?? ""}
+                onChange={(event) =>
+                  setAdding({ ...adding, date: event.target.value })
+                }
+              />
             </Field>
             {addError && <Banner>{addError}</Banner>}
             <FormActions>

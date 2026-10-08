@@ -58,8 +58,10 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation(async (input: string, init?: RequestInit) => {
-      if (init?.method === "PUT") return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      if (input.endsWith("organization/settings")) return new Response(JSON.stringify(settings), { status: 200 });
+      if (init?.method === "PUT")
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      if (input.endsWith("organization/settings"))
+        return new Response(JSON.stringify(settings), { status: 200 });
       return new Response(JSON.stringify(preferences), { status: 200 });
     }),
   );
@@ -72,7 +74,9 @@ it("loads organization settings without personal preferences", async () => {
   expect(screen.getByLabelText("Organization name")).not.toHaveAttribute(
     "readonly",
   );
-  expect(screen.getByRole("article", { name: "Organization details" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("article", { name: "Organization details" }),
+  ).toBeInTheDocument();
   expect(screen.getByLabelText("Time zone")).toHaveValue("Africa/Nairobi");
   expect(screen.queryByLabelText("Font scale")).not.toBeInTheDocument();
   expect(fetch).toHaveBeenCalledWith(
@@ -120,9 +124,12 @@ it("saves organization sections through their endpoint contracts", async () => {
       expect.objectContaining({ method: "PUT" }),
     ),
   );
-  fireEvent.change(screen.getByLabelText("Business date", { selector: "input" }), {
-    target: { value: "2026-09-20" },
-  });
+  fireEvent.change(
+    screen.getByLabelText("Business date", { selector: "input" }),
+    {
+      target: { value: "2026-09-20" },
+    },
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save business date" }));
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith(
@@ -139,7 +146,9 @@ it("saves organization sections through their endpoint contracts", async () => {
     .map(([, init]) => JSON.parse(String(init!.body)));
   expect(bodies).toHaveLength(4);
   for (const body of bodies) expect(body).not.toHaveProperty("reason");
-  expect(bodies[0]).toEqual({ value: { name: "New Fleet", slug: "new-fleet" } });
+  expect(bodies[0]).toEqual({
+    value: { name: "New Fleet", slug: "new-fleet" },
+  });
   expect(bodies[3]).toEqual({ value: "2026-09-20" });
 });
 
@@ -178,21 +187,36 @@ it("lets a frozen business date move forward to the organization's calendar date
   };
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: string, init?: RequestInit) =>
-      new Response(JSON.stringify(init?.method === "PUT" ? { ok: true } : frozen), { status: 200 }),
+    vi.fn(
+      async (_input: string, init?: RequestInit) =>
+        new Response(
+          JSON.stringify(init?.method === "PUT" ? { ok: true } : frozen),
+          { status: 200 },
+        ),
     ),
   );
   render(<OrganizationSettingsView />);
 
-  const picker = await screen.findByLabelText("Business date", { selector: "input" });
+  const picker = await screen.findByLabelText("Business date", {
+    selector: "input",
+  });
   expect(picker).toHaveValue("2026-03-15");
   expect(picker).toHaveAttribute("max", "2026-09-30");
-  expect(screen.getByText("Held at 15 Mar 2026. The organization's calendar date is 30 Sep 2026.")).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "Held at 15 Mar 2026. The organization's calendar date is 30 Sep 2026.",
+    ),
+  ).toBeInTheDocument();
 
   fireEvent.change(picker, { target: { value: "2026-03-16" } });
   fireEvent.click(screen.getByRole("button", { name: "Save business date" }));
   await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith("/api/setup/organization/settings/businessDate", expect.objectContaining({ body: JSON.stringify({ value: "2026-03-16" }) })),
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/setup/organization/settings/businessDate",
+      expect.objectContaining({
+        body: JSON.stringify({ value: "2026-03-16" }),
+      }),
+    ),
   );
 });
 
@@ -201,7 +225,10 @@ it("lets a frozen business date move forward to the organization's calendar date
 function serveSettings(versions: object[]) {
   let reads = 0;
   const fetchMock = vi.fn(async (_input: string, init?: RequestInit) => {
-    if (init?.method === "PUT") return new Response(JSON.stringify({ section: "saved" }), { status: 200 });
+    if (init?.method === "PUT")
+      return new Response(JSON.stringify({ section: "saved" }), {
+        status: 200,
+      });
     const body = versions[Math.min(reads, versions.length - 1)];
     reads += 1;
     return new Response(JSON.stringify(body), { status: 200 });
@@ -211,36 +238,83 @@ function serveSettings(versions: object[]) {
 }
 
 it("moves the business date's upper limit when a new time zone changes the calendar date", async () => {
-  const before = { ...settings, effectiveBusinessDate: "2026-09-30", calendarDate: "2026-09-30" };
-  const after = { ...before, localization: { ...settings.localization, timeZone: "Pacific/Kiritimati" }, effectiveBusinessDate: "2026-10-01", calendarDate: "2026-10-01" };
+  const before = {
+    ...settings,
+    effectiveBusinessDate: "2026-09-30",
+    calendarDate: "2026-09-30",
+  };
+  const after = {
+    ...before,
+    localization: { ...settings.localization, timeZone: "Pacific/Kiritimati" },
+    effectiveBusinessDate: "2026-10-01",
+    calendarDate: "2026-10-01",
+  };
   serveSettings([before, after]);
   render(<OrganizationSettingsView />);
 
-  const picker = await screen.findByLabelText("Business date", { selector: "input" });
+  const picker = await screen.findByLabelText("Business date", {
+    selector: "input",
+  });
   expect(picker).toHaveAttribute("max", "2026-09-30");
   fireEvent.click(screen.getByRole("button", { name: "Save locale" }));
 
-  await waitFor(() => expect(screen.getByLabelText("Business date", { selector: "input" })).toHaveAttribute("max", "2026-10-01"));
-  expect(screen.getByLabelText("Business date", { selector: "input" })).toHaveValue("2026-10-01");
-  expect(screen.getByText("Following the organization's calendar date, 1 Oct 2026.")).toBeInTheDocument();
+  await waitFor(() =>
+    expect(
+      screen.getByLabelText("Business date", { selector: "input" }),
+    ).toHaveAttribute("max", "2026-10-01"),
+  );
+  expect(
+    screen.getByLabelText("Business date", { selector: "input" }),
+  ).toHaveValue("2026-10-01");
+  expect(
+    screen.getByText("Following the organization's calendar date, 1 Oct 2026."),
+  ).toBeInTheDocument();
 });
 
 it("shows the calendar date once the held business date is dropped", async () => {
-  const held = { ...settings, organization: { ...settings.organization, businessDate: "2026-03-15" }, effectiveBusinessDate: "2026-03-15", calendarDate: "2026-09-30" };
-  const following = { ...held, organization: { ...settings.organization, businessDate: null }, effectiveBusinessDate: "2026-09-30" };
+  const held = {
+    ...settings,
+    organization: { ...settings.organization, businessDate: "2026-03-15" },
+    effectiveBusinessDate: "2026-03-15",
+    calendarDate: "2026-09-30",
+  };
+  const following = {
+    ...held,
+    organization: { ...settings.organization, businessDate: null },
+    effectiveBusinessDate: "2026-09-30",
+  };
   const fetchMock = serveSettings([held, following]);
   render(<OrganizationSettingsView />);
 
-  expect(await screen.findByLabelText("Business date", { selector: "input" })).toHaveValue("2026-03-15");
-  fireEvent.click(screen.getByRole("button", { name: "Follow organization time zone" }));
-  expect(screen.getByLabelText("Business date", { selector: "input" })).toHaveValue("2026-09-30");
-  expect(screen.getByText("Following the organization's calendar date, 30 Sep 2026.")).toBeInTheDocument();
+  expect(
+    await screen.findByLabelText("Business date", { selector: "input" }),
+  ).toHaveValue("2026-03-15");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Follow organization time zone" }),
+  );
+  expect(
+    screen.getByLabelText("Business date", { selector: "input" }),
+  ).toHaveValue("2026-09-30");
+  expect(
+    screen.getByText(
+      "Following the organization's calendar date, 30 Sep 2026.",
+    ),
+  ).toBeInTheDocument();
   expect(screen.queryByText(/Held at/)).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Save business date" }));
-  await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => !init?.method)).toHaveLength(2));
-  expect(fetchMock).toHaveBeenCalledWith("/api/setup/organization/settings/businessDate", expect.objectContaining({ body: JSON.stringify({ value: null }) }));
-  expect(screen.getByLabelText("Business date", { selector: "input" })).toHaveValue("2026-09-30");
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => !init?.method),
+    ).toHaveLength(2),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/setup/organization/settings/businessDate",
+    expect.objectContaining({ body: JSON.stringify({ value: null }) }),
+  );
+  expect(
+    screen.getByLabelText("Business date", { selector: "input" }),
+  ).toHaveValue("2026-09-30");
 });
 
 it("keeps the wrong-PIN policy inside the server's bounds: 3 to 10 tries, a pause of 1 to 60 minutes", async () => {
@@ -251,8 +325,13 @@ it("keeps the wrong-PIN policy inside the server's bounds: 3 to 10 tries, a paus
   expect(tries).toHaveAttribute("max", "10");
   expect(pause).toHaveAttribute("min", "1");
   expect(pause).toHaveAttribute("max", "60");
-  expect(screen.getByText("1 to 60, so a pause lasts at most an hour. A PIN reset by email still lifts a pause.")).toBeInTheDocument();
-  const puts = () => vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "PUT");
+  expect(
+    screen.getByText(
+      "1 to 60, so a pause lasts at most an hour. A PIN reset by email still lifts a pause.",
+    ),
+  ).toBeInTheDocument();
+  const puts = () =>
+    vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "PUT");
 
   for (const [field, value, message] of [
     [tries, "2", "Wrong PINs before a pause: use 3 to 10."],
@@ -272,7 +351,10 @@ it("keeps the wrong-PIN policy inside the server's bounds: 3 to 10 tries, a paus
   fireEvent.change(pause, { target: { value: "60" } });
   fireEvent.click(screen.getByRole("button", { name: "Save security" }));
   await waitFor(() => expect(puts()).toHaveLength(1));
-  expect(JSON.parse(String(puts()[0][1]!.body)).value).toMatchObject({ lockoutThreshold: 10, lockoutMinutes: 60 });
+  expect(JSON.parse(String(puts()[0][1]!.body)).value).toMatchObject({
+    lockoutThreshold: 10,
+    lockoutMinutes: 60,
+  });
 });
 
 it("says what the business date is now after following the calendar again", async () => {
@@ -284,26 +366,51 @@ it("says what the business date is now after following the calendar again", asyn
   };
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: string, init?: RequestInit) =>
-      new Response(JSON.stringify(init?.method === "PUT" ? { ok: true } : frozen), { status: 200 }),
+    vi.fn(
+      async (_input: string, init?: RequestInit) =>
+        new Response(
+          JSON.stringify(init?.method === "PUT" ? { ok: true } : frozen),
+          { status: 200 },
+        ),
     ),
   );
   render(<OrganizationSettingsView />);
-  expect(await screen.findByText("Held at 29 Sep 2026. The organization's calendar date is 30 Sep 2026.")).toBeInTheDocument();
+  expect(
+    await screen.findByText(
+      "Held at 29 Sep 2026. The organization's calendar date is 30 Sep 2026.",
+    ),
+  ).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "Follow organization time zone" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Follow organization time zone" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save business date" }));
-  expect(await screen.findByText("Following the organization's calendar date, 30 Sep 2026.")).toBeInTheDocument();
-  expect(screen.getByLabelText("Business date", { selector: "input" })).toHaveValue("2026-09-30");
+  expect(
+    await screen.findByText(
+      "Following the organization's calendar date, 30 Sep 2026.",
+    ),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByLabelText("Business date", { selector: "input" }),
+  ).toHaveValue("2026-09-30");
 });
 
 it("checks the security policy's limits before saving, and caps the pause at an hour", async () => {
   render(<OrganizationSettingsView />);
   await screen.findByDisplayValue("Demo Fleet");
-  fireEvent.change(screen.getByLabelText("Wrong PINs before a pause"), { target: { value: "2" } });
-  fireEvent.change(screen.getByLabelText("Pause length in minutes"), { target: { value: "90" } });
+  fireEvent.change(screen.getByLabelText("Wrong PINs before a pause"), {
+    target: { value: "2" },
+  });
+  fireEvent.change(screen.getByLabelText("Pause length in minutes"), {
+    target: { value: "90" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Save security" }));
 
-  expect(screen.getByRole("alert")).toHaveTextContent("Wrong PINs before a pause: use 3 to 10. Pause length: use 1 to 60.");
-  expect(fetch).not.toHaveBeenCalledWith("/api/setup/organization/settings/securityPolicy", expect.anything());
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Wrong PINs before a pause: use 3 to 10. Pause length: use 1 to 60.",
+  );
+  expect(fetch).not.toHaveBeenCalledWith(
+    "/api/setup/organization/settings/securityPolicy",
+    expect.anything(),
+  );
 });

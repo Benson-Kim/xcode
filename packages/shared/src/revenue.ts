@@ -1,6 +1,11 @@
 export type RevenueStatus = "none" | "future" | "missing" | "amount" | "reason";
 
-export const REVENUE_REASONS = ["Garage", "Arrest", "No Crew", "Other"] as const;
+export const REVENUE_REASONS = [
+  "Garage",
+  "Arrest",
+  "No Crew",
+  "Other",
+] as const;
 export type RevenueReason = (typeof REVENUE_REASONS)[number];
 
 export const REVENUE_NOTE_LIMIT = 80;
@@ -108,5 +113,7 @@ export type RevenueReportPeriod =
   (typeof REVENUE_REPORT_PERIODS)[number]["value"];
 
 export function revenuePeriodLabel(period: RevenuePeriod): string {
-  return REVENUE_PERIODS.find((option) => option.value === period)?.label ?? period;
+  return (
+    REVENUE_PERIODS.find((option) => option.value === period)?.label ?? period
+  );
 }

@@ -49,7 +49,9 @@ export function useStreamedList<T>(path: string | null, pageSize = 25) {
           );
           if (!active) return;
           if (!Array.isArray(result?.items))
-            throw new Error("The server's answer was not the list that was expected. Reload the page and try again.");
+            throw new Error(
+              "The server's answer was not the list that was expected. Reload the page and try again.",
+            );
           items.push(...result.items);
           total = result.total;
           const done = items.length >= total || result.items.length === 0;

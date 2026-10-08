@@ -6,7 +6,17 @@ import { IconButton } from "./button";
 import { CloseIcon } from "./icons";
 
 // A modal panel with a sticky title bar (.access-dialog). Escape and the close button both call onClose.
-export function Dialog({ open, title, onClose, children }: { open: boolean; title: string; onClose: () => void; children: ReactNode }) {
+export function Dialog({
+  open,
+  title,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {

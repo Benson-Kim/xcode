@@ -1,7 +1,14 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { forwardedFor, logProxyError, readLimitedBody, requestId, sameOrigin, upstreamUrl } from "../../body";
+import {
+  forwardedFor,
+  logProxyError,
+  readLimitedBody,
+  requestId,
+  sameOrigin,
+  upstreamUrl,
+} from "../../body";
 
 const allowedMethods = new Set(["GET", "POST", "PUT", "DELETE"]);
 
@@ -77,7 +84,10 @@ async function proxy(
       { status: 401 },
     );
 
-  const body = method === "GET" || method === "DELETE" ? undefined : await readLimitedBody(request);
+  const body =
+    method === "GET" || method === "DELETE"
+      ? undefined
+      : await readLimitedBody(request);
   if (body === null)
     return NextResponse.json({ status: "payload_too_large" }, { status: 413 });
   try {

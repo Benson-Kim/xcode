@@ -21,8 +21,12 @@ const loaded = {
 
 let fetcher: ReturnType<typeof vi.fn>;
 beforeEach(() => {
-  fetcher = vi.fn().mockImplementation(async (_input: string, init?: RequestInit) =>
-    new Response(JSON.stringify(init?.method === "PUT" ? {} : loaded), { status: 200 }));
+  fetcher = vi.fn().mockImplementation(
+    async (_input: string, init?: RequestInit) =>
+      new Response(JSON.stringify(init?.method === "PUT" ? {} : loaded), {
+        status: 200,
+      }),
+  );
   vi.stubGlobal("fetch", fetcher);
 });
 
@@ -31,7 +35,9 @@ it("offers only the overrides the organization allows", async () => {
   const zone = await screen.findByLabelText("Time-zone override");
   expect(zone).toBeDisabled();
   expect(zone).toHaveValue("Africa/Nairobi");
-  expect(screen.getByText("Your organization sets this for everyone.")).toBeInTheDocument();
+  expect(
+    screen.getByText("Your organization sets this for everyone."),
+  ).toBeInTheDocument();
   expect(screen.getByLabelText("Locale override")).toBeEnabled();
 });
 
@@ -39,10 +45,18 @@ it("hands the clock back to the organization default", async () => {
   renderInApp(<PreferencesView />);
   const clock = await screen.findByLabelText("Clock");
   expect(clock).toHaveValue("12");
-  expect(screen.getByRole("option", { name: "Organization default (24-hour)" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("option", { name: "Organization default (24-hour)" }),
+  ).toBeInTheDocument();
   fireEvent.change(clock, { target: { value: "default" } });
   fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
-  await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(true));
-  const [, put] = fetcher.mock.calls.find(([, init]) => init?.method === "PUT")!;
+  await waitFor(() =>
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(
+      true,
+    ),
+  );
+  const [, put] = fetcher.mock.calls.find(
+    ([, init]) => init?.method === "PUT",
+  )!;
   expect(JSON.parse(String(put.body)).hour12).toBeNull();
 });

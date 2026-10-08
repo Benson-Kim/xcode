@@ -1,7 +1,4 @@
-import {
-  revenuePeriodLabel,
-  type RevenuePeriod,
-} from "@xcode/shared/revenue";
+import { revenuePeriodLabel, type RevenuePeriod } from "@xcode/shared/revenue";
 
 import {
   dayLabel,

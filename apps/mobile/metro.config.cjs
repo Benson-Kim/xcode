@@ -6,7 +6,11 @@ const config = getDefaultConfig(__dirname);
 const pinned = /^react(-dom)?(\/|$)/;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (pinned.test(moduleName)) {
-    return context.resolveRequest({ ...context, originModulePath: path.join(__dirname, "package.json") }, moduleName, platform);
+    return context.resolveRequest(
+      { ...context, originModulePath: path.join(__dirname, "package.json") },
+      moduleName,
+      platform,
+    );
   }
   return context.resolveRequest(context, moduleName, platform);
 };

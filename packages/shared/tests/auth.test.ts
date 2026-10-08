@@ -37,13 +37,11 @@ it("pause countdown includes the last partial second and stops at zero", () => {
 });
 
 it("typed client preserves challenge responses without inventing tokens", async () => {
-  const fetcher = vi
-    .fn()
-    .mockResolvedValue(
-      new Response(JSON.stringify({ status: "verification_required" }), {
-        status: 202,
-      }),
-    );
+  const fetcher = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ status: "verification_required" }), {
+      status: 202,
+    }),
+  );
   const result = await createAuthClient("/auth", fetcher)("sign-in", {
     email: "user@example.com",
     pin: "5826",
@@ -100,13 +98,11 @@ it("treats any 5xx as service unavailability", () => {
 });
 
 it("says the service is unavailable on a 503, as when a new-device email cannot be sent", async () => {
-  const unavailable = vi
-    .fn()
-    .mockResolvedValue(
-      new Response(JSON.stringify({ status: "service_unavailable" }), {
-        status: 503,
-      }),
-    );
+  const unavailable = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ status: "service_unavailable" }), {
+      status: 503,
+    }),
+  );
   await expect(
     createAuthClient("/auth", unavailable)("sign-in", {}),
   ).rejects.toMatchObject({

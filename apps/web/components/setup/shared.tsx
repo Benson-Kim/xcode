@@ -1,6 +1,12 @@
 import type { ExpenseBucket } from "../../lib/types";
 
-export type Company = { id: string; name: string; vehicleCount: number; active?: boolean; archivedOn?: string | null };
+export type Company = {
+  id: string;
+  name: string;
+  vehicleCount: number;
+  active?: boolean;
+  archivedOn?: string | null;
+};
 
 export type Vehicle = {
   id: string;
@@ -19,7 +25,10 @@ export type Vehicle = {
 };
 
 // What the scheduled-item editor needs to pick vehicles (GET recurring/vehicle-options).
-export type VehicleOption = Pick<Vehicle, "id" | "companyId" | "companyName" | "registration"> & { active?: boolean };
+export type VehicleOption = Pick<
+  Vehicle,
+  "id" | "companyId" | "companyName" | "registration"
+> & { active?: boolean };
 
 export type HistoryRow = {
   version: number;
@@ -48,7 +57,12 @@ export type RecurringItem = {
   start: string;
   end?: string | null;
   stoppedFrom?: string | null;
-  allocations: { vehicleId: string; amount: number; registration?: string | null; active?: boolean }[];
+  allocations: {
+    vehicleId: string;
+    amount: number;
+    registration?: string | null;
+    active?: boolean;
+  }[];
   // Also posts to vehicles outside the viewer's scope: amount and allocations are only their share, and it is read-only.
   partial?: boolean;
   expenseItemId?: string | null;
@@ -95,7 +109,10 @@ export const expenseBucketNames: Record<ExpenseBucket, string> = {
 
 // The bucket a cost counts in: every cost reports under one, and a row saved without one counts as a recurring
 // charge, which is how the API reports it too. Savings are not money out and report under none.
-export function costBucket(row: { kind: number; bucket?: ExpenseBucket | null }): ExpenseBucket | null {
+export function costBucket(row: {
+  kind: number;
+  bucket?: ExpenseBucket | null;
+}): ExpenseBucket | null {
   if (row.kind !== 1) return null;
   return row.bucket ?? 2;
 }

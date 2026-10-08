@@ -43,7 +43,9 @@ it("locks the page down to its own origin", () => {
 
 it("lets the brand font through, and nothing else off-origin", () => {
   const { directives } = run();
-  expect(directives["style-src"]).toBe("'self' 'unsafe-inline' https://fonts.googleapis.com");
+  expect(directives["style-src"]).toBe(
+    "'self' 'unsafe-inline' https://fonts.googleapis.com",
+  );
   expect(directives["font-src"]).toBe("'self' https://fonts.gstatic.com");
   expect(directives["connect-src"]).toBe("'self'");
   expect(directives["default-src"]).toBe("'self'");
@@ -63,7 +65,9 @@ it("allows eval only while developing, and upgrades to https only in production"
 
 it("hands the nonce to the renderer on the request", () => {
   const response = proxy(new NextRequest("https://xcode.test/"));
-  const nonce = response.headers.get("Content-Security-Policy")!.match(/'nonce-([^']+)'/)![1];
+  const nonce = response.headers
+    .get("Content-Security-Policy")!
+    .match(/'nonce-([^']+)'/)![1];
   expect(response.headers.get("x-nonce") ?? nonce).toBeTruthy();
 });
 
@@ -74,5 +78,8 @@ it("skips the API proxies, static assets and prefetches", () => {
   expect(pattern.test("/")).toBe(true);
   expect(pattern.test("/api/setup/revenue")).toBe(false);
   expect(pattern.test("/_next/static/chunk.js")).toBe(false);
-  expect(matcher.missing.map((header) => header.key)).toEqual(["next-router-prefetch", "purpose"]);
+  expect(matcher.missing.map((header) => header.key)).toEqual([
+    "next-router-prefetch",
+    "purpose",
+  ]);
 });

@@ -96,7 +96,11 @@ export function PinPad({
               <Text
                 weight="bold"
                 // Decorative initials keep their size so a larger text preference cannot push them out of the circle.
-                style={{ color: colors.onBrand, fontSize: (short ? 17 : 21) / fontScale, lineHeight: (short ? 22 : 27) / fontScale }}
+                style={{
+                  color: colors.onBrand,
+                  fontSize: (short ? 17 : 21) / fontScale,
+                  lineHeight: (short ? 22 : 27) / fontScale,
+                }}
               >
                 {header.initials}
               </Text>

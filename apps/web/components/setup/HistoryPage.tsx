@@ -8,7 +8,18 @@ import type { Formatter } from "@xcode/shared/format";
 import { apiRequest } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
 import type { Page } from "../../lib/types";
-import { Banner, Button, DataTable, Hint, PageHeader, SelectInput, Td, TextInput, Toolbar, Tr } from "../ui";
+import {
+  Banner,
+  Button,
+  DataTable,
+  Hint,
+  PageHeader,
+  SelectInput,
+  Td,
+  TextInput,
+  Toolbar,
+  Tr,
+} from "../ui";
 import type { HistoryRow } from "./shared";
 
 const PAGE_SIZE = 25;
@@ -29,12 +40,23 @@ const sections: Record<string, string> = {
   revenue: "Revenue",
 };
 
-type FieldChange = { key: string; label: string; before: string; after: string };
-type Snapshot = { raw: string } | { fields: Map<string, { label: string; value: string }> } | null;
+type FieldChange = {
+  key: string;
+  label: string;
+  before: string;
+  after: string;
+};
+type Snapshot =
+  | { raw: string }
+  | { fields: Map<string, { label: string; value: string }> }
+  | null;
 
 // "weeklyTarget" or "WeeklyTarget" -> "Weekly target".
 function humanize(key: string) {
-  const words = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/_/g, " ").toLowerCase();
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
@@ -42,21 +64,43 @@ function display(formats: Formatter, value: unknown) {
   if (value === null || value === undefined) return "None";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (isDate(value)) return formats.formatDateOnly(value);
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value))) return formats.formatDateTime(value);
+  if (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T/.test(value) &&
+    !Number.isNaN(Date.parse(value))
+  )
+    return formats.formatDateTime(value);
   return String(value);
 }
 
 // Internal identifiers ("Id", "VehicleId", "companyIds", a record's concurrency "Version", or any value that is a
 // bare GUID such as "CapturedBy") mean nothing to a reader, so the log leaves them out.
-const internal = (key: string) => /^(ids?|version)$/i.test(key) || /[a-z0-9]Ids?$/.test(key);
+const internal = (key: string) =>
+  /^(ids?|version)$/i.test(key) || /[a-z0-9]Ids?$/.test(key);
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Every value in a saved snapshot, keyed by its path: nested objects and lists become "Versions 2 › Amount".
 // A list of plain values (such as permissions) is one field, so a change reads as the whole list before and after
 // rather than as positions that shifted.
-function flatten(formats: Formatter, value: unknown, path: string[], labels: string[], into: Map<string, { label: string; value: string }>) {
-  if (Array.isArray(value) && value.length && value.every((entry) => entry === null || typeof entry !== "object")) {
-    into.set(path.join("."), { label: labels.join(" › ") || "Value", value: value.map((entry) => display(formats, entry)).sort().join(", ") });
+function flatten(
+  formats: Formatter,
+  value: unknown,
+  path: string[],
+  labels: string[],
+  into: Map<string, { label: string; value: string }>,
+) {
+  if (
+    Array.isArray(value) &&
+    value.length &&
+    value.every((entry) => entry === null || typeof entry !== "object")
+  ) {
+    into.set(path.join("."), {
+      label: labels.join(" › ") || "Value",
+      value: value
+        .map((entry) => display(formats, entry))
+        .sort()
+        .join(", "),
+    });
     return into;
   }
   const all: [string, unknown, string][] = Array.isArray(value)
@@ -64,17 +108,25 @@ function flatten(formats: Formatter, value: unknown, path: string[], labels: str
     : value && typeof value === "object"
       ? Object.entries(value).map(([key, entry]) => [key, entry, humanize(key)])
       : [];
-  const entries = Array.isArray(value) ? all : all.filter(([key]) => !internal(key));
+  const entries = Array.isArray(value)
+    ? all
+    : all.filter(([key]) => !internal(key));
   if (all.length && !entries.length) return into;
   if (!entries.length) {
     if (typeof value === "string" && GUID.test(value)) return into;
     const empty = Array.isArray(value) || (value && typeof value === "object");
-    into.set(path.join("."), { label: labels.join(" › ") || "Value", value: empty ? "None" : display(formats, value) });
+    into.set(path.join("."), {
+      label: labels.join(" › ") || "Value",
+      value: empty ? "None" : display(formats, value),
+    });
     return into;
   }
   for (const [key, entry, label] of entries) {
     // A list position joins the name before it ("Versions 2"), so a path reads as a sentence.
-    const nextLabels = Array.isArray(value) && labels.length ? [...labels.slice(0, -1), `${labels[labels.length - 1]} ${label}`] : [...labels, label];
+    const nextLabels =
+      Array.isArray(value) && labels.length
+        ? [...labels.slice(0, -1), `${labels[labels.length - 1]} ${label}`]
+        : [...labels, label];
     flatten(formats, entry, [...path, key], nextLabels, into);
   }
   return into;
@@ -91,13 +143,26 @@ function parse(formats: Formatter, value?: string | null): Snapshot {
 }
 
 // What a change did, field by field. An update lists only the fields that changed; a create lists them all.
-export function fieldChanges(formats: Formatter, before?: string | null, after?: string | null): FieldChange[] {
+export function fieldChanges(
+  formats: Formatter,
+  before?: string | null,
+  after?: string | null,
+): FieldChange[] {
   const [old, next] = [parse(formats, before), parse(formats, after)];
   if (!old && !next) return [];
   if ((old && "raw" in old) || (next && "raw" in next))
-    return [{ key: "raw", label: "Saved value", before: before && before !== "null" ? before : "—", after: after && after !== "null" ? after : "—" }];
-  const oldFields = old?.fields ?? new Map<string, { label: string; value: string }>();
-  const newFields = next?.fields ?? new Map<string, { label: string; value: string }>();
+    return [
+      {
+        key: "raw",
+        label: "Saved value",
+        before: before && before !== "null" ? before : "—",
+        after: after && after !== "null" ? after : "—",
+      },
+    ];
+  const oldFields =
+    old?.fields ?? new Map<string, { label: string; value: string }>();
+  const newFields =
+    next?.fields ?? new Map<string, { label: string; value: string }>();
   const keys = [...new Set([...newFields.keys(), ...oldFields.keys()])];
   return keys
     .map((key) => ({
@@ -114,23 +179,41 @@ type Filters = { section: string; from: string; to: string; text: string };
 
 const NOTHING_SET: Filters = { section: "all", from: "", to: "", text: "" };
 
-const narrowed = (filters: Filters) => filters.section !== "all" || Boolean(filters.from || filters.to || filters.text.trim());
+const narrowed = (filters: Filters) =>
+  filters.section !== "all" ||
+  Boolean(filters.from || filters.to || filters.text.trim());
 
 // Only the parts that are set are sent, so the request says exactly what the person asked for.
 function search(filters: Filters) {
   const parts: string[] = [];
-  if (filters.section !== "all") parts.push(`section=${encodeURIComponent(filters.section)}`);
+  if (filters.section !== "all")
+    parts.push(`section=${encodeURIComponent(filters.section)}`);
   if (filters.from) parts.push(`from=${filters.from}`);
   if (filters.to) parts.push(`to=${filters.to}`);
-  if (filters.text.trim()) parts.push(`text=${encodeURIComponent(filters.text.trim())}`);
+  if (filters.text.trim())
+    parts.push(`text=${encodeURIComponent(filters.text.trim())}`);
   return parts.length ? `&${parts.join("&")}` : "";
 }
 
 // The pages held for one query. The query is part of it, so a change of filter is answered by rendering an
 // empty list rather than by clearing this in an effect, which would cost a second render.
-type Loaded = { query: string; items: HistoryRow[]; total: number; pages: number; done: boolean; error: string };
+type Loaded = {
+  query: string;
+  items: HistoryRow[];
+  total: number;
+  pages: number;
+  done: boolean;
+  error: string;
+};
 
-const nothingYet = (query: string): Loaded => ({ query, items: [], total: 0, pages: 0, done: false, error: "" });
+const nothingYet = (query: string): Loaded => ({
+  query,
+  items: [],
+  total: 0,
+  pages: 0,
+  done: false,
+  error: "",
+});
 
 const rowKey = (row: HistoryRow) => `${row.version}-${row.entityId}`;
 
@@ -144,17 +227,36 @@ function useHistoryPages(query: string) {
 
   const receive = useCallback(
     (page: number) =>
-      apiRequest<Page<HistoryRow>>(`setup/history?page=${page}&pageSize=${PAGE_SIZE}${query}`)
+      apiRequest<Page<HistoryRow>>(
+        `setup/history?page=${page}&pageSize=${PAGE_SIZE}${query}`,
+      )
         .then(
           (result) =>
             setLoaded((current) => {
-              const kept = page === 1 || current.query !== query ? [] : current.items;
+              const kept =
+                page === 1 || current.query !== query ? [] : current.items;
               const seen = new Set(kept.map(rowKey));
-              const items = [...kept, ...result.items.filter((row) => !seen.has(rowKey(row)))];
-              return { query, items, total: result.total, pages: page, done: result.items.length < PAGE_SIZE || items.length >= result.total, error: "" };
+              const items = [
+                ...kept,
+                ...result.items.filter((row) => !seen.has(rowKey(row))),
+              ];
+              return {
+                query,
+                items,
+                total: result.total,
+                pages: page,
+                done:
+                  result.items.length < PAGE_SIZE ||
+                  items.length >= result.total,
+                error: "",
+              };
             }),
           // The query is stamped here too, so a first page that fails stops being "still loading" and says why.
-          (error: Error) => setLoaded((current) => ({ ...(current.query === query ? current : nothingYet(query)), error: error.message })),
+          (error: Error) =>
+            setLoaded((current) => ({
+              ...(current.query === query ? current : nothingYet(query)),
+              error: error.message,
+            })),
         )
         .finally(() => setPending(null)),
     [query],
@@ -183,15 +285,26 @@ function useHistoryPages(query: string) {
   };
 }
 
-function ChangeTable({ caption, changes }: { caption: string; changes: FieldChange[] }) {
-  const cell = "border-t border-divider py-1 pr-3 align-top text-left [overflow-wrap:anywhere]";
+function ChangeTable({
+  caption,
+  changes,
+}: {
+  caption: string;
+  changes: FieldChange[];
+}) {
+  const cell =
+    "border-t border-divider py-1 pr-3 align-top text-left [overflow-wrap:anywhere]";
   return (
     <table className="mt-2 w-full table-fixed border-collapse text-[13px]">
       <caption className="sr-only">{caption}</caption>
       <thead>
         <tr>
           {["Field", "Before", "After"].map((heading) => (
-            <th key={heading} scope="col" className="py-1 pr-3 text-left font-semibold text-grey">
+            <th
+              key={heading}
+              scope="col"
+              className="py-1 pr-3 text-left font-semibold text-grey"
+            >
               {heading}
             </th>
           ))}
@@ -228,18 +341,28 @@ export function HistoryPage() {
   const history = useHistoryPages(search(applied));
   const rows = history.items;
   const some = narrowed(applied);
-  const set = (part: Partial<Filters>) => setFilters((current) => ({ ...current, ...part }));
+  const set = (part: Partial<Filters>) =>
+    setFilters((current) => ({ ...current, ...part }));
   const label = "text-[13px] text-grey";
   return (
     <section>
-      <PageHeader title="Change log" description="Who changed what in setup, organization settings, people and access, with each value before and after the change." />
+      <PageHeader
+        title="Change log"
+        description="Who changed what in setup, organization settings, people and access, with each value before and after the change."
+      />
       {history.error && <Banner className="mt-5">{history.error}</Banner>}
 
       <Toolbar>
         <label htmlFor="log-section" className={label}>
           Section
         </label>
-        <SelectInput id="log-section" density="compact" inline value={filters.section} onChange={(event) => set({ section: event.target.value })}>
+        <SelectInput
+          id="log-section"
+          density="compact"
+          inline
+          value={filters.section}
+          onChange={(event) => set({ section: event.target.value })}
+        >
           <option value="all">All sections</option>
           {Object.entries(sections).map(([key, name]) => (
             <option key={key} value={key}>
@@ -251,15 +374,39 @@ export function HistoryPage() {
           From
         </label>
         {/* The range cannot be set backwards here, and the server refuses it as well. */}
-        <TextInput id="log-from" type="date" density="compact" inline max={filters.to || undefined} value={filters.from} onChange={(event) => set({ from: event.target.value })} />
+        <TextInput
+          id="log-from"
+          type="date"
+          density="compact"
+          inline
+          max={filters.to || undefined}
+          value={filters.from}
+          onChange={(event) => set({ from: event.target.value })}
+        />
         <label htmlFor="log-to" className={label}>
           To
         </label>
-        <TextInput id="log-to" type="date" density="compact" inline min={filters.from || undefined} value={filters.to} onChange={(event) => set({ to: event.target.value })} />
+        <TextInput
+          id="log-to"
+          type="date"
+          density="compact"
+          inline
+          min={filters.from || undefined}
+          value={filters.to}
+          onChange={(event) => set({ to: event.target.value })}
+        />
         <label htmlFor="log-search" className={label}>
           Search
         </label>
-        <TextInput id="log-search" type="search" density="compact" inline placeholder="A reason or a name" value={filters.text} onChange={(event) => set({ text: event.target.value })} />
+        <TextInput
+          id="log-search"
+          type="search"
+          density="compact"
+          inline
+          placeholder="A reason or a name"
+          value={filters.text}
+          onChange={(event) => set({ text: event.target.value })}
+        />
         {narrowed(filters) && (
           <Button tone="quiet" onClick={() => setFilters(NOTHING_SET)}>
             Clear
@@ -278,7 +425,9 @@ export function HistoryPage() {
         loadingLabel="Loading the change log"
         isEmpty={!rows.length}
         failed={Boolean(history.error)}
-        emptyMessage={some ? "No changes match this filter." : "No setup changes yet."}
+        emptyMessage={
+          some ? "No changes match this filter." : "No setup changes yet."
+        }
       >
         {rows.map((row) => {
           const what = `${sections[row.section] ?? row.section}: ${row.reason}`;
@@ -288,10 +437,20 @@ export function HistoryPage() {
               <Td label="When" className="whitespace-nowrap">
                 {formats.formatDateTime(row.occurredAt)}
               </Td>
-              <Td label="Who">{row.actorName || "Someone no longer in the organization"}</Td>
-              <Td label="What changed" title={sections[row.section] ?? row.section}>
+              <Td label="Who">
+                {row.actorName || "Someone no longer in the organization"}
+              </Td>
+              <Td
+                label="What changed"
+                title={sections[row.section] ?? row.section}
+              >
                 <div>{what}</div>
-                {changes.length > 0 && <ChangeTable caption={`${what}, before and after`} changes={changes} />}
+                {changes.length > 0 && (
+                  <ChangeTable
+                    caption={`${what}, before and after`}
+                    changes={changes}
+                  />
+                )}
               </Td>
             </Tr>
           );
@@ -307,7 +466,12 @@ export function HistoryPage() {
                 : `Showing all ${rows.length} changes${some ? " that match" : ""}`}
           </Hint>
           {history.hasMore && (
-            <Button tone="outline" disabled={history.loadingMore} aria-busy={history.loadingMore || undefined} onClick={history.more}>
+            <Button
+              tone="outline"
+              disabled={history.loadingMore}
+              aria-busy={history.loadingMore || undefined}
+              onClick={history.more}
+            >
               {history.loadingMore ? "Loading..." : "Load more"}
             </Button>
           )}

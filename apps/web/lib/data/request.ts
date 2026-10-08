@@ -12,7 +12,8 @@ export class ApiError extends Error {
   }
 }
 
-const NOT_PERMITTED = "Your access does not include this. Ask your admin if you need it.";
+const NOT_PERMITTED =
+  "Your access does not include this. Ask your admin if you need it.";
 
 // Calls the app's API through its Next.js proxy routes: `path` is relative to /api, for example "setup/companies".
 // An expired access token is refreshed once on the way.
@@ -28,7 +29,11 @@ export async function apiRequest<T>(
     });
   } catch (error) {
     if (error instanceof TypeError)
-      throw new ApiError("Unable to reach the server. Check your connection.", 0, {});
+      throw new ApiError(
+        "Unable to reach the server. Check your connection.",
+        0,
+        {},
+      );
     throw error;
   }
   const body = await response.json().catch(() => ({}));

@@ -42,7 +42,11 @@ it("rejects impossible calendar dates", () => {
 it("guards shiftDate and formatTimestamp against invalid input", () => {
   expect(shiftDate("not-a-date", 1)).toBe("not-a-date");
   expect(shiftDate("2024-02-30", 1)).toBe("2024-02-30");
-  const settings = { locale: "en-GB", datePattern: "medium" as const, hour12: false };
+  const settings = {
+    locale: "en-GB",
+    datePattern: "medium" as const,
+    hour12: false,
+  };
   expect(formatTimestamp("garbage", settings)).toBe("garbage");
 });
 

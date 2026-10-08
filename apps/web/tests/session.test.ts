@@ -40,11 +40,16 @@ it("shares one refresh between concurrent requests", async () => {
   ]);
 
   expect(responses.map((response) => response.status)).toEqual([200, 200]);
-  expect(fetcher.mock.calls.filter(([input]) => input === "/api/auth/refresh")).toHaveLength(1);
+  expect(
+    fetcher.mock.calls.filter(([input]) => input === "/api/auth/refresh"),
+  ).toHaveLength(1);
 });
 
 it("announces the end of the session when refresh fails", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json(401)).mockResolvedValueOnce(json(401)));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValueOnce(json(401)).mockResolvedValueOnce(json(401)),
+  );
   const expired = vi.fn();
   const stop = onSessionExpired(expired);
 

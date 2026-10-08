@@ -6,9 +6,15 @@ import type { AuthenticatedPerson } from "@xcode/shared/auth";
 
 export type Session = AuthenticatedPerson;
 
-type SessionState = { session: Session | null; can: (permission: string) => boolean };
+type SessionState = {
+  session: Session | null;
+  can: (permission: string) => boolean;
+};
 
-const SessionContext = createContext<SessionState>({ session: null, can: () => false });
+const SessionContext = createContext<SessionState>({
+  session: null,
+  can: () => false,
+});
 
 export const SessionProvider = SessionContext.Provider;
 

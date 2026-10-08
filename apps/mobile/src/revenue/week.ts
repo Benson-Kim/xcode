@@ -1,5 +1,9 @@
 import { OfflineError, ServerError, apiGet } from "../lib/api";
-import { loadCaptureList, saveCaptureList, type StoredCaptureList } from "../lib/storage";
+import {
+  loadCaptureList,
+  saveCaptureList,
+  type StoredCaptureList,
+} from "../lib/storage";
 import type { RevenueCell, RevenueWeek } from "./types";
 
 // The weeks loaded while signed in, held in memory only (never written to the phone), so capture carries on
@@ -9,7 +13,12 @@ const kept = new Map<string, RevenueWeek>();
 let keptFor = "";
 
 export const weekPath = (weekStart?: string, vehicleId?: string) => {
-  const query = [weekStart && `weekStart=${encodeURIComponent(weekStart)}`, vehicleId && `vehicleId=${encodeURIComponent(vehicleId)}`].filter(Boolean).join("&");
+  const query = [
+    weekStart && `weekStart=${encodeURIComponent(weekStart)}`,
+    vehicleId && `vehicleId=${encodeURIComponent(vehicleId)}`,
+  ]
+    .filter(Boolean)
+    .join("&");
   return `setup/revenue${query ? `?${query}` : ""}`;
 };
 
@@ -71,7 +80,11 @@ const fromCaptureList = (list: StoredCaptureList): RevenueWeek => ({
 // A week from the API, the copy loaded earlier when there is no connection (saved: true), or, when the app
 // started offline with nothing in memory, the saved capture list (minimal: true, so the screens know the
 // figures are not there to show).
-export async function loadWeek(owner: string, weekStart?: string, vehicleId?: string): Promise<{ week: RevenueWeek; saved: boolean; minimal?: boolean }> {
+export async function loadWeek(
+  owner: string,
+  weekStart?: string,
+  vehicleId?: string,
+): Promise<{ week: RevenueWeek; saved: boolean; minimal?: boolean }> {
   if (keptFor !== owner) {
     kept.clear();
     keptFor = owner;
@@ -90,12 +103,15 @@ export async function loadWeek(owner: string, weekStart?: string, vehicleId?: st
       await saveCaptureList(captureList(owner, week)).catch(() => {});
     return { week, saved: false };
   } catch (error) {
-    if (!(error instanceof OfflineError) || error instanceof ServerError) throw error;
+    if (!(error instanceof OfflineError) || error instanceof ServerError)
+      throw error;
     const copy = kept.get(path);
     if (copy) return { week: copy, saved: true };
     // Nothing in memory: the app started without a connection. The saved list covers the current week only,
     // whether that week was asked for by date or by asking for no date at all.
-    const list = vehicleId ? null : await loadCaptureList(owner).catch(() => null);
+    const list = vehicleId
+      ? null
+      : await loadCaptureList(owner).catch(() => null);
     if (list && (!weekStart || weekStart === list.weekStart))
       return { week: fromCaptureList(list), saved: true, minimal: true };
     throw error;

@@ -169,10 +169,7 @@ export function formatCalendarDateRange(
     : `${format(from)} to ${format(through)}`;
 }
 
-export function formatTimestamp(
-  value: string,
-  settings: DateFormatSettings,
-) {
+export function formatTimestamp(value: string, settings: DateFormatSettings) {
   const date = new Date(value);
   if (isNaN(date.getTime())) return value;
   const zone = safeTimeZone(settings.timeZone);

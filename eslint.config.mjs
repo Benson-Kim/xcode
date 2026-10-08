@@ -33,7 +33,10 @@ export default [
     // The Expo app: the same hooks rules as the web app, without the Next.js ones.
     files: ["apps/mobile/**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },
-    rules: { "react-hooks/rules-of-hooks": "error", "react-hooks/exhaustive-deps": "error" },
+    rules: {
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "error",
+    },
   },
   {
     // CommonJS config files, and jest.mock factories, which are hoisted above imports and must require.

@@ -173,7 +173,9 @@ export default function App() {
             <SafeAreaView
               style={[styles.safe, { backgroundColor: theme.colors.cream }]}
               edges={
-                state.phase === "signed-in" ? ["top", "left", "right"] : undefined
+                state.phase === "signed-in"
+                  ? ["top", "left", "right"]
+                  : undefined
               }
             >
               {!ready ? (

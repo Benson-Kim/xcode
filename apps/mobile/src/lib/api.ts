@@ -17,20 +17,14 @@ import {
 } from "./storage";
 
 const fallbackUrl =
-  Platform.OS === "android"
-    ? "http://10.0.2.2:5000"
-    : "http://localhost:5000";
+  Platform.OS === "android" ? "http://10.0.2.2:5000" : "http://localhost:5000";
 
 export const apiUrl = (() => {
   const url = process.env.EXPO_PUBLIC_API_URL || (__DEV__ ? fallbackUrl : "");
   if (!url)
-    throw new Error(
-      "EXPO_PUBLIC_API_URL must be set for release builds.",
-    );
+    throw new Error("EXPO_PUBLIC_API_URL must be set for release builds.");
   if (!__DEV__ && !url.startsWith("https://"))
-    throw new Error(
-      "EXPO_PUBLIC_API_URL must use HTTPS in release builds.",
-    );
+    throw new Error("EXPO_PUBLIC_API_URL must use HTTPS in release builds.");
   return url;
 })();
 
@@ -65,7 +59,10 @@ async function reach(input: RequestInfo | URL, init?: RequestInit) {
   const caller = init?.signal;
   if (caller) {
     if (caller.aborted) controller.abort();
-    else caller.addEventListener("abort", () => controller.abort(), { once: true });
+    else
+      caller.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
   }
   try {
     return await fetch(input, { ...init, signal: controller.signal });
@@ -150,7 +147,10 @@ async function authorized(path: string, init: RequestInit = {}) {
   const call = (token: string) =>
     reach(`${apiUrl}/${path}`, {
       ...init,
-      headers: { ...(init.headers as Record<string, string>), Authorization: `Bearer ${token}` },
+      headers: {
+        ...(init.headers as Record<string, string>),
+        Authorization: `Bearer ${token}`,
+      },
     });
   let response = await call(session.accessToken);
   if (response.status === 401)

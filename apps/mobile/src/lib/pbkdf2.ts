@@ -24,8 +24,7 @@ function compress(state: Uint32Array, block: Uint32Array, w: Uint32Array) {
     const x = w[i - 15];
     const y = w[i - 2];
     const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
-    const s1 =
-      ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+    const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
     w[i] = w[i - 16] + s0 + w[i - 7] + s1;
   }
   let a = state[0];
