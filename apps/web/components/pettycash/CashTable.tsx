@@ -4,13 +4,13 @@ import type { PettyCashEntry } from "@xcode/shared/pettyCash";
 
 import { useFormats } from "../../lib/formats";
 import { DataTable, Td, Tr } from "../ui";
+import { Days } from "./dayGroups";
 import { RowActions, type EntryActions } from "./RowActions";
 
-const COLUMNS = [
-  { label: "Date" },
+const columns = (currency: string) => [
   { label: "Manager" },
   { label: "What" },
-  { label: "Amount", numeric: true },
+  { label: `Amount (${currency})`, numeric: true },
   { label: "Actions", hidden: true },
 ];
 
@@ -18,57 +18,62 @@ const COLUMNS = [
 // design.
 export function CashTable({
   entries,
-  week,
+  days,
   loading,
   failed,
   actions,
 }: {
   entries: PettyCashEntry[];
-  week: boolean;
+  days: boolean;
   loading: boolean;
   failed: boolean;
   actions: EntryActions;
 }) {
   const formats = useFormats();
+  const currency = formats.currencyCode();
   return (
     <DataTable
-      columns={COLUMNS}
+      columns={columns(currency)}
       loading={loading}
       loadingLabel="Loading cash received"
       isEmpty={!entries.length}
       failed={failed}
       emptyMessage={
-        week
-          ? "No cash movements in this week."
+        days
+          ? "No cash movements in this period."
           : "No cash movements on this day."
       }
     >
-      {entries.map((entry) => {
-        const back = entry.total < 0;
-        return (
-          <Tr key={entry.id}>
-            <Td label="Date" className="whitespace-nowrap">
-              {formats.formatDateOnly(entry.date)}
-            </Td>
-            <Td label="Manager">
-              <strong>{entry.holderName}</strong>
-            </Td>
-            <Td label="What">
-              {entry.note || (back ? "Cash returned" : "Cash given")}
-            </Td>
-            <Td label="Amount" numeric>
-              <strong className={back ? "text-green" : undefined}>
-                {back
-                  ? `Less ${formats.kes(-entry.total)}`
-                  : formats.kes(entry.total)}
-              </strong>
-            </Td>
-            <Td>
-              <RowActions entry={entry} actions={actions} />
-            </Td>
-          </Tr>
-        );
-      })}
+      <Days
+        entries={entries}
+        grouped={days}
+        before={2}
+        after={1}
+        totalLabel={`Day total (${currency})`}
+        row={(entry) => {
+          const back = entry.total < 0;
+          return (
+            <Tr key={entry.id}>
+              <Td label="Manager">
+                <strong>{entry.holderName}</strong>
+              </Td>
+              <Td label="What">
+                {entry.note || (back ? "Cash returned" : "Cash given")}
+              </Td>
+              <Td label={`Amount (${currency})`} numeric>
+                <strong className={back ? "text-green" : undefined}>
+                  {back
+                    ? `Less ${formats.formatNumber(-entry.total)}`
+                    : formats.formatNumber(entry.total)}
+                </strong>
+              </Td>
+              <Td>
+                <RowActions entry={entry} actions={actions} />
+              </Td>
+            </Tr>
+          );
+        }}
+      />
     </DataTable>
   );
 }

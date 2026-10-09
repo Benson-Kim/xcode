@@ -235,6 +235,33 @@ export interface SaveRevenue {
   version?: number | null;
 }
 
+// Capture revenue for one day (GET setup/revenue/day?date&companyId): every vehicle active that day, in registration
+// order, with its cell and the same day a week earlier (null when that day has no record).
+export interface RevenueDayVehicle {
+  id: string;
+  companyId: string;
+  registration: string;
+  day: RevenueCell;
+  lastWeek: { amount: number | null; reason: string | null } | null;
+}
+
+export interface RevenueDay {
+  date: string;
+  businessDate: string;
+  vehicles: RevenueDayVehicle[];
+  truncated: boolean;
+}
+
+// PUT setup/revenue/day/{date}: saved together or not at all. A refused row's error names the vehicle; a 409 also
+// carries its vehicleId and current cell.
+export interface SaveRevenueDay {
+  rows: (SaveRevenue & { vehicleId: string })[];
+}
+
+export interface RevenueDaySaved {
+  rows: { vehicleId: string; id: string; version: number }[];
+}
+
 export const REVENUE_PERIODS = [
   { value: "today", label: "Today" },
   { value: "week", label: "This week" },

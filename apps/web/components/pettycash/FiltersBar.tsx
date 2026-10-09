@@ -2,33 +2,40 @@
 
 import type { ReactNode } from "react";
 
+import type { Period } from "@xcode/shared/periods";
 import {
   PETTY_CASH_STATUS_LABELS,
   PETTY_CASH_STATUSES,
   type PettyCashHolder,
-  type PettyCashPeriod,
   type PettyCashStatus,
 } from "@xcode/shared/pettyCash";
 
+import { PeriodPicker } from "../period/PeriodPicker";
 import {
-  SegmentedControl,
-  SelectInput,
+  SearchSelect,
+  Skeleton,
   Spacer,
   TextInput,
   Toolbar,
+  type SearchOption,
 } from "../ui";
-import { DayNavigator } from "./DayNavigator";
-import { PERIODS, type PeriodRange } from "./period";
 
 export type StatusFilter = PettyCashStatus | "all";
 
+const STATUS_OPTIONS: SearchOption[] = [
+  { value: "all", label: "All statuses" },
+  ...PETTY_CASH_STATUSES.map((value) => ({
+    value,
+    label: PETTY_CASH_STATUS_LABELS[value],
+  })),
+];
+
+// The period first, then the manager, the status and the search, with the actions at the end.
 export function FiltersBar({
-  date,
-  range,
-  businessDate,
   period,
+  businessDate,
+  firstDayOfWeek,
   onPeriodChange,
-  onDateChange,
   holders,
   holderId,
   onHolderChange,
@@ -38,12 +45,11 @@ export function FiltersBar({
   onSearchChange,
   actions,
 }: {
-  date: string | null;
-  range: PeriodRange | null;
+  // Null until the page knows the business date.
+  period: Period | null;
   businessDate: string | null;
-  period: PettyCashPeriod;
-  onPeriodChange: (period: PettyCashPeriod) => void;
-  onDateChange: (date: string) => void;
+  firstDayOfWeek: number;
+  onPeriodChange: (period: Period) => void;
   // Given only to a person who may see every float.
   holders?: PettyCashHolder[];
   holderId: string;
@@ -57,53 +63,41 @@ export function FiltersBar({
 }) {
   return (
     <Toolbar>
-      <DayNavigator
-        date={date}
-        range={range}
-        businessDate={businessDate}
-        period={period}
-        onChange={onDateChange}
-      />
-      <SegmentedControl
-        label="Period"
-        options={PERIODS}
-        value={period}
-        onChange={onPeriodChange}
-      />
+      {period && businessDate ? (
+        <PeriodPicker
+          period={period}
+          businessDate={businessDate}
+          firstDayOfWeek={firstDayOfWeek}
+          onChange={onPeriodChange}
+        />
+      ) : (
+        <Skeleton className="h-11 w-56" />
+      )}
       {holders && (
-        <SelectInput
+        <SearchSelect
           aria-label="Manager"
           density="compact"
           inline
           value={holderId}
-          onChange={(event) => onHolderChange(event.target.value)}
-        >
-          <option value="">Everyone</option>
-          {holders.map((holder) => (
-            <option key={holder.id} value={holder.id}>
-              {holder.name}
-              {holder.active ? "" : " (not active)"}
-            </option>
-          ))}
-        </SelectInput>
+          onChange={onHolderChange}
+          options={[
+            { value: "", label: "Everyone" },
+            ...holders.map((holder) => ({
+              value: holder.id,
+              label: `${holder.name}${holder.active ? "" : " (not active)"}`,
+            })),
+          ]}
+        />
       )}
       {status && onStatusChange && (
-        <SelectInput
+        <SearchSelect
           aria-label="Show"
           density="compact"
           inline
           value={status}
-          onChange={(event) =>
-            onStatusChange(event.target.value as StatusFilter)
-          }
-        >
-          <option value="all">All</option>
-          {PETTY_CASH_STATUSES.map((value) => (
-            <option key={value} value={value}>
-              {PETTY_CASH_STATUS_LABELS[value]}
-            </option>
-          ))}
-        </SelectInput>
+          onChange={(value) => onStatusChange(value as StatusFilter)}
+          options={STATUS_OPTIONS}
+        />
       )}
       <TextInput
         type="search"

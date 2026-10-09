@@ -3,22 +3,32 @@
 import { useEffect, useState } from "react";
 
 import { plural } from "@xcode/shared/format";
+import type { Period } from "@xcode/shared/periods";
 import {
-  PETTY_CASH_PAGE_SIZE,
   pettyCashEntriesPath,
   pettyCashOverviewPath,
   type PettyCashDayApproved,
   type PettyCashEntry,
   type PettyCashEntryPage,
+  type PettyCashKind,
   type PettyCashOverview,
-  type PettyCashPeriod,
+  type PettyCashPermissions,
   type PettyCashSaved,
   type PettyCashStatus,
 } from "@xcode/shared/pettyCash";
 
+import { useAppearance } from "../../lib/appearance";
 import { useResource } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
-import { Banner, Button, Hint, PageHeader, Tabs, useToast } from "../ui";
+import {
+  Banner,
+  Button,
+  PageHeader,
+  Pager,
+  Tabs,
+  usePaging,
+  useToast,
+} from "../ui";
 import { CashTable } from "./CashTable";
 import { EntriesTable } from "./EntriesTable";
 import { EntryDialog, type EntryDialogState } from "./EntryDialog";
@@ -39,14 +49,18 @@ const TABS: { value: Tab; label: string }[] = [
 
 export function PettyCashPage({
   initialStatus,
+  initialDate,
 }: {
   initialStatus?: PettyCashStatus;
+  initialDate?: string;
 }) {
   const formats = useFormats();
   const toast = useToast();
+  const appearanceDate = useAppearance().appearance?.businessDate;
   const [tab, setTab] = useState<Tab>("expenses");
-  const [chosenDate, setChosenDate] = useState<string | null>(null);
-  const [period, setPeriod] = useState<PettyCashPeriod>("day");
+  const [chosen, setChosen] = useState<Period | null>(
+    initialDate ? { from: initialDate, to: initialDate, unit: "day" } : null,
+  );
   const [holderId, setHolderId] = useState("");
   const [status, setStatus] = useState<StatusFilter>(initialStatus ?? "all");
   const [search, setSearch] = useState("");
@@ -62,12 +76,13 @@ export function PettyCashPage({
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Without a date the server answers for the business date, which is how the page learns it. What the person may do
-  // and who holds a float do not depend on the day or the filter, so the last answer keeps them while the next loads.
+  // Without a period the server answers for the business date, which is how the page learns it. What the person may
+  // do and who holds a float do not depend on the days or the filter, so the last answer keeps them while the next
+  // loads.
   const overview = useResource<PettyCashOverview>(
     pettyCashOverviewPath({
-      date: chosenDate ?? undefined,
-      period: period === "week" ? period : undefined,
+      from: chosen?.from,
+      to: chosen?.to,
       holderId: holderId || undefined,
     }),
   );
@@ -77,23 +92,14 @@ export function PettyCashPage({
   if (overview.data && overview.data !== known) setKnown(overview.data);
 
   const permissions = known?.permissions;
-  const date = chosenDate ?? known?.date ?? null;
-  const businessDate = known?.businessDate ?? null;
-  const week = period === "week";
-  // The server cuts weeks on the organization's first day, so a week's lists wait for its overview to say where it
-  // starts.
-  const shown =
-    overview.data &&
-    overview.data.period === period &&
-    overview.data.date === date
-      ? overview.data
-      : null;
-  const range =
-    date === null
-      ? null
-      : week
-        ? shown && { from: shown.from, to: shown.to }
-        : { from: date, to: date };
+  const businessDate = known?.businessDate ?? appearanceDate ?? null;
+  const range = chosen ?? (known ? { from: known.from, to: known.to } : null);
+  const period: Period | null = range && {
+    ...range,
+    unit: chosen?.unit ?? "day",
+  };
+  const oneDay = range ? range.from === range.to : true;
+  const date = range && oneDay ? range.from : null;
   // A new entry opens on today when what is shown contains it, otherwise on its last day.
   const formDate =
     businessDate &&
@@ -102,6 +108,9 @@ export function PettyCashPage({
       ? range.to
       : businessDate;
 
+  const paging = usePaging(
+    `${range?.from}|${range?.to}|${holderId}|${query}|${tab}|${status}`,
+  );
   const list = useResource<PettyCashEntryPage>(
     range
       ? pettyCashEntriesPath({
@@ -109,7 +118,8 @@ export function PettyCashPage({
           to: range.to,
           holderId: holderId || undefined,
           q: query || undefined,
-          pageSize: PETTY_CASH_PAGE_SIZE,
+          page: paging.page,
+          pageSize: paging.pageSize,
           ...(tab === "cash"
             ? { kind: "cash" as const }
             : {
@@ -119,6 +129,7 @@ export function PettyCashPage({
         })
       : null,
   );
+  if (list.data) paging.stepBack(list.data.total);
   const items = list.data?.items ?? [];
   const loading = range === null ? !overview.error : list.loading;
 
@@ -199,32 +210,13 @@ export function PettyCashPage({
   };
 
   const toolbarActions = permissions && (
-    <>
-      {permissions.canSpend && (
-        <Button onClick={() => setEntryDialog({ kind: "expense" })}>
-          Expense
-        </Button>
-      )}
-      {permissions.canIssue && (
-        <Button tone="outline" onClick={() => setEntryDialog({ kind: "cash" })}>
-          Cash
-        </Button>
-      )}
-      {(permissions.canSpend || permissions.canIssue) && (
-        <Button tone="warn" onClick={() => setEntryDialog({ kind: "credit" })}>
-          Credit note
-        </Button>
-      )}
-      {permissions.canApproveDay && !week && (
-        <Button
-          tone="ok"
-          disabled={busyId === "day" || !date}
-          onClick={() => void approveDay()}
-        >
-          Approve day
-        </Button>
-      )}
-    </>
+    <ToolbarActions
+      permissions={permissions}
+      canApproveDay={permissions.canApproveDay && oneDay}
+      approving={busyId === "day"}
+      onRecord={(kind) => setEntryDialog({ kind })}
+      onApproveDay={() => void approveDay()}
+    />
   );
 
   return (
@@ -242,21 +234,22 @@ export function PettyCashPage({
         </div>
       )}
 
+      <div className="mt-5">
+        <FigureCards overview={overview.data} />
+      </div>
+
       <Tabs
         id="petty"
         label="Petty cash"
         options={TABS}
         value={tab}
         onChange={setTab}
-        aside={<FigureCards overview={overview.data} />}
       >
         <FiltersBar
-          date={date}
-          range={range}
-          businessDate={businessDate}
           period={period}
-          onPeriodChange={setPeriod}
-          onDateChange={setChosenDate}
+          businessDate={businessDate}
+          firstDayOfWeek={formats.firstDayOfWeek()}
+          onPeriodChange={setChosen}
           holders={permissions?.canViewAll ? known?.holders : undefined}
           holderId={holderId}
           onHolderChange={setHolderId}
@@ -272,7 +265,7 @@ export function PettyCashPage({
         {tab === "expenses" ? (
           <EntriesTable
             entries={items}
-            week={week}
+            days={!oneDay}
             loading={loading}
             failed={Boolean(list.error)}
             actions={actions}
@@ -281,7 +274,7 @@ export function PettyCashPage({
           <>
             <CashTable
               entries={items}
-              week={week}
+              days={!oneDay}
               loading={loading}
               failed={Boolean(list.error)}
               actions={actions}
@@ -293,12 +286,13 @@ export function PettyCashPage({
           </>
         )}
 
-        {list.data && list.data.total > list.data.items.length && (
-          <Hint className="mt-2">
-            Showing the first {list.data.items.length} of {list.data.total}.
-            Search or pick a manager to narrow the list.
-          </Hint>
-        )}
+        <Pager
+          page={paging.page}
+          pageSize={paging.pageSize}
+          total={list.data?.total ?? 0}
+          onPageChange={paging.setPage}
+          onPageSizeChange={paging.setPageSize}
+        />
       </Tabs>
 
       {permissions && formDate && businessDate && (
@@ -328,5 +322,43 @@ export function PettyCashPage({
         onClose={() => setRemoving(null)}
       />
     </section>
+  );
+}
+
+// What this person may record, and approving the day shown.
+function ToolbarActions({
+  permissions,
+  canApproveDay,
+  approving,
+  onRecord,
+  onApproveDay,
+}: {
+  permissions: PettyCashPermissions;
+  canApproveDay: boolean;
+  approving: boolean;
+  onRecord: (kind: PettyCashKind) => void;
+  onApproveDay: () => void;
+}) {
+  return (
+    <>
+      {permissions.canSpend && (
+        <Button onClick={() => onRecord("expense")}>Expense</Button>
+      )}
+      {permissions.canIssue && (
+        <Button tone="outline" onClick={() => onRecord("cash")}>
+          Cash
+        </Button>
+      )}
+      {(permissions.canSpend || permissions.canIssue) && (
+        <Button tone="warn" onClick={() => onRecord("credit")}>
+          Credit note
+        </Button>
+      )}
+      {canApproveDay && (
+        <Button tone="ok" disabled={approving} onClick={onApproveDay}>
+          Approve day
+        </Button>
+      )}
+    </>
   );
 }

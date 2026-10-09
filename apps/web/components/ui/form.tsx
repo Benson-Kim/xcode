@@ -79,7 +79,7 @@ export function Field({
   );
 }
 
-function useFieldProps<
+export function useFieldProps<
   T extends {
     id?: string;
     "aria-describedby"?: string;

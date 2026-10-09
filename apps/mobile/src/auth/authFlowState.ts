@@ -33,6 +33,8 @@ export type Screen =
       pin: string;
       error: string;
       longPin: boolean;
+      // While the entered PIN is checked or saved.
+      checking?: boolean;
     }
   | {
       step: "pad";
@@ -41,6 +43,7 @@ export type Screen =
       code: string;
       pin: string;
       error: string;
+      checking?: boolean;
     }
   | {
       step: "pad";
@@ -50,6 +53,7 @@ export type Screen =
       chosen: string;
       pin: string;
       error: string;
+      checking?: boolean;
     }
   | ({ step: "code"; flow: "signin"; challengePin: string } & CodeView)
   | ({ step: "code"; flow: NewPinFlow } & CodeView)
@@ -169,6 +173,7 @@ export function padCopy(state: AuthState, screen: PadScreen) {
       header,
       label: "Enter your PIN",
       length: screen.longPin ? Math.max(4, screen.pin.length) : pinLength,
+      checking: "Checking your PIN…",
     };
   }
   const confirming = screen.mode === "confirm";
@@ -187,6 +192,7 @@ export function padCopy(state: AuthState, screen: PadScreen) {
     header,
     label: confirming ? "Confirm PIN" : "New PIN",
     length: pinLength,
+    checking: confirming ? "Saving your PIN…" : "Checking…",
   };
 }
 
@@ -269,12 +275,12 @@ function reducePad(state: AuthState, action: Action): AuthState | undefined {
         ? withScreen(state, { ...screen, longPin: true })
         : state;
     case "pinSubmitted":
-      return withScreen(state, { ...screen, pin: "" });
+      return withScreen(state, { ...screen, pin: "", checking: true });
     case "padError":
       return {
         ...state,
         shake: state.shake + (action.shake ? 1 : 0),
-        screen: { ...screen, pin: "", error: action.message },
+        screen: { ...screen, pin: "", error: action.message, checking: false },
       };
   }
   return reducePinChoice(state, screen, action);

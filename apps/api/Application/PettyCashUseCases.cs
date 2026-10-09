@@ -17,26 +17,55 @@ public sealed class PettyCashUseCases(ISetupExecution execution, IPettyCashRepos
     private static readonly string[] ChangePermissions = [Spend, Issue, ApproveItem];
     private static readonly string[] DashboardPermissions = [PermissionKeys.DashFloat, PermissionKeys.DashPettyCash];
 
-    // A week starts on the organization's first day of the week, as revenue weeks do.
-    public Task<PettyCashOverviewDto> Overview(DateOnly? date, string? period, Guid? holderId, CancellationToken ct) =>
+    // A week starts on the organization's first day of the week, as revenue weeks do. A first and last day show any
+    // period instead: opening at the start of the first day, closing at the end of the last.
+    public Task<PettyCashOverviewDto> Overview(DateOnly? date, string? period, Guid? holderId, DateOnly? first, DateOnly? last,
+        CancellationToken ct) =>
         execution.ReadAny(ReadPermissions, async actor =>
         {
-            var day = Day(actor, date);
-            var week = period?.Trim() switch
+            DateOnly day, from, to;
+            string shown;
+            if (first is not null || last is not null)
             {
-                null or "" or "day" => false,
-                "week" => true,
-                _ => throw new ArgumentException("Choose a day or a week.")
-            };
-            var from = week ? StartOfWeek(day, await setup.FirstDayOfWeek(ct)) : day;
-            var to = week ? from.AddDays(6) : day;
+                (from, to) = Range(actor, first, last);
+                (day, shown) = (to, from == to ? "day" : "range");
+            }
+            else
+            {
+                day = Day(actor, date);
+                var week = period?.Trim() switch
+                {
+                    null or "" or "day" => false,
+                    "week" => true,
+                    _ => throw new ArgumentException("Choose a day or a week.")
+                };
+                from = week ? StartOfWeek(day, await setup.FirstDayOfWeek(ct)) : day;
+                to = week ? from.AddDays(6) : day;
+                shown = week ? "week" : "day";
+            }
             var holders = await VisibleHolders(actor, ct);
             var selected = Selected(holders, holderId);
             var tallies = await repository.Tallies(actor, [.. selected.Select(h => h.Id)], from, to, ct);
             var limit = await repository.ApprovalLimit(actor.UserId, ct);
-            return new PettyCashOverviewDto(actor.Today, day, week ? "week" : "day", from, to, Permissions(actor, limit), holders,
+            return new PettyCashOverviewDto(actor.Today, day, shown, from, to, Permissions(actor, limit), holders,
                 Figures(tallies), [.. selected.Select(h => Float(h, tallies))]);
         }, ct);
+
+    // Both days or neither, at most 367 days, starting no later than the business date.
+    private static (DateOnly From, DateOnly To) Range(SetupActor actor, DateOnly? first, DateOnly? last)
+    {
+        if (first is not { } from || last is not { } to)
+            throw new ArgumentException("Choose the first and last day.");
+        if (from > to)
+            throw new ArgumentException("The first date cannot be after the last date.");
+        if (to.DayNumber - from.DayNumber + 1 > 367)
+            throw new ArgumentException("Choose at most 367 days.");
+        if (from > actor.Today)
+            throw new ArgumentException("Choose a period that starts on or before today.");
+        if (from < actor.Today.AddDays(-3650))
+            throw new ArgumentException("Choose a date in the last ten years.");
+        return (from, to);
+    }
 
     public Task<Page<PettyCashEntryDto>> Entries(DateOnly? from, DateOnly? to, Guid? holderId, string? kind, string? status, string? q,
         int page, int pageSize, CancellationToken ct) =>

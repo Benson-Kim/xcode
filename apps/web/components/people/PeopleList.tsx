@@ -137,15 +137,7 @@ function FilterToolbar(props: Props & { shown: number; filtered: boolean }) {
         <option value="waiting">Waiting for first sign in</option>
         <option value="none">No access</option>
       </SelectInput>
-      {!props.loading && (
-        <Hint>
-          {plural(
-            props.filtered ? props.shown : props.total,
-            "person",
-            "people",
-          )}
-        </Hint>
-      )}
+      {!props.loading && <Hint>{plural(props.total, "person", "people")}</Hint>}
       <Spacer />
       {props.canManage && (
         <Button tone="ok" onClick={props.onAdd}>
@@ -158,11 +150,8 @@ function FilterToolbar(props: Props & { shown: number; filtered: boolean }) {
 
 export function PeopleList(props: Props) {
   const { filters, items } = props;
-  const rows = items.filter(
-    (person) =>
-      (filters.role === "all" || person.role === filters.role) &&
-      (filters.status === "all" || signInState(person) === filters.status),
-  );
+  // The server has filtered the page already.
+  const rows = items;
   const filtered = filters.role !== "all" || filters.status !== "all";
   return (
     <>

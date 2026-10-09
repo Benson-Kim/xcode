@@ -1,8 +1,34 @@
 import { act, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import { CompaniesPage } from "../components/setup";
+import { DataTable, Td, Tr } from "../components/ui";
+import { streamError, useStreamedList } from "../lib/data";
 import { renderInApp } from "./renderInApp";
+
+// A list that reads every page of an API list, as the pages that need every row do.
+function Companies() {
+  const list = useStreamedList<{ id: string; name: string }>("setup/companies");
+  return (
+    <>
+      <p>{streamError(list)}</p>
+      <DataTable
+        columns={[{ label: "Company" }]}
+        loading={list.loading}
+        pendingRows={list.pendingRows}
+        isEmpty={!list.items.length}
+        emptyMessage="None"
+      >
+        {list.items.map((item) => (
+          <Tr key={item.id}>
+            <Td>
+              <button>{item.name}</button>
+            </Td>
+          </Tr>
+        ))}
+      </DataTable>
+    </>
+  );
+}
 
 // 60 companies over three pages of 25; pages 2 and 3 wait until the test releases them.
 const company = (index: number) => ({
@@ -40,7 +66,7 @@ const placeholders = () =>
   table().querySelectorAll("tbody tr:not(:has(button))");
 
 it("shows rows as each page arrives, with fewer placeholders every time", async () => {
-  renderInApp(<CompaniesPage />);
+  renderInApp(<Companies />);
 
   expect(await screen.findByText("Company 25")).toBeInTheDocument();
   expect(rows()).toHaveLength(25);
@@ -79,7 +105,7 @@ it("says how much of the list is shown when a later page fails", async () => {
       );
     }),
   );
-  renderInApp(<CompaniesPage />);
+  renderInApp(<Companies />);
 
   expect(
     await screen.findByText("Refused Showing 25 of 60."),

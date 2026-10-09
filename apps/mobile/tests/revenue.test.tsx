@@ -357,7 +357,7 @@ it("replaces the saved value with mine over the version the API reported, even w
   await waitFor(() => expect(tabLabel()).toBe("Revenue"));
 });
 
-it("opens on the earliest missing day and fills earlier days first", async () => {
+it("opens on today, mentions an earlier gap without requiring it, and saves the day that was tapped", async () => {
   const api = await signIn(people.clerk, "0712000006", (routes) =>
     routes.on("setup/revenue", [
       200,
@@ -366,36 +366,55 @@ it("opens on the earliest missing day and fills earlier days first", async () =>
       ]),
     ]),
   );
-  api.on("setup/revenue/v-1/2026-09-28", "offline");
   api.on(PUT, "offline");
   await openRevenue();
-  expect(await screen.findByText("Mon 28 Sep 2026")).toBeTruthy();
+  expect(await screen.findByText("Tue 29 Sep 2026")).toBeTruthy();
 
-  // A later missing day opens on the earliest one.
-  await fireEvent.press(screen.getByRole("button", { name: "Next day" }));
-  expect(
-    screen.getByRole("button", {
-      name: "Earlier days are missing. Start with Mon 28 Sep 2026",
-    }),
-  ).toBeTruthy();
+  const gap = {
+    name: "No record yet from Mon 28 Sep 2026. You can fill it when you have it. Go there",
+  };
+  expect(screen.getByRole("button", gap)).toBeTruthy();
   await fireEvent.press(
     screen.getByRole("button", { name: "KDA 482M, Enter revenue" }),
   );
-  expect(screen.getByText("Fill Mon 28 Sep 2026 first.")).toBeTruthy();
-  expect(screen.getByText("Mon 28 Sep 2026. Expected KES 1,000")).toBeTruthy();
+  // The tapped day opens; the gap is only mentioned, with a way to go there.
+  expect(screen.getByText("Tue 29 Sep 2026. Expected KES 1,000")).toBeTruthy();
+  expect(
+    screen.getAllByText(
+      "No record yet from Mon 28 Sep 2026. You can fill it when you have it.",
+    ).length,
+  ).toBeGreaterThan(0);
   await fireEvent.press(screen.getByRole("radio", { name: "Garage" }));
   await fireEvent.press(screen.getByRole("button", { name: "Save" }));
 
-  // The same vehicle still misses the 29th, so capture goes straight on to it; the earlier day is waiting on the phone.
-  expect(
-    await screen.findByText("Tue 29 Sep 2026. Expected KES 1,000"),
-  ).toBeTruthy();
-  await fireEvent.changeText(screen.getByLabelText("Revenue amount"), "800");
-  await fireEvent.press(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() => expect(tabLabel()).toBe("Revenue, 2 waiting to send"));
-  expect(
-    screen.queryByRole("button", { name: /^Earlier days are missing/ }),
-  ).toBeNull();
+  await waitFor(() => expect(tabLabel()).toBe("Revenue, 1 waiting to send"));
+  expect(screen.queryByText("Tue 29 Sep 2026. Expected KES 1,000")).toBeNull();
+  expect(api.sent("setup/revenue/v-1/2026-09-29")).toHaveLength(1);
+  expect(api.sent("setup/revenue/v-1/2026-09-28")).toHaveLength(0);
+
+  await fireEvent.press(screen.getByRole("button", gap));
+  expect(await screen.findByText("Mon 28 Sep 2026")).toBeTruthy();
+});
+
+it("goes to the gap from the capture sheet without saving anything", async () => {
+  const api = await signIn(people.clerk, "0712000043", (routes) =>
+    routes.on("setup/revenue", [
+      200,
+      week(TODAY, "2026-09-28", [
+        { id: "v-1", registration: "KDA 482M", earliestMissing: "2026-09-28" },
+      ]),
+    ]),
+  );
+  await openRevenue();
+  await fireEvent.press(
+    await screen.findByRole("button", { name: "KDA 482M, Enter revenue" }),
+  );
+  await fireEvent.press(
+    screen.getByRole("button", { name: "Open 28 Sep 2026" }),
+  );
+  expect(await screen.findByText("Mon 28 Sep 2026")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  expect(api.sent(PUT)).toHaveLength(0);
 });
 
 it("works out the earliest missing day once per week and queue, not on every render", async () => {
@@ -408,15 +427,15 @@ it("works out the earliest missing day once per week and queue, not on every ren
     ]),
   );
   await openRevenue();
-  expect(await screen.findByText("Mon 28 Sep 2026")).toBeTruthy();
+  expect(await screen.findByText("Tue 29 Sep 2026")).toBeTruthy();
   const worked = jest.mocked(earliestNeededDay).mock.calls.length;
   expect(worked).toBeGreaterThan(0);
 
   // Moving between days renders the screen again over the same week and queue.
-  await fireEvent.press(screen.getByRole("button", { name: "Next day" }));
-  expect(await screen.findByText("Tue 29 Sep 2026")).toBeTruthy();
   await fireEvent.press(screen.getByRole("button", { name: "Previous day" }));
   expect(await screen.findByText("Mon 28 Sep 2026")).toBeTruthy();
+  await fireEvent.press(screen.getByRole("button", { name: "Next day" }));
+  expect(await screen.findByText("Tue 29 Sep 2026")).toBeTruthy();
   expect(jest.mocked(earliestNeededDay).mock.calls.length).toBe(worked);
 });
 
@@ -683,6 +702,8 @@ it("offers Replace with mine only for a day the person may still change", async 
     },
   ]);
   await openRevenue();
+  await fireEvent.press(screen.getByRole("button", { name: "Previous day" }));
+  expect(await screen.findByText("Mon 28 Sep 2026")).toBeTruthy();
   await captureAmount("KDA 482M, Enter revenue", "1000");
 
   expect(await screen.findByText("Saved: KES 900")).toBeTruthy();
@@ -873,49 +894,22 @@ it("shows every revenue date in the organization's date pattern", async () => {
   expect(screen.getByText("This week, 26/02/2024 to 03/03/2024")).toBeTruthy();
 
   await openRevenue();
-  expect(await screen.findByText("Tue 27/02/2024")).toBeTruthy();
-  await fireEvent.press(screen.getByRole("button", { name: "Next day" }));
-  expect(
-    screen.getByRole("button", {
-      name: "Earlier days are missing. Start with Tue 27/02/2024",
-    }),
-  ).toBeTruthy();
+  expect(await screen.findByText("Thu 29/02/2024")).toBeTruthy();
+  const gap =
+    "No record yet from Mon 26/02/2024. You can fill it when you have it.";
+  expect(screen.getByRole("button", { name: `${gap} Go there` })).toBeTruthy();
   await fireEvent.press(
     screen.getByRole("button", { name: "KDA 482M, Enter revenue" }),
   );
-  expect(screen.getByText("Fill Tue 27/02/2024 first.")).toBeTruthy();
-  expect(screen.getByText("Tue 27/02/2024. Expected KES 1,000")).toBeTruthy();
+  expect(screen.getAllByText(gap).length).toBeGreaterThan(0);
+  expect(screen.getByText("Thu 29/02/2024. Expected KES 1,000")).toBeTruthy();
   await fireEvent.press(screen.getByRole("button", { name: "Close" }));
 
   await fireEvent.press(screen.getByRole("button", { name: "Week" }));
   expect(await screen.findByText("26/02/2024 to 03/03/2024")).toBeTruthy();
 });
 
-it("words a blocked capture in the organization's date pattern and keeps the earlier day in storage", async () => {
-  const api = await signIn(people.clerk, "0712000032", (routes) => {
-    routes.on("setup/appearance", [200, shortDates]);
-    routes.on("setup/revenue", [
-      200,
-      week(SHORT_DAY, "2024-02-26", [{ id: "v-1", registration: "KDA 482M" }]),
-    ]);
-  });
-  api.on(`setup/revenue/v-1/${SHORT_DAY}`, [
-    400,
-    {
-      title: "Invalid setup change",
-      detail: "Record 2024-02-20 before this date first.",
-      earliestMissing: "2024-02-20",
-    },
-  ]);
-  await openRevenue();
-  await captureAmount("KDA 482M, Enter revenue", "1000");
-  expect(await screen.findByText("Capture 20/02/2024 first.")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Open 20/02/2024" })).toBeTruthy();
-  expect(storedText()).toContain('"earliestMissing":"2024-02-20"');
-  expect(storedText()).not.toContain("Capture 20 Feb 2024 first.");
-});
-
-it("shows a blocked capture stored with its sentence already written in the organization's pattern", async () => {
+it("reads a capture an earlier version kept as waiting for an earlier day as an ordinary waiting one, and sends it", async () => {
   const items = require("expo-secure-store").__items as Map<string, string>;
   const key = `xcode.revenue-queue.${people.clerk.userId}`;
   items.set(key, JSON.stringify({ used: "1" }));
@@ -938,51 +932,37 @@ it("shows a blocked capture stored with its sentence already written in the orga
       lastAttemptAt: 1,
     }),
   );
-  await signIn(people.clerk, "0712000033", (routes) => {
-    routes.on(`setup/revenue/v-1/${SHORT_DAY}`, "offline");
+  const api = await signIn(people.clerk, "0712000033", (routes) => {
     routes.on("setup/appearance", [200, shortDates]);
     routes.on("setup/revenue", [
       200,
       week(SHORT_DAY, "2024-02-26", [{ id: "v-1", registration: "KDA 482M" }]),
     ]);
   });
+  api.on(`setup/revenue/v-1/${SHORT_DAY}`, [200, { id: "r-1", version: 1 }]);
   await openRevenue();
-  expect(await screen.findByText("Capture 20/02/2024 first.")).toBeTruthy();
-  expect(screen.queryByText("Capture 20 Feb 2024 first.")).toBeNull();
-  expect(screen.getByRole("button", { name: "Open 20/02/2024" })).toBeTruthy();
+  await waitFor(() =>
+    expect(api.sent(`setup/revenue/v-1/${SHORT_DAY}`)).toHaveLength(1),
+  );
+  expect(screen.queryByText(/first\./)).toBeNull();
+  expect(screen.queryByText("Waiting for an earlier day")).toBeNull();
+  await waitFor(() => expect(storedText()).not.toContain("earliestMissing"));
 });
 
-it("keeps what a stored blocked capture says when it names no earlier day", async () => {
-  const items = require("expo-secure-store").__items as Map<string, string>;
-  const key = `xcode.revenue-queue.${people.clerk.userId}`;
-  items.set(key, JSON.stringify({ used: "1" }));
-  items.set(
-    `${key}.0`,
-    JSON.stringify({
-      vehicleId: "v-1",
-      registration: "KDA 482M",
-      date: SHORT_DAY,
-      amount: 1000,
-      reason: null,
-      note: null,
-      version: null,
-      state: "blocked",
-      message: "Waiting for an earlier day.",
-      earliestMissing: null,
-      current: null,
-      queuedAt: 1,
-      attempts: 1,
-      lastAttemptAt: 1,
-    }),
-  );
-  await signIn(people.clerk, "0712000034", (routes) => {
-    routes.on(`setup/revenue/v-1/${SHORT_DAY}`, "offline");
+it("shows a refused capture's own reason, not a demand for an earlier day", async () => {
+  const api = await signIn(people.clerk, "0712000032", (routes) => {
     routes.on("setup/appearance", [200, shortDates]);
     routes.on("setup/revenue", [
       200,
       week(SHORT_DAY, "2024-02-26", [{ id: "v-1", registration: "KDA 482M" }]),
     ]);
   });
+  api.on(`setup/revenue/v-1/${SHORT_DAY}`, [
+    400,
+    { title: "Invalid setup change", detail: "Revenue must be above zero." },
+  ]);
   await openRevenue();
-  expect(await screen.findByText("Waiting for an earlier day.")).toBeTruthy();
+  await captureAmount("KDA 482M, Enter revenue", "1000");
+  expect(await screen.findByText("Revenue must be above zero.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Open / })).toBeNull();
 });

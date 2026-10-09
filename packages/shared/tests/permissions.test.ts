@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { PETTY_CASH_PERMISSIONS } from "@xcode/shared/pettyCash";
 import {
   DASHBOARD_CARDS,
+  EXPENSES_NAV,
   NAV,
+  NAV_SECTIONS,
   PERMISSION_KEYS,
   PRIMARY_NAV,
   SETUP_NAV,
@@ -76,17 +78,55 @@ describe("NAV", () => {
     expect(PRIMARY_NAV.map((id) => NAV[id].label)).toEqual([
       "Dashboard",
       "Revenue",
+    ]);
+    expect(EXPENSES_NAV.map((id) => NAV[id].label)).toEqual([
+      "Central expenses",
       "Petty cash",
+      "Scheduled expenses and savings",
     ]);
     expect(SETUP_NAV.map((id) => NAV[id].label)).toEqual([
       "PSV companies",
       "Vehicles",
       "Expense categories",
-      "Scheduled expenses and savings",
       "People and access",
       "Change log",
       "Organization settings",
     ]);
+  });
+
+  it("lays the sections out as items, the Expenses group, Reports, then the Setup group", () => {
+    expect(
+      NAV_SECTIONS.map((section) =>
+        section.kind === "group"
+          ? [section.id, section.label, section.items]
+          : [section.kind, section.items],
+      ),
+    ).toEqual([
+      ["items", PRIMARY_NAV],
+      ["expenses", "Expenses", EXPENSES_NAV],
+      ["items", ["reports"]],
+      ["setup", "Setup", SETUP_NAV],
+    ]);
+  });
+
+  it("places every menu entry in exactly one section", () => {
+    const placed = NAV_SECTIONS.flatMap((section) => [...section.items]);
+    expect([...placed].sort()).toEqual(Object.keys(NAV).sort());
+  });
+
+  it("opens Central expenses for expenses.view and Reports for reports.view", () => {
+    expect(NAV.centralexpenses.any).toEqual(["expenses.view"]);
+    expect(NAV.reports.any).toEqual(["reports.view"]);
+    expect(
+      canSee(NAV.centralexpenses, permissionChecker(["expenses.capture"])),
+    ).toBe(false);
+    expect(
+      canSee(NAV.centralexpenses, permissionChecker(["expenses.view"])),
+    ).toBe(true);
+    expect(canSee(NAV.reports, permissionChecker(["reports.export"]))).toBe(
+      false,
+    );
+    expect(canSee(NAV.reports, permissionChecker(["reports.view"]))).toBe(true);
   });
 
   it("opens Petty cash for the petty cash permissions and Vehicles for investment viewers", () => {

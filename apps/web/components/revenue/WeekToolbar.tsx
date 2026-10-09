@@ -1,5 +1,5 @@
 import { percentText } from "@xcode/shared/format";
-import type { RevenueVehicle, RevenueWeek } from "@xcode/shared/revenue";
+import type { RevenueWeek } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
 import { shiftDate } from "../revenueFormat";
@@ -18,7 +18,7 @@ export function WeekToolbar({
   shown,
   data,
   companyId,
-  first,
+  canCapture,
   stale,
   onWeek,
   onCompany,
@@ -28,14 +28,11 @@ export function WeekToolbar({
   shown: RevenueWeek | undefined;
   data: RevenueWeek | undefined;
   companyId: string;
-  first: { vehicle: RevenueVehicle; date: string } | null;
+  canCapture: boolean;
   stale: boolean;
   onWeek: (weekStart: string) => void;
   onCompany: (companyId: string) => void;
-  onCapture: (
-    target: { vehicle: RevenueVehicle; date: string },
-    from: HTMLElement,
-  ) => void;
+  onCapture: (week: RevenueWeek) => void;
 }) {
   const formats = useFormats();
   return (
@@ -84,11 +81,11 @@ export function WeekToolbar({
         </SelectInput>
       )}
       <Spacer />
-      {first && (
+      {canCapture && (
         <Button
-          disabled={stale}
+          disabled={stale || !data}
           aria-busy={stale ? true : undefined}
-          onClick={(event) => onCapture(first, event.currentTarget)}
+          onClick={() => data && onCapture(data)}
         >
           Capture revenue
         </Button>

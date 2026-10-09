@@ -23,6 +23,7 @@ import { useFormats } from "../../lib/formats";
 import type { NewCapture } from "../../revenue/queue";
 import { Button, ErrorText, Text, alpha, fonts, useTheme } from "../../ui";
 import { IconButton } from "../parts";
+import { gapText } from "./HeaderNav";
 import type { Target } from "./model";
 
 type Entry = Pick<NewCapture, "amount" | "reason" | "note">;
@@ -131,9 +132,11 @@ function useFocusRing() {
 function SheetHead({
   target,
   onClose,
+  onOpenGap,
 }: {
   target: Target;
   onClose: () => void;
+  onOpenGap: (date: string) => void;
 }) {
   const { colors } = useTheme();
   const formats = useFormats();
@@ -157,14 +160,20 @@ function SheetHead({
         <IconButton icon="close" label="Close" onPress={onClose} />
       </View>
       {target.earlier ? (
-        <Text
-          style={[
-            styles.info,
-            { backgroundColor: colors.amberBg, color: colors.amberText },
-          ]}
+        <View
+          style={[styles.info, { backgroundColor: colors.amberBg, gap: 6 }]}
         >
-          {`Fill ${formats.formatWeekdayDate(target.earlier)} first.`}
-        </Text>
+          <Text style={{ color: colors.amberText, fontSize: 14 }}>
+            {gapText(formats.formatWeekdayDate(target.earlier))}
+          </Text>
+          <Button
+            tone="outline"
+            onPress={() => onOpenGap(target.earlier!)}
+            style={{ width: "auto", height: 44 }}
+          >
+            {`Open ${formats.formatDateOnly(target.earlier)}`}
+          </Button>
+        </View>
       ) : null}
     </>
   );
@@ -337,11 +346,14 @@ export function CaptureSheet({
   canReason,
   onSave,
   onClose,
+  onOpenGap,
 }: {
   target: Target;
   canReason: boolean;
   onSave: (entry: Entry) => Promise<void>;
   onClose: () => void;
+  // Closes the sheet and moves the screen to the vehicle's earlier gap.
+  onOpenGap: (date: string) => void;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -364,7 +376,11 @@ export function CaptureSheet({
               { paddingBottom: 28 + insets.bottom },
             ]}
           >
-            <SheetHead target={target} onClose={onClose} />
+            <SheetHead
+              target={target}
+              onClose={onClose}
+              onOpenGap={onOpenGap}
+            />
             <AmountField
               value={form.amount}
               autoFocus={!form.reason}

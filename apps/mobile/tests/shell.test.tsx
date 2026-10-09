@@ -105,16 +105,16 @@ it("starts a revenue clerk on today with capture first", async () => {
   const capture = screen.getByRole("header", { name: "Today's revenue" });
   expect(capture).toBeTruthy();
   await fireEvent.press(screen.getByText("Capture revenue"));
-  // The screen opens on the earliest missing day, one tap from capture.
+  // The screen opens on today, one tap from capture.
   await fireEvent.press(
     await screen.findByRole("button", { name: "KDA 482M, Enter revenue" }),
   );
-  expect(screen.getByText("Mon 28 Sep 2026. Expected KES 1,000")).toBeTruthy();
+  expect(screen.getByText("Tue 29 Sep 2026. Expected KES 1,000")).toBeTruthy();
   expect(screen.getByRole("radio", { name: "Garage" })).toBeTruthy();
   await fireEvent.changeText(screen.getByLabelText("Revenue amount"), "1000");
   await fireEvent.press(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
-    expect(api.sent("setup/revenue/vehicle-1/2026-09-28")).toEqual([
+    expect(api.sent("setup/revenue/vehicle-1/2026-09-29")).toEqual([
       { amount: 1000, reason: null, note: null, version: null },
     ]),
   );

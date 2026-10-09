@@ -6,8 +6,8 @@ import type { RevenueWeek } from "@xcode/shared/revenue";
 import { revenueWeekPath } from "../../lib/endpoints/revenue";
 import { useRevenueWeek } from "./useRevenueWeek";
 
-// The week on screen: which week and company, the data for it, and what the toolbar and primary action derive from it.
-export function useWeekGrid(canView: boolean, canCapture: boolean) {
+// The week on screen: which week and company, the data for it, and what the toolbar derives from it.
+export function useWeekGrid(canView: boolean) {
   const [weekStart, setWeekStart] = useState("");
   const [companyId, setCompanyId] = useState("");
 
@@ -37,13 +37,6 @@ export function useWeekGrid(canView: boolean, canCapture: boolean) {
   const today = shown?.businessDate ?? "";
   const start = weekStart || shown?.weekStart || "";
   const days = useMemo(() => (data ? weekDays(data.weekStart) : []), [data]);
-  // The grid's primary action starts at the earliest missing day, at the first vehicle missing it.
-  const gap = data && canCapture ? data.firstGap : null;
-  const gapVehicle = gap
-    ? data?.vehicles.find((vehicle) => vehicle.id === gap.vehicleId)
-    : undefined;
-  const first =
-    gap && gapVehicle ? { vehicle: gapVehicle, date: gap.date } : null;
 
   return {
     week,
@@ -58,6 +51,5 @@ export function useWeekGrid(canView: boolean, canCapture: boolean) {
     today,
     start,
     days,
-    first,
   };
 }

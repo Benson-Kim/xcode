@@ -37,7 +37,19 @@ import {
 export const QUEUE_LIMIT = 500;
 const MESSAGE_LIMIT = 160;
 const MAX_ATTEMPTS = 10;
-const STATES: QueueState[] = ["pending", "blocked", "conflict", "failed"];
+// "blocked" was kept by an earlier version, while days had to be captured in order. It reads as pending.
+const STATES: (QueueState | "blocked")[] = [
+  "pending",
+  "blocked",
+  "conflict",
+  "failed",
+];
+
+// What is stored: the current shape, or the one an earlier version wrote.
+type StoredCapture = Omit<QueuedCapture, "state"> & {
+  state: QueueState | "blocked";
+  earliestMissing?: string | null;
+};
 
 export class QueueFullError extends Error {
   constructor() {
@@ -89,7 +101,7 @@ const validSaved = (value: unknown) => {
   );
 };
 
-const validCapture = (entry: QueuedCapture) =>
+const validCapture = (entry: StoredCapture) =>
   text(entry.vehicleId, 64) &&
   entry.vehicleId.length > 0 &&
   text(entry.registration, 40) &&
@@ -104,7 +116,8 @@ const validCapture = (entry: QueuedCapture) =>
   orNull(entry.version, whole) &&
   STATES.includes(entry.state) &&
   text(entry.message, MESSAGE_LIMIT) &&
-  orNull(entry.earliestMissing, isDate) &&
+  (entry.earliestMissing === undefined ||
+    orNull(entry.earliestMissing, isDate)) &&
   orNull(entry.current, validSaved) &&
   Number.isFinite(entry.queuedAt) &&
   (entry.attempts === undefined || whole(entry.attempts)) &&
@@ -118,9 +131,29 @@ const savedValue = (cell: RevenueCell): SavedValue => ({
   canEdit: cell.canEdit,
 });
 
-// Oldest day first, so an earlier day for a vehicle always reaches the API before a later one.
-const byDay = (a: QueuedCapture, b: QueuedCapture) =>
-  a.date.localeCompare(b.date) || a.registration.localeCompare(b.registration);
+// Each capture is kept at a time later than the one before, even within one millisecond.
+let lastKept = 0;
+const kept = () => (lastKept = Math.max(Date.now(), lastKept + 1));
+
+// In the order they were kept. A capture is never held back for another day: days can be captured in any order.
+const byKept = (a: QueuedCapture, b: QueuedCapture) =>
+  a.queuedAt - b.queuedAt ||
+  a.date.localeCompare(b.date) ||
+  a.registration.localeCompare(b.registration);
+
+// A capture as stored, in the current shape: one that waited for an earlier day just waits to be sent.
+function fromStored(stored: StoredCapture): QueuedCapture {
+  const { state, ...rest } = stored;
+  const blocked = state === "blocked";
+  delete rest.earliestMissing;
+  return {
+    ...rest,
+    state: blocked ? "pending" : state,
+    message: blocked ? "" : stored.message,
+    attempts: stored.attempts ?? 0,
+    lastAttemptAt: stored.lastAttemptAt ?? 0,
+  };
+}
 
 // Storage work for one person runs a step at a time, across every queue opened for them: a queue closing after
 // a lock can never write over the one the next unlock opens.
@@ -174,7 +207,7 @@ export function openQueue(
   let revision = 0;
 
   const entries = () =>
-    [...held.values()].map((item) => item.entry).sort(byDay);
+    [...held.values()].map((item) => item.entry).sort(byKept);
   const find = (entry: QueuedCapture) =>
     held.get(keyOf(entry.vehicleId, entry.date))?.entry;
   const changed = () => {
@@ -204,16 +237,12 @@ export function openQueue(
       .concat(unnamed >= 0 ? [unnamed] : []);
     const found = await Promise.all(
       slots.map((slot) =>
-        read<QueuedCapture>(slotKey(owner, slot), validCapture),
+        read<StoredCapture>(slotKey(owner, slot), validCapture),
       ),
     );
     for (const [position, stored] of found.entries()) {
       if (!stored) continue;
-      const entry: QueuedCapture = {
-        ...stored,
-        attempts: stored.attempts ?? 0,
-        lastAttemptAt: stored.lastAttemptAt ?? 0,
-      };
+      const entry = fromStored(stored);
       const slot = slots[position];
       const key = keyOf(entry.vehicleId, entry.date);
       const other = held.get(key);
@@ -317,13 +346,6 @@ export function openQueue(
         state: "conflict",
         message: "Someone else saved this day first.",
         current,
-        earliestMissing: null,
-      });
-    } else if (status === 400 && isDate(problem.earliestMissing)) {
-      await update(entry, {
-        state: "blocked",
-        message: "Capture the earlier day first.",
-        earliestMissing: problem.earliestMissing,
       });
     } else if (status === 400 || status === 403 || status === 404) {
       const fallback =
@@ -335,7 +357,6 @@ export function openQueue(
       await update(entry, {
         state: "failed",
         message: why || fallback,
-        earliestMissing: null,
       });
     } else if (status === 429) {
       await update(entry, tried(entry));
@@ -344,7 +365,6 @@ export function openQueue(
       await update(entry, {
         state: "failed",
         message: why || "The API did not accept this entry.",
-        earliestMissing: null,
       });
     } else {
       if (entry.attempts + 1 < MAX_ATTEMPTS) {
@@ -355,7 +375,6 @@ export function openQueue(
         ...tried(entry),
         state: "failed",
         message: "This entry could not be sent after several tries.",
-        earliestMissing: null,
       });
     }
     return true;
@@ -376,7 +395,7 @@ export function openQueue(
         do {
           again = false;
           for (const entry of entries().filter(
-            (item) => item.state === "pending" || item.state === "blocked",
+            (item) => item.state === "pending",
           )) {
             // Discarded or replaced since the pass began: the replacement goes in the next pass.
             if (find(entry) !== entry) continue;
@@ -417,9 +436,8 @@ export function openQueue(
         registration: capture.registration.slice(0, 40),
         state: "pending",
         message: "",
-        earliestMissing: null,
         current: null,
-        queuedAt: Date.now(),
+        queuedAt: kept(),
         attempts: 0,
         lastAttemptAt: 0,
       };
@@ -555,7 +573,7 @@ export function useRevenueQueue(
   }, [snapshot, owner]);
 }
 
-// Counts for the Revenue tab: waiting (pending, or waiting for an earlier day), conflicts and refusals.
+// Counts for the Revenue tab: waiting (pending), conflicts and refusals.
 export function queueCounts(entries: QueuedCapture[]) {
   const counts = { waiting: 0, conflicts: 0, failed: 0 };
   for (const entry of entries) {

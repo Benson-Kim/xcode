@@ -53,6 +53,18 @@ export function ChevronIcon(props: ComponentProps<"svg"> & { size?: number }) {
   );
 }
 
+// Two chevrons pointing left; turn it for the right.
+export function ChevronsLeftIcon(
+  props: ComponentProps<"svg"> & { size?: number },
+) {
+  return (
+    <Icon size={18} {...props}>
+      <path d="M11 17l-5-5 5-5" />
+      <path d="M18 17l-5-5 5-5" />
+    </Icon>
+  );
+}
+
 export function CloseIcon(props: ComponentProps<"svg"> & { size?: number }) {
   return (
     <Icon {...props}>

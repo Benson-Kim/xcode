@@ -13,7 +13,7 @@ import {
   type Waiting,
 } from "./model";
 
-// The day on screen, and the earliest day any vehicle still needs.
+// The day on screen, and the earliest day any vehicle is known to still need (offered as a hint to go there).
 export function useCaptureDay({
   week,
   waiting,
@@ -36,17 +36,13 @@ export function useCaptureDay({
     [week, waiting, canCapture],
   );
 
-  // Opens on the earliest day still missing for people who capture, otherwise on the business date (never the phone's clock).
+  // Opens on the business date (never the phone's clock). An earlier gap is offered as a hint, not opened for you.
   useEffect(() => {
     if (!week || day || !queueLoaded) return;
-    const first =
-      firstNeeded && firstNeeded < week.businessDate
-        ? firstNeeded
-        : week.businessDate;
-    setDay(first);
-    if (first < week.weekStart)
-      setWeekStart(weekHolding(first, week.currentWeekStart));
-  }, [week, day, queueLoaded, firstNeeded, setWeekStart]);
+    setDay(week.businessDate);
+    if (week.businessDate < week.weekStart)
+      setWeekStart(weekHolding(week.businessDate, week.currentWeekStart));
+  }, [week, day, queueLoaded, setWeekStart]);
 
   const goToDay = useCallback(
     (next: string) => {

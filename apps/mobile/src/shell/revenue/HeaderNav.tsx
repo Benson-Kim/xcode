@@ -103,9 +103,7 @@ function DayProgress({ rows }: { rows: DayRowData[] }) {
   ).length;
   // Not sent yet: waiting on this phone to go out (a conflict or refusal is shown as such).
   const unsent = inFleet.filter(
-    (row) =>
-      row.queued &&
-      (row.queued.state === "pending" || row.queued.state === "blocked"),
+    (row) => row.queued?.state === "pending",
   ).length;
   return (
     <Text style={{ fontSize: 14, color: colors.grey }}>
@@ -117,6 +115,10 @@ function DayProgress({ rows }: { rows: DayRowData[] }) {
     </Text>
   );
 }
+
+// A gap is mentioned, never required.
+export const gapText = (date: string) =>
+  `No record yet from ${date}. You can fill it when you have it.`;
 
 function MissingBanner({
   earliest,
@@ -130,17 +132,17 @@ function MissingBanner({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Earlier days are missing. Start with ${formats.formatWeekdayDate(earliest)}`}
+      accessibilityLabel={`${gapText(formats.formatWeekdayDate(earliest))} Go there`}
       onPress={() => onGo(earliest)}
       style={[
         styles.missBanner,
-        { borderColor: colors.redLine, backgroundColor: colors.redBg },
+        { borderColor: colors.amberLine, backgroundColor: colors.amberBg },
       ]}
     >
-      <Icon name="alert" size={18} color={colors.redText} />
+      <Icon name="alert" size={18} color={colors.amberText} />
       <Text
-        style={{ flex: 1, fontSize: 14, color: colors.redText }}
-      >{`Earlier days are missing. Start with ${formats.formatWeekdayDate(earliest)}`}</Text>
+        style={{ flex: 1, fontSize: 14, color: colors.amberText }}
+      >{`${gapText(formats.formatWeekdayDate(earliest))} Tap to go there.`}</Text>
     </Pressable>
   );
 }
@@ -291,11 +293,7 @@ export function RevenueHeader(props: HeaderProps) {
         />
       )}
       <LoadNotice {...props.notice} onRetry={props.onRetry} />
-      <QueuePanel
-        queue={props.queue}
-        canReplace={props.canReplace}
-        onOpenDay={props.onGoDay}
-      />
+      <QueuePanel queue={props.queue} canReplace={props.canReplace} />
       <Nav {...props} />
     </View>
   );

@@ -23,17 +23,14 @@ public static class RevenueEndpoints
             try { return await next(context); }
             catch (RevenueConflictException conflict)
             {
+                var extensions = new Dictionary<string, object?> { ["current"] = conflict.Current };
+                if (conflict.VehicleId is { } vehicleId) extensions["vehicleId"] = vehicleId;
                 return Results.Problem(statusCode: 409, title: "This day already has a different record.", detail: conflict.Message,
-                    extensions: new Dictionary<string, object?> { ["current"] = conflict.Current });
+                    extensions: extensions);
             }
             catch (DbUpdateConcurrencyException)
             {
                 return Results.Problem(statusCode: 409, title: "This day was changed by another save.", detail: "Reload the current record and try again.");
-            }
-            catch (RevenueEarlierDayMissingException missing)
-            {
-                return Results.Problem(statusCode: 400, title: "Invalid setup change", detail: missing.Message,
-                    extensions: new Dictionary<string, object?> { ["earliestMissing"] = missing.EarliestMissing.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) });
             }
         });
 
@@ -47,6 +44,18 @@ public static class RevenueEndpoints
                 useCases.Dashboard(period, companyId, ct))
             .Produces<RevenueDashboardDto>()
             .WithName("GetRevenueDashboard");
+
+        group.MapGet("/day", (RevenueUseCases useCases, CancellationToken ct, DateOnly? date = null, Guid? companyId = null) =>
+                useCases.Day(date, companyId, ct))
+            .Produces<RevenueDayDto>()
+            .WithName("GetRevenueDay");
+
+        group.MapPut("/day/{date}", async (DateOnly date, SaveRevenueDay input, RevenueUseCases useCases, CancellationToken ct) =>
+                Results.Ok(await useCases.SaveDay(date, input, ct)))
+            .Produces<RevenueDaySaved>()
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .WithName("SaveRevenueDay");
 
         group.MapPut("/{vehicleId:guid}/{date}", async (Guid vehicleId, DateOnly date, SaveRevenue input, RevenueUseCases useCases, CancellationToken ct) =>
                 Results.Ok(await useCases.Save(vehicleId, date, input, ct)))

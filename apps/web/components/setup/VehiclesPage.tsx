@@ -41,6 +41,7 @@ import {
   ListSkeleton,
   Note,
   PageHeader,
+  ListPager,
   RowButton,
   SegmentedControl,
   SelectInput,
@@ -57,6 +58,7 @@ import {
   Tr,
   useToast,
 } from "../ui";
+import { usePagedList } from "../usePagedList";
 import {
   costBucket,
   expenseBucketNames,
@@ -81,7 +83,6 @@ export function VehiclesPage({
   const { formatDateOnly, kes } = useFormats();
   // invest.view alone lists the vehicles read-only, to reach each one's Investment tab.
   const canManage = can("vehicles.manage");
-  const vehicles = useStreamedList<Vehicle>("setup/vehicles");
   // Vehicle managers may not manage companies; ask the server for active company options in that case. A read-only
   // list takes its companies from the vehicles themselves.
   const companyList = useStreamedList<Company>(
@@ -95,6 +96,12 @@ export function VehiclesPage({
   // The organization's business date, never the computer clock; undefined until the appearance has loaded.
   const today = appearance?.businessDate;
   const [filter, setFilter] = useState("all");
+  // Vehicles come a server page at a time, filtered to the chosen company by the server.
+  const vehicles = usePagedList<Vehicle>(
+    filter === "all"
+      ? "setup/vehicles"
+      : `setup/vehicles?companyId=${encodeURIComponent(filter)}`,
+  );
   // The vehicle being edited (a null id adds one). After a save it shows the vehicle as saved until the reloaded list
   // arrives, then the server's copy, so what the server works out (active, targets, counts) is never a local guess.
   const [editing, setEditing] = useState<{
@@ -104,7 +111,7 @@ export function VehiclesPage({
   } | null>(null);
   const rows = vehicles.items;
   const companies = companyChoices(
-    rows,
+    useCompaniesSeen(rows),
     companyList.items,
     companyOptions.data,
   );
@@ -138,9 +145,6 @@ export function VehiclesPage({
       />
     );
 
-  const visible = rows.filter(
-    (vehicle) => filter === "all" || vehicle.companyId === filter,
-  );
   return (
     <section>
       <PageHeader
@@ -153,25 +157,13 @@ export function VehiclesPage({
         </Banner>
       )}
       <Toolbar>
-        <label htmlFor="vehicle-filter" className="text-[13px] text-grey">
-          Company
-        </label>
-        <SelectInput
-          id="vehicle-filter"
-          density="compact"
-          inline
+        <CompanyFilter
           value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        >
-          <option value="all">All companies</option>
-          {companies.map((company) => (
-            <option key={company.id} value={company.id}>
-              {company.name}
-            </option>
-          ))}
-        </SelectInput>
+          companies={companies}
+          onChange={setFilter}
+        />
         {!vehicles.loading && (
-          <Hint>{plural(visible.length, "vehicle", "vehicles")}</Hint>
+          <Hint>{plural(vehicles.total, "vehicle", "vehicles")}</Hint>
         )}
         <Spacer />
         {canManage && (
@@ -191,9 +183,9 @@ export function VehiclesPage({
           ...(canManage ? [{ label: "Scheduled items", numeric: true }] : []),
         ]}
         loading={vehicles.loading}
-        pendingRows={filter === "all" ? vehicles.pendingRows : 0}
+        pendingRows={vehicles.pendingRows}
         loadingLabel="Loading vehicles"
-        isEmpty={!visible.length}
+        isEmpty={!rows.length}
         failed={Boolean(vehicles.error)}
         emptyMessage={
           filter === "all"
@@ -201,7 +193,7 @@ export function VehiclesPage({
             : "No vehicles in this company yet."
         }
       >
-        {visible.map((vehicle) => {
+        {rows.map((vehicle) => {
           const status = fleetStatus(vehicle, formatDateOnly);
           return (
             <Tr key={vehicle.id}>
@@ -244,6 +236,7 @@ export function VehiclesPage({
           );
         })}
       </DataTable>
+      <ListPager list={vehicles} />
     </section>
   );
 }
@@ -273,6 +266,49 @@ function fleetStatus(
         left: false,
       }
     : { label: "Active", tone: "ok", left: false };
+}
+
+function CompanyFilter({
+  value,
+  companies,
+  onChange,
+}: {
+  value: string;
+  companies: CompanyChoice[];
+  onChange: (companyId: string) => void;
+}) {
+  return (
+    <>
+      <label htmlFor="vehicle-filter" className="text-[13px] text-grey">
+        Company
+      </label>
+      <SelectInput
+        id="vehicle-filter"
+        density="compact"
+        inline
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="all">All companies</option>
+        {companies.map((company) => (
+          <option key={company.id} value={company.id}>
+            {company.name}
+          </option>
+        ))}
+      </SelectInput>
+    </>
+  );
+}
+
+// Someone who may not read the company options learns the companies from the vehicles listed, so each company seen
+// stays a choice while another page or company is shown.
+function useCompaniesSeen(rows: Vehicle[]) {
+  const [seen, setSeen] = useState<Vehicle[]>([]);
+  const unseen = rows.filter(
+    (vehicle) => !seen.some((known) => known.companyId === vehicle.companyId),
+  );
+  if (unseen.length) setSeen([...seen, ...unseen]);
+  return [...seen, ...unseen];
 }
 
 function companyChoices(

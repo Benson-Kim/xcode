@@ -14,45 +14,36 @@ import {
 export const isReason = (value: string | null): value is RevenueReason =>
   REVENUE_REASONS.includes(value as RevenueReason);
 
-// The day being captured and the day the person set out to fill (an earlier gap opens first), plus the vehicles
-// already done for that day in this run, so a grid that has not reloaded yet never sends capture back to them.
+// The day being captured, the vehicle's earliest gap before it (a hint, never a requirement), and the vehicles already
+// done for that day in this run, so a grid that has not reloaded yet never sends capture back to them.
 export type Capture = {
   vehicleId: string;
   date: string;
-  target: string;
-  info: string;
+  gap: string | null;
   done: string[];
 };
 
-// A missing day waits for the vehicle's earliest gap, so a tap on a later one opens that gap first.
+// A tap opens the day that was tapped; an earlier gap is only mentioned.
 export function captureAt(
-  formats: Formatter,
   vehicle: RevenueVehicle,
-  day: string,
   at: Opening,
   done: string[] = [],
 ): Capture {
-  const info = at.earlier
-    ? `Fill ${formats.formatWeekdayDate(at.earlier)} first.`
-    : "";
-  return { vehicleId: vehicle.id, date: at.date, target: day, info, done };
+  return { vehicleId: vehicle.id, date: at.date, gap: at.earlier, done };
 }
 
 export function openAt(
-  formats: Formatter,
   vehicle: RevenueVehicle,
   day: string,
   businessDate: string,
   done: string[] = [],
 ): Capture {
-  return captureAt(
-    formats,
-    vehicle,
-    day,
-    openingFor(vehicle, day, { businessDate }),
-    done,
-  );
+  return captureAt(vehicle, openingFor(vehicle, day, { businessDate }), done);
 }
+
+// The gentle line under the date when the vehicle has an earlier day with no record.
+export const gapHint = (formats: Formatter, gap: string) =>
+  `No record yet from ${formats.formatWeekdayDate(gap)}. You can fill it when you have it.`;
 
 export function entryLabel(
   formats: Formatter,

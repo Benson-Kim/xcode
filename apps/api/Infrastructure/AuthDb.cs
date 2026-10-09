@@ -29,6 +29,7 @@ public sealed partial class AuthDb(DbContextOptions<AuthDb> options, Auth.Applic
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<RevenueRecord> RevenueRecords => Set<RevenueRecord>();
     public DbSet<PettyCashEntry> PettyCashEntries => Set<PettyCashEntry>();
+    public DbSet<CentralExpense> CentralExpenses => Set<CentralExpense>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -36,6 +37,7 @@ public sealed partial class AuthDb(DbContextOptions<AuthDb> options, Auth.Applic
         ConfigureSetup(model);
         ConfigureRevenue(model);
         ConfigurePettyCash(model);
+        ConfigureCentralExpenses(model);
 
         model.Entity<User>().Property(x => x.Email).HasMaxLength(320);
         model.Entity<User>().HasIndex(x => x.Email).IsUnique();

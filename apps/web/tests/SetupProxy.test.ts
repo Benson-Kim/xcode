@@ -116,6 +116,34 @@ it("forwards every petty cash path", async () => {
   expect(fetcher).not.toHaveBeenCalled();
 });
 
+it("forwards the expenses ledger and reports paths, and nothing like them", async () => {
+  const fetcher = vi.fn(
+    async (url: string) =>
+      new Response(JSON.stringify({ url }), { status: 200 }),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  const allowed = [
+    ["expenses", "ledger"],
+    ["expenses", "options"],
+    ["expenses", "entries"],
+    ["expenses", "entries", "e-1"],
+    ["expenses", "entries", "e-1", "remove"],
+    ["reports"],
+    ["reports", "fleet", "net"],
+    ["reports", "pettycash", "cashBook", "export"],
+  ];
+  for (const path of allowed)
+    expect((await get(path)).status, path.join("/")).toBe(200);
+  expect(
+    fetcher.mock.calls.map(([url]) => String(url).replace(/^.*\/setup\//, "")),
+  ).toEqual(allowed.map((path) => path.join("/")));
+
+  fetcher.mockClear();
+  for (const path of [["expensesx", "ledger"], ["report"], ["reportsx"]])
+    expect((await get(path)).status, path.join("/")).toBe(404);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
 // The largest legitimate body is a logo upload: a data URL of about 350 KB.
 const MB = 1024 * 1024;
 const write = (

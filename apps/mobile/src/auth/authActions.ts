@@ -14,12 +14,14 @@ import {
   forgetThisPhone,
   isNoInternet,
   keepSession,
+  wakeServer,
 } from "../lib/api";
 import {
   OFFLINE_UNLOCK_HOURS,
   matchesPinCheck,
   offlineUnlockUntil,
   savePinCheck,
+  startPinMatch,
   type StoredPerson,
 } from "../lib/storage";
 import { fetchPerson } from "../session";
@@ -82,7 +84,8 @@ async function finishSignIn(
   const { phone } = ctx.state();
   try {
     await keepSession(phone, result);
-    await savePinCheck(usedPin);
+    // Deriving the offline PIN check takes seconds on a phone, so signing in goes ahead without it.
+    void savePinCheck(usedPin, result.accessToken).catch(() => undefined);
     await ctx.attempts.clear(phone);
     const person = await fetchPerson(phone, usedPin.length);
     if (!ctx.alive()) return;
@@ -115,14 +118,45 @@ function pauseFromServer(ctx: AuthContext, error: AuthError) {
   });
 }
 
+// The phone's own PIN check takes seconds. When the server is slow to answer an unlock, it starts while the request
+// is still waiting, so the answer is ready if the server turns out to be out of reach. A quick answer never costs one.
+const EARLY_CHECK_AFTER_MS = 800;
+
+type EarlyMatch = { result: () => Promise<boolean | null>; cancel: () => void };
+
+function earlyMatch(entered: string): EarlyMatch {
+  let started: ReturnType<typeof startPinMatch> | undefined;
+  const timer = setTimeout(
+    () => (started = startPinMatch(entered)),
+    EARLY_CHECK_AFTER_MS,
+  );
+  return {
+    // The check started while waiting, or one now if the request failed before it began or it was stopped.
+    result: () => {
+      clearTimeout(timer);
+      return started
+        ? started.result.catch(() => matchesPinCheck(entered))
+        : matchesPinCheck(entered);
+    },
+    cancel: () => {
+      clearTimeout(timer);
+      started?.cancel();
+    },
+  };
+}
+
+const matchOf = (entered: string, early?: EarlyMatch) =>
+  early ? early.result() : matchesPinCheck(entered);
+
 // PIN unlock works without internet
 async function unlockOffline(
   ctx: AuthContext,
   entered: string,
   failure: unknown,
+  early?: EarlyMatch,
 ) {
   const { person, phone } = ctx.state();
-  const match = await matchesPinCheck(entered);
+  const match = await matchOf(entered, early);
   if (match === null || !person)
     return ctx.dispatch({
       type: "padError",
@@ -152,11 +186,12 @@ async function failPad(
   error: unknown,
   entered: string,
   mode: "enter" | "unlock",
+  early?: EarlyMatch,
 ) {
   if (isPaused(error)) return pauseFromServer(ctx, error);
   // The PIN this phone last signed in with, refused online: the person's number (or PIN) was changed
   // elsewhere, so another try cannot help and must not count toward a pause.
-  if (isRefused(error) && mode === "unlock" && (await matchesPinCheck(entered)))
+  if (isRefused(error) && mode === "unlock" && (await matchOf(entered, early)))
     return ctx.dispatch({
       type: "padError",
       message:
@@ -172,7 +207,7 @@ async function failPad(
     (error instanceof OfflineError ||
       (error instanceof AuthError && error.httpStatus >= 500))
   )
-    return unlockOffline(ctx, entered, error);
+    return unlockOffline(ctx, entered, error, early);
   ctx.dispatch({
     type: "padError",
     message: failureMessage(
@@ -188,11 +223,13 @@ async function checkPin(
   mode: "enter" | "unlock",
 ) {
   const { phone } = ctx.state();
+  const early = mode === "unlock" ? earlyMatch(entered) : undefined;
   try {
     const result = await send(mode === "unlock" ? "unlock" : "sign-in", {
       phoneNumber: phone,
       pin: entered,
     });
+    early?.cancel();
     if (result.status === "verification_required")
       ctx.dispatch({
         type: "codeRequested",
@@ -203,7 +240,8 @@ async function checkPin(
       });
     else await finishSignIn(ctx, result, entered, false);
   } catch (error) {
-    await failPad(ctx, error, entered, mode);
+    await failPad(ctx, error, entered, mode, early);
+    early?.cancel();
   }
 }
 
@@ -401,6 +439,8 @@ function press(ctx: AuthContext, digit: string) {
     return;
   ctx.dispatch({ type: "digit", digit });
   const entered = pad.pin + digit;
+  // A server gone idle wakes while the rest of the PIN is typed.
+  if (entered.length === 1) wakeServer();
   if (isPersonalPad(pad) && pad.longPin) return;
   if (entered.length < state.pinLength || !ctx.lock.acquire()) return;
   ctx.delayed.schedule(() => void submitPin(ctx, entered));

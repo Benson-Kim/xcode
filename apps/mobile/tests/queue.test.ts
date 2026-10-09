@@ -129,7 +129,7 @@ async function withHole() {
   return { api, ...first };
 }
 
-it("sends an earlier day first even when it was kept after a later one, and a newer capture replaces the waiting one", async () => {
+it("sends captures in the order they were kept, whatever their days, and a newer capture replaces the waiting one", async () => {
   const api = fakeApi();
   let online = false;
   const order: string[] = [];
@@ -155,18 +155,19 @@ it("sends an earlier day first even when it was kept after a later one, and a ne
   expect(
     latest().entries.map((entry) => `${entry.vehicleId}/${entry.date}`),
   ).toEqual([
+    "v-1/2026-09-29",
     "v-1/2026-09-27",
     "v-2/2026-09-28",
     "v-1/2026-09-28",
-    "v-1/2026-09-29",
   ]);
 
   online = true;
   await queue.sync();
-  expect(order.filter((path) => path.startsWith("v-1"))).toEqual([
-    "v-1/2026-09-27",
-    "v-1/2026-09-28",
+  expect(order).toEqual([
     "v-1/2026-09-29",
+    "v-1/2026-09-27",
+    "v-2/2026-09-28",
+    "v-1/2026-09-28",
   ]);
   expect(order).toHaveLength(4);
   // A correction sends the version it was read at; a new day sends null; the replaced capture went once, as 1200.
@@ -211,8 +212,7 @@ it("keeps every refused capture with the reason, and drops one only on a 200 or 
     400,
     {
       title: "Invalid setup change",
-      detail: "Record 2026-09-20 before this date first.",
-      earliestMissing: "2026-09-20",
+      detail: "Revenue must be above zero.",
     },
   ]);
   api.on("setup/revenue/v-1/2026-09-28", [503, {}]);
@@ -240,9 +240,8 @@ it("keeps every refused capture with the reason, and drops one only on a 200 or 
     message: "This vehicle is no longer in your view.",
   });
   expect(byDate["2026-09-27"]).toMatchObject({
-    state: "blocked",
-    message: "Capture the earlier day first.",
-    earliestMissing: "2026-09-20",
+    state: "failed",
+    message: "Revenue must be above zero.",
   });
   // The API struggling stops the round; later days wait and are not sent.
   expect(byDate["2026-09-28"]).toMatchObject({ state: "pending" });
@@ -250,10 +249,10 @@ it("keeps every refused capture with the reason, and drops one only on a 200 or 
   expect(api.sent("setup/revenue/v-1/2026-09-29")).toHaveLength(0);
   expect(latest().entries).toHaveLength(5);
 
-  // Failed entries wait for the person; a blocked one is tried again with every round.
+  // Failed entries wait for the person.
   await queue.sync();
   expect(api.sent("setup/revenue/v-1/2026-09-25")).toHaveLength(1);
-  expect(api.sent("setup/revenue/v-1/2026-09-27")).toHaveLength(2);
+  expect(api.sent("setup/revenue/v-1/2026-09-27")).toHaveLength(1);
 
   await queue.discard(byDate["2026-09-26"]);
   expect(latest().entries.map((entry) => entry.date)).toEqual([
@@ -424,9 +423,7 @@ async function restartEach(
 
     const waiting = started
       .latest()
-      .entries.filter(
-        (entry) => entry.state === "pending" || entry.state === "blocked",
-      );
+      .entries.filter((entry) => entry.state === "pending");
     const from = api.reached.length;
     api.answer(() => [200, { version: 1 }]);
     await started.queue.sync();
@@ -600,7 +597,6 @@ it("reads the index, each waiting capture and one free slot when it opens, and n
         ...capture(date),
         state: "pending",
         message: "",
-        earliestMissing: null,
         current: null,
         queuedAt: slot,
       }),
@@ -619,7 +615,6 @@ it("writes nothing more after a start that could not finish reading the queue ba
       ...capture(date),
       state: "pending",
       message: "",
-      earliestMissing: null,
       current: null,
       queuedAt,
     });

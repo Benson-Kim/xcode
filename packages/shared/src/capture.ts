@@ -1,4 +1,3 @@
-import { shiftDate } from "./dates";
 import type { Formatter } from "./format";
 import {
   awaitsCapture,
@@ -21,8 +20,8 @@ export const activeOn = (vehicle: RevenueVehicle, date: string): boolean =>
   vehicle.joinedOn <= date &&
   (vehicle.leftOn === null || date < vehicle.leftOn);
 
-// Still needs a record. Inside the loaded week the cell says so. Anywhere else captures run in date order, so every
-// active day on or after the vehicle's earliest gap is still missing too.
+// Still needs a record. Inside the loaded week the cell says so. Anywhere else only the vehicle's earliest gap is known
+// to be missing: days are captured in any order, so a later day outside the week may or may not have a record.
 export function needsRecord(
   vehicle: RevenueVehicle,
   date: string,
@@ -31,28 +30,31 @@ export function needsRecord(
   if (handled(vehicle.id, date)) return false;
   const cell = cellOn(vehicle, date);
   if (cell) return awaitsCapture(cell);
-  return (
-    activeOn(vehicle, date) &&
-    vehicle.earliestMissing !== null &&
-    vehicle.earliestMissing <= date
-  );
+  return activeOn(vehicle, date) && vehicle.earliestMissing === date;
 }
 
-// The first day the vehicle still needs, up to the business date. earliestMissing leaves out today, so with no gap
-// before today, today is the only candidate. The search stops at the first day that needs a record: at most one step
-// per day the caller has handled, plus one.
+// The first day, up to the business date, that the vehicle is known to still need: its earliest gap, or a missing
+// cell of the loaded week, whichever comes first. earliestMissing leaves out today, so today counts only when the
+// loaded week holds it.
 export function earliestNeeded(
   vehicle: RevenueVehicle,
   week: Pick<RevenueWeek, "businessDate">,
   handled: Handled = notHandled,
 ): string | null {
-  for (
-    let date = vehicle.earliestMissing ?? week.businessDate;
-    date <= week.businessDate;
-    date = shiftDate(date, 1)
-  )
-    if (needsRecord(vehicle, date, handled)) return date;
-  return null;
+  let first: string | null = null;
+  const days = [
+    vehicle.earliestMissing,
+    ...vehicle.days.map((cell) => cell.date),
+  ];
+  for (const date of days)
+    if (
+      date !== null &&
+      date <= week.businessDate &&
+      (first === null || date < first) &&
+      needsRecord(vehicle, date, handled)
+    )
+      first = date;
+  return first;
 }
 
 export function earliestNeededDay(
@@ -71,7 +73,8 @@ export function earliestNeededDay(
 export const canOpen = (cell: RevenueCell, canCapture: boolean): boolean =>
   awaitsCapture(cell) ? canCapture : cell.canEdit;
 
-// Where a tap on a day lands: that day, or the vehicle's earlier gap, which has to be filled first.
+// Where a tap on a day lands: always that day. earlier is the vehicle's first gap before it, as a hint that it can be
+// filled when the record turns up; it never blocks the day.
 export type Opening = { date: string; earlier: string | null };
 
 export function openingFor(
@@ -80,15 +83,15 @@ export function openingFor(
   week: Pick<RevenueWeek, "businessDate">,
   handled: Handled = notHandled,
 ): Opening {
-  if (!needsRecord(vehicle, tapped)) return { date: tapped, earlier: null };
   const first = earliestNeeded(vehicle, week, handled);
-  return first !== null && first < tapped
-    ? { date: first, earlier: first }
-    : { date: tapped, earlier: null };
+  return {
+    date: tapped,
+    earlier: first !== null && first < tapped ? first : null,
+  };
 }
 
-// After a save: the next vehicle (this one first, then in grid order, wrapping round) that still needs the day, and
-// where it opens.
+// After a save: the next vehicle (this one first, then in grid order, wrapping round) that still needs the same day,
+// and where it opens: that day.
 export function nextToCapture(
   week: RevenueWeek,
   fromVehicleId: string,

@@ -202,6 +202,7 @@ function serveWeek(
       const found = options.vehicleWeek?.(path);
       return found ? json(found) : undefined;
     }
+    if (path.startsWith("/api/setup/revenue/day")) return undefined;
     if (path.startsWith("/api/setup/revenue")) return json(grid());
   });
 }
@@ -477,49 +478,23 @@ it("shows a vehicle's week detail with expected, actual, difference and a bar fo
   expect(detail.querySelectorAll("[data-bar]")).toHaveLength(2);
 });
 
-it("opens a vehicle's earliest missing day first, loading it when it falls in another week", async () => {
-  const fetcher = serveWeek(
-    () =>
-      week([
-        vehicle(
-          "vehicle-1",
-          "KDA 482M",
-          {
-            [DATES[0]]: { canEdit: false },
-            [DATES[1]]: { canEdit: false },
-            [DATES[2]]: { canEdit: false },
-          },
-          { earliestMissing: "2026-09-24" },
-        ),
-      ]),
-    {
-      vehicleWeek: () =>
-        week(
-          [
-            vehicle(
-              "vehicle-1",
-              "KDA 482M",
-              {},
-              {
-                earliestMissing: "2026-09-24",
-                days: [
-                  "2026-09-21",
-                  "2026-09-22",
-                  "2026-09-23",
-                  "2026-09-24",
-                ].map((date, index) =>
-                  cell(date, index < 3 ? recorded(900) : { expected: 1100 }),
-                ),
-              },
-            ),
-          ],
-          { weekStart: "2026-09-21" },
-        ),
-    },
+it("opens the day that was tapped even when the vehicle has an earlier gap, mentions the gap and saves without it", async () => {
+  const fetcher = serveWeek(() =>
+    week([
+      vehicle(
+        "vehicle-1",
+        "KDA 482M",
+        {
+          [DATES[0]]: { canEdit: false },
+          [DATES[1]]: { canEdit: false },
+          [DATES[2]]: { canEdit: false },
+        },
+        { earliestMissing: "2026-09-24" },
+      ),
+    ]),
   );
   renderInApp(<RevenuePage />, { permissions: CLERK });
 
-  // A later missing day stays shut on the server, but the grid still offers it and opens the earliest gap instead.
   fireEvent.click(
     await screen.findByRole("button", {
       name: "KDA 482M, Wed 30 Sep 2026: Missing",
@@ -527,14 +502,14 @@ it("opens a vehicle's earliest missing day first, loading it when it falls in an
   );
   const dialog = await screen.findByRole("dialog", { name: "KDA 482M" });
   expect(
-    await within(dialog).findByText("Thu 24 Sep 2026. Expected KES 1,100"),
+    within(dialog).getByText("Wed 30 Sep 2026. Expected KES 1,000"),
   ).toBeInTheDocument();
   expect(
-    within(dialog).getByText("Fill Thu 24 Sep 2026 first."),
+    within(dialog).getByText(
+      "No record yet from Thu 24 Sep 2026. You can fill it when you have it.",
+    ),
   ).toBeInTheDocument();
-  expect(gets(fetcher, "vehicleId=vehicle-1")).toEqual([
-    "/api/setup/revenue?weekStart=2026-09-24&vehicleId=vehicle-1",
-  ]);
+  expect(gets(fetcher, "vehicleId=vehicle-1")).toEqual([]);
 
   fireEvent.change(within(dialog).getByLabelText("Revenue"), {
     target: { value: "1100" },
@@ -542,38 +517,10 @@ it("opens a vehicle's earliest missing day first, loading it when it falls in an
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(puts(fetcher)[0]?.path).toBe(
-      "/api/setup/revenue/vehicle-1/2026-09-24",
+      "/api/setup/revenue/vehicle-1/2026-09-30",
     ),
   );
-});
-
-it("starts capture from the grid's primary action at the earliest missing vehicle and day", async () => {
-  const fetcher = serveWeek(() =>
-    week([
-      vehicle(
-        "vehicle-1",
-        "KDA 482M",
-        { [DATES[0]]: recorded(900), [DATES[2]]: { canEdit: false } },
-        { earliestMissing: DATES[1] },
-      ),
-      vehicle(
-        "vehicle-2",
-        "KBZ 110A",
-        { [DATES[1]]: { canEdit: false }, [DATES[2]]: { canEdit: false } },
-        { earliestMissing: DATES[0] },
-      ),
-    ]),
-  );
-  renderInApp(<RevenuePage />, { permissions: CLERK });
-
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Capture revenue" }),
-  );
-  const dialog = await screen.findByRole("dialog", { name: "KBZ 110A" });
-  expect(
-    within(dialog).getByText("Mon 28 Sep 2026. Expected KES 1,000"),
-  ).toBeInTheDocument();
-  expect(gets(fetcher, "vehicleId=")).toHaveLength(0);
+  expect(puts(fetcher)).toHaveLength(1);
 });
 
 it("moves to the next vehicle still missing that day after a save, then closes", async () => {
@@ -627,35 +574,21 @@ it("moves to the next vehicle still missing that day after a save, then closes",
   ]);
 });
 
-it("after filling an earlier gap, returns to the same vehicle's next gap before moving on", async () => {
-  let saved = false;
-  const fetcher = serveWeek(
-    () =>
-      week([
-        vehicle(
-          "vehicle-1",
-          "KDA 482M",
-          { [DATES[1]]: { canEdit: false }, [DATES[2]]: { canEdit: false } },
-          { earliestMissing: DATES[0] },
-        ),
-      ]),
-    {
-      save: () => {
-        saved = true;
-        return json({ id: "record-1", version: 1 });
-      },
-      vehicleWeek: () =>
-        saved
-          ? week([
-              vehicle(
-                "vehicle-1",
-                "KDA 482M",
-                { [DATES[0]]: recorded(900), [DATES[2]]: { canEdit: false } },
-                { earliestMissing: DATES[1] },
-              ),
-            ])
-          : undefined,
-    },
+it("after a save, moves to the next vehicle still missing the same day, whatever gaps the saved vehicle has", async () => {
+  const fetcher = serveWeek(() =>
+    week([
+      vehicle(
+        "vehicle-1",
+        "KDA 482M",
+        { [DATES[1]]: { canEdit: false }, [DATES[2]]: { canEdit: false } },
+        { earliestMissing: DATES[0] },
+      ),
+      vehicle("vehicle-2", "KBZ 110A", {
+        [DATES[0]]: recorded(900),
+        [DATES[1]]: recorded(900),
+        [DATES[2]]: { canEdit: false },
+      }),
+    ]),
   );
   renderInApp(<RevenuePage />, { permissions: CLERK });
 
@@ -666,20 +599,22 @@ it("after filling an earlier gap, returns to the same vehicle's next gap before 
   );
   let dialog = await screen.findByRole("dialog", { name: "KDA 482M" });
   expect(
-    within(dialog).getByText("Fill Mon 28 Sep 2026 first."),
+    within(dialog).getByText(/^No record yet from Mon 28 Sep 2026/),
   ).toBeInTheDocument();
   fireEvent.change(within(dialog).getByLabelText("Revenue"), {
     target: { value: "900" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
-  dialog = await screen.findByRole("dialog", { name: "KDA 482M" });
+  dialog = await screen.findByRole("dialog", { name: "KBZ 110A" });
   expect(
-    await within(dialog).findByText("Fill Tue 29 Sep 2026 first."),
+    within(dialog).getByText("Wed 30 Sep 2026. Expected KES 1,000"),
   ).toBeInTheDocument();
-  expect(gets(fetcher, "vehicleId=vehicle-1")).toEqual([
-    "/api/setup/revenue?weekStart=2026-09-30&vehicleId=vehicle-1",
+  expect(within(dialog).queryByText(/No record yet/)).not.toBeInTheDocument();
+  expect(puts(fetcher).map((call) => call.path)).toEqual([
+    "/api/setup/revenue/vehicle-1/2026-09-30",
   ]);
+  expect(gets(fetcher, "vehicleId=vehicle-1")).toEqual([]);
 });
 
 it("sends the version the day was opened at, even when the grid reloads underneath the dialog", async () => {
@@ -904,59 +839,60 @@ it("on a conflict without the saved record (an insert race) refetches the day, t
   });
 });
 
-it("when an earlier day is missing, says so and opens that day", async () => {
-  const fetcher = serveWeek(() => week([vehicle("vehicle-1", "KDA 482M")]), {
-    save: () =>
-      json(
-        {
-          title: "Invalid setup change",
-          detail: "Record 2026-09-25 before this date first.",
-          status: 400,
-          earliestMissing: "2026-09-25",
-        },
-        400,
-      ),
-    vehicleWeek: () =>
-      week(
-        [
-          vehicle(
-            "vehicle-1",
-            "KDA 482M",
-            {},
-            {
-              earliestMissing: "2026-09-25",
-              days: [cell("2026-09-25", { expected: 1200 })],
-            },
-          ),
-        ],
-        { weekStart: "2026-09-21" },
-      ),
-  });
-  renderInApp(<RevenuePage />, { permissions: CLERK });
-
-  fireEvent.click(
-    await screen.findByRole("button", {
-      name: "KDA 482M, Mon 28 Sep 2026: Missing",
-    }),
+it("never makes the gap a condition: saving works, and the hint offers a way to the earlier day", async () => {
+  const fetcher = serveWeek(
+    () =>
+      week([
+        vehicle("vehicle-1", "KDA 482M", {}, { earliestMissing: "2026-09-25" }),
+      ]),
+    {
+      vehicleWeek: () =>
+        week(
+          [
+            vehicle(
+              "vehicle-1",
+              "KDA 482M",
+              {},
+              {
+                earliestMissing: "2026-09-25",
+                days: [cell("2026-09-25", { expected: 1200 })],
+              },
+            ),
+          ],
+          { weekStart: "2026-09-21" },
+        ),
+    },
   );
-  const dialog = await screen.findByRole("dialog", { name: "KDA 482M" });
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+  const wednesday = {
+    name: "KDA 482M, Wed 30 Sep 2026: Missing",
+  };
+
+  fireEvent.click(await screen.findByRole("button", wednesday));
+  let dialog = await screen.findByRole("dialog", { name: "KDA 482M" });
   fireEvent.change(within(dialog).getByLabelText("Revenue"), {
     target: { value: "900" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
-
-  expect(
-    await within(dialog).findByText("Record Fri 25 Sep 2026 first."),
-  ).toBeInTheDocument();
-  fireEvent.click(
-    within(dialog).getByRole("button", { name: "Open Fri 25 Sep 2026" }),
+  await waitFor(() => expect(puts(fetcher)).toHaveLength(1));
+  expect(puts(fetcher)[0].path).toBe("/api/setup/revenue/vehicle-1/2026-09-30");
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
   );
+
+  fireEvent.click(await screen.findByRole("button", wednesday));
+  dialog = await screen.findByRole("dialog", { name: "KDA 482M" });
+  expect(within(dialog).getByText(/^No record yet from /)).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: /^Open / }));
   expect(
     await within(dialog).findByText("Fri 25 Sep 2026. Expected KES 1,200"),
   ).toBeInTheDocument();
   expect(gets(fetcher, "vehicleId=vehicle-1")).toEqual([
     "/api/setup/revenue?weekStart=2026-09-25&vehicleId=vehicle-1",
   ]);
+  expect(
+    within(dialog).queryByText(/^No record yet from /),
+  ).not.toBeInTheDocument();
 });
 
 it("offers no-revenue reasons only with the no-earnings permission, and Other needs a short note", async () => {
@@ -1080,10 +1016,11 @@ it("takes today from the business date, never the computer clock", async () => {
     "Wed 30, today",
   ]);
   fireEvent.click(screen.getByRole("button", { name: "Capture revenue" }));
-  const dialog = await screen.findByRole("dialog", { name: "KDA 482M" });
+  const dialog = await screen.findByRole("dialog", { name: "Capture revenue" });
+  expect(within(dialog).getByText("Wed 30 Sep 2026")).toBeInTheDocument();
   expect(
-    within(dialog).getByText("Wed 30 Sep 2026. Expected KES 1,000"),
-  ).toBeInTheDocument();
+    within(dialog).getByRole("button", { name: "Next day" }),
+  ).toBeDisabled();
 });
 
 it("saves once however often Save or Enter is pressed while a save is on its way", async () => {
@@ -1149,7 +1086,9 @@ it("refuses an amount with more than two decimals, or of zero, and keeps the cen
   renderInApp(<RevenuePage />, { permissions: CLERK });
 
   fireEvent.click(
-    await screen.findByRole("button", { name: "Capture revenue" }),
+    await screen.findByRole("button", {
+      name: "KDA 482M, Mon 28 Sep 2026: Missing",
+    }),
   );
   await screen.findByRole("dialog", { name: "KDA 482M" });
 
@@ -1178,7 +1117,7 @@ it("refuses an amount with more than two decimals, or of zero, and keeps the cen
   expect(puts(fetcher)[0].body).toMatchObject({ amount: 1500.5, reason: null });
 });
 
-it("shows the day totals and opens capture at the first gap the API works out for the whole grid", async () => {
+it("shows the day totals the API works out for the whole grid, and opens Capture revenue on the latest missing day", async () => {
   // A grid larger than this page: the figures cover vehicles the page does not list.
   serveWeek(() =>
     week(
@@ -1211,10 +1150,10 @@ it("shows the day totals and opens capture at the first gap the API works out fo
       "9,150",
     ),
   ).toBeInTheDocument();
+  // KBZ 110A still misses Tuesday, the latest day before today that a vehicle on screen has no record for.
   fireEvent.click(screen.getByRole("button", { name: "Capture revenue" }));
-  expect(
-    await screen.findByRole("dialog", { name: "KDA 482M" }),
-  ).toBeInTheDocument();
+  const dialog = await screen.findByRole("dialog", { name: "Capture revenue" });
+  expect(within(dialog).getByText("Tue 29 Sep 2026")).toBeInTheDocument();
 });
 
 it("loads a fleet beyond the API's whole-grid limit in pages of the same week, and shows it once all are in", async () => {
@@ -1249,17 +1188,17 @@ it("loads a fleet beyond the API's whole-grid limit in pages of the same week, a
   });
   renderInApp(<RevenuePage />, { permissions: CLERK });
 
-  await screen.findByRole("table", { name: /Revenue by vehicle and day/ });
+  const grid = await screen.findByRole("table", {
+    name: /Revenue by vehicle and day/,
+  });
   expect(gets(fetcher, "/api/setup/revenue")).toEqual([
     "/api/setup/revenue",
     "/api/setup/revenue?weekStart=2026-09-28&page=6&pageSize=100",
     "/api/setup/revenue?weekStart=2026-09-28&page=7&pageSize=100",
     "/api/setup/revenue?weekStart=2026-09-28&page=8&pageSize=100",
   ]);
-  fireEvent.click(screen.getByRole("button", { name: "Capture revenue" }));
-  expect(
-    await screen.findByRole("dialog", { name: last.registration }),
-  ).toBeInTheDocument();
+  // Every vehicle, the last page's included, is a row of the grid (plus its two header rows).
+  expect(grid).toHaveAttribute("aria-rowcount", String(fleet.length + 2));
 }, 30_000);
 
 it("loads the week again when the fleet changed between its pages, so no vehicle is skipped", async () => {

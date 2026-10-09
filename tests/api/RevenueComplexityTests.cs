@@ -61,7 +61,7 @@ public sealed class RevenueComplexityTests(ITestOutputHelper output) : IDisposab
     }
 
     [Fact]
-    public async Task SaveFindsTheEarliestMissingDayFromOneAggregateRowWhateverTheHistoryLength()
+    public async Task TheWeekFindsTheEarliestMissingDayFromOneAggregateRowWhateverTheHistoryLength()
     {
         var today = await Arrange();
         var company = await Company(app, "Complexity Fleet");
@@ -70,17 +70,15 @@ public sealed class RevenueComplexityTests(ITestOutputHelper output) : IDisposab
         var holed = await Vehicle(app, company, "KAA 302A", today.AddDays(-120));
         await Records(app, holed, today.AddDays(-120), today.AddDays(-1), skip: [today.AddDays(-7)]);
 
-        var fullVehicle = await LoadVehicle(contiguous);
-        var full = await Measure((repository, actor) => repository.EarliestMissing(actor, fullVehicle, today, CancellationToken.None));
-        Assert.Null(full.Result);
-        Assert.Equal(1, full.Commands);
-        Assert.True(full.Reads <= 2, $"Read {full.Reads} rows for one vehicle's aggregate.");
+        var full = await Measure((repository, actor) => repository.Week(actor, null, null, contiguous, null, CancellationToken.None));
+        Assert.Null(Assert.Single(full.Result.Vehicles).EarliestMissing);
+        // Never a row per recorded day: 120 days of history read as one aggregate row.
+        Assert.True(full.Reads <= 30, $"Read {full.Reads} rows for one vehicle's week.");
 
-        // A hole in the history falls back to that one vehicle's dates.
-        var holedVehicle = await LoadVehicle(holed);
-        var gap = await Measure((repository, actor) => repository.EarliestMissing(actor, holedVehicle, today, CancellationToken.None));
-        Assert.Equal(today.AddDays(-7), gap.Result);
-        Assert.Equal(2, gap.Commands);
+        // Days are taken in any order, so a hole is normal; it costs one more read, of that vehicle's own dates.
+        var gap = await Measure((repository, actor) => repository.Week(actor, null, null, holed, null, CancellationToken.None));
+        Assert.Equal(today.AddDays(-7), Assert.Single(gap.Result.Vehicles).EarliestMissing);
+        Assert.Equal(full.Commands + 1, gap.Commands);
     }
 
     [Fact]
@@ -142,13 +140,6 @@ public sealed class RevenueComplexityTests(ITestOutputHelper output) : IDisposab
             db.Provisioning = false;
         });
         return company;
-    }
-
-    private async Task<FleetVehicle> LoadVehicle(Guid id)
-    {
-        FleetVehicle vehicle = null!;
-        await app.WithDb(async db => vehicle = await db.Set<FleetVehicle>().IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.Id == id));
-        return vehicle;
     }
 
     private async Task<(T Result, int Commands, int Reads)> Measure<T>(Func<RevenueRepository, SetupActor, Task<T>> action)

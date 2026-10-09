@@ -21,6 +21,7 @@ import {
   DataTable,
   FormSkeleton,
   PageHeader,
+  ListPager,
   RowButton,
   SegmentedControl,
   SelectInput,
@@ -30,6 +31,7 @@ import {
   Toolbar,
   Tr,
 } from "../ui";
+import { usePagedList } from "../usePagedList";
 import {
   costBucket,
   expenseBucketNames,
@@ -39,6 +41,14 @@ import {
 
 type Filter = "all" | "cost" | "savings";
 type Status = "all" | "running" | "stopped";
+
+function listPath(kind: Filter, companyId: string, status: Status) {
+  const query = new URLSearchParams();
+  if (kind !== "all") query.set("kind", kind);
+  if (companyId !== "all") query.set("companyId", companyId);
+  if (status !== "all") query.set("status", status);
+  return `setup/recurring${query.toString() ? `?${query}` : ""}`;
+}
 
 export function RecurringPage({
   canManage,
@@ -51,13 +61,25 @@ export function RecurringPage({
 }) {
   const { appearance } = useAppearance();
   const { formatDateOnly, kes } = useFormats();
-  const recurring = useStreamedList<RecurringItem>("setup/recurring");
   const [filter, setFilter] = useState<Filter>("all");
   const [companyFilter, setCompanyFilter] = useState("all");
   const [status, setStatus] = useState<Status>("all");
   const [editing, setEditing] = useState<string | null>(
     newForVehicle ? "new" : (openItem ?? null),
   );
+  // The list comes a server page at a time, filtered by the server. An item opened from elsewhere that is not on the
+  // page shown is looked for in the whole list.
+  const paged = usePagedList<RecurringItem>(
+    listPath(filter, companyFilter, status),
+  );
+  const missing =
+    editing !== null &&
+    editing !== "new" &&
+    !paged.items.some((candidate) => candidate.id === editing);
+  const streamed = useStreamedList<RecurringItem>(
+    missing ? "setup/recurring" : null,
+  );
+  const recurring = missing ? streamed : paged;
   // Viewing needs only commitments access: shares carry their registration and costs their item's name. The vehicle
   // picker is for editors; the expense item picker loads once an editor opens.
   const options = useResource<VehicleOption[]>(
@@ -122,9 +144,6 @@ export function RecurringPage({
       ? 1
       : 0;
   // Companies come from the vehicle options, which only editors load: allocations carry no company.
-  const companyOf = new Map(
-    (options.data ?? []).map((vehicle) => [vehicle.id, vehicle.companyId]),
-  );
   const companies = [
     ...new Map(
       (options.data ?? []).map((vehicle) => [
@@ -133,27 +152,11 @@ export function RecurringPage({
       ]),
     ).entries(),
   ].sort((left, right) => left[1].localeCompare(right[1]));
-  const visible = items
-    .filter(
-      (item) =>
-        filter === "all" ||
-        (filter === "cost" ? item.kind === 1 : item.kind === 2),
-    )
-    .filter(
-      (item) =>
-        companyFilter === "all" ||
-        item.allocations.some(
-          (allocation) => companyOf.get(allocation.vehicleId) === companyFilter,
-        ),
-    )
-    .filter(
-      (item) =>
-        status === "all" || (status === "stopped") === Boolean(finished(item)),
-    )
-    .sort(
-      (left, right) =>
-        finished(left) - finished(right) || left.name.localeCompare(right.name),
-    );
+  // The server filters and puts running items first; within the page they read by name.
+  const visible = [...items].sort(
+    (left, right) =>
+      finished(left) - finished(right) || left.name.localeCompare(right.name),
+  );
   return (
     <section>
       <PageHeader
@@ -331,6 +334,7 @@ export function RecurringPage({
           );
         })}
       </DataTable>
+      {!missing && <ListPager list={paged} />}
     </section>
   );
 }

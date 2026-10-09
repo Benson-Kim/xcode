@@ -138,6 +138,10 @@ export function RevenueScreen({
           canReason={canReason}
           onSave={(entry) => save(target, entry)}
           onClose={close}
+          onOpenGap={(date) => {
+            close();
+            goToDay(date);
+          }}
         />
       )}
     </>

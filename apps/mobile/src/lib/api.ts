@@ -67,11 +67,20 @@ export class SessionEndedError extends Error {
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
+// The hosting puts an idle server and its database to sleep, and the first request after a quiet spell can take
+// tens of seconds. Signing in and unlocking wait that long rather than calling a sleeping server unreachable.
+const AUTH_TIMEOUT_MS = 45_000;
+const WAKE_TIMEOUT_MS = 60_000;
+const WAKE_EVERY_MS = 60_000;
 
 // A hung connection is as good as none: the request is abandoned after the timeout.
-async function reach(input: RequestInfo | URL, init?: RequestInit) {
+async function reach(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const caller = init?.signal;
   if (caller) {
     if (caller.aborted) controller.abort();
@@ -95,7 +104,26 @@ async function phoneIsOnline() {
   return getNetworkStateAsync().then(hasConnection, () => false);
 }
 
-const authClient = createAuthClient(`${apiUrl}/auth`, reach as typeof fetch);
+const authClient = createAuthClient(`${apiUrl}/auth`, ((input, init) =>
+  reach(input, init, AUTH_TIMEOUT_MS)) as typeof fetch);
+
+let wokenAt = 0;
+
+// Wakes the server and its database ahead of the first real request, so a server that went idle is ready by the
+// time a PIN is typed: called when the app opens or comes back and when a PIN pad takes its first digit. At most
+// once a minute; a failed wake lets the next call try again.
+export function wakeServer(now = Date.now()): void {
+  if (now - wokenAt < WAKE_EVERY_MS) return;
+  wokenAt = now;
+  reach(`${apiUrl}/health/ready`, undefined, WAKE_TIMEOUT_MS).then(
+    (response) => {
+      if (!response.ok) wokenAt = 0;
+    },
+    () => {
+      wokenAt = 0;
+    },
+  );
+}
 
 // The API rejects a request with any field missing, so every call sends them all.
 export async function authApi(

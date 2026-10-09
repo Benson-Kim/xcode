@@ -341,6 +341,9 @@ jobs:
         working-directory: apps/mobile/android
         env:
           EXPO_PUBLIC_API_URL: ${{ vars.API_URL }}
+          # The app compares its own build number with version.json, published next to the APK, and offers the newer one.
+          EXPO_PUBLIC_BUILD_NUMBER: ${{ github.run_number }}
+          EXPO_PUBLIC_UPDATE_URL: https://github.com/${{ github.repository }}/releases/download/staging-android/version.json
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -355,8 +358,12 @@ jobs:
       - name: Publish the APK
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ github.run_number }}
+          REPOSITORY: ${{ github.repository }}
         run: |
+          printf '{"build":%s,"version":"1.0.0-staging.%s","url":"https://github.com/%s/releases/download/staging-android/xcode-staging.apk","commit":"%s"}\n' \
+            "$BUILD" "$BUILD" "$REPOSITORY" "$GITHUB_SHA" > "$RUNNER_TEMP/version.json"
           gh release delete staging-android --yes --cleanup-tag || true
-          gh release create staging-android "$RUNNER_TEMP/xcode-staging.apk" \
+          gh release create staging-android "$RUNNER_TEMP/xcode-staging.apk" "$RUNNER_TEMP/version.json" \
             --target "$GITHUB_SHA" --prerelease --title "Staging Android app" \
             --notes "Android app for staging, built from $GITHUB_SHA. Open this page on the phone, download xcode-staging.apk and install it."

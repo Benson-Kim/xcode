@@ -63,10 +63,23 @@ public sealed class AccessUseCases(ISetupExecution execution, AuthDb db, IOrgani
     }, ct);
 
     // Visibility, order and paging run in the database; only the page's own related rows are loaded.
-    public Task<Page<PersonDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read(PermissionKeys.PeopleView, async actor =>
+    // role is a role name; status is where the person is with signing in: active (has a PIN), waiting (no PIN yet) or
+    // none (switched off).
+    public Task<Page<PersonDto>> List(string? role, string? status, int page, int pageSize, CancellationToken ct) =>
+        execution.Read(PermissionKeys.PeopleView, async actor =>
     {
         SetupPagination.Validate(page, pageSize);
         var visible = Visible(actor);
+        if (!string.IsNullOrEmpty(role) && role != "all")
+            visible = visible.Where(x => db.PersonRoles.Any(link => link.UserId == x.UserId && db.Roles.Any(r => r.Id == link.RoleId && r.Name == role)));
+        visible = status switch
+        {
+            null or "" or "all" => visible,
+            "none" => visible.Where(x => !x.Active),
+            "active" => visible.Where(x => x.Active && db.Users.Any(u => u.Id == x.UserId && u.PinHash != null)),
+            "waiting" => visible.Where(x => x.Active && db.Users.Any(u => u.Id == x.UserId && u.PinHash == null)),
+            _ => throw new ArgumentException("Status must be active, waiting or none.")
+        };
         var total = await visible.CountAsync(ct);
         var rows = await Load(visible
             .OrderBy(x => x.LastName)

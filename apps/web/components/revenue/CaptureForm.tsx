@@ -10,9 +10,10 @@ import {
   Field,
   FormActions,
   Hint,
+  LinkButton,
   Note,
 } from "../ui";
-import { entryLabel } from "./capture";
+import { entryLabel, gapHint } from "./capture";
 import { ConflictChoice } from "./ConflictChoice";
 import { ReasonPicker } from "./ReasonPicker";
 import { useCaptureEntry } from "./useCaptureEntry";
@@ -20,21 +21,22 @@ import { useCaptureEntry } from "./useCaptureEntry";
 export function CaptureForm({
   vehicle,
   cell,
-  info,
+  gap,
   canChooseReason,
   onCancel,
   onDone,
-  onOpenDay,
+  onOpenGap,
   reload,
 }: {
   vehicle: RevenueVehicle;
   cell: RevenueCell;
-  info: string;
+  // The vehicle's earliest day with no record before this one, mentioned but never required.
+  gap: string | null;
   canChooseReason: boolean;
   onCancel: () => void;
   // Called once the day is settled (saved, or the saved record kept): moves capture on.
   onDone: () => Promise<void>;
-  onOpenDay: (date: string) => void;
+  onOpenGap: (date: string) => void;
   // Reads the day again, for a conflict that came without the saved record.
   reload: () => Promise<RevenueCell | undefined>;
 }) {
@@ -50,7 +52,7 @@ export function CaptureForm({
     onDone,
     reload,
   });
-  const { opened, conflict, saving, earlier, error } = entry;
+  const { opened, conflict, saving, error } = entry;
   return (
     <form
       noValidate
@@ -61,7 +63,7 @@ export function CaptureForm({
       }}
     >
       <p className="m-0 text-[13px] text-grey">{`${formats.formatWeekdayDate(cell.date)}. Expected ${formats.kes(cell.expected)}`}</p>
-      {info && <Note>{info}</Note>}
+      {gap && <GapHint date={gap} onOpen={onOpenGap} />}
       {!canChooseReason && !conflict && opened.reason && (
         <Hint>{`Recorded as ${entryLabel(formats, opened)}. Enter the revenue to replace it.`}</Hint>
       )}
@@ -97,7 +99,6 @@ export function CaptureForm({
               onNote={entry.typeNote}
             />
           )}
-          {earlier && <EarlierDay date={earlier} onOpen={onOpenDay} />}
           {error && <Banner>{error}</Banner>}
           <FormActions>
             <Button tone="ok" type="submit" disabled={saving}>
@@ -113,7 +114,8 @@ export function CaptureForm({
   );
 }
 
-function EarlierDay({
+// Says the vehicle has an earlier day with no record, and offers to go there. Saving this day never waits for it.
+function GapHint({
   date,
   onOpen,
 }: {
@@ -122,15 +124,11 @@ function EarlierDay({
 }) {
   const formats = useFormats();
   return (
-    <>
-      <Note>{`Record ${formats.formatWeekdayDate(date)} first.`}</Note>
-      <Button
-        tone="outline"
-        className="self-start"
-        onClick={() => onOpen(date)}
-      >
-        {`Open ${formats.formatWeekdayDate(date)}`}
-      </Button>
-    </>
+    <Note tone="info" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span>{gapHint(formats, date)}</span>
+      <LinkButton compact onClick={() => onOpen(date)}>
+        {`Open ${formats.formatDateOnly(date)}`}
+      </LinkButton>
+    </Note>
   );
 }

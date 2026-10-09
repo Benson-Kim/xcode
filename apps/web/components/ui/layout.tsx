@@ -1,8 +1,21 @@
-import type { ComponentProps, ReactNode } from "react";
+"use client";
+
+import {
+  createContext,
+  useContext,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 
 import { cn } from "./cn";
 
-// Page title and subtitle (.page-title / .page-sub).
+// Where the app shell wants page titles shown (its top bar). Without one, a page keeps its title inline.
+const PageHeaderSlot = createContext<HTMLElement | null>(null);
+export const PageHeaderSlotProvider = PageHeaderSlot.Provider;
+
+// Page title and subtitle (.page-title / .page-sub). In the app shell they are drawn in the top bar, the title cut
+// short rather than wrapped and the subtitle left out on narrow screens.
 export function PageHeader({
   title,
   description,
@@ -10,6 +23,19 @@ export function PageHeader({
   title: ReactNode;
   description?: ReactNode;
 }) {
+  const slot = useContext(PageHeaderSlot);
+  if (slot)
+    return createPortal(
+      <header className="min-w-0">
+        <h1 className="m-0 truncate text-xl leading-6 font-bold">{title}</h1>
+        {description && (
+          <p className="m-0 truncate text-xs leading-4 text-grey max-[899px]:hidden">
+            {description}
+          </p>
+        )}
+      </header>,
+      slot,
+    );
   return (
     <header>
       <h1 className="m-0 text-[28px] leading-[1.2] font-bold">{title}</h1>

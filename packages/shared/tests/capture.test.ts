@@ -121,10 +121,11 @@ describe("needsRecord", () => {
     ).toBe(true);
   });
 
-  it("works out a day with no cell from the earliest gap", () => {
+  it("knows only the earliest gap for a day with no cell: later days may have been recorded out of order", () => {
     const gap = elsewhere({ earliestMissing: "2026-09-24" });
-    expect(needsRecord(gap, "2026-09-25")).toBe(true);
     expect(needsRecord(gap, "2026-09-24")).toBe(true);
+    expect(needsRecord(gap, "2026-09-25")).toBe(false);
+    expect(needsRecord(gap, "2026-09-26")).toBe(false);
     expect(needsRecord(gap, "2026-09-23")).toBe(false);
     expect(
       needsRecord(elsewhere({ earliestMissing: null }), "2026-09-25"),
@@ -134,7 +135,7 @@ describe("needsRecord", () => {
   it("does not count days after the vehicle left or before it joined", () => {
     expect(
       needsRecord(
-        elsewhere({ earliestMissing: "2026-09-24", leftOn: "2026-09-25" }),
+        elsewhere({ earliestMissing: "2026-09-26", leftOn: "2026-09-25" }),
         "2026-09-26",
       ),
     ).toBe(false);
@@ -147,7 +148,7 @@ describe("needsRecord", () => {
     expect(
       needsRecord(
         elsewhere({ earliestMissing: "2026-09-24", joinedOn: "2026-09-26" }),
-        "2026-09-25",
+        "2026-09-24",
       ),
     ).toBe(false);
   });
@@ -159,13 +160,22 @@ describe("earliestNeeded", () => {
     expect(earliestNeeded(vehicle("a"), TODAY, handling("a/2026-09-28"))).toBe(
       "2026-09-29",
     );
-    expect(
-      earliestNeeded(
-        elsewhere({ earliestMissing: "2026-09-24" }),
-        TODAY,
-        handling("a/2026-09-24", "a/2026-09-25", "a/2026-09-26"),
-      ),
-    ).toBe("2026-09-27");
+  });
+
+  it("knows only the earliest gap outside the loaded week, and nothing once it is handled", () => {
+    const away = elsewhere({ earliestMissing: "2026-09-24" });
+    expect(earliestNeeded(away, TODAY)).toBe("2026-09-24");
+    expect(earliestNeeded(away, TODAY, handling("a/2026-09-24"))).toBeNull();
+  });
+
+  it("takes the earlier of the gap and the loaded week's first missing day", () => {
+    const both = vehicle("a", { earliestMissing: "2026-09-20" });
+    expect(earliestNeeded(both, TODAY)).toBe("2026-09-20");
+    const later = vehicle("a", {
+      earliestMissing: "2026-09-29",
+      days: grid({ "2026-09-28": "amount", "2026-09-29": "missing" }),
+    });
+    expect(earliestNeeded(later, TODAY)).toBe("2026-09-29");
   });
 
   it("is today when nothing earlier is missing and today is still open", () => {
@@ -199,14 +209,17 @@ describe("earliestNeeded", () => {
     ).toBeNull();
   });
 
-  it("does not invent today for a week that does not hold it", () => {
+  it("reads the missing days of a loaded week from its cells, and does not invent today for one that lacks it", () => {
     const old = vehicle("a", {
       earliestMissing: null,
       days: ["2026-09-21", "2026-09-22", "2026-09-23"].map((date) =>
         cell(date, "missing"),
       ),
     });
-    expect(earliestNeeded(old, TODAY)).toBeNull();
+    expect(earliestNeeded(old, TODAY)).toBe("2026-09-21");
+    expect(
+      earliestNeeded(elsewhere({ earliestMissing: null }), TODAY),
+    ).toBeNull();
   });
 
   it("ignores a gap that starts after the business date", () => {
@@ -218,7 +231,10 @@ describe("earliestNeeded", () => {
 
 describe("earliestNeededDay", () => {
   it("is the earliest day any vehicle still needs", () => {
-    const later = vehicle("b", { earliestMissing: "2026-09-29" });
+    const later = vehicle("b", {
+      earliestMissing: "2026-09-29",
+      days: grid({ "2026-09-28": "amount" }),
+    });
     const sooner = vehicle("c", { earliestMissing: "2026-09-28" });
     expect(earliestNeededDay(week([later, sooner]))).toBe("2026-09-28");
     expect(
@@ -269,25 +285,25 @@ describe("canOpen", () => {
 });
 
 describe("openingFor", () => {
-  it("opens the earlier gap when a later missing day is tapped", () => {
+  it("opens the tapped day even when an earlier day is missing, and says where the gap is", () => {
     expect(openingFor(vehicle("a"), "2026-09-30", TODAY)).toEqual({
-      date: "2026-09-28",
+      date: "2026-09-30",
       earlier: "2026-09-28",
     });
   });
 
-  it("opens the tapped day when it is the earliest gap", () => {
+  it("has no gap to mention when the tapped day is the earliest one", () => {
     expect(openingFor(vehicle("a"), "2026-09-28", TODAY)).toEqual({
       date: "2026-09-28",
       earlier: null,
     });
   });
 
-  it("skips an earlier gap the caller has handled", () => {
+  it("mentions the gap that is left once the caller has handled the first", () => {
     expect(
       openingFor(vehicle("a"), "2026-09-30", TODAY, handling("a/2026-09-28")),
     ).toEqual({
-      date: "2026-09-29",
+      date: "2026-09-30",
       earlier: "2026-09-29",
     });
     expect(
@@ -298,19 +314,23 @@ describe("openingFor", () => {
     });
   });
 
-  it("opens a recorded day as itself", () => {
+  it("opens a recorded day as itself, with the vehicle's gap as a hint", () => {
     const recorded = vehicle("a", { days: grid({ "2026-09-29": "amount" }) });
     expect(openingFor(recorded, "2026-09-29", TODAY)).toEqual({
       date: "2026-09-29",
-      earlier: null,
+      earlier: "2026-09-28",
     });
   });
 
-  it("finds the earlier gap of a day in another week", () => {
+  it("opens a day of another week as itself, with the earliest gap as a hint", () => {
     const away = elsewhere({ earliestMissing: "2026-09-24" });
     expect(openingFor(away, "2026-09-26", TODAY)).toEqual({
-      date: "2026-09-24",
+      date: "2026-09-26",
       earlier: "2026-09-24",
+    });
+    expect(openingFor(away, "2026-09-24", TODAY)).toEqual({
+      date: "2026-09-24",
+      earlier: null,
     });
   });
 });
@@ -377,7 +397,7 @@ describe("nextToCapture", () => {
     ).toBeNull();
   });
 
-  it("sends a vehicle with an earlier gap to that gap", () => {
+  it("opens the same day on a vehicle that has an earlier gap, mentioning the gap", () => {
     const behind = vehicle("b", { earliestMissing: "2026-09-26" });
     const next = nextToCapture(
       week([vehicle("a"), behind]),
@@ -388,7 +408,7 @@ describe("nextToCapture", () => {
     );
     expect(next?.vehicle.id).toBe("b");
     expect(next?.opening).toEqual({
-      date: "2026-09-26",
+      date: "2026-09-30",
       earlier: "2026-09-26",
     });
   });

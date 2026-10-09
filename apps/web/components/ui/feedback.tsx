@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 
+import { Button } from "./button";
 import { cn } from "./cn";
 import { AlertIcon, OfflineIcon } from "./icons";
 
@@ -29,6 +30,26 @@ export function Banner({
     >
       <Icon size={18} className="mt-0.5 shrink-0" />
       <span>{children}</span>
+    </div>
+  );
+}
+
+// A page that could not load: what went wrong, and a button to try again.
+export function RetryBanner({
+  children,
+  onRetry,
+  className,
+}: {
+  children: ReactNode;
+  onRetry: () => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex flex-wrap items-center gap-3", className)}>
+      <Banner>{children}</Banner>
+      <Button tone="outline" onClick={onRetry}>
+        Try again
+      </Button>
     </div>
   );
 }
@@ -88,6 +109,15 @@ export function StatusBadge({
         STATUS[tone],
       )}
     >
+      {children}
+    </span>
+  );
+}
+
+// A plain label in a list, with no indicator (the source of an expense).
+export function PlainTag({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-block rounded-full bg-divider px-2.5 py-0.5 text-[13px] font-semibold whitespace-nowrap text-navy">
       {children}
     </span>
   );

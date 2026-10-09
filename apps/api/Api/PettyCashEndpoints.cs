@@ -36,8 +36,8 @@ public static class PettyCashEndpoints
         });
 
         group.MapGet("/overview", (PettyCashUseCases useCases, CancellationToken ct, DateOnly? date = null, string? period = null,
-                    Guid? holderId = null) =>
-                useCases.Overview(date, period, holderId, ct))
+                    Guid? holderId = null, DateOnly? from = null, DateOnly? to = null) =>
+                useCases.Overview(date, period, holderId, from, to, ct))
             .Produces<PettyCashOverviewDto>()
             .WithName("GetPettyCashOverview");
 

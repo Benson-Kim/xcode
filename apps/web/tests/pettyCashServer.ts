@@ -239,6 +239,23 @@ export function servePettyCash(options: Options = {}) {
       if (method !== "GET")
         return json({ id: "saved", version: 4, status: "waiting", balance: 0 });
       if (route === "overview") {
+        const from = url.searchParams.get("from");
+        const to = url.searchParams.get("to");
+        if (from && to)
+          return json(
+            overviewOf(
+              permissions,
+              to,
+              {
+                ...(options.floats ? { floats: options.floats } : {}),
+                from,
+                to,
+                period: from === to ? "day" : "range",
+                figures: from === to ? DAY_FIGURES : WEEK_FIGURES,
+              },
+              "day",
+            ),
+          );
         const period =
           url.searchParams.get("period") === "week" ? "week" : "day";
         return json(
@@ -265,10 +282,15 @@ export function servePettyCash(options: Options = {}) {
             (!from || entry.date >= from) &&
             (!to || entry.date <= to),
         );
+        const pageSize = Number(url.searchParams.get("pageSize") ?? 100);
+        const pageNumber = Number(url.searchParams.get("page") ?? 1);
         return json({
-          items,
-          pageNumber: 1,
-          pageSize: 100,
+          items: items.slice(
+            (pageNumber - 1) * pageSize,
+            pageNumber * pageSize,
+          ),
+          pageNumber,
+          pageSize,
           total: items.length,
         });
       }

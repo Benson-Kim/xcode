@@ -36,8 +36,27 @@ it.each([
       { length: saltLength },
       (_, i) => (i * 37 + 11) & 0xff,
     );
-    expect(hex(pbkdf2Sha256(password, salt, iterations))).toBe(
+    expect(hex(await pbkdf2Sha256(password, salt, iterations))).toBe(
       hex(await webCrypto(password, salt, iterations)),
     );
   },
 );
+
+it("hands the thread back between slices, so the screen keeps responding while it derives", async () => {
+  let slices = 0;
+  let tick: ReturnType<typeof setTimeout>;
+  const count = () => {
+    slices++;
+    tick = setTimeout(count, 0);
+  };
+  tick = setTimeout(count, 0);
+  try {
+    const salt = new Uint8Array(16).fill(3);
+    const password = new TextEncoder().encode("1379");
+    const sliced = await pbkdf2Sha256(password, salt, 5000, 0);
+    expect(slices).toBeGreaterThan(10);
+    expect(hex(sliced)).toBe(hex(await webCrypto(password, salt, 5000)));
+  } finally {
+    clearTimeout(tick!);
+  }
+});

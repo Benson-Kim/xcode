@@ -5,6 +5,7 @@ import type { RevenueCell, RevenueVehicle } from "@xcode/shared/revenue";
 
 import {
   captureAt,
+  gapHint,
   cellState,
   entryLabel,
   isReason,
@@ -55,26 +56,30 @@ describe("isReason", () => {
 describe("captureAt", () => {
   const v = vehicle([], null);
 
-  it("says nothing when the day opens as tapped", () => {
-    expect(captureAt(formats, v, WED, { date: WED, earlier: null })).toEqual({
+  it("opens the day as tapped, with no gap to mention", () => {
+    expect(captureAt(v, { date: WED, earlier: null })).toEqual({
       vehicleId: "v1",
       date: WED,
-      target: WED,
-      info: "",
+      gap: null,
       done: [],
     });
   });
 
-  it("names the earlier gap that opens first and keeps the done list", () => {
-    expect(
-      captureAt(formats, v, WED, { date: MON, earlier: MON }, ["v0"]),
-    ).toEqual({
+  it("keeps the earlier gap as a hint and the done list", () => {
+    expect(captureAt(v, { date: WED, earlier: MON }, ["v0"])).toEqual({
       vehicleId: "v1",
-      date: MON,
-      target: WED,
-      info: "Fill Mon 28 Sep 2026 first.",
+      date: WED,
+      gap: MON,
       done: ["v0"],
     });
+  });
+});
+
+describe("gapHint", () => {
+  it("says there is no record yet and that it can wait", () => {
+    expect(gapHint(formats, MON)).toBe(
+      "No record yet from Mon 28 Sep 2026. You can fill it when you have it.",
+    );
   });
 });
 
@@ -88,22 +93,20 @@ describe("openAt", () => {
     MON,
   );
 
-  it("sends a tap on a later gap to the earliest one", () => {
-    expect(openAt(formats, gaps, WED, WED)).toEqual({
+  it("opens the day that was tapped, never an earlier gap, and mentions the gap", () => {
+    expect(openAt(gaps, WED, WED)).toEqual({
       vehicleId: "v1",
-      date: MON,
-      target: WED,
-      info: "Fill Mon 28 Sep 2026 first.",
+      date: WED,
+      gap: MON,
       done: [],
     });
   });
 
-  it("opens the earliest gap as tapped", () => {
-    expect(openAt(formats, gaps, MON, WED).info).toBe("");
-    expect(openAt(formats, gaps, MON, WED).date).toBe(MON);
+  it("opens the earliest gap as tapped, with nothing to mention", () => {
+    expect(openAt(gaps, MON, WED)).toMatchObject({ date: MON, gap: null });
   });
 
-  it("opens a recorded day as tapped, whatever is missing before it", () => {
+  it("opens a recorded day as tapped, mentioning what is missing before it", () => {
     const recorded = vehicle(
       [
         { date: MON, status: "missing" },
@@ -111,15 +114,11 @@ describe("openAt", () => {
       ],
       MON,
     );
-    expect(openAt(formats, recorded, TUE, WED)).toMatchObject({
-      date: TUE,
-      target: TUE,
-      info: "",
-    });
+    expect(openAt(recorded, TUE, WED)).toMatchObject({ date: TUE, gap: MON });
   });
 
   it("carries the vehicles already done", () => {
-    expect(openAt(formats, gaps, MON, WED, ["v9"]).done).toEqual(["v9"]);
+    expect(openAt(gaps, MON, WED, ["v9"]).done).toEqual(["v9"]);
   });
 });
 

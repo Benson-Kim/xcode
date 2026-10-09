@@ -13,8 +13,42 @@ import {
   savePinPolicy,
   saveSession,
 } from "../src/lib/storage";
+import { accessToken } from "./fakeApi";
 
 jest.unmock("../src/lib/pbkdf2");
+
+const pbkdf2 =
+  require("../src/lib/pbkdf2") as typeof import("../src/lib/pbkdf2");
+const items = () => require("expo-secure-store").__items as Map<string, string>;
+
+const spies: { mockRestore(): void }[] = [];
+afterEach(() => spies.splice(0).forEach((spy) => spy.mockRestore()));
+
+function watchDerivations() {
+  const derive = jest.spyOn(pbkdf2, "pbkdf2Sha256");
+  spies.push(derive);
+  return derive;
+}
+
+// Holds the next derivation until release() is called.
+function holdDerivation() {
+  const real = pbkdf2.pbkdf2Sha256;
+  let release = () => {};
+  const derive = watchDerivations().mockImplementationOnce(
+    (...args) =>
+      new Promise((resolve) => {
+        release = () => resolve(real(...args));
+      }),
+  );
+  return {
+    derive,
+    release: () => release(),
+    started: async () => {
+      while (!derive.mock.calls.length)
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    },
+  };
+}
 
 const session = {
   phoneNumber: "0712345678",
@@ -74,6 +108,60 @@ it("checks a PIN offline without storing it", async () => {
   expect(await SecureStore.getItemAsync("xcode.pin-check")).not.toContain(
     "2580",
   );
+});
+
+it("keeps the check without deriving again when the same user signs in at the same security version", async () => {
+  await savePinCheck("1379", accessToken("user-1", 3));
+  const kept = items().get("xcode.pin-check");
+  const derive = watchDerivations();
+  await savePinCheck("1379", accessToken("user-1", 3));
+  expect(derive).not.toHaveBeenCalled();
+  expect(items().get("xcode.pin-check")).toBe(kept);
+
+  // A token the phone cannot read never counts as unchanged.
+  await savePinCheck("1379", "not-a-token");
+  expect(derive).toHaveBeenCalledTimes(1);
+  expect(await matchesPinCheck("1379")).toBe(true);
+});
+
+it("drops the old check at once when the PIN may have changed, and keeps the new one once derived", async () => {
+  await savePinCheck("1379", accessToken("user-1", 3));
+  const held = holdDerivation();
+  const saving = savePinCheck("2468", accessToken("user-1", 4));
+  await held.started();
+  expect(items().has("xcode.pin-check")).toBe(false);
+  held.release();
+  await saving;
+  expect(await matchesPinCheck("2468")).toBe(true);
+  expect(await matchesPinCheck("1379")).toBe(false);
+});
+
+it("never keeps another user's check, even at the same security version", async () => {
+  await savePinCheck("1379", accessToken("user-1", 3));
+  await savePinCheck("2468", accessToken("user-2", 3));
+  expect(await matchesPinCheck("2468")).toBe(true);
+  expect(await matchesPinCheck("1379")).toBe(false);
+});
+
+it("checks a PIN against a save still being derived", async () => {
+  const held = holdDerivation();
+  const saving = savePinCheck("2468", accessToken("user-1", 1));
+  await held.started();
+  const match = matchesPinCheck("2468");
+  held.release();
+  expect(await match).toBe(true);
+  await saving;
+});
+
+it("writes nothing from a save still being derived when switch user forgets the person", async () => {
+  const held = holdDerivation();
+  const saving = savePinCheck("2468", accessToken("user-1", 1));
+  await held.started();
+  await forgetPerson();
+  held.release();
+  await saving;
+  expect(items().has("xcode.pin-check")).toBe(false);
+  expect(await matchesPinCheck("2468")).toBeNull();
 });
 
 it("switch user forgets the person but keeps the installation id", async () => {

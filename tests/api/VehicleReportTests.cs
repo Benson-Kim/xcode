@@ -225,6 +225,67 @@ public sealed class VehicleReportTests : IDisposable
         Assert.Equal((one.Reads, one.Rows + 41), many);
     }
 
+    [Fact]
+    public async Task CentralExpensesReachTheReportUnderTheirBucketAndOneReadCoversAnyNumberOfThem()
+    {
+        var (owner, vehicle, other) = await Arrange();
+        await Fleet(vehicle, other);
+        var tyres = await ExpenseItemTestData.Id(owner, "Tyres");
+        var parking = await ExpenseItemTestData.Id(owner, "Parking");
+        var march = "from=2026-03-01&through=2026-03-31";
+        var before = await Report(owner, vehicle, march);
+
+        async Task<Guid> Record(Guid item, Guid onVehicle, decimal amount, int day)
+        {
+            using var response = await owner.PostAsJsonAsync("/setup/expenses/entries", new
+            {
+                date = new DateOnly(2026, 3, day), expenseItemId = item, units = 1m, unitAmount = amount,
+                allocations = new[] { new { vehicleId = onVehicle, amount } }
+            });
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("ids")[0].GetGuid();
+        }
+
+        var repair = await Record(tyres, vehicle, 6000m, 10);
+        await Record(parking, vehicle, 500m, 12);
+        await Record(tyres, other, 900m, 11);
+        var after = await Report(owner, vehicle, march);
+        Assert.Equal((before.Repairs + 6000m, before.Charges + 500m, before.Loans), (after.Repairs, after.Charges, after.Loans));
+        Assert.Equal((before.MoneyOut + 6500m, before.Net - 6500m, before.AfterSavings - 6500m, before.Costs + 6500m),
+            (after.MoneyOut, after.Net, after.AfterSavings, after.Costs));
+        Assert.Equal(before.Savings, after.Savings);
+        var central = after.Postings.Where(p => p.Source == "central").OrderBy(p => p.Date).ToList();
+        Assert.Equal([("Tyres", 6000m, ExpenseBucket.RepairsAndMaintenance), ("Parking", 500m, ExpenseBucket.RecurringCharges)],
+            central.Select(p => (p.Name, p.Amount, p.Bucket)));
+        Assert.Equal((repair, repair, RecurringKind.Cost), (central[0].ItemId, central[0].VersionId, central[0].Kind));
+        Assert.Equal(before.Postings.Count + 2, after.Postings.Count);
+        Assert.Equal(after.Postings.OrderBy(p => p.Date), after.Postings);
+
+        // One read for the vehicle's central expenses, however many there are.
+        async Task<(int Reads, int Central, int Rows)> Measure()
+        {
+            app.Database.Reset();
+            using var response = await owner.GetAsync($"/setup/vehicles/{vehicle}/report?{march}");
+            response.EnsureSuccessStatusCode();
+            var selects = app.Database.Sql.Where(sql => sql.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)).ToList();
+            return (selects.Count, selects.Count(sql => sql.Contains("\"CentralExpenses\"", StringComparison.Ordinal)), app.Database.Rows);
+        }
+
+        var two = await Measure();
+        Assert.Equal(1, two.Central);
+        for (var day = 1; day <= 20; day++)
+            await Record(tyres, vehicle, 10m, day);
+        var many = await Measure();
+        Assert.Equal((two.Reads, 1, two.Rows + 20), many);
+
+        // A removed expense leaves the report.
+        using var removed = await owner.PostAsJsonAsync($"/setup/expenses/entries/{repair}/remove", new { version = 1, reason = "Recorded twice" });
+        removed.EnsureSuccessStatusCode();
+        var last = await Report(owner, vehicle, march);
+        Assert.DoesNotContain(last.Postings, p => p.ItemId == repair);
+        Assert.Equal(after.Repairs - 6000m + 200m, last.Repairs);
+    }
+
     private static RecurringSchedule Weekly(int day) => new(RecurrenceFrequency.Weekly, day);
     private static RecurringSchedule Monthly(int day) => new(RecurrenceFrequency.Monthly, day);
 

@@ -21,6 +21,7 @@ import {
   writes,
 } from "./pettyCashServer";
 import { renderInApp } from "./renderInApp";
+import { listboxOf, offered, optionsOf, pick } from "./searchSelect";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -337,10 +338,8 @@ it("lets an issuer pick the float for a credit note and sends it", async () => {
   });
   renderInApp(<PettyCashPage />);
   const dialog = await openDialog("Add credit note", "Credit note");
-  await within(dialog).findByRole("option", { name: "Peter Otieno" });
-  fireEvent.change(within(dialog).getByLabelText("Manager"), {
-    target: { value: "h2" },
-  });
+  await offered(within(dialog).getByLabelText("Manager"), "Peter Otieno");
+  pick(within(dialog).getByLabelText("Manager"), "Peter Otieno");
   fireEvent.change(within(dialog).getByLabelText("Paid to"), {
     target: { value: "Fuel station" },
   });
@@ -368,12 +367,16 @@ it("shows the live total of an expense and sends units, amount, vehicle and item
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
   const dialog = await openDialog("Add expense", "Expense");
-  await within(dialog).findByRole("option", {
-    name: "KDA 482M, Rongai Express",
-  });
+  await offered(
+    within(dialog).getByLabelText("Vehicle"),
+    "KDA 482M, Rongai Express",
+  );
+  const item = within(dialog).getByLabelText("What it was for");
+  expect(optionsOf(item)).toEqual(["Tyres", "Brake pads", "Parking"]);
   expect(
-    within(dialog).getByRole("group", { name: "Garage and repairs" }),
+    within(listboxOf(item)).getByText("Garage and repairs"),
   ).toBeInTheDocument();
+  expect(within(listboxOf(item)).getByText("Fees")).toBeInTheDocument();
 
   fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
   expect(
@@ -391,12 +394,8 @@ it("shows the live total of an expense and sends units, amount, vehicle and item
     target: { value: "1250" },
   });
   expect(within(dialog).getByText(/Total KES 5,000\./)).toBeInTheDocument();
-  fireEvent.change(within(dialog).getByLabelText("Vehicle"), {
-    target: { value: "v1" },
-  });
-  fireEvent.change(within(dialog).getByLabelText("What it was for"), {
-    target: { value: "i1" },
-  });
+  pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
+  pick(within(dialog).getByLabelText("What it was for"), "Tyres");
   fireEvent.change(within(dialog).getByLabelText("Note"), {
     target: { value: "Front left" },
   });
@@ -420,21 +419,18 @@ it("shows the live total of an expense and sends units, amount, vehicle and item
 });
 
 async function fillExpense(dialog: HTMLElement, units: string, amount: string) {
-  await within(dialog).findByRole("option", {
-    name: "KDA 482M, Rongai Express",
-  });
+  await offered(
+    within(dialog).getByLabelText("Vehicle"),
+    "KDA 482M, Rongai Express",
+  );
   fireEvent.change(within(dialog).getByLabelText("Units"), {
     target: { value: units },
   });
   fireEvent.change(within(dialog).getByLabelText("Amount each"), {
     target: { value: amount },
   });
-  fireEvent.change(within(dialog).getByLabelText("Vehicle"), {
-    target: { value: "v1" },
-  });
-  fireEvent.change(within(dialog).getByLabelText("What it was for"), {
-    target: { value: "i1" },
-  });
+  pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
+  pick(within(dialog).getByLabelText("What it was for"), "Tyres");
 }
 
 it("takes part of a unit, shows the exact live total and sends the units as a number", async () => {
@@ -563,18 +559,15 @@ it("reports a refused save with role alert and keeps one id for the retry", asyn
   });
   renderInApp(<PettyCashPage />);
   const dialog = await openDialog("Add expense", "Expense");
-  await within(dialog).findByRole("option", {
-    name: "KDA 482M, Rongai Express",
-  });
+  await offered(
+    within(dialog).getByLabelText("Vehicle"),
+    "KDA 482M, Rongai Express",
+  );
   fireEvent.change(within(dialog).getByLabelText("Amount each"), {
     target: { value: "300" },
   });
-  fireEvent.change(within(dialog).getByLabelText("Vehicle"), {
-    target: { value: "v1" },
-  });
-  fireEvent.change(within(dialog).getByLabelText("What it was for"), {
-    target: { value: "i3" },
-  });
+  pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
+  pick(within(dialog).getByLabelText("What it was for"), "Parking");
   fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
 
   const alert = await within(dialog).findByRole("alert");
@@ -594,18 +587,15 @@ it("still sends a fresh id from a page opened over plain http, where crypto.rand
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
   const dialog = await openDialog("Add expense", "Expense");
-  await within(dialog).findByRole("option", {
-    name: "KDA 482M, Rongai Express",
-  });
+  await offered(
+    within(dialog).getByLabelText("Vehicle"),
+    "KDA 482M, Rongai Express",
+  );
   fireEvent.change(within(dialog).getByLabelText("Amount each"), {
     target: { value: "300" },
   });
-  fireEvent.change(within(dialog).getByLabelText("Vehicle"), {
-    target: { value: "v1" },
-  });
-  fireEvent.change(within(dialog).getByLabelText("What it was for"), {
-    target: { value: "i3" },
-  });
+  pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
+  pick(within(dialog).getByLabelText("What it was for"), "Parking");
   fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
   await screen.findByText(/recorded on KDA 482M/);
   expect(writes(fetcher)[0].body.id).toMatch(UUID);
@@ -707,15 +697,24 @@ it("closes the dialog on a 409, shows the message on the page and loads the list
   await waitFor(() => expect(entryReads(fetcher).length).toBeGreaterThan(1));
 });
 
+const trigger = (name: string | RegExp) =>
+  screen.findByRole("button", { name });
+const openPeriod = async (name: string | RegExp = /^Period, /) =>
+  fireEvent.click(await trigger(name));
+const choosePreset = async (preset: string) => {
+  await openPeriod();
+  fireEvent.click(await screen.findByRole("button", { name: preset }));
+};
+
 it("moves a day at a time and stops at the business date", async () => {
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
   const next = await screen.findByRole("button", { name: "Next day" });
-  await screen.findByText("Wed 30 Sep 2026");
+  await trigger("Period, Wed 30 Sep 2026");
   expect(next).toBeDisabled();
 
   fireEvent.click(screen.getByRole("button", { name: "Previous day" }));
-  expect(await screen.findByText("Tue 29 Sep 2026")).toBeInTheDocument();
+  await trigger("Period, Tue 29 Sep 2026");
   await waitFor(() =>
     expect(
       entryReads(fetcher).some(
@@ -725,62 +724,68 @@ it("moves a day at a time and stops at the business date", async () => {
     ).toBe(true),
   );
   expect(paths(fetcher)).toContain(
-    "/api/setup/pettycash/overview?date=2026-09-29",
+    "/api/setup/pettycash/overview?from=2026-09-29&to=2026-09-29",
   );
   expect(screen.getByRole("button", { name: "Next day" })).toBeEnabled();
 });
 
-const showWeek = () =>
-  fireEvent.click(
-    within(screen.getByRole("group", { name: "Period" })).getByRole("button", {
-      name: "Week",
-    }),
-  );
+it("opens on the business date, with the same period picker as Central expenses ahead of the other filters", async () => {
+  const fetcher = servePettyCash({
+    permissions: permissionsOf({ canViewAll: true }),
+  });
+  renderInApp(<PettyCashPage />);
+  const period = await trigger("Period, Wed 30 Sep 2026");
+  expect(paths(fetcher)[0]).toBe("/api/setup/pettycash/overview");
+  const manager = await screen.findByRole("combobox", { name: "Manager" });
+  const status = screen.getByRole("combobox", { name: "Show" });
+  const search = screen.getByRole("searchbox", { name: "Search" });
+  const approve = await screen.findByRole("button", { name: "Expense" });
+  const follows = (first: HTMLElement, second: HTMLElement) =>
+    Boolean(
+      first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  expect(follows(period, manager)).toBe(true);
+  expect(follows(manager, status)).toBe(true);
+  expect(follows(status, search)).toBe(true);
+  expect(follows(search, approve)).toBe(true);
+  expect(
+    screen.queryByRole("group", { name: "Period" }),
+  ).not.toBeInTheDocument();
+});
 
-it("shows a week: asks for the week's figures and entries, labels them, adds a Date column and drops Approve day", async () => {
+it("shows several days: asks for the figures and entries of the span, labels them and drops Approve day", async () => {
   const fetcher = servePettyCash({
     permissions: permissionsOf({ canApproveDay: true, canApproveItem: true }),
     entries: [
       expense({ id: "e1", date: "2026-09-28" }),
       expense({ id: "e2", date: "2026-09-30", registration: "KDB 100X" }),
       expense({ id: "e3", date: "2026-09-27", registration: "KDC 200Y" }),
-      cash({ id: "k1", date: "2026-09-29" }),
     ],
   });
   renderInApp(<PettyCashPage />);
   await screen.findByRole("row", { name: /KDB 100X/ });
   expect(
-    screen.queryByRole("row", { name: /KDA 482M/ }),
-  ).not.toBeInTheDocument();
-  const period = screen.getByRole("group", { name: "Period" });
-  expect(within(period).getByRole("button", { name: "Day" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  expect(
     screen.getByRole("button", { name: "Approve day" }),
   ).toBeInTheDocument();
-  expect(
-    screen.queryByRole("columnheader", { name: "Date" }),
-  ).not.toBeInTheDocument();
-  expect(paths(fetcher).some((path) => path.includes("period="))).toBe(false);
+  expect(screen.queryByText("Wed 30 Sep 2026", { selector: "td" })).toBeNull();
 
-  showWeek();
-  expect(within(period).getByRole("button", { name: "Week" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  const figures = await screen.findByRole("group", { name: "Week figures" });
+  await choosePreset("This week");
+  const figures = await screen.findByRole("group", {
+    name: "Period figures",
+  });
   expect(
-    within(figures).getByText("This week, money out").nextSibling,
+    within(figures).getByText("28 Sep to 4 Oct 2026, money out").nextSibling,
   ).toHaveTextContent("KES 16,000");
   expect(
-    within(figures).getByText("This week, cash received").nextSibling,
+    within(figures).getByText("28 Sep to 4 Oct 2026, cash received")
+      .nextSibling,
   ).toHaveTextContent("KES 21,000");
   expect(
     within(figures).getByText("Opening cash balance").nextSibling,
   ).toHaveTextContent("KES 9,000");
-  expect(paths(fetcher)).toContain(`/api/setup/pettycash/overview?period=week`);
+  expect(paths(fetcher)).toContain(
+    "/api/setup/pettycash/overview?from=2026-09-28&to=2026-10-04",
+  );
   await waitFor(() =>
     expect(
       entryReads(fetcher).some(
@@ -791,116 +796,136 @@ it("shows a week: asks for the week's figures and entries, labels them, adds a D
       ),
     ).toBe(true),
   );
-  expect(await screen.findByText("28 Sep to 4 Oct 2026")).toBeInTheDocument();
-
   expect(
-    await screen.findByRole("columnheader", { name: "Date" }),
+    await screen.findByRole("button", { name: "Period, 28 Sep to 4 Oct 2026" }),
   ).toBeInTheDocument();
-  expect(
-    within(await screen.findByRole("row", { name: /KDA 482M/ })).getByText(
-      "28 Sep 2026",
-    ),
-  ).toBeInTheDocument();
-  expect(
-    within(screen.getByRole("row", { name: /KDB 100X/ })).getByText(
-      "30 Sep 2026",
-    ),
-  ).toBeInTheDocument();
+  await screen.findByRole("row", { name: /KDA 482M/ });
   expect(
     screen.queryByRole("row", { name: /KDC 200Y/ }),
   ).not.toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "Approve day" }),
   ).not.toBeInTheDocument();
-
-  fireEvent.click(screen.getByRole("tab", { name: "Cash received" }));
-  await waitFor(() =>
-    expect(
-      entryReads(fetcher).some(
-        (path) =>
-          path.includes("kind=cash") &&
-          path.includes("from=2026-09-28") &&
-          path.includes("to=2026-10-04"),
-      ),
-    ).toBe(true),
-  );
   expect(
-    within(await screen.findByRole("row", { name: /Cash given/ })).getByText(
-      "29 Sep 2026",
-    ),
-  ).toBeInTheDocument();
-  expect(
-    screen.getByRole("columnheader", { name: "Date" }),
-  ).toBeInTheDocument();
-  expect(within(period).getByRole("button", { name: "Week" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-
-  fireEvent.click(within(period).getByRole("button", { name: "Day" }));
-  expect(
-    await screen.findByRole("button", { name: "Approve day" }),
-  ).toBeInTheDocument();
-  expect(await screen.findByText("Wed 30 Sep 2026")).toBeInTheDocument();
-  // Cash received always shows its dates, as in the design; expenses show them only for a week.
-  expect(
-    screen.getByRole("columnheader", { name: "Date" }),
-  ).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
-  await waitFor(() =>
-    expect(
-      screen.queryByRole("columnheader", { name: "Date" }),
-    ).not.toBeInTheDocument(),
-  );
+    screen.queryByRole("columnheader", { name: "Date" }),
+  ).not.toBeInTheDocument();
 });
 
-it("moves a week at a time, stops at the week of the business date and keeps the week when the date moves", async () => {
+it("groups the entries of several days under a row for each day with that day's total", async () => {
+  servePettyCash({
+    entries: [
+      expense({ id: "e1", date: "2026-09-28", total: 3500 }),
+      expense({
+        id: "e4",
+        date: "2026-09-28",
+        registration: "KDD 300Z",
+        total: 1000,
+        unitAmount: 1000,
+      }),
+      expense({
+        id: "e2",
+        date: "2026-09-30",
+        registration: "KDB 100X",
+        total: 2000,
+        unitAmount: 2000,
+      }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  await screen.findByRole("row", { name: /KDB 100X/ });
+  expect(document.querySelector("[data-day]")).toBeNull();
+
+  await choosePreset("This week");
+  await screen.findByRole("row", { name: /KDD 300Z/ });
+  const days = [...document.querySelectorAll<HTMLElement>("[data-day]")];
+  expect(days.map((day) => day.dataset.day)).toEqual([
+    "2026-09-28",
+    "2026-09-30",
+  ]);
+  expect(days[0]).toHaveTextContent("Mon 28 Sep 2026");
+  expect(days[0]).toHaveTextContent("4,500");
+  expect(days[1]).toHaveTextContent("Wed 30 Sep 2026");
+  expect(days[1]).toHaveTextContent("2,000");
+  const rows = [...document.querySelectorAll("tbody tr")].map((row) =>
+    row.getAttribute("data-day") ? "day" : "entry",
+  );
+  expect(rows).toEqual(["day", "entry", "entry", "day", "entry"]);
+  expect(
+    screen.getByRole("columnheader", { name: "Total (KES)" }),
+  ).toBeInTheDocument();
+});
+
+it("groups cash received by day too, and lists floats as numbers", async () => {
+  servePettyCash({
+    entries: [
+      cash({ id: "k1", date: "2026-09-29", total: 5000 }),
+      cash({
+        id: "k2",
+        date: "2026-09-29",
+        total: -300,
+        note: "Cash returned",
+      }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  await choosePreset("This week");
+  fireEvent.click(await screen.findByRole("tab", { name: "Cash received" }));
+  const day = await waitFor(() => {
+    const found = document.querySelector<HTMLElement>("[data-day]");
+    if (!found) throw new Error("no day row yet");
+    return found;
+  });
+  expect(day).toHaveTextContent("Tue 29 Sep 2026");
+  expect(day).toHaveTextContent("4,700");
+});
+
+it("takes any span of days, from the custom dates", async () => {
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
-  await screen.findByRole("button", { name: "Next day" });
-  showWeek();
-  const next = await screen.findByRole("button", { name: "Next week" });
-  await screen.findByText("28 Sep to 4 Oct 2026");
-  expect(next).toBeDisabled();
-
-  fireEvent.click(screen.getByRole("button", { name: "Previous week" }));
-  expect(await screen.findByText("21 to 27 Sep 2026")).toBeInTheDocument();
-  expect(paths(fetcher)).toContain(
-    "/api/setup/pettycash/overview?date=2026-09-21&period=week",
-  );
-  await waitFor(() =>
-    expect(
-      entryReads(fetcher).some(
-        (path) =>
-          path.includes("from=2026-09-21") && path.includes("to=2026-09-27"),
-      ),
-    ).toBe(true),
+  await openPeriod("Period, Wed 30 Sep 2026");
+  const panel = await screen.findByRole("dialog", { name: "Choose a period" });
+  fireEvent.change(within(panel).getByLabelText("From"), {
+    target: { value: "2026-09-01" },
+  });
+  fireEvent.change(within(panel).getByLabelText("To"), {
+    target: { value: "2026-09-20" },
+  });
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Show these dates" }),
   );
   expect(
-    await screen.findByRole("group", { name: "Week figures" }),
+    await screen.findByRole("group", { name: "Period figures" }),
   ).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Next week" })).toBeEnabled();
+  expect(paths(fetcher)).toContain(
+    "/api/setup/pettycash/overview?from=2026-09-01&to=2026-09-20",
+  );
+  expect(
+    await screen.findByText("1 to 20 Sep 2026, money out"),
+  ).toBeInTheDocument();
+});
 
+it("labels the figures of a single past day by its date", async () => {
+  servePettyCash();
+  renderInApp(<PettyCashPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Previous day" }));
+  const figures = await screen.findByRole("group", { name: "Day figures" });
+  expect(
+    await within(figures).findByText("29 Sep 2026, money out"),
+  ).toBeInTheDocument();
+  expect(within(figures).queryByText(/Today/)).not.toBeInTheDocument();
+});
+
+it("opens a new entry on the last day of a past period, and on today when the period holds it", async () => {
+  servePettyCash();
+  renderInApp(<PettyCashPage />);
+  await choosePreset("Last week");
   fireEvent.click(await screen.findByRole("button", { name: "Expense" }));
   expect(await screen.findByLabelText("Date")).toHaveValue("2026-09-27");
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-  fireEvent.click(screen.getByRole("button", { name: "Next week" }));
-  expect(await screen.findByText("28 Sep to 4 Oct 2026")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Next week" })).toBeDisabled();
-});
-
-it("labels the figures of a week that is over by its first day", async () => {
-  servePettyCash();
-  renderInApp(<PettyCashPage />);
-  await screen.findByRole("button", { name: "Next day" });
-  showWeek();
-  fireEvent.click(await screen.findByRole("button", { name: "Previous week" }));
-  const figures = await screen.findByRole("group", { name: "Week figures" });
-  expect(
-    await within(figures).findByText("Week of 21 Sep 2026, money out"),
-  ).toBeInTheDocument();
-  expect(within(figures).queryByText(/This week/)).not.toBeInTheDocument();
+  await choosePreset("This week");
+  fireEvent.click(await screen.findByRole("button", { name: "Expense" }));
+  expect(await screen.findByLabelText("Date")).toHaveValue("2026-09-30");
 });
 
 it("shows units as entered, with up to three decimals and grouping", async () => {
@@ -929,7 +954,7 @@ it("offers the manager filter only to someone who may see every float, and sends
   const fetcher = servePettyCash({ permissions: REVIEWER });
   const first = renderInApp(<PettyCashPage />);
   const manager = await screen.findByRole("combobox", { name: "Manager" });
-  fireEvent.change(manager, { target: { value: "h2" } });
+  pick(manager, "Peter Otieno");
   await waitFor(() =>
     expect(paths(fetcher)).toContain(
       "/api/setup/pettycash/overview?holderId=h2",
@@ -957,9 +982,7 @@ it("filters expenses by status and by search", async () => {
   });
   renderInApp(<PettyCashPage />);
   await screen.findByRole("row", { name: /KDA 482M/ });
-  fireEvent.change(screen.getByRole("combobox", { name: "Show" }), {
-    target: { value: "waiting" },
-  });
+  pick(screen.getByRole("combobox", { name: "Show" }), "Waiting");
   await waitFor(() =>
     expect(
       entryReads(fetcher).some((path) => path.includes("status=waiting")),
@@ -983,7 +1006,7 @@ it("opens on the waiting filter when asked to", async () => {
   const fetcher = servePettyCash({ entries: [expense()] });
   renderInApp(<PettyCashPage initialStatus="waiting" />);
   expect(await screen.findByRole("combobox", { name: "Show" })).toHaveValue(
-    "waiting",
+    "Waiting",
   );
   await waitFor(() =>
     expect(entryReads(fetcher)[0]).toContain("status=waiting"),
@@ -1045,9 +1068,10 @@ it("approves a day for the chosen manager and reports what was left", async () =
         : undefined,
   });
   renderInApp(<PettyCashPage />);
-  fireEvent.change(await screen.findByRole("combobox", { name: "Manager" }), {
-    target: { value: "h2" },
-  });
+  pick(
+    await screen.findByRole("combobox", { name: "Manager" }),
+    "Peter Otieno",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Approve day" }));
   expect(
     await screen.findByText(
@@ -1087,7 +1111,7 @@ it("lists cash on the Cash received tab with the floats, and moves between tabs 
   );
   expect(await screen.findByText("Cash given")).toBeInTheDocument();
   expect(screen.getByText("Returned")).toBeInTheDocument();
-  expect(screen.getByText("Less KES 300")).toBeInTheDocument();
+  expect(screen.getByText("Less 300")).toBeInTheDocument();
   expect(screen.queryByText("KDA 482M")).not.toBeInTheDocument();
   expect(
     screen.getByRole("button", {
@@ -1096,9 +1120,9 @@ it("lists cash on the Cash received tab with the floats, and moves between tabs 
   ).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Floats" })).toBeInTheDocument();
   const floats = screen
-    .getByRole("columnheader", { name: "Cash in hand" })
+    .getByRole("columnheader", { name: "Cash in hand (KES)" })
     .closest("table")!;
-  expect(within(floats).getByText("KES 12,500")).toBeInTheDocument();
+  expect(within(floats).getByText("12,500")).toBeInTheDocument();
   expect(
     entryReads(fetcher).some(
       (path) => path.includes("kind=cash") && !path.includes("expense"),
@@ -1112,13 +1136,15 @@ it("lists cash on the Cash received tab with the floats, and moves between tabs 
   );
 });
 
-it("stacks the tabs beside the figure cards, as in the design, and moves between them with up and down", async () => {
+it("puts the figure cards above the tabs, as Central expenses does, and moves between the tabs with the left and right arrows", async () => {
   servePettyCash();
   renderInApp(<PettyCashPage />);
   const figures = await screen.findByRole("group", { name: "Day figures" });
   const tabs = screen.getByRole("tablist", { name: "Petty cash" });
-  expect(tabs).toHaveAttribute("aria-orientation", "vertical");
-  expect(tabs.parentElement).toBe(figures.parentElement?.parentElement);
+  expect(tabs).not.toHaveAttribute("aria-orientation");
+  expect(
+    figures.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
   expect(
     within(screen.getByRole("tabpanel")).queryByRole("group", {
       name: "Day figures",
@@ -1132,13 +1158,14 @@ it("stacks the tabs beside the figure cards, as in the design, and moves between
   ])
     expect(within(figures).getByText(label)).toBeInTheDocument();
 
-  const expenses = screen.getByRole("tab", { name: "Expenses" });
-  fireEvent.keyDown(expenses, { key: "ArrowDown" });
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Expenses" }), {
+    key: "ArrowRight",
+  });
   expect(
     await screen.findByRole("tab", { name: "Cash received" }),
   ).toHaveAttribute("aria-selected", "true");
   fireEvent.keyDown(screen.getByRole("tab", { name: "Cash received" }), {
-    key: "ArrowUp",
+    key: "ArrowLeft",
   });
   expect(await screen.findByRole("tab", { name: "Expenses" })).toHaveAttribute(
     "aria-selected",
@@ -1175,16 +1202,14 @@ it("gives cash to a chosen manager, and takes it back with a minus sign", async 
   });
   renderInApp(<PettyCashPage />);
   const dialog = await openDialog("Add cash", "Cash");
-  await within(dialog).findByRole("option", { name: "Peter Otieno" });
+  await offered(within(dialog).getByLabelText("Manager"), "Peter Otieno");
   fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
   expect(
     await within(dialog).findByText("Choose the manager."),
   ).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([]);
 
-  fireEvent.change(within(dialog).getByLabelText("Manager"), {
-    target: { value: "h2" },
-  });
+  pick(within(dialog).getByLabelText("Manager"), "Peter Otieno");
   fireEvent.change(within(dialog).getByLabelText("Amount"), {
     target: { value: "-300" },
   });
@@ -1200,4 +1225,42 @@ it("gives cash to a chosen manager, and takes it back with a minus sign", async 
     unitAmount: -300,
     note: null,
   });
+});
+
+const manyExpenses = (count: number) =>
+  Array.from({ length: count }, (_, index) =>
+    expense({
+      id: `e${index + 1}`,
+      registration: `KDA ${String(index + 1).padStart(3, "0")}M`,
+    }),
+  );
+
+it("pages the entries on the server, 25 to a page, and goes back to page 1 when the filter changes", async () => {
+  const fetcher = servePettyCash({ entries: manyExpenses(230) });
+  renderInApp(<PettyCashPage />);
+  await screen.findByText("KDA 001M");
+  expect(entryReads(fetcher)[0]).toContain("page=1&pageSize=25");
+  expect(screen.getByText("Showing 1–25 of 230")).toBeInTheDocument();
+  expect(screen.queryByText(/Showing the first/)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  expect(await screen.findByText("Showing 26–50 of 230")).toBeInTheDocument();
+  expect(entryReads(fetcher).at(-1)).toContain("page=2&pageSize=25");
+  expect(screen.getByText("KDA 026M")).toBeInTheDocument();
+  expect(screen.queryByText("KDA 001M")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
+  expect(await screen.findByText("Showing 51–75 of 230")).toBeInTheDocument();
+
+  pick(screen.getByLabelText("Rows per page"), "100");
+  expect(await screen.findByText("Showing 1–100 of 230")).toBeInTheDocument();
+  expect(entryReads(fetcher).at(-1)).toContain("page=1&pageSize=100");
+
+  fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+  await screen.findByText("Showing 101–200 of 230");
+  pick(screen.getByLabelText("Show"), "Waiting");
+  await waitFor(() =>
+    expect(entryReads(fetcher).at(-1)).toContain("page=1&pageSize=100"),
+  );
+  expect(entryReads(fetcher).at(-1)).toContain("status=waiting");
 });

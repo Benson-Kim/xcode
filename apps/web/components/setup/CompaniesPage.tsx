@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { apiRequest, streamError, useStreamedList } from "../../lib/data";
+import { apiRequest, streamError } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
 import {
   Banner,
@@ -11,6 +11,7 @@ import {
   Field,
   FormActions,
   PageHeader,
+  ListPager,
   StatusBadge,
   Td,
   TextInput,
@@ -18,6 +19,7 @@ import {
   Tr,
   useToast,
 } from "../ui";
+import { usePagedList } from "../usePagedList";
 import type { Company } from "./shared";
 
 // Whether the company carries an archive date, even one still ahead of the business date. Older rows had none, so inactive counts too.
@@ -35,7 +37,7 @@ export function CompaniesPage() {
   } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const companies = useStreamedList<Company>("setup/companies");
+  const companies = usePagedList<Company>("setup/companies");
   const rows = companies.items;
 
   const toast = useToast();
@@ -167,7 +169,6 @@ export function CompaniesPage() {
           { label: "Actions", hidden: true },
         ]}
         loading={companies.loading}
-        pendingRows={companies.pendingRows}
         loadingLabel="Loading companies"
         isEmpty={!rows.length}
         failed={Boolean(companies.error)}
@@ -279,6 +280,7 @@ export function CompaniesPage() {
           ),
         )}
       </DataTable>
+      <ListPager list={companies} />
     </section>
   );
 }

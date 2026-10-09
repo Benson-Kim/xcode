@@ -4,7 +4,7 @@ import {
   DASHBOARD_CARDS as SHARED_CARDS,
   NAV,
   permissionChecker,
-  SETUP_NAV,
+  type NavId,
   type DashboardKey,
   type PermissionKey,
 } from "@xcode/shared/permissions";
@@ -47,7 +47,17 @@ export const TABS: {
   { id: "more", label: "More", icon: "more" },
 ];
 
-export const SETUP_LINKS = SETUP_NAV.map((id) => ({
+const SETUP_IDS = [
+  "companies",
+  "vehicles",
+  "expenses",
+  "recurring",
+  "people",
+  "history",
+  "settings",
+] as const satisfies readonly NavId[];
+
+export const SETUP_LINKS = SETUP_IDS.map((id) => ({
   label: NAV[id].label,
   any: NAV[id].any,
 }));

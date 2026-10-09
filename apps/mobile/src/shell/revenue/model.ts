@@ -59,7 +59,7 @@ export const handledBy =
   (vehicleId, date) =>
     waiting.has(keyOf(vehicleId, date));
 
-// What a tap on a vehicle's day opens: that day, an earlier day that must be filled first, or nothing.
+// What a tap on a vehicle's day opens: that day (earlier is the vehicle's first gap before it, a hint), or nothing.
 export type Target = {
   vehicle: RevenueVehicle;
   date: string;
@@ -100,7 +100,6 @@ export function targetFor(
 
 export const STATE_TAG: Record<QueuedCapture["state"], string> = {
   pending: "Not sent yet",
-  blocked: "Waiting for an earlier day",
   conflict: "Conflict",
   failed: "Not saved",
 };

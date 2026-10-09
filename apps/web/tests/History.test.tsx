@@ -55,17 +55,16 @@ function serveHistory(total: number, rows?: ReturnType<typeof change>[]) {
   const fetchMock = vi.fn(async (input: string) => {
     const url = new URL(input, "http://app");
     const pageSize = Number(url.searchParams.get("pageSize"));
-    const before = url.searchParams.get("before");
+    const page = Number(url.searchParams.get("page") ?? 1);
     const all =
       rows ??
       Array.from({ length: total }, (_, index) => change(total - index));
-    const older =
-      before === null ? all : all.filter((row) => row.version < Number(before));
-    const items = older.slice(0, pageSize);
+    const items = all.slice((page - 1) * pageSize, page * pageSize);
     return new Response(
-      JSON.stringify(
-        pageOf(items, pageSize, all.length, older.length > pageSize),
-      ),
+      JSON.stringify({
+        ...pageOf(items, pageSize, all.length, false),
+        pageNumber: page,
+      }),
       { status: 200 },
     );
   });
@@ -77,85 +76,52 @@ beforeEach(() => {
   serveHistory(0);
 });
 
-it("asks for only the first page on first render and the next one on Load more", async () => {
+const FIRST = "/api/setup/history?includeTotal=true&page=1&pageSize=25";
+
+it("asks for only the first page on first render, counted, and the next one on request", async () => {
   const fetchMock = serveHistory(60);
   renderInApp(<HistoryPage />);
 
   expect(
     await screen.findByText("PSV companies: Change 60"),
   ).toBeInTheDocument();
-  expect(fetchMock.mock.calls.map(([input]) => input)).toEqual([
-    "/api/setup/history?pageSize=25",
-  ]);
+  expect(fetchMock.mock.calls.map(([input]) => input)).toEqual([FIRST]);
   expect(changeRows()).toHaveLength(25);
-  expect(screen.getByText("Showing 25 of 60 changes")).toBeInTheDocument();
+  expect(screen.getByText("Showing 1–25 of 60")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
   expect(
-    await screen.findByText("PSV companies: Change 11"),
+    await screen.findByText("PSV companies: Change 35"),
   ).toBeInTheDocument();
   expect(fetchMock).toHaveBeenLastCalledWith(
-    "/api/setup/history?pageSize=25&before=36",
+    "/api/setup/history?includeTotal=true&page=2&pageSize=25",
     expect.anything(),
   );
-  expect(changeRows()).toHaveLength(50);
+  expect(changeRows()).toHaveLength(25);
+  expect(screen.getByText("Showing 26–50 of 60")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
   expect(
     await screen.findByText("PSV companies: Change 1"),
   ).toBeInTheDocument();
-  expect(changeRows()).toHaveLength(60);
-  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(changeRows()).toHaveLength(10);
+  expect(screen.getByText("Showing 51–60 of 60")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
   expect(
     screen.queryByRole("button", { name: "Load more" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByText("Showing all 60 changes")).toBeInTheDocument();
 });
 
-it("asks for the changes older than the last one it was given and stops when the server says there are no more", async () => {
-  const urls: string[] = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: string) => {
-      urls.push(input);
-      if (!input.includes("before="))
-        return new Response(
-          JSON.stringify({
-            ...pageOf(
-              Array.from({ length: 25 }, (_, index) => change(30 - index)),
-              25,
-              40,
-              true,
-            ),
-            nextBefore: 6,
-          }),
-          { status: 200 },
-        );
-      return new Response(
-        JSON.stringify(pageOf([change(5), change(4)], 25, 40, false)),
-        { status: 200 },
-      );
-    }),
-  );
+it("pages by number, not by the version of the last change it was given", async () => {
+  const fetchMock = serveHistory(40);
   renderInApp(<HistoryPage />);
-
+  await screen.findByText("Showing 1–25 of 40");
+  fireEvent.click(screen.getByRole("button", { name: "Last page" }));
+  await screen.findByText("Showing 26–40 of 40");
   expect(
-    await screen.findByText("Showing 25 of 40 changes"),
-  ).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-  expect(
-    await screen.findByText("PSV companies: Change 4"),
-  ).toBeInTheDocument();
-
-  expect(urls).toEqual([
-    "/api/setup/history?pageSize=25",
-    "/api/setup/history?pageSize=25&before=6",
-  ]);
-  expect(changeRows()).toHaveLength(27);
-  expect(
-    screen.queryByRole("button", { name: "Load more" }),
-  ).not.toBeInTheDocument();
-  expect(screen.getByText("Showing all 27 changes")).toBeInTheDocument();
+    fetchMock.mock.calls.every(([input]) => !String(input).includes("before=")),
+  ).toBe(true);
+  expect(changeRows()).toHaveLength(15);
 });
 
 it("shows each change field by field, with the before and after values side by side", async () => {
@@ -261,13 +227,13 @@ it("shows each change field by field, with the before and after values side by s
   ]);
 });
 
-it("keeps the rows it has and says why when the next page fails", async () => {
+it("says why when another page cannot be loaded, and loads it again on request", async () => {
   let calls = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => {
       calls += 1;
-      if (calls > 1)
+      if (calls === 2)
         return new Response(
           JSON.stringify({
             title: "Not permitted in this organization or data scope.",
@@ -281,7 +247,7 @@ it("keeps the rows it has and says why when the next page fails", async () => {
             Array.from({ length: 25 }, (_, index) => change(30 - index)),
             25,
             30,
-            true,
+            false,
           ),
         ),
         { status: 200 },
@@ -290,12 +256,12 @@ it("keeps the rows it has and says why when the next page fails", async () => {
   );
   renderInApp(<HistoryPage />);
 
-  fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Next page" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Your access to the change log was removed.",
   );
+  fireEvent.click(screen.getByRole("button", { name: "Page 1" }));
   await waitFor(() => expect(changeRows()).toHaveLength(25));
-  expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled();
 });
 
 it("leaves out internal ids and shows a list of plain values as one field", async () => {
@@ -388,14 +354,14 @@ it("narrows the log through the server and starts again at the first page", asyn
   expect(
     await screen.findByText("Vehicles: Added vehicle KDA 123A"),
   ).toBeInTheDocument();
-  expect(screen.getByText("Showing all 3 changes")).toBeInTheDocument();
+  expect(changeRows()).toHaveLength(3);
 
   fireEvent.change(screen.getByLabelText("Section"), {
     target: { value: "people" },
   });
   await waitFor(() =>
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/setup/history?pageSize=25&section=people",
+      "/api/setup/history?includeTotal=true&section=people&page=1&pageSize=25",
       expect.anything(),
     ),
   );
@@ -405,18 +371,13 @@ it("narrows the log through the server and starts again at the first page", asyn
   expect(
     screen.queryByText("Vehicles: Added vehicle KDA 123A"),
   ).not.toBeInTheDocument();
-  expect(screen.getByText("1 change matches")).toBeInTheDocument();
+  expect(changeRows()).toHaveLength(1);
 
   // The search box settles before it asks: three keystrokes are one request, and it looks at the name too.
   fireEvent.change(screen.getByLabelText("Section"), {
     target: { value: "all" },
   });
-  await waitFor(() =>
-    expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/setup/history?pageSize=25",
-      expect.anything(),
-    ),
-  );
+  await waitFor(() => expect(changeRows()).toHaveLength(3));
   const asked = fetchMock.mock.calls.length;
   for (const typed of ["a", "an", "antony"])
     fireEvent.change(screen.getByLabelText("Search"), {
@@ -424,7 +385,7 @@ it("narrows the log through the server and starts again at the first page", asyn
     });
   await waitFor(() =>
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/setup/history?pageSize=25&text=antony",
+      "/api/setup/history?includeTotal=true&text=antony&page=1&pageSize=25",
       expect.anything(),
     ),
   );
@@ -443,7 +404,7 @@ it("narrows the log through the server and starts again at the first page", asyn
   });
   await waitFor(() =>
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/setup/history?pageSize=25&from=2026-09-21&to=2026-09-21",
+      "/api/setup/history?includeTotal=true&from=2026-09-21&to=2026-09-21&page=1&pageSize=25",
       expect.anything(),
     ),
   );
@@ -458,13 +419,20 @@ it("narrows the log through the server and starts again at the first page", asyn
   expect(screen.getByLabelText("To")).toHaveAttribute("min", "2026-09-21");
 
   fireEvent.click(screen.getByRole("button", { name: "Clear" }));
-  await waitFor(() =>
-    expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/setup/history?pageSize=25",
-      expect.anything(),
-    ),
-  );
-  expect(await screen.findByText("Showing all 3 changes")).toBeInTheDocument();
+  await waitFor(() => expect(changeRows()).toHaveLength(3));
+  await waitFor(() => expect(changeRows()).toHaveLength(3));
+});
+
+it("names the Central expenses and Reports sections of the change log", async () => {
+  serveHistory(2, [
+    change(2, { section: "centralexpenses", reason: "Removed an expense" }),
+    change(1, { section: "reports", reason: "Exported a report" }),
+  ]);
+  renderInApp(<HistoryPage />);
+  expect(
+    await screen.findByText("Central expenses: Removed an expense"),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Reports: Exported a report")).toBeInTheDocument();
 });
 
 it("keeps the newer filter's answer when an older request finishes last", async () => {
@@ -507,7 +475,7 @@ it("keeps the newer filter's answer when an older request finishes last", async 
   expect(
     screen.getByText("People and access: Invited someone"),
   ).toBeInTheDocument();
-  expect(screen.getByText("1 change matches")).toBeInTheDocument();
+  expect(changeRows()).toHaveLength(1);
   expect(
     screen.queryByText("PSV companies: Renamed Metro Trans"),
   ).not.toBeInTheDocument();

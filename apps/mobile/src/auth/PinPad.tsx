@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Platform,
   Pressable,
@@ -22,6 +23,8 @@ type Props = {
   length: number;
   value: string;
   error: string;
+  // Shown in place of the error while the entry is being checked.
+  status?: string;
   busy: boolean;
   // Bumped on every wrong entry so the dots shake.
   shake: number;
@@ -37,6 +40,7 @@ export function PinPad({
   length,
   value,
   error,
+  status,
   busy,
   shake,
   onDigit,
@@ -147,7 +151,11 @@ export function PinPad({
           ))}
         </Animated.View>
         <View style={styles.errorBox}>
-          <ErrorText center>{error}</ErrorText>
+          {status ? (
+            <Checking status={status} />
+          ) : (
+            <ErrorText center>{error}</ErrorText>
+          )}
         </View>
       </View>
 
@@ -194,6 +202,23 @@ export function PinPad({
   );
 }
 
+// The spinner runs natively, so it keeps turning even while the JS thread is busy.
+function Checking({ status }: { status: string }) {
+  const { colors } = useTheme();
+  return (
+    <View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={status}
+      accessibilityLiveRegion="polite"
+      style={styles.status}
+    >
+      <ActivityIndicator color={colors.blue} />
+      <Text style={{ color: colors.grey }}>{status}</Text>
+    </View>
+  );
+}
+
 export function LinkRow({ children }: { children: ReactNode }) {
   return <View style={styles.row}>{children}</View>;
 }
@@ -215,6 +240,12 @@ const styles = StyleSheet.create({
   dots: { flexDirection: "row", gap: 18 },
   dot: { width: 16, height: 16, borderRadius: 8, borderWidth: 2 },
   errorBox: { minHeight: 44, alignSelf: "stretch" },
+  status: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
   keypad: { flexDirection: "row", flexWrap: "wrap", marginHorizontal: -6 },
   cell: { width: "33.333%", padding: 6 },
   key: {

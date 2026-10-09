@@ -12,6 +12,7 @@ public static class SetupEndpoints
     {
         services.AddScoped<ISetupExecution, SetupExecution>();
         services.AddScoped<ISetupRepository, SetupRepository>();
+        services.AddScoped<IFleetPostings, FleetPostings>();
         services.AddSingleton<HistoryCountCache>();
         services.AddScoped<CompanyUseCases>();
         services.AddScoped<VehicleUseCases>();
@@ -70,7 +71,8 @@ public static class SetupEndpoints
             .Produces<MyScope>()
             .WithName("GetMyAccessScope");
         group
-            .MapGet("/people", (AccessUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
+            .MapGet("/people", (AccessUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25, string? role = null,
+                string? status = null) => useCases.List(role, status, page, pageSize, ct))
             .Produces<Page<PersonDto>>()
             .WithName("ListPeople");
         group
@@ -102,7 +104,8 @@ public static class SetupEndpoints
             .Produces<IdResponse>().WithName("ArchiveSetupCompany");
         group.MapPost("/companies/{id:guid}/restore", async (Guid id, CompanyLifecycleRequest input, CompanyUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.SetArchived(id, false, input, ct))))
             .Produces<IdResponse>().WithName("RestoreSetupCompany");
-        group.MapGet("/vehicles", (VehicleUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
+        group.MapGet("/vehicles", (VehicleUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25, Guid? companyId = null) =>
+                useCases.List(companyId, page, pageSize, ct))
             .Produces<Page<VehicleDto>>()
             .WithName("ListSetupVehicles");
         group.MapPost("/vehicles", async (SaveVehicle input, VehicleUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Save(null, input, ct))))
@@ -117,7 +120,8 @@ public static class SetupEndpoints
             .Produces<IdResponse>().WithName("RestoreSetupVehicle");
         group.MapGet("/vehicles/{id:guid}/report", (Guid id, VehicleUseCases useCases, CancellationToken ct, DateOnly? from = null, DateOnly? through = null, string? period = null) => useCases.Report(id, from, through, period, ct))
             .Produces<VehicleReport>().WithName("GetSetupVehicleReport");
-        group.MapGet("/recurring", (RecurringUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25) => useCases.List(page, pageSize, ct))
+        group.MapGet("/recurring", (RecurringUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25, string? kind = null,
+                Guid? companyId = null, string? status = null) => useCases.List(RecurringFilter.Of(kind, companyId, status), page, pageSize, ct))
             .Produces<Page<RecurringDto>>().WithName("ListSetupRecurring");
         group.MapGet("/recurring/vehicle-options", (RecurringUseCases useCases, CancellationToken ct) => useCases.VehicleOptions(ct))
             .Produces<IReadOnlyList<VehicleOption>>().WithName("ListRecurringVehicleOptions");

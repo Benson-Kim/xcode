@@ -165,6 +165,15 @@ describe("the pad", () => {
     expect(JSON.stringify(state)).not.toContain("4826");
   });
 
+  it("marks the pad as checking from the submit until the answer", () => {
+    const submitted = run(typed(trusted(), "4826"), { type: "pinSubmitted" });
+    expect(pad(submitted).checking).toBe(true);
+    expect(
+      pad(run(submitted, { type: "padError", message: "Wrong PIN." })).checking,
+    ).toBe(false);
+    expect(pad(run(submitted, { type: "completed" })).checking).toBeFalsy();
+  });
+
   it("shakes only when asked", () => {
     const quiet = run(trusted(), { type: "padError", message: "x" });
     const shaken = run(trusted(), {

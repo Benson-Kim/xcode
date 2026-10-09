@@ -1,28 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { isDate } from "@xcode/shared/dates";
 import type { Formatter } from "@xcode/shared/format";
 
-import { apiRequest } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
-import type { ChangeLogPage } from "../../lib/types";
 import {
   Banner,
   Button,
   DataTable,
-  Hint,
   PageHeader,
+  Pager,
   SelectInput,
   Td,
   TextInput,
   Toolbar,
   Tr,
 } from "../ui";
+import { usePagedList } from "../usePagedList";
 import type { HistoryRow } from "./shared";
-
-const PAGE_SIZE = 25;
 
 const sections: Record<string, string> = {
   companies: "PSV companies",
@@ -39,6 +36,8 @@ const sections: Record<string, string> = {
   people: "People and access",
   revenue: "Revenue",
   pettycash: "Petty cash",
+  centralexpenses: "Central expenses",
+  reports: "Reports",
 };
 
 type FieldChange = {
@@ -196,101 +195,12 @@ function search(filters: Filters) {
   return parts.length ? `&${parts.join("&")}` : "";
 }
 
-// The pages held for one query. The query is part of it, so a change of filter is answered by rendering an
-// empty list rather than by clearing this in an effect, which would cost a second render.
-type Loaded = {
-  query: string;
-  items: HistoryRow[];
-  total: number;
-  pages: number;
-  next: number | null;
-  error: string;
-};
-
-const nothingYet = (query: string): Loaded => ({
-  query,
-  items: [],
-  total: 0,
-  pages: 0,
-  next: null,
-  error: "",
-});
-
 const rowKey = (row: HistoryRow) => `${row.version}-${row.entityId}`;
 
-// The change log a page at a time: the first page when it opens, and the next only when the person asks for it.
-// Changes saved meanwhile push older rows down a page, so rows already shown are not added twice.
-// The filter is part of the request, so the server counts the narrowed log and "Load more" means more of it;
-// changing the filter starts again at the newest change. Each later page asks for the changes older than the last
-// one received, so changes saved meanwhile cannot shift it.
+// The change log a server page at a time, with its count. The filter is part of the request, so the server counts
+// the narrowed log; changing it starts again at page 1.
 function useHistoryPages(query: string) {
-  const [loaded, setLoaded] = useState<Loaded>(() => nothingYet(query));
-  const [pending, setPending] = useState<number | null>(1);
-  // An answer for a filter that has since changed is dropped, even when it arrives after the current one.
-  const latestQuery = useRef(query);
-  const stale = useCallback(() => latestQuery.current !== query, [query]);
-
-  const receive = useCallback(
-    (page: number, before: number | null) =>
-      apiRequest<ChangeLogPage<HistoryRow>>(
-        `setup/history?pageSize=${PAGE_SIZE}${before === null ? "" : `&before=${before}`}${query}`,
-      )
-        .then(
-          (result) =>
-            !stale() &&
-            setLoaded((current) => {
-              const kept =
-                page === 1 || current.query !== query ? [] : current.items;
-              const seen = new Set(kept.map(rowKey));
-              const items = [
-                ...kept,
-                ...result.items.filter((row) => !seen.has(rowKey(row))),
-              ];
-              return {
-                query,
-                items,
-                total: result.total ?? items.length,
-                pages: page,
-                next: result.hasMore ? result.nextBefore : null,
-                error: "",
-              };
-            }),
-          // The query is stamped here too, so a first page that fails stops being "still loading" and says why.
-          (error: Error) =>
-            !stale() &&
-            setLoaded((current) => ({
-              ...(current.query === query ? current : nothingYet(query)),
-              error: error.message,
-            })),
-        )
-        .finally(() => {
-          if (!stale()) setPending(null);
-        }),
-    [query, stale],
-  );
-
-  useEffect(() => {
-    latestQuery.current = query;
-    void receive(1, null);
-  }, [query, receive]);
-
-  function more() {
-    if (pending !== null || loaded.next === null) return;
-    setPending(loaded.pages + 1);
-    void receive(loaded.pages + 1, loaded.next);
-  }
-
-  // Rows from an earlier filter are not this filter's answer, so they are not shown while its first page is on
-  // its way: a changed query is loading by definition.
-  const changed = loaded.query !== query;
-  const shown = changed ? nothingYet(query) : loaded;
-  return {
-    ...shown,
-    loading: changed || (shown.pages === 0 && pending !== null),
-    loadingMore: !changed && shown.pages > 0 && pending !== null,
-    hasMore: !changed && shown.pages > 0 && shown.next !== null,
-    more,
-  };
+  return usePagedList<HistoryRow>(`setup/history?includeTotal=true${query}`);
 }
 
 function ChangeTable({
@@ -429,7 +339,6 @@ export function HistoryPage() {
           { label: "What changed" },
         ]}
         loading={history.loading}
-        pendingRows={history.loadingMore ? 1 : 0}
         loadingLabel="Loading the change log"
         isEmpty={!rows.length}
         failed={Boolean(history.error)}
@@ -464,27 +373,13 @@ export function HistoryPage() {
           );
         })}
       </DataTable>
-      {rows.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Hint>
-            {history.hasMore
-              ? `Showing ${rows.length} of ${history.total} changes${some ? " that match" : ""}`
-              : rows.length === 1
-                ? `1 change${some ? " matches" : ""}`
-                : `Showing all ${rows.length} changes${some ? " that match" : ""}`}
-          </Hint>
-          {history.hasMore && (
-            <Button
-              tone="outline"
-              disabled={history.loadingMore}
-              aria-busy={history.loadingMore || undefined}
-              onClick={history.more}
-            >
-              {history.loadingMore ? "Loading..." : "Load more"}
-            </Button>
-          )}
-        </div>
-      )}
+      <Pager
+        page={history.paging.page}
+        pageSize={history.paging.pageSize}
+        total={history.total}
+        onPageChange={history.paging.setPage}
+        onPageSizeChange={history.paging.setPageSize}
+      />
     </section>
   );
 }

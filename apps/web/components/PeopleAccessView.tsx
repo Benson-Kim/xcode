@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { streamError, useResource, useStreamedList } from "../lib/data";
+import { streamError, useResource } from "../lib/data";
 import {
   CATALOG_PATH,
   PEOPLE_PATH,
@@ -22,7 +22,8 @@ import { PeopleList, type PeopleFilters } from "./people/PeopleList";
 import { PersonEditor } from "./people/PersonEditor";
 import { RecentChanges } from "./people/RecentChanges";
 import type { HistoryRow } from "./setup/shared";
-import { Banner, PageHeader } from "./ui";
+import { Banner, ListPager, PageHeader } from "./ui";
+import { usePagedList } from "./usePagedList";
 
 export function PeopleAccessView({
   canManageAccess = false,
@@ -31,7 +32,6 @@ export function PeopleAccessView({
 }) {
   const { can } = useSession();
   const canManage = can("people.manage") || canManageAccess;
-  const people = useStreamedList<Person>(PEOPLE_PATH);
   const roles = useResource<Role[]>(ROLES_PATH);
   const catalog = useResource<PermissionGroup[]>(CATALOG_PATH);
   const scope = useResource<ScopeOptions>(canManage ? SCOPE_PATH : null);
@@ -44,6 +44,13 @@ export function PeopleAccessView({
     role: "all",
     status: "all",
   });
+  // The list comes a server page at a time, filtered by the server.
+  const query = new URLSearchParams();
+  if (filters.role !== "all") query.set("role", filters.role);
+  if (filters.status !== "all") query.set("status", filters.status);
+  const people = usePagedList<Person>(
+    `${PEOPLE_PATH}${query.toString() ? `?${query}` : ""}`,
+  );
   const error = streamError(people) || roles.error || catalog.error;
 
   if (editing) {
@@ -85,6 +92,7 @@ export function PeopleAccessView({
         onEdit={setEditing}
         onAdd={() => setEditing("new")}
       />
+      <ListPager list={people} />
       {can("audit.view") && (
         <RecentChanges
           loading={recent.loading}

@@ -44,7 +44,6 @@ export function useCaptureEntry({
   );
   const [note, setNote] = useState(opened.note ?? "");
   const [error, setError] = useState("");
-  const [earlier, setEarlier] = useState("");
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [saving, setSaving] = useState(false);
   // Blocks a second save (Enter, or a quick second click) while one is on its way, before the disabled button renders.
@@ -73,12 +72,6 @@ export function useCaptureEntry({
         (await reload().catch(() => undefined));
       if (current) setConflict({ message: failure.message, current });
       else setError(failure.message);
-    } else if (
-      failure instanceof ApiError &&
-      failure.status === 400 &&
-      typeof failure.body.earliestMissing === "string"
-    ) {
-      setEarlier(failure.body.earliestMissing);
     } else {
       setError(
         failure instanceof Error
@@ -94,7 +87,6 @@ export function useCaptureEntry({
     if (typeof next === "string") return setError(next);
     void settle(async () => {
       setError("");
-      setEarlier("");
       try {
         await revenueApi.saveDay(vehicle.id, cell.date, { ...next, version });
       } catch (failure) {
@@ -116,7 +108,6 @@ export function useCaptureEntry({
     reason,
     note,
     error,
-    earlier,
     conflict,
     saving,
     mine: entry(),

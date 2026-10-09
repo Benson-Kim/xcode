@@ -185,12 +185,18 @@ function fromHex(hex: string): Uint8Array {
   return bytes;
 }
 
-async function pbkdf2(pin: string, saltHex: string): Promise<string> {
+async function pbkdf2(
+  pin: string,
+  saltHex: string,
+  signal?: AbortSignal,
+): Promise<string> {
   return hexBytes(
-    pbkdf2Sha256(
+    await pbkdf2Sha256(
       new TextEncoder().encode(pin),
       fromHex(saltHex),
       PBKDF2_ITERATIONS,
+      undefined,
+      signal,
     ),
   );
 }
@@ -206,26 +212,104 @@ interface PinCheck {
   version?: number;
   salt: string;
   hash: string;
+  // Who signed in with the PIN, and at which security version. Absent on checks saved before it was kept.
+  stamp?: string;
 }
 
-export async function savePinCheck(pin: string): Promise<void> {
-  const salt = hexBytes(Crypto.getRandomBytes(16));
-  await write(keys.pinCheck, {
-    version: PIN_CHECK_VERSION,
-    salt,
-    hash: await pbkdf2(pin, salt),
-  });
+const BASE64URL =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+// The user an access token was issued to and their security version, which the server raises on every PIN change.
+function tokenStamp(accessToken: string): string | undefined {
+  let text = "";
+  let bits = 0;
+  let value = 0;
+  for (const char of accessToken.split(".")[1] ?? "") {
+    const digit = BASE64URL.indexOf(char);
+    if (digit < 0) return undefined;
+    value = ((value << 6) | digit) & 0xffff;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      text += String.fromCharCode((value >> bits) & 0xff);
+    }
+  }
+  try {
+    const { sub, version } = JSON.parse(text) as {
+      sub?: unknown;
+      version?: unknown;
+    };
+    return typeof sub === "string" && sub && /^\d+$/.test(String(version))
+      ? `${sub}:${version}`
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-export async function matchesPinCheck(pin: string): Promise<boolean | null> {
-  const check = await read<PinCheck>(
+const readPinCheck = () =>
+  read<PinCheck>(
     keys.pinCheck,
     (v) => typeof v.salt === "string" && typeof v.hash === "string",
   );
+
+// Sign-in does not wait for a check to be derived. Reading waits for a save in progress, and a save still running
+// when the person is forgotten writes nothing.
+let pinCheckEpoch = 0;
+let pinCheckSaving: Promise<unknown> = Promise.resolve();
+let pinCheckWriting: Promise<unknown> = Promise.resolve();
+
+// Keeps a check of the PIN the server just accepted. A check from the same user at the same security version is of
+// this very PIN and is kept. Any other goes at once, since it may be of a PIN changed elsewhere.
+export function savePinCheck(
+  pin: string,
+  accessToken?: string | null,
+): Promise<void> {
+  const epoch = ++pinCheckEpoch;
+  const stamp = accessToken ? tokenStamp(accessToken) : undefined;
+  const save = (async () => {
+    const current = await readPinCheck();
+    if (stamp && current?.stamp === stamp) return;
+    if (current) await vault.remove(keys.pinCheck);
+    const salt = hexBytes(Crypto.getRandomBytes(16));
+    const hash = await pbkdf2(pin, salt);
+    if (epoch !== pinCheckEpoch) return;
+    const writing = write(keys.pinCheck, {
+      version: PIN_CHECK_VERSION,
+      salt,
+      hash,
+      ...(stamp && { stamp }),
+    });
+    pinCheckWriting = writing.catch(() => undefined);
+    await writing;
+  })();
+  pinCheckSaving = save.catch(() => undefined);
+  return save;
+}
+
+export async function matchesPinCheck(
+  pin: string,
+  signal?: AbortSignal,
+): Promise<boolean | null> {
+  await pinCheckSaving;
+  const check = await readPinCheck();
   if (!check) return null;
   const v = check.version ?? 1;
   if (v === 1) return (await digestV1(check.salt, pin)) === check.hash;
-  return (await pbkdf2(pin, check.salt)) === check.hash;
+  return (await pbkdf2(pin, check.salt, signal)) === check.hash;
+}
+
+// Starts checking a PIN against this phone's own check the moment it is complete, alongside the request to the
+// server, so that if the server cannot be reached the answer is already there instead of taking seconds more.
+// Cancel it once the server has answered.
+export function startPinMatch(pin: string): {
+  result: Promise<boolean | null>;
+  cancel: () => void;
+} {
+  const controller = new AbortController();
+  const result = matchesPinCheck(pin, controller.signal);
+  result.catch(() => undefined);
+  return { result, cancel: () => controller.abort() };
 }
 
 export async function loadOfflineTries(): Promise<OfflineTries> {
@@ -301,6 +385,8 @@ export async function loadCaptureList(
 
 // Switch user: this phone stops being trusted for anyone
 export async function forgetPerson(): Promise<void> {
+  pinCheckEpoch++;
+  await pinCheckWriting;
   for (const key of [
     keys.session,
     keys.person,

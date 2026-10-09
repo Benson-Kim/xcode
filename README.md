@@ -34,8 +34,8 @@ Each part also runs alone: `test:lint-rules`, `test:shared`, `test:web`, `test:m
 - Colours: `packages/shared/src/tokens.ts` is the only source. `apps/web/app/tokens.css` is generated from it, and the phone's palette is built from the same tables. After changing a token, regenerate the CSS with `cd apps/web && npx vitest run tests/tokens.test.ts -u`; tests in both apps fail on drift.
 - Requests: the revenue, people, recurring, organization settings and preferences screens call the API through `apps/web/lib/endpoints/*`, and ESLint refuses a literal path passed to `apiRequest` there. The other setup pages still pass paths; move them over when you next change them, then add them to `endpointScreens` in `eslint.config.mjs`.
 - Function length: ESLint warns on any app function over 150 lines, not counting blank lines and comments (tests excluded). These still exceed it. Split them when you next change them, and do not raise the limit:
-  - web: `SettingsForm` 550, `ExpenseCategoriesPage` 508, `VehicleEditor` 458, `AuthPanel` 455, `VehicleInvestmentTab` 311, petty-cash `EntryForm` 297, `RecurringPage` 283, `PettyCashPage` 267, `CompaniesPage` 250, `AppShell` 233, `PreferencesForm` 178, `VehiclesPage` 168, the auth route's `POST` 159, `dashboardCards` 159;
-  - mobile: `openQueue` 301, `PettyCashScreen` 251, `AppShell` 189, `HomeScreen` 187, `App` 164, `FloatSection` 160, `PinPad` 156.
+  - web: `SettingsForm` 550, `ExpenseCategoriesPage` 508, `VehicleEditor` 458, `AuthPanel` 455, `VehicleInvestmentTab` 311, petty-cash `EntryForm` 283, `RecurringPage` 274, `PettyCashPage` 251, `CompaniesPage` 250, `PreferencesForm` 178, `AppShell` 164, the auth route's `POST` 159, `dashboardCards` 159, `VehiclesPage` 158;
+  - mobile: `openQueue` 286, `PettyCashScreen` 257, `AppShell` 189, `App` 187, `HomeScreen` 187, `PinPad` 161, `FloatSection` 160.
 
 ## Continuous integration
 

@@ -74,7 +74,6 @@ export function useCaptureTarget({
           ...capture,
           state: "pending",
           message: "",
-          earliestMissing: null,
           current: null,
           queuedAt: 0,
           attempts: 0,

@@ -76,6 +76,7 @@ public sealed class TokenIssuer(AuthOptions options, IClock clock)
     public string Hash(string value) => Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(options.SigningKey), Encoding.UTF8.GetBytes(value)));
     public string Access(User user, string deviceId, Guid organizationId, string role, string firstName, string lastName, IEnumerable<string> permissions, TimeSpan lifetime)
     {
+        // The phone reads sub and version to tell whether its offline PIN check is still of the current PIN.
         var claims = new List<Claim>
         {
             new("sub", user.Id.ToString()), new("device", deviceId), new("version", user.SecurityVersion.ToString()),

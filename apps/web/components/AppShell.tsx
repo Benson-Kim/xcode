@@ -21,11 +21,12 @@ import {
 import {
   canSee,
   NAV,
+  NAV_SECTIONS,
   permissionChecker,
-  PRIMARY_NAV,
-  SETUP_NAV,
   startsOnToday,
   type DashboardKey,
+  type NavId,
+  type NavSection,
   type PermissionCheck,
   type PermissionKey,
 } from "@xcode/shared/permissions";
@@ -81,6 +82,7 @@ import {
   LoadingRegion,
   MenuIcon,
   PageHeader,
+  PageHeaderSlotProvider,
   ProgressBar,
   SegmentedControl,
   Skeleton,
@@ -132,6 +134,14 @@ const OrganizationSettingsView = lazyScreen(() =>
     (module) => module.OrganizationSettingsView,
   ),
 );
+const CentralExpensesPage = lazyScreen(() =>
+  import("./expenses/CentralExpensesPage").then(
+    (module) => module.CentralExpensesPage,
+  ),
+);
+const ReportsPage = lazyScreen(() =>
+  import("./reports/ReportsPage").then((module) => module.ReportsPage),
+);
 const PreferencesView = lazyScreen(() =>
   import("./PreferencesView").then((module) => module.PreferencesView),
 );
@@ -169,10 +179,10 @@ function isLoadFailure(error: unknown) {
 // leaving keyboard and screen-reader users on the page body.
 function FocusPage() {
   useEffect(() => {
-    const main = document.querySelector("main");
+    // The title is in the top bar, outside main.
     const target =
-      main?.querySelector("h1") ??
-      main?.querySelector<HTMLElement>('[role="status"]');
+      document.querySelector<HTMLElement>("h1") ??
+      document.querySelector<HTMLElement>('main [role="status"]');
     if (!target) return;
     target.tabIndex = -1;
     target.focus();
@@ -255,13 +265,14 @@ type NavItem = {
 };
 
 // Every menu entry is shown to the people holding any of its permissions, as @xcode/shared/permissions says.
-const topLevel: NavItem[] = PRIMARY_NAV.map((id) => ({ id, ...NAV[id] }));
-const setupGroup: NavItem[] = SETUP_NAV.map((id) => ({ id, ...NAV[id] }));
+const navItems = (ids: readonly NavId[]): NavItem[] =>
+  ids.map((id) => ({ id, ...NAV[id] }));
 
 export type ViewParams = {
   openItem?: string;
   newForVehicle?: string;
   status?: PettyCashStatus;
+  date?: string;
 };
 
 export function AppShell({ onSignOut }: { onSignOut: () => void }) {
@@ -273,8 +284,8 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [sessionError, setSessionError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [setupOpen, setSetupOpen] = useState(true);
   const [accessOpen, setAccessOpen] = useState(false);
+  const [titleSlot, setTitleSlot] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -334,7 +345,6 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
     [session],
   );
   const { can } = sessionState;
-  const allowed = (item: NavItem) => canSee(item, can);
   const displayName = session
     ? `${session.firstName} ${session.lastName}`.trim()
     : "";
@@ -349,162 +359,183 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
     window.scrollTo?.(0, 0);
   }
 
+  return (
+    <FormatsContext.Provider value={formatter}>
+      <SessionProvider value={sessionState}>
+        <AppearanceProvider value={appearanceState}>
+          <ToastProvider>
+            <PageHeaderSlotProvider value={titleSlot}>
+              <div className="flex min-h-screen flex-col">
+                <header className="sticky top-0 z-20 flex h-16 items-center border-b border-card-line bg-surface">
+                  {/* As wide as the menu below; the title zone then starts where <main> does, with its inset. */}
+                  <div className="flex w-62 shrink-0 items-center gap-3 px-5 max-[899px]:w-auto max-[899px]:gap-1.5 max-[899px]:pr-0 max-[899px]:pl-1">
+                    <IconButton
+                      className="hidden max-[899px]:grid"
+                      aria-label="Open menu"
+                      aria-expanded={menuOpen}
+                      aria-controls="main-menu"
+                      onClick={() => setMenuOpen((open) => !open)}
+                    >
+                      <MenuIcon />
+                    </IconButton>
+                    <Brand
+                      compact
+                      loading={appearanceState.loading && !appearance.error}
+                      name={brand?.displayName}
+                      subline={appearance.data?.organizationName}
+                      logo={brand?.logo}
+                      logoAlt={brand?.logoAlt}
+                    />
+                  </div>
+                  <div
+                    ref={setTitleSlot}
+                    className="min-w-0 flex-1 px-8 max-[899px]:px-4"
+                  />
+                  <UserMenu
+                    session={session}
+                    displayName={displayName}
+                    open={userMenuOpen}
+                    onToggle={() => setUserMenuOpen((open) => !open)}
+                    onAccess={() => {
+                      setUserMenuOpen(false);
+                      setAccessOpen(true);
+                    }}
+                    onPreferences={() => navigate("preferences")}
+                    onSignOut={onSignOut}
+                  />
+                </header>
+                <div className="flex min-h-0 flex-1">
+                  <MainMenu
+                    view={view}
+                    open={menuOpen}
+                    can={can}
+                    onNavigate={navigate}
+                  />
+                  {menuOpen && (
+                    <button
+                      type="button"
+                      aria-label="Close menu"
+                      onClick={() => setMenuOpen(false)}
+                      className="fixed inset-x-0 top-16 bottom-0 z-25 hidden bg-navy/35 max-[899px]:block"
+                    />
+                  )}
+                  <main className="min-w-0 flex-1 px-8 pt-7 pb-12 max-[899px]:px-4 max-[899px]:pt-5 max-[899px]:pb-10">
+                    {/* Keyed on the visit, so a screen still loading shows placeholders, never the page it replaced, and a
+                    page that failed to load is left behind on the next one. */}
+                    <PageBoundary key={visit}>
+                      <Page
+                        view={view}
+                        params={params}
+                        sessionError={sessionError}
+                        onNavigate={navigate}
+                      />
+                    </PageBoundary>
+                    <p className="mt-8 mb-0 text-xs text-grey">
+                      XCODE Web v0.9
+                    </p>
+                  </main>
+                </div>
+                <AccessDialog
+                  open={accessOpen}
+                  onClose={() => setAccessOpen(false)}
+                />
+              </div>
+            </PageHeaderSlotProvider>
+          </ToastProvider>
+        </AppearanceProvider>
+      </SessionProvider>
+    </FormatsContext.Provider>
+  );
+}
+
+// The side menu: each section in order, a group collapsible like Setup, and only the entries this person may open.
+function MainMenu({
+  view,
+  open: drawerOpen,
+  can,
+  onNavigate,
+}: {
+  view: ShellView;
+  open: boolean;
+  can: PermissionCheck;
+  onNavigate: (view: ShellView) => void;
+}) {
+  const [closedGroups, setClosedGroups] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const allowed = (item: NavItem) => canSee(item, can);
   const navButton = (item: NavItem) => (
     <li key={item.id}>
       <button
         type="button"
         aria-current={view === item.id ? "page" : undefined}
-        onClick={() => navigate(item.id)}
+        onClick={() => onNavigate(item.id)}
         className="flex min-h-10.5 w-full items-center rounded-[10px] px-3 text-left text-[15px] hover:bg-hover aria-[current=page]:bg-blue-soft aria-[current=page]:font-bold aria-[current=page]:text-blue-dark"
       >
         {item.label}
       </button>
     </li>
   );
-  const visibleSetup = setupGroup.filter(allowed);
+  const toggleGroup = (id: string) =>
+    setClosedGroups((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const navSection = (section: NavSection, index: number) => {
+    const visible = navItems(section.items).filter(allowed);
+    if (!visible.length) return null;
+    const spacing = index > 0 && "mt-3.5";
+    if (section.kind === "items")
+      return (
+        <ul
+          key={index}
+          className={cn("m-0 flex list-none flex-col gap-0.5 p-0", spacing)}
+        >
+          {visible.map(navButton)}
+        </ul>
+      );
+    const open = !closedGroups.has(section.id);
+    return (
+      <div key={section.id} className={cn(spacing)}>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => toggleGroup(section.id)}
+          className="flex min-h-9 w-full items-center justify-between px-3 text-[13px] font-bold text-grey"
+        >
+          {section.label}
+          <ChevronIcon
+            className={cn(
+              "transition-transform motion-reduce:transition-none",
+              !open && "-rotate-90",
+            )}
+          />
+        </button>
+        {open && (
+          // Indented under the group with a rule down its left side, as in the design (.nav-group ul).
+          <ul className="m-0 mt-0.5 ml-3.5 flex list-none flex-col gap-0.5 border-l border-card-line p-0 pl-2.5">
+            {visible.map(navButton)}
+          </ul>
+        )}
+      </div>
+    );
+  };
 
   return (
-    <FormatsContext.Provider value={formatter}>
-      <SessionProvider value={sessionState}>
-        <AppearanceProvider value={appearanceState}>
-          <ToastProvider>
-            <div className="flex min-h-screen flex-col">
-              <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-card-line bg-surface px-5 max-[899px]:gap-1.5 max-[899px]:pr-2 max-[899px]:pl-1">
-                <IconButton
-                  className="hidden max-[899px]:grid"
-                  aria-label="Open menu"
-                  aria-expanded={menuOpen}
-                  aria-controls="main-menu"
-                  onClick={() => setMenuOpen((open) => !open)}
-                >
-                  <MenuIcon />
-                </IconButton>
-                <Brand
-                  compact
-                  loading={appearanceState.loading && !appearance.error}
-                  name={brand?.displayName}
-                  subline={appearance.data?.organizationName}
-                  logo={brand?.logo}
-                  logoAlt={brand?.logoAlt}
-                />
-                <span className="flex-1" />
-                <div className="relative">
-                  <button
-                    type="button"
-                    aria-haspopup="menu"
-                    aria-expanded={userMenuOpen}
-                    onClick={() => setUserMenuOpen((open) => !open)}
-                    className="flex min-h-11 items-center gap-2.5 rounded-xl px-2 py-1 text-left hover:bg-hover"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="grid size-9 shrink-0 place-items-center rounded-full bg-brand text-sm font-bold text-white"
-                    >
-                      {session
-                        ? initials(session.firstName, session.lastName)
-                        : ""}
-                    </span>
-                    <span className="max-[899px]:hidden">
-                      <span className="block text-sm font-semibold">
-                        {displayName || "Your account"}
-                      </span>
-                      <span className="block text-xs text-grey">
-                        {session?.role || "Loading your access"}
-                      </span>
-                    </span>
-                  </button>
-                  {userMenuOpen && (
-                    <div
-                      role="menu"
-                      className="absolute top-13 right-0 z-40 min-w-50 rounded-xl border border-card-line bg-surface p-1.5 shadow-menu"
-                    >
-                      <MenuButton
-                        onClick={() => {
-                          setUserMenuOpen(false);
-                          setAccessOpen(true);
-                        }}
-                      >
-                        Your access
-                      </MenuButton>
-                      <MenuButton onClick={() => navigate("preferences")}>
-                        Your preferences
-                      </MenuButton>
-                      <MenuButton onClick={onSignOut}>Sign out</MenuButton>
-                    </div>
-                  )}
-                </div>
-              </header>
-              <div className="flex min-h-0 flex-1">
-                <nav
-                  id="main-menu"
-                  aria-label="Main"
-                  className={cn(
-                    "w-62 shrink-0 overflow-y-auto border-r border-card-line bg-surface px-3 py-4",
-                    "max-[899px]:fixed max-[899px]:top-16 max-[899px]:bottom-0 max-[899px]:left-0 max-[899px]:z-30 max-[899px]:transition-transform motion-reduce:transition-none",
-                    menuOpen
-                      ? "max-[899px]:shadow-drawer"
-                      : "max-[899px]:-translate-x-full",
-                  )}
-                >
-                  <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-                    {topLevel.filter(allowed).map(navButton)}
-                  </ul>
-                  {visibleSetup.length > 0 && (
-                    <div className="mt-3.5">
-                      <button
-                        type="button"
-                        aria-expanded={setupOpen}
-                        onClick={() => setSetupOpen((open) => !open)}
-                        className="flex min-h-9 w-full items-center justify-between px-3 text-[13px] font-bold text-grey"
-                      >
-                        Setup
-                        <ChevronIcon
-                          className={cn(
-                            "transition-transform motion-reduce:transition-none",
-                            !setupOpen && "-rotate-90",
-                          )}
-                        />
-                      </button>
-                      {setupOpen && (
-                        // Indented under the group with a rule down its left side, as in the design (.nav-group ul).
-                        <ul className="m-0 mt-0.5 ml-3.5 flex list-none flex-col gap-0.5 border-l border-card-line p-0 pl-2.5">
-                          {visibleSetup.map(navButton)}
-                        </ul>
-                      )}
-                    </div>
-                  )}
-                </nav>
-                {menuOpen && (
-                  <button
-                    type="button"
-                    aria-label="Close menu"
-                    onClick={() => setMenuOpen(false)}
-                    className="fixed inset-x-0 top-16 bottom-0 z-25 hidden bg-navy/35 max-[899px]:block"
-                  />
-                )}
-                <main className="min-w-0 flex-1 px-8 pt-7 pb-12 max-[899px]:px-4 max-[899px]:pt-5 max-[899px]:pb-10">
-                  {/* Keyed on the visit, so a screen still loading shows placeholders, never the page it replaced, and a
-                    page that failed to load is left behind on the next one. */}
-                  <PageBoundary key={visit}>
-                    <Page
-                      view={view}
-                      params={params}
-                      sessionError={sessionError}
-                      onNavigate={navigate}
-                    />
-                  </PageBoundary>
-                  <p className="mt-8 mb-0 text-xs text-grey">XCODE Web v0.9</p>
-                </main>
-              </div>
-              <AccessDialog
-                open={accessOpen}
-                onClose={() => setAccessOpen(false)}
-              />
-            </div>
-          </ToastProvider>
-        </AppearanceProvider>
-      </SessionProvider>
-    </FormatsContext.Provider>
+    <nav
+      id="main-menu"
+      aria-label="Main"
+      className={cn(
+        "w-62 shrink-0 overflow-y-auto border-r border-card-line bg-surface px-3 py-4",
+        "max-[899px]:fixed max-[899px]:top-16 max-[899px]:bottom-0 max-[899px]:left-0 max-[899px]:z-30 max-[899px]:transition-transform motion-reduce:transition-none",
+        drawerOpen
+          ? "max-[899px]:shadow-drawer"
+          : "max-[899px]:-translate-x-full",
+      )}
+    >
+      {NAV_SECTIONS.map(navSection)}
+    </nav>
   );
 }
 
@@ -544,8 +575,17 @@ function Page({
       <Dashboard session={session} error={sessionError} onOpen={onNavigate} />
     );
   if (view === "revenue") return <RevenuePage />;
+  if (view === "centralexpenses")
+    return (
+      <CentralExpensesPage
+        onOpenPettyCash={(date) => onNavigate("pettycash", { date })}
+      />
+    );
+  if (view === "reports") return <ReportsPage />;
   if (view === "pettycash")
-    return <PettyCashPage initialStatus={params.status} />;
+    return (
+      <PettyCashPage initialStatus={params.status} initialDate={params.date} />
+    );
   if (view === "companies") return <CompaniesPage />;
   if (view === "vehicles")
     return (
@@ -1045,5 +1085,61 @@ function AccessDialog({
         })
       )}
     </Dialog>
+  );
+}
+
+// The signed-in person, and their menu: their access, their preferences and signing out.
+function UserMenu({
+  session,
+  displayName,
+  open,
+  onToggle,
+  onAccess,
+  onPreferences,
+  onSignOut,
+}: {
+  session: Session | null;
+  displayName: string;
+  open: boolean;
+  onToggle: () => void;
+  onAccess: () => void;
+  onPreferences: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <div className="relative mr-5 max-[899px]:mr-2">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex min-h-11 items-center gap-2.5 rounded-xl px-2 py-1 text-left hover:bg-hover"
+      >
+        <span
+          aria-hidden="true"
+          className="grid size-9 shrink-0 place-items-center rounded-full bg-brand text-sm font-bold text-white"
+        >
+          {session ? initials(session.firstName, session.lastName) : ""}
+        </span>
+        <span className="max-[899px]:hidden">
+          <span className="block text-sm font-semibold">
+            {displayName || "Your account"}
+          </span>
+          <span className="block text-xs text-grey">
+            {session?.role || "Loading your access"}
+          </span>
+        </span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute top-13 right-0 z-40 min-w-50 rounded-xl border border-card-line bg-surface p-1.5 shadow-menu"
+        >
+          <MenuButton onClick={onAccess}>Your access</MenuButton>
+          <MenuButton onClick={onPreferences}>Your preferences</MenuButton>
+          <MenuButton onClick={onSignOut}>Sign out</MenuButton>
+        </div>
+      )}
+    </div>
   );
 }

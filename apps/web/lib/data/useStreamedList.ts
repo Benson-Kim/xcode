@@ -139,7 +139,7 @@ function streamLoader<T>(path: string, pageSize: number): Loader<Streamed<T>> {
 // What to tell the person when a list failed: a list that stopped part way also says how much of it is shown.
 export function streamError(list: {
   error: string;
-  partial: boolean;
+  partial?: boolean;
   items: unknown[];
   total: number;
 }) {

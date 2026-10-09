@@ -1,4 +1,10 @@
-import type { RevenueWeek, SaveRevenue } from "@xcode/shared/revenue";
+import type {
+  RevenueDay,
+  RevenueDaySaved,
+  RevenueWeek,
+  SaveRevenue,
+  SaveRevenueDay,
+} from "@xcode/shared/revenue";
 
 import { apiRequest } from "../data";
 
@@ -39,7 +45,21 @@ export function revenueWeekPagePath({
 export const vehicleWeekPath = (vehicleId: string, date: string) =>
   `${REVENUE_PATH}?weekStart=${date}&vehicleId=${vehicleId}`;
 
+// Every vehicle active on one day, for the company chosen in the grid (all of them when none is).
+export function fleetDayPath(date: string, companyId: string) {
+  const params = new URLSearchParams({ date });
+  if (companyId) params.set("companyId", companyId);
+  return `${REVENUE_PATH}/day?${params}`;
+}
+
 export const revenueApi = {
+  fleetDay: (date: string, companyId: string, signal?: AbortSignal) =>
+    apiRequest<RevenueDay>(fleetDayPath(date, companyId), { signal }),
+  saveFleetDay: (date: string, body: SaveRevenueDay) =>
+    apiRequest<RevenueDaySaved>(`${REVENUE_PATH}/day/${date}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   vehicleWeek: (vehicleId: string, date: string) =>
     apiRequest<RevenueWeek>(vehicleWeekPath(vehicleId, date)),
   saveDay: (vehicleId: string, date: string, body: SaveDayRequest) =>

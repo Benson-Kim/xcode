@@ -3,6 +3,30 @@ using Auth.Domain.Setup;
 namespace Auth.Application.Setup;
 
 public sealed record Page<T>(IReadOnlyList<T> Items, int PageNumber, int PageSize, int Total);
+
+// The filters of the scheduled expenses and savings list. An item runs while it has not stopped or ended and still
+// shares to a vehicle in the fleet today; a company matches an item sharing to one of its vehicles.
+public sealed record RecurringFilter(RecurringKind? Kind, Guid? CompanyId, bool? Running)
+{
+    public static readonly RecurringFilter None = new(null, null, null);
+
+    public static RecurringFilter Of(string? kind, Guid? companyId, string? status) => new(
+        kind switch
+        {
+            null or "" or "all" => null,
+            "cost" => RecurringKind.Cost,
+            "savings" => RecurringKind.Savings,
+            _ => throw new ArgumentException("Kind must be cost or savings.")
+        },
+        companyId,
+        status switch
+        {
+            null or "" or "all" => null,
+            "running" => true,
+            "stopped" => false,
+            _ => throw new ArgumentException("Status must be running or stopped.")
+        });
+}
 public sealed record CompanyDto(Guid Id, string Name, int VehicleCount, bool Active, DateOnly? ArchivedOn);
 public sealed record CompanyOption(Guid Id, string Name);
 public sealed record TargetDto(DateOnly EffectiveFrom, decimal WeeklyAmount, int Revision);
@@ -66,8 +90,8 @@ public sealed record RecurringDto(Guid Id, Guid VersionId, int Revision, string 
 public sealed record AllocationDto(Guid VehicleId, decimal Amount, string? Registration, bool Active = true);
 // What a recurring-item editor needs to pick vehicles, without the vehicle-management view.
 public sealed record VehicleOption(Guid Id, Guid CompanyId, string CompanyName, string Registration, bool Active = true);
-// Source is "pettycash" for approved petty cash spending, whose ItemId and VersionId are the entry's id; null for a
-// scheduled item.
+// Source is "pettycash" for approved petty cash spending and "central" for a central expense, whose ItemId and
+// VersionId are the entry's id; null for a scheduled item.
 public sealed record PostingDto(Guid ItemId, Guid VersionId, DateOnly Date, string Name, RecurringKind Kind, decimal Amount,
     ExpenseBucket? Bucket = null, string? Source = null);
 // Contract C6: money in against the target, money out in its three buckets, and what is left before and after savings.

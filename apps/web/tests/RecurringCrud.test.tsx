@@ -592,29 +592,54 @@ it("filters the list by company and by running or stopped, as the design does", 
   const share = (target: { id: string; registration: string }) => [
     { vehicleId: target.id, amount: 1200, registration: target.registration },
   ];
-  mockFetch(async (input) => {
-    const url = String(input);
-    if (url.includes("/vehicle-options"))
+  const all = [
+    { ...item, id: "parking", name: "Parking", allocations: share(vehicle) },
+    {
+      ...item,
+      id: "sacco",
+      name: "SACCO fee",
+      stoppedFrom: "2026-09-15",
+      allocations: share(metro),
+    },
+    {
+      ...item,
+      id: "licence",
+      name: "Licence",
+      start: "2026-01-01",
+      end: "2026-06-30",
+      allocations: share(metro),
+    },
+  ];
+  // The server filters: a company by the vehicles shared to, running while not stopped or ended.
+  const companyOf = new Map([
+    [vehicle.id, vehicle.companyId],
+    [metro.id, metro.companyId],
+  ]);
+  const running = (row: (typeof all)[number]) =>
+    !(row.stoppedFrom && row.stoppedFrom <= businessDate) &&
+    !(row.end && row.end < businessDate);
+  const fetcher = mockFetch(async (input) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.includes("/vehicle-options"))
       return new Response(JSON.stringify([vehicle, metro]), { status: 200 });
-    return listResponse([
-      { ...item, id: "parking", name: "Parking", allocations: share(vehicle) },
-      {
-        ...item,
-        id: "sacco",
-        name: "SACCO fee",
-        stoppedFrom: "2026-09-15",
-        allocations: share(metro),
-      },
-      {
-        ...item,
-        id: "licence",
-        name: "Licence",
-        start: "2026-01-01",
-        end: "2026-06-30",
-        allocations: share(metro),
-      },
-    ]);
+    const companyId = url.searchParams.get("companyId");
+    const status = url.searchParams.get("status");
+    return listResponse(
+      all.filter(
+        (row) =>
+          (!companyId ||
+            row.allocations.some(
+              (share) => companyOf.get(share.vehicleId) === companyId,
+            )) &&
+          (!status || running(row) === (status === "running")),
+      ),
+    );
   });
+  const lastList = () =>
+    fetcher.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url.startsWith("/api/setup/recurring?"))
+      .at(-1);
 
   renderInApp(
     <RecurringPage canManage />,
@@ -638,27 +663,41 @@ it("filters the list by company and by running or stopped, as the design does", 
   ).toEqual(["All", "Running", "Stopped"]);
 
   fireEvent.change(company, { target: { value: "company-1" } });
-  expect(names()).toEqual(["Parking"]);
+  await waitFor(() => expect(names()).toEqual(["Parking"]));
+  expect(lastList()).toBe(
+    "/api/setup/recurring?companyId=company-1&page=1&pageSize=25",
+  );
   fireEvent.change(company, { target: { value: "all" } });
   fireEvent.change(status, { target: { value: "stopped" } });
-  expect(names()).toEqual(["Licence", "SACCO fee"]);
+  await waitFor(() => expect(names()).toEqual(["Licence", "SACCO fee"]));
+  expect(lastList()).toBe(
+    "/api/setup/recurring?status=stopped&page=1&pageSize=25",
+  );
   fireEvent.change(status, { target: { value: "running" } });
-  expect(names()).toEqual(["Parking"]);
+  await waitFor(() => expect(names()).toEqual(["Parking"]));
   fireEvent.change(company, { target: { value: "company-2" } });
-  expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
+  expect(await screen.findByText("Nothing here yet.")).toBeInTheDocument();
+  expect(lastList()).toBe(
+    "/api/setup/recurring?companyId=company-2&status=running&page=1&pageSize=25",
+  );
 });
 
 it("shows a future stop separately while listing its next posting as running", async () => {
-  mockFetch(async () =>
-    listResponse([
-      {
-        ...item,
-        stoppedFrom: "2026-09-25",
-        start: "2026-09-01",
-        frequency: 1,
-        day: null,
-      },
-    ]),
+  // The server counts an item that stops after the business date as running.
+  const fetcher = mockFetch(async (input) =>
+    listResponse(
+      String(input).includes("status=stopped")
+        ? []
+        : [
+            {
+              ...item,
+              stoppedFrom: "2026-09-25",
+              start: "2026-09-01",
+              frequency: 1,
+              day: null,
+            },
+          ],
+    ),
   );
   renderInApp(
     <RecurringPage canManage={false} />,
@@ -677,11 +716,12 @@ it("shows a future stop separately while listing its next posting as running", a
   fireEvent.change(screen.getByRole("combobox", { name: "Show" }), {
     target: { value: "stopped" },
   });
-  expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
+  expect(await screen.findByText("Nothing here yet.")).toBeInTheDocument();
   fireEvent.change(screen.getByRole("combobox", { name: "Show" }), {
     target: { value: "running" },
   });
   expect(
-    screen.getByRole("row", { name: /Loan repayment/ }),
+    await screen.findByRole("row", { name: /Loan repayment/ }),
   ).toBeInTheDocument();
+  expect(String(fetcher.mock.calls.at(-1)?.[0])).toContain("status=running");
 });

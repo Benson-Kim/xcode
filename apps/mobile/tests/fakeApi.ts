@@ -325,6 +325,20 @@ export const pettyPage = (items: unknown[], total = items.length) => ({
   total,
 });
 
+// An access token shaped as the API issues it: whose it is, their security version and their name (here not ASCII).
+export const accessToken = (userId: string, securityVersion: number) => {
+  const claims = JSON.stringify({
+    sub: userId,
+    version: String(securityVersion),
+    first_name: "Mũthoni",
+  });
+  const payload = btoa(String.fromCharCode(...new TextEncoder().encode(claims)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  return `header.${payload}.signature`;
+};
+
 export const tokens = (n = 1) => ({
   status: "authenticated",
   accessToken: `access-${n}`,

@@ -95,11 +95,23 @@ function bytes(words: Uint32Array) {
   return out;
 }
 
-export function pbkdf2Sha256(
+type Derivation = {
+  done: number;
+  iterations: number;
+  inner: Uint32Array;
+  outer: Uint32Array;
+  u: Uint32Array;
+  result: Uint32Array;
+  block: Uint32Array;
+  state: Uint32Array;
+  w: Uint32Array;
+};
+
+function start(
   password: Uint8Array,
   salt: Uint8Array,
   iterations: number,
-): Uint8Array {
+): Derivation {
   const w = new Uint32Array(64);
   const key = new Uint8Array(64);
   key.set(password.length > 64 ? bytes(hash(IV, 0, password, w)) : password);
@@ -116,12 +128,27 @@ export function pbkdf2Sha256(
   first.set(salt);
   first[salt.length + 3] = 1;
   const u = hash(outer, 64, bytes(hash(inner, 64, first, w)), w);
-  const result = u.slice();
   const block = new Uint32Array(16);
   block[8] = 0x80000000;
   block[15] = (64 + 32) * 8;
-  const state = new Uint32Array(8);
-  for (let n = 1; n < iterations; n++) {
+  return {
+    done: 1,
+    iterations,
+    inner,
+    outer,
+    u,
+    result: u.slice(),
+    block,
+    state: new Uint32Array(8),
+    w,
+  };
+}
+
+// Runs up to `count` more iterations; true once all have run.
+function advance(derivation: Derivation, count: number): boolean {
+  const { inner, outer, u, result, block, state, w } = derivation;
+  const end = Math.min(derivation.iterations, derivation.done + count);
+  for (let n = derivation.done; n < end; n++) {
     block.set(u);
     state.set(inner);
     compress(state, block, w);
@@ -130,5 +157,26 @@ export function pbkdf2Sha256(
     compress(u, block, w);
     for (let i = 0; i < 8; i++) result[i] ^= u[i];
   }
-  return bytes(result);
+  derivation.done = end;
+  return end >= derivation.iterations;
+}
+
+// Takes seconds on a phone (Hermes has no JIT), so it runs in slices of about `sliceMs` and hands the JS thread
+// back between them: the screen keeps responding meanwhile. An aborted signal stops it at the next slice.
+export async function pbkdf2Sha256(
+  password: Uint8Array,
+  salt: Uint8Array,
+  iterations: number,
+  sliceMs = 16,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  const derivation = start(password, salt, iterations);
+  let sliceStarted = Date.now();
+  while (!advance(derivation, 64)) {
+    if (Date.now() - sliceStarted < sliceMs) continue;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (signal?.aborted) throw new Error("The PIN check was stopped.");
+    sliceStarted = Date.now();
+  }
+  return bytes(derivation.result);
 }

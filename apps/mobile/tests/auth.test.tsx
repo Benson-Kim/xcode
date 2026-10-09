@@ -7,8 +7,14 @@ import {
   apiGet,
   keepSession,
 } from "../src/lib/api";
-import { loadSession, saveOfflineTries, saveSession } from "../src/lib/storage";
-import { fakeApi, people, tokens } from "./fakeApi";
+import {
+  loadSession,
+  matchesPinCheck,
+  saveOfflineTries,
+  savePinCheck,
+  saveSession,
+} from "../src/lib/storage";
+import { accessToken, fakeApi, people, tokens } from "./fakeApi";
 import { startApp, storedText, trustPhone, typePin } from "./helpers";
 
 const DEVICE = "stable-test-device";
@@ -438,6 +444,132 @@ it("holds the keypad while an offline unlock is being checked", async () => {
     await screen.findByText("Hi Antony");
   } finally {
     check.mockRestore();
+  }
+});
+
+// The phone's own check takes seconds, so when the server is slow to answer it starts while the request waits,
+// and stops once the server answers.
+it("starts the offline PIN check while a slow unlock waits, and stops it when the server answers", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  let answer = () => {};
+  api.on(
+    "auth/unlock",
+    () =>
+      new Promise<[number, unknown]>((resolve) => {
+        answer = () => resolve([200, tokens()]);
+      }),
+  );
+  api.on("auth/session", [200, people.owner]);
+  const cancel = jest.fn();
+  const early = jest
+    .spyOn(require("../src/lib/storage"), "startPinMatch")
+    .mockImplementation(() => ({ result: new Promise(() => {}), cancel }));
+  try {
+    await startApp();
+    await screen.findByText("Welcome back, Antony");
+    await typePin("4826");
+    await waitFor(() => expect(early).toHaveBeenCalledWith("4826"), {
+      timeout: 3000,
+    });
+    expect(cancel).not.toHaveBeenCalled();
+    await act(async () => answer());
+    await screen.findByText("Hi Antony");
+    expect(cancel).toHaveBeenCalled();
+  } finally {
+    early.mockRestore();
+  }
+});
+
+it("wakes the server when the first digit of a PIN is typed", async () => {
+  await trustPhone();
+  fakeApi().on("auth/unlock", [200, tokens()]);
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+  const wake = jest.spyOn(require("../src/lib/api"), "wakeServer");
+  try {
+    await typePin("4");
+    expect(wake).toHaveBeenCalledTimes(1);
+    await typePin("82");
+    expect(wake).toHaveBeenCalledTimes(1);
+  } finally {
+    wake.mockRestore();
+  }
+});
+
+it("shows at once that the PIN is being checked", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  let answer = () => {};
+  api.on(
+    "auth/unlock",
+    () =>
+      new Promise<[number, unknown]>((resolve) => {
+        answer = () => resolve([200, tokens()]);
+      }),
+  );
+  api.on("auth/session", [200, people.owner]);
+  await startApp();
+  await screen.findByText("Welcome back, Antony");
+
+  await typePin("4826");
+  expect(
+    await screen.findByRole("progressbar", { name: "Checking your PIN…" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "1" })).toBeDisabled();
+  await act(async () => answer());
+  await screen.findByText("Hi Antony");
+  expect(screen.queryByText("Checking your PIN…")).toBeNull();
+});
+
+it("opens the app without waiting for the offline PIN check, and keeps the check once it is derived", async () => {
+  await trustPhone();
+  const api = fakeApi();
+  api.on("auth/unlock", [200, tokens()]);
+  api.on("auth/session", [200, people.owner]);
+  const pbkdf2 = require("../src/lib/pbkdf2");
+  const real = pbkdf2.pbkdf2Sha256;
+  let release = () => {};
+  const derive = jest.spyOn(pbkdf2, "pbkdf2Sha256").mockImplementationOnce(
+    (...args: unknown[]) =>
+      new Promise((resolve) => {
+        release = () => resolve(real(...args));
+      }),
+  );
+  try {
+    await startApp();
+    await screen.findByText("Welcome back, Antony");
+    await typePin("4826");
+    await screen.findByText("Hi Antony");
+    expect(derive).toHaveBeenCalledTimes(1);
+    const items = require("expo-secure-store").__items as Map<string, string>;
+    expect(items.has("xcode.pin-check")).toBe(false);
+
+    release();
+    expect(await matchesPinCheck("4826")).toBe(true);
+    expect(await matchesPinCheck("4827")).toBe(false);
+  } finally {
+    derive.mockRestore();
+  }
+});
+
+it("does not derive the PIN check again when an unlock shows the PIN has not changed", async () => {
+  const token = accessToken(people.owner.userId, 7);
+  await trustPhone();
+  await savePinCheck("4826", token);
+  const api = fakeApi();
+  api.on("auth/unlock", [200, { ...tokens(), accessToken: token }]);
+  api.on("auth/session", [200, people.owner]);
+  const derive = jest.spyOn(require("../src/lib/pbkdf2"), "pbkdf2Sha256");
+  try {
+    await startApp();
+    await screen.findByText("Welcome back, Antony");
+    await typePin("4826");
+    await screen.findByText("Hi Antony");
+    expect(derive).not.toHaveBeenCalled();
+    expect(await matchesPinCheck("4826")).toBe(true);
+  } finally {
+    derive.mockRestore();
   }
 });
 
@@ -916,11 +1048,14 @@ it("holds the keypad while a code is requested from the pad", async () => {
 });
 
 it("locks again when the app goes to the background", async () => {
-  let change: (state: "active" | "background") => void = () => {};
+  // Every listener hears the change, as AppState tells them all.
+  const handlers: ((state: "active" | "background") => void)[] = [];
+  const change = (state: "active" | "background") =>
+    handlers.forEach((handler) => handler(state));
   const listener = jest
     .spyOn(AppState, "addEventListener")
     .mockImplementation((_, handler) => {
-      change = handler;
+      handlers.push(handler);
       return { remove: jest.fn() };
     });
   await trustPhone();

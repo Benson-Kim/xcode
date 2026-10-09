@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it } from "vitest";
 
 import { PeopleAccessView } from "../components/PeopleAccessView";
-import { fakeApi } from "./fakeApi";
+import { fakeApi, type Sent } from "./fakeApi";
 import {
   catalogFixture,
   peoplePage,
@@ -242,16 +242,33 @@ it("filters the list by role and by where each person is with signing in", async
     person("b", "Baraka", "Owner", { hasPin: false }),
     person("c", "Chebet", "Revenue clerk", { active: false }),
   ];
-  fake.on(PEOPLE, [200, peoplePage(people)]);
+  // The server filters: active has a PIN, waiting has none yet, none is switched off.
+  const state = (x: (typeof people)[number]) =>
+    !x.active ? "none" : x.hasPin ? "active" : "waiting";
+  const filtered = (sent: Sent) => {
+    const query = new URL(sent.path, "http://localhost").searchParams;
+    const role = query.get("role");
+    const status = query.get("status");
+    return [
+      200,
+      peoplePage(
+        people.filter(
+          (x) => (!role || x.role === role) && (!status || state(x) === status),
+        ),
+      ),
+    ] as const;
+  };
+  fake.on(PEOPLE, filtered);
+  fake.on("setup/people?*", filtered);
   renderInApp(<PeopleAccessView />, { permissions: ["people.view"] });
   expect(await screen.findByText("3 people")).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Sign in"), {
     target: { value: "waiting" },
   });
-  expect(screen.getByText("1 person")).toBeInTheDocument();
+  expect(await screen.findByText("1 person")).toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "Baraka Test" }),
+    await screen.findByRole("button", { name: "Baraka Test" }),
   ).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Sign in"), {
@@ -260,7 +277,7 @@ it("filters the list by role and by where each person is with signing in", async
   fireEvent.change(screen.getByLabelText("Role"), {
     target: { value: "Revenue clerk" },
   });
-  expect(screen.getByText("2 people")).toBeInTheDocument();
+  expect(await screen.findByText("2 people")).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "Baraka Test" }),
   ).not.toBeInTheDocument();
@@ -269,8 +286,12 @@ it("filters the list by role and by where each person is with signing in", async
     target: { value: "none" },
   });
   expect(
-    screen.getByRole("button", { name: "Chebet Test" }),
+    await screen.findByRole("button", { name: "Chebet Test" }),
   ).toBeInTheDocument();
+  expect(
+    fake.calls.filter((call) => call.path.startsWith("setup/people?")).at(-1)
+      ?.path,
+  ).toBe("setup/people?role=Revenue+clerk&status=none&page=1&pageSize=25");
   expect(
     screen.queryByRole("button", { name: "Amina Test" }),
   ).not.toBeInTheDocument();

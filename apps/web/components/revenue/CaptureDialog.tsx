@@ -19,11 +19,11 @@ export function CaptureDialog({
             key={`${capture.vehicleId}:${capture.date}`}
             vehicle={vehicle}
             cell={cell}
-            info={capture.info}
+            gap={capture.gap}
             canChooseReason={canChooseReason}
             onCancel={flow.close}
             onDone={() => flow.advance(capture)}
-            onOpenDay={flow.fillFirst}
+            onOpenGap={flow.openGap}
             reload={async () =>
               (
                 await revenueApi.vehicleWeek(capture.vehicleId, capture.date)

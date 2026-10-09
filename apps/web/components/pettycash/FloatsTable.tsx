@@ -5,13 +5,13 @@ import type { PettyCashFloat } from "@xcode/shared/pettyCash";
 import { useFormats } from "../../lib/formats";
 import { CellNote, DataTable, SubHeading, Td, Tr } from "../ui";
 
-const COLUMNS = [
+const columns = (currency: string) => [
   { label: "Manager" },
-  { label: "Cash received", numeric: true },
-  { label: "Money out", numeric: true },
-  { label: "Cash in hand", numeric: true },
-  { label: "Waiting", numeric: true },
-  { label: "Approved", numeric: true },
+  { label: `Cash received (${currency})`, numeric: true },
+  { label: `Money out (${currency})`, numeric: true },
+  { label: `Cash in hand (${currency})`, numeric: true },
+  { label: `Waiting (${currency})`, numeric: true },
+  { label: `Approved (${currency})`, numeric: true },
   { label: "Last cash" },
 ];
 
@@ -24,11 +24,12 @@ export function FloatsTable({
   loading: boolean;
 }) {
   const formats = useFormats();
+  const currency = formats.currencyCode();
   return (
     <>
       <SubHeading className="mt-6">Floats</SubHeading>
       <DataTable
-        columns={COLUMNS}
+        columns={columns(currency)}
         loading={loading}
         loadingLabel="Loading floats"
         isEmpty={!floats?.length}
@@ -41,21 +42,21 @@ export function FloatsTable({
               <strong>{float.name}</strong>
               {!float.active && <CellNote>Not active</CellNote>}
             </Td>
-            <Td label="Cash received" numeric>
-              {formats.kes(float.cashReceived)}
+            <Td label={`Cash received (${currency})`} numeric>
+              {formats.formatNumber(float.cashReceived)}
             </Td>
-            <Td label="Money out" numeric>
-              {formats.kes(float.expenses + float.creditNotes)}
+            <Td label={`Money out (${currency})`} numeric>
+              {formats.formatNumber(float.expenses + float.creditNotes)}
             </Td>
             <Td
-              label="Cash in hand"
+              label={`Cash in hand (${currency})`}
               numeric
               className={float.balance < 0 ? "text-red" : undefined}
             >
-              <strong>{formats.kes(float.balance)}</strong>
+              <strong>{formats.formatNumber(float.balance)}</strong>
             </Td>
-            <Td label="Waiting" numeric>
-              {formats.kes(float.waiting)}
+            <Td label={`Waiting (${currency})`} numeric>
+              {formats.formatNumber(float.waiting)}
               {float.waitingCount > 0 && (
                 <CellNote>
                   {float.waitingCount === 1
@@ -64,8 +65,8 @@ export function FloatsTable({
                 </CellNote>
               )}
             </Td>
-            <Td label="Approved" numeric>
-              {formats.kes(float.approved)}
+            <Td label={`Approved (${currency})`} numeric>
+              {formats.formatNumber(float.approved)}
             </Td>
             <Td label="Last cash">
               {float.lastCashOn

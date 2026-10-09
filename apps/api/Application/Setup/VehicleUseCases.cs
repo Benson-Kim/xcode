@@ -9,11 +9,11 @@ public sealed class VehicleUseCases(ISetupExecution execution, ISetupRepository 
     // Someone who may only see investment still has to find the vehicle it belongs to; every change stays vehicles.manage.
     private static readonly string[] Listers = [PermissionKeys.VehiclesManage, PermissionKeys.InvestView];
 
-    public Task<Page<VehicleDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read("", async actor =>
+    public Task<Page<VehicleDto>> List(Guid? companyId, int page, int pageSize, CancellationToken ct) => execution.Read("", async actor =>
     {
         await SetupPermissions.RequireAny(organizations, actor, Listers, ct);
         SetupPagination.Validate(page, pageSize);
-        var vehicles = await repository.Vehicles(actor, page, pageSize, ct);
+        var vehicles = await repository.Vehicles(actor, companyId, page, pageSize, ct);
         // Reaching a vehicle's investment needs its registration and company, not the targets it is run against or
         // its scheduled items.
         return actor.Permissions.Contains(PermissionKeys.VehiclesManage) ? vehicles : vehicles with

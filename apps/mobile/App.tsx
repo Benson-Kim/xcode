@@ -32,8 +32,10 @@ import { SessionEndedError, forgetThisPhone } from "./src/lib/api";
 import { FormatsContext } from "./src/lib/formats";
 import { hasConnection } from "./src/lib/network";
 import { loadPerson, loadSession, type StoredPerson } from "./src/lib/storage";
+import { useServerWake } from "./src/lib/useServerWake";
 import { fetchPerson } from "./src/session";
 import { AppShell } from "./src/shell/AppShell";
+import { UpdateNotice } from "./src/shell/UpdateBanner";
 import { ErrorBoundary, ThemeProvider } from "./src/ui";
 
 type State =
@@ -54,6 +56,7 @@ export default function App() {
   const [state, setState] = useState<State>({ phase: "starting" });
   // The organization's branding, formats and the person's display preferences, as last saved on XCODE Web.
   const [appearance, setAppearance] = useState<Appearance | null>(null);
+  useServerWake();
 
   useEffect(() => {
     let mounted = true;
@@ -204,6 +207,7 @@ export default function App() {
                   : undefined
               }
             >
+              {ready && <UpdateNotice />}
               {!ready ? (
                 <View style={styles.starting}>
                   <ActivityIndicator

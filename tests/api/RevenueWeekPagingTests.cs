@@ -219,8 +219,8 @@ public sealed class RevenueWeekPagingTests : IDisposable
         Assert.Equal(1, behind[0].GetProperty("version").GetInt64());
         Assert.Equal(JsonValueKind.Null, behind[1].GetProperty("amount").ValueKind);
         Assert.Equal(JsonValueKind.Null, behind[1].GetProperty("version").ValueKind);
-        // The owner may correct the recorded day; the earliest missing day opens and a later one stays shut until it is filled.
-        Assert.Equal([true, true, false, false], behind.Take(4).Select(x => x.GetProperty("canEdit").GetBoolean()));
+        // The owner may correct the recorded day and capture every missing day, in any order.
+        Assert.Equal([true, true, true, true], behind.Take(4).Select(x => x.GetProperty("canEdit").GetBoolean()));
         Assert.Equal(1000m, behind[1].GetProperty("expected").GetDecimal());
         var midweek = rows[4].GetProperty("days").EnumerateArray().ToArray();
         Assert.Equal(("none", 0m), (midweek[0].GetProperty("status").GetString(), midweek[0].GetProperty("expected").GetDecimal()));

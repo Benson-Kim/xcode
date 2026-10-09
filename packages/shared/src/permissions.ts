@@ -69,6 +69,8 @@ export const canSee = (rule: NavRule, can: PermissionCheck): boolean =>
 export const NAV = {
   dashboard: { label: "Dashboard" },
   revenue: { label: "Revenue", any: ["revenue.view"] },
+  centralexpenses: { label: "Central expenses", any: ["expenses.view"] },
+  reports: { label: "Reports", any: ["reports.view"] },
   pettycash: { label: "Petty cash", any: PETTY_CASH_PERMISSIONS },
   companies: { label: "PSV companies", any: ["companies.manage"] },
   vehicles: { label: "Vehicles", any: ["vehicles.manage", "invest.view"] },
@@ -90,18 +92,34 @@ export type NavId = keyof typeof NAV;
 export const PRIMARY_NAV = [
   "dashboard",
   "revenue",
+] as const satisfies readonly NavId[];
+
+export const EXPENSES_NAV = [
+  "centralexpenses",
   "pettycash",
+  "recurring",
 ] as const satisfies readonly NavId[];
 
 export const SETUP_NAV = [
   "companies",
   "vehicles",
   "expenses",
-  "recurring",
   "people",
   "history",
   "settings",
 ] as const satisfies readonly NavId[];
+
+export type NavSection =
+  | { kind: "items"; items: readonly NavId[] }
+  | { kind: "group"; id: string; label: string; items: readonly NavId[] };
+
+// The menu top to bottom: loose items, or a collapsible group with its own heading.
+export const NAV_SECTIONS: readonly NavSection[] = [
+  { kind: "items", items: PRIMARY_NAV },
+  { kind: "group", id: "expenses", label: "Expenses", items: EXPENSES_NAV },
+  { kind: "items", items: ["reports"] },
+  { kind: "group", id: "setup", label: "Setup", items: SETUP_NAV },
+];
 
 export const DASHBOARD_CARDS = [
   { permission: "dash.capture", title: "Today's revenue" },

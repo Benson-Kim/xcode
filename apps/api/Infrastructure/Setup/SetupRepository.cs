@@ -10,8 +10,10 @@ using Microsoft.EntityFrameworkCore;
 namespace Auth.Infrastructure.Setup;
 
 public sealed class SetupRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsChangeLog log,
-    HistoryCountCache? counts = null) : ISetupRepository
+    HistoryCountCache? counts = null, IFleetPostings? fleetPostings = null) : ISetupRepository
 {
+    private readonly IFleetPostings postings = fleetPostings ?? new FleetPostings(db);
+
     private IQueryable<FleetVehicle> VisibleVehicles(SetupActor actor) => db
         .Set<FleetVehicle>()
         .Where(v => actor.AllCompanies || actor.CompanyIds.Contains(v.CompanyId) || actor.VehicleIds.Contains(v.Id));
@@ -74,9 +76,11 @@ public sealed class SetupRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsC
         .Set<PsvCompany>()
         .AnyAsync(c => c.OrganizationId == organizationId && c.NormalizedName == normalizedName && c.Id != except, ct);
 
-    public async Task<Page<VehicleDto>> Vehicles(SetupActor actor, int page, int pageSize, CancellationToken ct)
+    public async Task<Page<VehicleDto>> Vehicles(SetupActor actor, Guid? companyId, int page, int pageSize, CancellationToken ct)
     {
         var query = VisibleVehicles(actor).AsNoTracking();
+        if (companyId is not null)
+            query = query.Where(v => v.CompanyId == companyId.Value);
         var total = await query.CountAsync(ct);
         var rows = await query
             .OrderBy(v => v.Registration)
@@ -168,14 +172,34 @@ public sealed class SetupRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsC
     public async Task<string> Currency(CancellationToken ct) =>
         await db.Localizations.AsNoTracking().Select(x => x.Currency).SingleOrDefaultAsync(ct) ?? new OrganizationLocalization().Currency;
 
-    public async Task<Page<RecurringDto>> Recurring(SetupActor actor, int page, int pageSize, CancellationToken ct)
+    public async Task<Page<RecurringDto>> Recurring(SetupActor actor, RecurringFilter filter, int page, int pageSize, CancellationToken ct)
     {
-        var query = VisibleRecurring(actor).AsNoTracking();
+        var today = actor.Today;
+        var visible = VisibleVehicles(actor);
+        // Conditions on an item's current version: the one no later revision replaced.
+        var items = VisibleRecurring(actor).AsNoTracking();
+        if (filter.Kind is { } kind)
+            items = items.Where(i => i.Versions.Any(v => !i.Versions.Any(o => o.Revision > v.Revision) && v.Kind == kind));
+        if (filter.CompanyId is { } companyId)
+            items = items.Where(i => i.Versions.Any(v => !i.Versions.Any(o => o.Revision > v.Revision)
+                && v.Allocations.Any(a => visible.Any(x => x.Id == a.VehicleId && x.CompanyId == companyId))));
+        // An item runs while it has not stopped or ended and shares to a vehicle the person sees that is in the fleet today.
+        var query = items.Select(i => new
+        {
+            Item = i,
+            Running = (i.StoppedFrom == null || i.StoppedFrom > today) && i.Versions.Any(v =>
+                !i.Versions.Any(o => o.Revision > v.Revision) && (v.End == null || v.End >= today)
+                && v.Allocations.Any(a => visible.Any(x => x.Id == a.VehicleId && x.JoinedOn <= today && (x.LeftOn == null || x.LeftOn > today))))
+        });
+        if (filter.Running is { } running)
+            query = query.Where(x => x.Running == running);
         var total = await query.CountAsync(ct);
-        // Pages follow the current name, so page two continues where page one stopped.
+        // Running items first, then by current name, so page two continues where page one stopped.
         var ids = await query
-            .OrderBy(i => i.Versions.OrderByDescending(v => v.Revision).Select(v => v.Name).FirstOrDefault())
-            .ThenBy(i => i.Id)
+            .OrderBy(x => x.Running ? 0 : 1)
+            .ThenBy(x => x.Item.Versions.OrderByDescending(v => v.Revision).Select(v => v.Name).FirstOrDefault())
+            .ThenBy(x => x.Item.Id)
+            .Select(x => x.Item)
             .Skip((page - 1) * pageSize).Take(pageSize).Select(i => i.Id).ToListAsync(ct);
         var visibleIds = VisibleVehicles(actor).Select(v => v.Id);
         // Project the editor's shares, including retired vehicles so their history remains inspectable.
@@ -239,35 +263,16 @@ public sealed class SetupRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsC
         var first = from < vehicle.JoinedOn ? vehicle.JoinedOn : from;
         var last = through < actor.Today ? through : actor.Today;
         if (vehicle.LeftOn is { } left && left <= last) last = left.AddDays(-1);
-        // A bounded, deterministic projection of immutable schedule versions: due dates post automatically, without
-        // hard deletes or a request-path mutation. Only this vehicle's shares are loaded, one row per version however
-        // many vehicles an item is shared with, and each version's due dates are stepped (RecurringItem.DueBetween).
-        var items = await db.Set<RecurringItem>().AsNoTracking()
-            .Where(i => i.Versions.Any(v => v.Allocations.Any(a => a.VehicleId == vehicle.Id)))
-            .Include(i => i.Versions).ThenInclude(v => v.Allocations.Where(a => a.VehicleId == vehicle.Id))
-            .ToListAsync(ct);
         // Summed here: SQLite, used in tests, cannot sum decimals.
         var records = await db.Set<RevenueRecord>().AsNoTracking()
             .Where(r => r.VehicleId == vehicle.Id && r.BusinessDate >= first && r.BusinessDate <= last)
             .Select(r => new { r.BusinessDate, r.Amount })
             .ToListAsync(ct);
-        // Petty cash reaches the vehicle once it is approved, under its item's category.
-        var pettyCash = await db.Set<PettyCashEntry>().AsNoTracking()
-            .Where(e => e.VehicleId == vehicle.Id && e.Kind == PettyCashKind.Expense && e.Status == PettyCashStatus.Approved &&
-                e.RemovedAt == null && e.Date >= first && e.Date <= last)
-            .Join(db.Set<ExpenseItem>(), e => e.ExpenseItemId, i => i.Id, (e, i) => new { e.Id, e.Date, e.Total, i.Name, i.CategoryId })
-            .Join(db.Set<ExpenseCategory>(), x => x.CategoryId, c => c.Id, (x, c) => new PostingDto(x.Id, x.Id, x.Date, x.Name,
-                RecurringKind.Cost, x.Total, c.Bucket, "pettycash"))
-            .ToListAsync(ct);
-
-        var postings = items
-            .SelectMany(item => item.DueBetween(first, last)
-                .Select(due => (Due: due, Share: due.Version.Allocations.SingleOrDefault(a => a.VehicleId == vehicle.Id)))
-                .Where(x => x.Share is not null)
-                .Select(x => new PostingDto(item.Id, x.Due.Version.Id, x.Due.Date, x.Due.Version.Name, x.Due.Version.Kind,
-                    x.Share!.Amount, x.Due.Version.ReportedBucket())))
-            .Concat(pettyCash)
-            .OrderBy(p => p.Date).ThenBy(p => p.Name, StringComparer.Ordinal).ThenBy(p => p.ItemId)
+        // Scheduled due dates, approved petty cash and central expenses, each in the bucket of its category.
+        var postingDtos = (await postings.Load(actor, [vehicle], from, through, ct))
+            .Select(p => new PostingDto(p.Id, p.VersionId ?? p.Id, p.Date, p.Name, p.Kind, p.Amount, p.Bucket,
+                p.Source == PostingSource.Scheduled ? null : PostingSources.Word(p.Source)))
+            .OrderBy(p => p.Date).ThenBy(p => p.Name, StringComparer.Ordinal).ThenBy(p => p.ItemId).ThenBy(p => p.VersionId)
             .ToList();
 
         // The revenue module's expected figure: the dated weekly target / 7 for each active day, where today counts
@@ -279,13 +284,13 @@ public sealed class SetupRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsC
         for (var day = first; day <= last; day = day.AddDays(1))
             if (day < actor.Today || captured.Contains(day)) target += vehicle.TargetOn(day) / 7m;
 
-        decimal Bucket(ExpenseBucket bucket) => postings.Where(p => p.Kind == RecurringKind.Cost && p.Bucket == bucket).Sum(p => p.Amount);
+        decimal Bucket(ExpenseBucket bucket) => postingDtos.Where(p => p.Kind == RecurringKind.Cost && p.Bucket == bucket).Sum(p => p.Amount);
         var (repairs, charges, loans) = (Bucket(ExpenseBucket.RepairsAndMaintenance), Bucket(ExpenseBucket.RecurringCharges), Bucket(ExpenseBucket.LoanRepayments));
-        var savings = postings.Where(p => p.Kind == RecurringKind.Savings).Sum(p => p.Amount);
+        var savings = postingDtos.Where(p => p.Kind == RecurringKind.Savings).Sum(p => p.Amount);
         var moneyOut = repairs + charges + loans;
         var net = moneyIn - moneyOut;
         return new(vehicle.Id, from, through, moneyIn, decimal.Round(target, 2), repairs, charges, loans, moneyOut, net,
-            savings, net - savings, moneyOut, postings);
+            savings, net - savings, moneyOut, postingDtos);
     }
 
     public async Task<HistoryPage> History(SetupActor actor, HistoryFilter filter, int page, int pageSize, long? before, bool includeTotal, CancellationToken ct)
@@ -306,7 +311,7 @@ public sealed class SetupRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsC
             // organization-wide.
             query = query.Where(v =>
                 (v.Section == "companies" && companies.Contains(v.EntityId)) ||
-                ((v.Section == "vehicles" || v.Section == "investment" || v.Section == "revenue" || v.Section == "pettycash") &&
+                ((v.Section == "vehicles" || v.Section == "investment" || v.Section == "revenue" || v.Section == "pettycash" || v.Section == "centralexpenses") &&
                     v.VehicleId != null && vehicles.Contains(v.VehicleId.Value)) ||
                 (v.Section == "recurring" && completeItems.Contains(v.EntityId)) || v.Section == "expenses" ||
                 (v.Section == "people" && people.Contains(v.EntityId)));

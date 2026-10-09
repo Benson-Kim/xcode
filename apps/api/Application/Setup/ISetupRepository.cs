@@ -12,7 +12,7 @@ public interface ISetupRepository
     // change that would put a recorded day outside the vehicle's time in the fleet is refused (D4).
     Task<(DateOnly First, DateOnly Last)?> RecordedRevenueDays(Guid vehicleId, CancellationToken ct);
     Task<bool> CompanyNameExists(Guid organizationId, string normalizedName, Guid? except, CancellationToken ct);
-    Task<Page<VehicleDto>> Vehicles(SetupActor actor, int page, int pageSize, CancellationToken ct);
+    Task<Page<VehicleDto>> Vehicles(SetupActor actor, Guid? companyId, int page, int pageSize, CancellationToken ct);
     Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct);
     // One read each for many ids: an id missing from the result is outside the actor's scope or does not exist.
     Task<IReadOnlyDictionary<Guid, FleetVehicle>> VehiclesById(SetupActor actor, IEnumerable<Guid> ids, CancellationToken ct);
@@ -21,7 +21,7 @@ public interface ISetupRepository
     Task<IReadOnlyList<VehicleOption>> VehicleOptions(SetupActor actor, CancellationToken ct);
     Task<int> FirstDayOfWeek(CancellationToken ct);
     Task<string> Currency(CancellationToken ct);
-    Task<Page<RecurringDto>> Recurring(SetupActor actor, int page, int pageSize, CancellationToken ct);
+    Task<Page<RecurringDto>> Recurring(SetupActor actor, RecurringFilter filter, int page, int pageSize, CancellationToken ct);
     Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct);
     // Contract C6 for a vehicle already found in the actor's scope: figures over its active days from `from` through `through`.
     Task<VehicleReport> Report(SetupActor actor, FleetVehicle vehicle, DateOnly from, DateOnly through, CancellationToken ct);

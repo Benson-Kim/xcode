@@ -68,31 +68,16 @@ function ConflictDetail({
   );
 }
 
-function EntryActions({
-  entry,
-  queue,
-  onOpenDay,
-}: Entry & { onOpenDay: (date: string) => void }) {
-  const formats = useFormats();
+function EntryActions({ entry, queue }: Entry) {
   return (
     <View style={styles.actions}>
-      {entry.state === "blocked" && entry.earliestMissing ? (
-        <Button
-          tone="outline"
-          onPress={() => onOpenDay(entry.earliestMissing!)}
-          style={styles.flexButton}
-        >
-          {`Open ${formats.formatDateOnly(entry.earliestMissing)}`}
-        </Button>
-      ) : (
-        <Button
-          tone="outline"
-          onPress={() => void queue.retry(entry)}
-          style={styles.flexButton}
-        >
-          Try again
-        </Button>
-      )}
+      <Button
+        tone="outline"
+        onPress={() => void queue.retry(entry)}
+        style={styles.flexButton}
+      >
+        Try again
+      </Button>
       <Button
         tone="outline"
         onPress={() => void queue.discard(entry)}
@@ -108,10 +93,8 @@ function QueueEntry({
   entry,
   queue,
   canReplace,
-  onOpenDay,
 }: Entry & {
   canReplace: (entry: QueuedCapture) => boolean;
-  onOpenDay: (date: string) => void;
 }) {
   const { colors } = useTheme();
   const formats = useFormats();
@@ -123,15 +106,11 @@ function QueueEntry({
       ]}
     >
       <Text weight="bold">{`${entry.registration}, ${formats.formatWeekdayDate(entry.date)}`}</Text>
-      <Text style={{ fontSize: 14 }}>
-        {entry.state === "blocked" && entry.earliestMissing
-          ? `Capture ${formats.formatDateOnly(entry.earliestMissing)} first.`
-          : entry.message}
-      </Text>
+      <Text style={{ fontSize: 14 }}>{entry.message}</Text>
       {entry.state === "conflict" ? (
         <ConflictDetail entry={entry} queue={queue} canReplace={canReplace} />
       ) : (
-        <EntryActions entry={entry} queue={queue} onOpenDay={onOpenDay} />
+        <EntryActions entry={entry} queue={queue} />
       )}
     </View>
   );
@@ -141,11 +120,9 @@ function QueueEntry({
 export function QueuePanel({
   queue,
   canReplace,
-  onOpenDay,
 }: {
   queue: RevenueQueue;
   canReplace: (entry: QueuedCapture) => boolean;
-  onOpenDay: (date: string) => void;
 }) {
   const { colors } = useTheme();
   const offline = !useOnline();
@@ -203,7 +180,6 @@ export function QueuePanel({
             entry={entry}
             queue={queue}
             canReplace={canReplace}
-            onOpenDay={onOpenDay}
           />
         ))}
     </View>

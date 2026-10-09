@@ -11,7 +11,6 @@ import {
   pettyCashTotal,
   type PettyCashEntry,
   type PettyCashHolder,
-  type PettyCashItemOption,
   type PettyCashKind,
   type PettyCashOptions,
   type PettyCashPermissions,
@@ -30,10 +29,11 @@ import {
   Field,
   FormActions,
   Grid2,
-  SelectInput,
+  SearchSelect,
   TextInput,
 } from "../ui";
 import { AmountInput } from "./AmountInput";
+import { itemOptions } from "./itemOptions";
 import {
   ENTRIES_PATH,
   entryPath,
@@ -105,16 +105,6 @@ export function EntryDialog({
       )}
     </Dialog>
   );
-}
-
-function groupItems(items: PettyCashItemOption[]) {
-  const groups = new Map<string, PettyCashItemOption[]>();
-  for (const item of items)
-    groups.set(item.categoryName, [
-      ...(groups.get(item.categoryName) ?? []),
-      item,
-    ]);
-  return [...groups];
 }
 
 function EntryForm({
@@ -310,18 +300,15 @@ function EntryForm({
         <>
           {pickHolder && (
             <Field id="pc-holder" label="Manager" error={errors.holder}>
-              <SelectInput
+              <SearchSelect
+                options={holderChoices.map((candidate) => ({
+                  value: candidate.id,
+                  label: `${candidate.name}${candidate.active ? "" : " (not active)"}`,
+                }))}
                 value={holder}
-                onChange={(event) => setHolder(event.target.value)}
-              >
-                <option value="">Choose the manager</option>
-                {holderChoices.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                    {candidate.active ? "" : " (not active)"}
-                  </option>
-                ))}
-              </SelectInput>
+                placeholder="Choose the manager"
+                onChange={setHolder}
+              />
             </Field>
           )}
           {kind === "credit" && (
@@ -351,36 +338,25 @@ function EntryForm({
       {kind === "expense" && (
         <>
           <Field id="pc-vehicle" label="Vehicle" error={errors.vehicle}>
-            <SelectInput
+            <SearchSelect
+              options={vehicleChoices.map((vehicle) => ({
+                value: vehicle.id,
+                label: vehicle.companyName
+                  ? `${vehicle.registration}, ${vehicle.companyName}`
+                  : vehicle.registration,
+              }))}
               value={vehicleId}
-              onChange={(event) => setVehicleId(event.target.value)}
-            >
-              <option value="">Choose the vehicle</option>
-              {vehicleChoices.map((vehicle) => (
-                <option key={vehicle.id} value={vehicle.id}>
-                  {vehicle.companyName
-                    ? `${vehicle.registration}, ${vehicle.companyName}`
-                    : vehicle.registration}
-                </option>
-              ))}
-            </SelectInput>
+              placeholder="Choose the vehicle"
+              onChange={setVehicleId}
+            />
           </Field>
           <Field id="pc-item" label="What it was for" error={errors.item}>
-            <SelectInput
+            <SearchSelect
+              options={itemOptions(itemChoices)}
               value={itemId}
-              onChange={(event) => setItemId(event.target.value)}
-            >
-              <option value="">Choose the item</option>
-              {groupItems(itemChoices).map(([category, group]) => (
-                <optgroup key={category} label={category}>
-                  {group.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </SelectInput>
+              placeholder="Choose the item"
+              onChange={setItemId}
+            />
           </Field>
         </>
       )}

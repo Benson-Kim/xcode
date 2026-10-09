@@ -62,7 +62,7 @@ public sealed record PettyCashFiguresDto(decimal OpeningBalance, decimal CashRec
 public sealed record PettyCashFloatDto(Guid HolderId, string Name, bool Active, decimal CashReceived, decimal CreditNotes, decimal Expenses,
     decimal Waiting, int WaitingCount, decimal Approved, decimal SentBack, decimal Balance, DateOnly? LastCashOn);
 
-// Period is "day" or "week"; From and To are the first and last day it covers.
+// Period is "day", "week", or "range" for a first and last day asked for; From and To are the days it covers.
 public sealed record PettyCashOverviewDto(DateOnly BusinessDate, DateOnly Date, string Period, DateOnly From, DateOnly To,
     PettyCashPermissionsDto Permissions, IReadOnlyList<PettyCashHolderDto> Holders, PettyCashFiguresDto Figures,
     IReadOnlyList<PettyCashFloatDto> Floats);
@@ -113,6 +113,11 @@ public sealed record PettyCashFilter(DateOnly? From, DateOnly? To, Guid? HolderI
 public sealed record PettyCashEntryRow(PettyCashEntry Entry, string HolderName, string? Registration, string? ExpenseItemName,
     ExpenseBucket? Bucket, string? ReviewedByName, string RecordedByName);
 
+// An entry as the reports read it, with its item's name and category.
+public sealed record PettyCashReportRow(Guid Id, PettyCashKind Kind, PettyCashStatus? Status, DateOnly Date, Guid HolderId,
+    Guid? VehicleId, Guid? ExpenseItemId, string? ItemName, string? CategoryName, decimal Units, decimal UnitAmount, decimal Total,
+    string? Payee, string? SentBackNote);
+
 // Sums of one holder's entries of one kind and status, before, within and after a window of dates.
 public sealed record PettyCashTally(Guid HolderId, PettyCashKind Kind, PettyCashStatus? Status, int Period, decimal Total, int Count,
     DateOnly Latest)
@@ -145,6 +150,9 @@ public interface IPettyCashRepository
     Task<decimal> Balance(Guid holderId, CancellationToken ct);
     Task<Page<PettyCashEntryRow>> Entries(SetupActor actor, IReadOnlyCollection<Guid> holderIds, PettyCashFilter filter, int page, int pageSize,
         CancellationToken ct);
+    // Every entry the actor may see on these floats up to a date, oldest first; from and a status narrow them.
+    Task<IReadOnlyList<PettyCashReportRow>> ReportRows(SetupActor actor, IReadOnlyCollection<Guid> holderIds, DateOnly? from, DateOnly through,
+        PettyCashStatus? status, CancellationToken ct);
     Task<PettyCashEntryRow?> Row(SetupActor actor, Guid id, CancellationToken ct);
     // The entry if the actor can see it and it is not removed, tracked for a change.
     Task<PettyCashEntry?> Entry(SetupActor actor, Guid id, CancellationToken ct);

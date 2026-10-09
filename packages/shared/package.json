@@ -9,10 +9,13 @@
     "./auth": "./src/auth.ts",
     "./capture": "./src/capture.ts",
     "./dates": "./src/dates.ts",
+    "./expenses": "./src/expenses.ts",
     "./format": "./src/format.ts",
     "./revenue": "./src/revenue.ts",
     "./pettyCash": "./src/pettyCash.ts",
+    "./periods": "./src/periods.ts",
     "./permissions": "./src/permissions.ts",
+    "./reports": "./src/reports.ts",
     "./tokens": "./src/tokens.ts"
   },
   "scripts": {

@@ -164,6 +164,36 @@ public sealed class PettyCashTests : IDisposable
         await AssertBadRequest(await clerk.GetAsync($"/setup/pettycash/overview?period=month"), "Choose a day or a week.");
     }
 
+    // Any period: opening at the start of the first day, closing at the end of the last; the float is still to date.
+    [Fact]
+    public async Task AnyPeriodShowsItsFiguresFromTheFirstDayToTheLast()
+    {
+        var (w, owner) = await Arrange();
+        using var clerk = await app.SignIn(Clerk);
+        await Saved(await Post(owner, Cash(w.Today.AddDays(-10), w.Clerk, 10000m)));
+        await Saved(await Post(clerk, Expense(w.Today.AddDays(-6), w.Vehicle, w.Item, 1000m)));
+        await Saved(await Post(owner, Cash(w.Today.AddDays(-5), w.Clerk, 2000m)));
+        await Saved(await Post(clerk, Expense(w.Today.AddDays(-4), w.Vehicle, w.Item, 700m)));
+        await Saved(await Post(clerk, Credit(w.Today, 300m, "Kamau Motors", "Paid for parts")));
+        string Range(DateOnly from, DateOnly to) => $"/setup/pettycash/overview?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}";
+
+        var range = (await clerk.GetFromJsonAsync<PettyCashOverviewDto>(Range(w.Today.AddDays(-6), w.Today.AddDays(-4))))!;
+        Assert.Equal(("range", w.Today.AddDays(-4), w.Today.AddDays(-6), w.Today.AddDays(-4)), (range.Period, range.Date, range.From, range.To));
+        Assert.Equal(new PettyCashFiguresDto(10000m, 2000m, 1700m, 0m, 1700m, 10300m), range.Figures);
+        Assert.Equal(10000m, range.Floats.Single().Balance);
+
+        // A period running past today ends where the entries do; one day is a day; date and period are then ignored.
+        var past = (await clerk.GetFromJsonAsync<PettyCashOverviewDto>(Range(w.Today.AddDays(-1), w.Today.AddDays(5)) + "&period=week"))!;
+        Assert.Equal(("range", 10300m, 300m, 10000m), (past.Period, past.Figures.OpeningBalance, past.Figures.CreditNotes, past.Figures.ClosingBalance));
+        var one = (await clerk.GetFromJsonAsync<PettyCashOverviewDto>(Range(w.Today, w.Today)))!;
+        Assert.Equal(("day", w.Today, w.Today), (one.Period, one.From, one.To));
+
+        await AssertBadRequest(await clerk.GetAsync($"/setup/pettycash/overview?from={w.Today:yyyy-MM-dd}"), "Choose the first and last day.");
+        await AssertBadRequest(await clerk.GetAsync(Range(w.Today, w.Today.AddDays(-1))), "The first date cannot be after the last date.");
+        await AssertBadRequest(await clerk.GetAsync(Range(w.Today.AddDays(-400), w.Today)), "Choose at most 367 days.");
+        await AssertBadRequest(await clerk.GetAsync(Range(w.Today.AddDays(1), w.Today.AddDays(2))), "Choose a period that starts on or before today.");
+    }
+
     [Fact]
     public async Task SpendingIsOnlyOnYourOwnFloatAndForYourOwnVehicles()
     {

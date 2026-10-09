@@ -11,7 +11,8 @@ export const metadata: Metadata = {
 // The theme the browser last painted, read before React runs so that a person who chose the dark theme does not
 // see a light page flash on every load. applyAppearance writes it; the shell replaces it once the appearance
 // arrives, which is the only thing that can tell us what the organization allows. The script carries the request's
-// nonce because the policy in proxy.ts names no other script source.
+// nonce because the policy in proxy.ts names no other script source. It sets data-theme on <html> before hydration,
+// so that element alone is told the server's attributes may differ (React checks it one level deep only).
 const PRE_PAINT =
   "try{var t=localStorage.getItem('xcode.theme');" +
   "if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';" +
@@ -22,7 +23,7 @@ export default async function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
-    <html lang="en-GB">
+    <html lang="en-GB" suppressHydrationWarning>
       <head>
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: PRE_PAINT }} />
       </head>

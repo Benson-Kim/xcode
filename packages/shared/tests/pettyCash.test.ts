@@ -85,6 +85,16 @@ it("builds the overview path for a day or a week", () => {
   ).toBe("setup/pettycash/overview?date=2026-10-07&period=week&holderId=h1");
 });
 
+it("builds the overview path for any span with from and to", () => {
+  expect(
+    pettyCashOverviewPath({
+      from: "2026-10-01",
+      to: "2026-10-09",
+      holderId: "h1",
+    }),
+  ).toBe("setup/pettycash/overview?from=2026-10-01&to=2026-10-09&holderId=h1");
+});
+
 it("opens petty cash for any of its four permissions only", () => {
   for (const key of [
     "pettycash.spend",

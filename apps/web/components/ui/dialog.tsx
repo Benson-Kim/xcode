@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 
 import { IconButton } from "./button";
+import { cn } from "./cn";
 import { CloseIcon } from "./icons";
 
 // A modal panel with a sticky title bar (.access-dialog). Escape and the close button both call onClose, once.
@@ -10,11 +11,17 @@ import { CloseIcon } from "./icons";
 export function Dialog({
   open,
   title,
+  subtitle,
+  size = "sm",
   onClose,
   children,
 }: {
   open: boolean;
   title: string;
+  // md fits a table, such as a day's revenue for every vehicle (dialog.md, 700px).
+  size?: "sm" | "md";
+  // A line under the title, such as who recorded what is being changed.
+  subtitle?: string;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -40,12 +47,22 @@ export function Dialog({
       onClose={() => {
         if (openRef.current) onClose();
       }}
-      className="m-auto max-h-[calc(100%-64px)] w-[min(520px,calc(100%-32px))] rounded-2xl border border-card-line p-0 text-navy backdrop:bg-navy/40"
+      className={cn(
+        "m-auto max-h-[calc(100%-64px)] rounded-2xl border border-card-line p-0 text-navy backdrop:bg-navy/40",
+        size === "md"
+          ? "w-[min(700px,calc(100%-32px))]"
+          : "w-[min(520px,calc(100%-32px))]",
+      )}
     >
       <div className="sticky top-0 flex items-center justify-between border-b border-card-line bg-surface px-5 py-4">
-        <h2 id={titleId} className="m-0 text-xl font-bold">
-          {title}
-        </h2>
+        <div className="min-w-0">
+          <h2 id={titleId} className="m-0 text-xl font-bold">
+            {title}
+          </h2>
+          {subtitle && (
+            <p className="m-0 mt-0.5 text-sm text-grey">{subtitle}</p>
+          )}
+        </div>
         <IconButton aria-label="Close" onClick={onClose}>
           <CloseIcon />
         </IconButton>

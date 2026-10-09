@@ -6,11 +6,12 @@ namespace Auth.Application.Setup;
 
 public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepository repository)
 {
-    public Task<Page<RecurringDto>> List(int page, int pageSize, CancellationToken ct) => execution.Read(PermissionKeys.CommitmentsView, actor =>
-    {
-        SetupPagination.Validate(page, pageSize);
-        return repository.Recurring(actor, page, pageSize, ct);
-    }, ct);
+    public Task<Page<RecurringDto>> List(RecurringFilter filter, int page, int pageSize, CancellationToken ct) =>
+        execution.Read(PermissionKeys.CommitmentsView, actor =>
+        {
+            SetupPagination.Validate(page, pageSize);
+            return repository.Recurring(actor, filter, page, pageSize, ct);
+        }, ct);
 
     public Task<IReadOnlyList<VehicleOption>> VehicleOptions(CancellationToken ct) =>
         execution.Read(PermissionKeys.CommitmentsManage, actor => repository.VehicleOptions(actor, ct), ct);

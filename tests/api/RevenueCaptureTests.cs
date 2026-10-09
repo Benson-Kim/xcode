@@ -22,7 +22,7 @@ public sealed class RevenueCaptureTests : IDisposable
     }
 
     [Fact]
-    public async Task EarliestMissingComesFromTheWholeHistoryAndLaterMissingDaysCannotBeOpened()
+    public async Task EarliestMissingComesFromTheWholeHistoryAndEveryMissingDayCanBeOpened()
     {
         var (today, company) = await Arrange();
         var joined = today.AddDays(-20);
@@ -47,16 +47,16 @@ public sealed class RevenueCaptureTests : IDisposable
         Assert.Null(Of(complete).On(today).Version);
 
         Assert.Equal(monday.AddDays(-2), Of(behind).EarliestMissing);
-        Assert.All(Of(behind).Days.Where(x => x.Date <= today), x => Assert.False(x.CanEdit));
+        Assert.All(Of(behind).Days.Where(x => x.Date <= today), x => Assert.True(x.CanEdit));
 
         Assert.Equal(joined.AddDays(5), Of(holed).EarliestMissing);
-        Assert.False(Of(holed).On(today).CanEdit);
+        Assert.True(Of(holed).On(today).CanEdit);
 
         Assert.Equal(today.AddDays(-1), Of(midweek).EarliestMissing);
         Assert.Equal("none", Of(midweek).On(monday).Status);
         Assert.Equal(0m, Of(midweek).On(monday).Expected);
         Assert.True(Of(midweek).On(today.AddDays(-1)).CanEdit);
-        Assert.False(Of(midweek).On(today).CanEdit);
+        Assert.True(Of(midweek).On(today).CanEdit);
         Assert.Equal(1000m, Of(midweek).TotalExpected);
 
         Assert.Null(Of(left).EarliestMissing);
@@ -85,8 +85,10 @@ public sealed class RevenueCaptureTests : IDisposable
         Assert.All(row.Days, x => Assert.Equal("none", x.Status));
     }
 
+    // A fleet without its history records from today; earlier days are filled if and when the history turns up,
+    // and until then the week keeps naming the earliest one missing.
     [Fact]
-    public async Task SavingPastAGapIsRefusedWithTheEarliestMissingDay()
+    public async Task SavingPastAGapIsAllowedAndTheGapStaysVisible()
     {
         var (today, company) = await Arrange();
         var monday = today.AddDays(-3);
@@ -94,16 +96,16 @@ public sealed class RevenueCaptureTests : IDisposable
         await Records(app, vehicle, today.AddDays(-20), monday.AddDays(-3));
 
         using var owner = await app.SignIn(Owner);
-        var skipped = await Put(owner, vehicle, today, amount: 1000m);
-        Assert.Equal(HttpStatusCode.BadRequest, skipped.StatusCode);
-        var problem = await Body(skipped);
-        Assert.Equal("Invalid setup change", problem.GetProperty("title").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(problem.GetProperty("detail").GetString()));
-        Assert.Equal($"{monday.AddDays(-2):yyyy-MM-dd}", problem.GetProperty("earliestMissing").GetString());
-
-        Assert.Equal(HttpStatusCode.OK, (await Put(owner, vehicle, monday.AddDays(-2), amount: 1000m)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Put(owner, vehicle, today, amount: 1000m)).StatusCode);
         var row = Assert.Single((await GetWeek(owner, $"?vehicleId={vehicle}")).Vehicles);
-        Assert.Equal(monday.AddDays(-1), row.EarliestMissing);
+        Assert.Equal(monday.AddDays(-2), row.EarliestMissing);
+        Assert.Equal("amount", row.Days.Single(x => x.Date == today).Status);
+
+        // A later earlier day, then the earliest: the gap closes from wherever the history comes in.
+        Assert.Equal(HttpStatusCode.OK, (await Put(owner, vehicle, monday, amount: 1000m)).StatusCode);
+        Assert.Equal(monday.AddDays(-2), Assert.Single((await GetWeek(owner, $"?vehicleId={vehicle}")).Vehicles).EarliestMissing);
+        Assert.Equal(HttpStatusCode.OK, (await Put(owner, vehicle, monday.AddDays(-2), amount: 1000m)).StatusCode);
+        Assert.Equal(monday.AddDays(-1), Assert.Single((await GetWeek(owner, $"?vehicleId={vehicle}")).Vehicles).EarliestMissing);
     }
 
     [Fact]

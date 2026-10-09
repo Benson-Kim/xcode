@@ -109,6 +109,30 @@ public sealed class PettyCashRepository(AuthDb db, IUnitOfWork unitOfWork, Setti
         return new Page<PettyCashEntryRow>(await Rows(entries, ct), page, pageSize, total);
     }
 
+    public async Task<IReadOnlyList<PettyCashReportRow>> ReportRows(SetupActor actor, IReadOnlyCollection<Guid> holderIds, DateOnly? from,
+        DateOnly through, PettyCashStatus? status, CancellationToken ct)
+    {
+        var query = Visible(actor).AsNoTracking().Where(e => holderIds.Contains(e.HolderId) && e.Date <= through);
+        if (from is { } start) query = query.Where(e => e.Date >= start);
+        if (status is { } wanted) query = query.Where(e => e.Status == wanted);
+        var entries = await query.OrderBy(e => e.Date).ThenBy(e => e.Id)
+            .Select(e => new { e.Id, e.Kind, e.Status, e.Date, e.HolderId, e.VehicleId, e.ExpenseItemId, e.Units, e.UnitAmount, e.Total, e.Payee, e.SentBackNote })
+            .ToListAsync(ct);
+        var itemIds = entries.Where(e => e.ExpenseItemId is not null).Select(e => e.ExpenseItemId!.Value).Distinct().ToArray();
+        var items = itemIds.Length == 0
+            ? new Dictionary<Guid, (string Name, string Category)>()
+            : await db.Set<ExpenseItem>().AsNoTracking()
+                .Where(i => itemIds.Contains(i.Id))
+                .Join(db.Set<ExpenseCategory>(), i => i.CategoryId, c => c.Id, (i, c) => new { i.Id, i.Name, Category = c.Name })
+                .ToDictionaryAsync(x => x.Id, x => (x.Name, x.Category), ct);
+        return [.. entries.Select(e =>
+        {
+            var item = e.ExpenseItemId is { } id && items.TryGetValue(id, out var found) ? found : ((string Name, string Category)?)null;
+            return new PettyCashReportRow(e.Id, e.Kind, e.Status, e.Date, e.HolderId, e.VehicleId, e.ExpenseItemId, item?.Name, item?.Category,
+                e.Units, e.UnitAmount, e.Total, e.Payee, e.SentBackNote);
+        })];
+    }
+
     public async Task<PettyCashEntryRow?> Row(SetupActor actor, Guid id, CancellationToken ct)
     {
         var entry = await Visible(actor).AsNoTracking().SingleOrDefaultAsync(e => e.Id == id, ct);

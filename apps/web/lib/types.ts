@@ -3,6 +3,8 @@ import type { PersonIdentity } from "@xcode/shared/auth";
 export type View =
   | "dashboard"
   | "revenue"
+  | "centralexpenses"
+  | "reports"
   | "people"
   | "companies"
   | "vehicles"

@@ -73,6 +73,7 @@ export function PadScreen({ state, screen, busy, actions }: Props) {
       length={copy.length}
       value={screen.pin}
       error={screen.error}
+      status={busy && screen.checking ? copy.checking : ""}
       busy={busy}
       shake={state.shake}
       onDigit={actions.press}

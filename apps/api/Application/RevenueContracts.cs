@@ -44,16 +44,15 @@ public sealed record RevenueCellDto(
 
     // The week grid and a 409's current cell come from here, so clients and the server agree on what may be opened.
     // target is the vehicle's weekly target that day (FleetVehicle.TargetOn), which the caller works out once.
-    public static RevenueCellDto For(SetupActor actor, FleetVehicle vehicle, DateOnly date, decimal target, RevenueDayRecord? record,
-        DateOnly? earliestMissing)
+    public static RevenueCellDto For(SetupActor actor, FleetVehicle vehicle, DateOnly date, decimal target, RevenueDayRecord? record)
     {
         var status = StatusOf(vehicle, date, actor.Today, record);
         var capture = actor.Permissions.Contains(PermissionKeys.RevenueCapture);
         var correct = actor.Permissions.Contains(PermissionKeys.RevenueCorrect);
         var canEdit = status switch
         {
-            // A later missing day stays shut until the earliest missing day is filled.
-            CellStatus.Missing => capture && (earliestMissing is null || date <= earliestMissing.Value),
+            // Days are captured in any order, so every missing day is open to capture.
+            CellStatus.Missing => capture,
             CellStatus.Amount or CellStatus.Reason => date == actor.Today ? capture || correct : correct,
             CellStatus.None or CellStatus.Future => false,
             _ => throw new InvalidOperationException($"Unknown cell status {status}.")
@@ -137,17 +136,15 @@ public sealed record RevenueDashboardDto(
 public sealed record RevenueSaved(Guid Id, long Version);
 
 /// <summary>The day holds a different record than the one this save was based on.</summary>
-public sealed class RevenueConflictException(RevenueCellDto current)
-    : Exception("This day was changed after you opened it. Check the current record and save again.")
+public sealed class RevenueConflictException(RevenueCellDto current, Guid? vehicleId = null, string? registration = null)
+    : Exception(registration is null
+        ? "This day was changed after you opened it. Check the current record and save again."
+        : $"{registration} was changed after you opened the day. Check its current record and save again.")
 {
     public RevenueCellDto Current { get; } = current;
-}
 
-/// <summary>An earlier day has no record yet. It is still a plain 400 wherever the revenue error filter is absent.</summary>
-public sealed class RevenueEarlierDayMissingException(DateOnly earliestMissing)
-    : ArgumentException($"Record {earliestMissing.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} before this date first.")
-{
-    public DateOnly EarliestMissing { get; } = earliestMissing;
+    // Set when the save covered several vehicles, so the client knows which row changed.
+    public Guid? VehicleId { get; } = vehicleId;
 }
 
 // Version is the record version the client last saw; it is required to change an existing record.
@@ -177,7 +174,9 @@ public interface IRevenueRepository
     Task<RevenueDashboardDto> Dashboard(SetupActor actor, string period, Guid? companyId, CancellationToken ct);
     Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct);
     Task<RevenueRecord?> Record(SetupActor actor, Guid vehicleId, DateOnly date, CancellationToken ct);
-    Task<DateOnly?> EarliestMissing(SetupActor actor, FleetVehicle vehicle, DateOnly before, CancellationToken ct);
+    Task<RevenueDayDto> Day(SetupActor actor, DateOnly date, Guid? companyId, CancellationToken ct);
+    Task<IReadOnlyList<FleetVehicle>> Vehicles(SetupActor actor, Guid[] ids, CancellationToken ct);
+    Task<IReadOnlyList<RevenueRecord>> Records(SetupActor actor, Guid[] vehicleIds, DateOnly date, CancellationToken ct);
     void Add(RevenueRecord record);
     Task RecordChange(SetupActor actor, Guid entityId, object? before, object after, string reason, CancellationToken ct);
 }

@@ -9,7 +9,7 @@ using System.Text.Json;
 
 namespace Auth.Infrastructure;
 
-public sealed class RevenueRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsChangeLog log) : IRevenueRepository
+public sealed partial class RevenueRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsChangeLog log) : IRevenueRepository
 {
     private IQueryable<FleetVehicle> VisibleVehicles(SetupActor actor) => db.Set<FleetVehicle>()
         .Where(v => actor.AllCompanies || actor.CompanyIds.Contains(v.CompanyId) || actor.VehicleIds.Contains(v.Id));
@@ -162,10 +162,7 @@ public sealed class RevenueRepository(AuthDb db, IUnitOfWork unitOfWork, Setting
         VisibleVehicles(actor).Where(v => v.Id == vehicleId).SelectMany(v => db.Set<RevenueRecord>()
             .Where(r => r.VehicleId == vehicleId && r.BusinessDate == date)).SingleOrDefaultAsync(ct);
 
-    public async Task<DateOnly?> EarliestMissing(SetupActor actor, FleetVehicle vehicle, DateOnly before, CancellationToken ct) =>
-        (await EarliestMissing([vehicle], db.Set<FleetVehicle>().Where(v => v.Id == vehicle.Id), before, ct))[vehicle.Id];
-
-    // Captures are enforced in date order, so a vehicle's records normally run unbroken from its join date. One grouped
+    // Many vehicles' records run unbroken from their join date, though days may be captured in any order. One grouped
     // query returns each vehicle's first and last recorded active day and a count (O(V) rows, not O(V*D)); only a
     // vehicle whose count shows a hole loads its own dates. The vehicles must carry their whole history of away periods,
     // and source is the query they were loaded from, which the records are joined to.
@@ -308,7 +305,7 @@ public sealed class RevenueRepository(AuthDb db, IUnitOfWork unitOfWork, Setting
                     expected += target / 7m;
                     if (record?.Amount is decimal value) amount += value;
                 }
-                cells.Add(RevenueCellDto.For(actor, vehicle, date, target, record, firstMissing));
+                cells.Add(RevenueCellDto.For(actor, vehicle, date, target, record));
             }
             rows.Add(new(vehicle.Id, vehicle.CompanyId, companyNames.GetValueOrDefault(vehicle.CompanyId, ""),
                 vehicle.Registration, vehicle.JoinedOn, vehicle.LeftOn, firstMissing, cells, decimal.Round(amount, 2),

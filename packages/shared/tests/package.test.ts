@@ -6,7 +6,7 @@ const pkg = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ) as { main?: string; types?: string; exports: Record<string, string> };
 
-const INTERNAL = ["intlCache"];
+const INTERNAL = ["intlCache", "query"];
 
 const modules = readdirSync(new URL("../src/", import.meta.url))
   .filter((file) => file.endsWith(".ts"))

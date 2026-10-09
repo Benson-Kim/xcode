@@ -15,16 +15,31 @@ export const hasConnection = (network: {
   isInternetReachable?: boolean;
 }) => network.isConnected === true && network.isInternetReachable !== false;
 
+// The connection the phone last reported. A banner that opens later starts from it, rather than saying "No
+// internet" until the phone answers and then switching to "Can't reach the XCODE server".
+let lastKnown: boolean | null = null;
+
+const remember = (network: Parameters<typeof hasConnection>[0]) =>
+  (lastKnown = hasConnection(network));
+
+// Asked once as the app opens, so the first banner already knows.
+export function primeConnection(): Promise<void> {
+  return getNetworkStateAsync().then(
+    (network) => void remember(network),
+    () => undefined,
+  );
+}
+
 export function useConnected() {
-  const [connected, setConnected] = useState(false);
+  const [connected, setConnected] = useState(lastKnown ?? true);
   useEffect(() => {
     let active = true;
     getNetworkStateAsync().then(
-      (network) => active && setConnected(hasConnection(network)),
+      (network) => active && setConnected(remember(network)),
       () => {},
     );
     const listener = addNetworkStateListener(
-      (network) => active && setConnected(hasConnection(network)),
+      (network) => active && setConnected(remember(network)),
     );
     return () => {
       active = false;

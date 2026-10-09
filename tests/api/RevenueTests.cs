@@ -14,7 +14,7 @@ public sealed class RevenueTests : IDisposable
     private const string Owner = "antony.maina@shamayah.co.ke";
 
     [Fact]
-    public async Task RevenueCaptureRequiresOrderedBackfillAndKeepsCorrectionHistory()
+    public async Task RevenueCaptureTakesDaysInAnyOrderAndKeepsCorrectionHistory()
     {
         await app.SeedDemo();
         var calendarDate = DateOnly.FromDateTime(app.Clock.UtcNow.UtcDateTime);
@@ -53,10 +53,11 @@ public sealed class RevenueTests : IDisposable
         var vehicle = await vehicleResponse.Content.ReadFromJsonAsync<IdResponse>();
         Assert.NotNull(vehicle);
 
-        var first = await client.PutAsJsonAsync(
-            $"/setup/revenue/{vehicle!.Id}/{joined.AddDays(1):yyyy-MM-dd}",
-            new { amount = 1000m, reason = (string?)null, note = (string?)null });
-        Assert.Equal(HttpStatusCode.BadRequest, first.StatusCode);
+        // Today first, with both earlier days still missing.
+        var today = await client.PutAsJsonAsync(
+            $"/setup/revenue/{vehicle!.Id}/{businessDate:yyyy-MM-dd}",
+            new { amount = 1200m, reason = (string?)null, note = (string?)null });
+        Assert.Equal(HttpStatusCode.OK, today.StatusCode);
 
         var firstDay = await client.PutAsJsonAsync(
             $"/setup/revenue/{vehicle.Id}/{joined:yyyy-MM-dd}",
@@ -72,11 +73,6 @@ public sealed class RevenueTests : IDisposable
             $"/setup/revenue/{vehicle.Id}/{joined.AddDays(1):yyyy-MM-dd}",
             new { amount = (decimal?)null, reason = "Garage", note = (string?)null });
         Assert.Equal(HttpStatusCode.OK, reason.StatusCode);
-
-        var today = await client.PutAsJsonAsync(
-            $"/setup/revenue/{vehicle.Id}/{businessDate:yyyy-MM-dd}",
-            new { amount = 1200m, reason = (string?)null, note = (string?)null });
-        Assert.Equal(HttpStatusCode.OK, today.StatusCode);
 
         var correction = await client.PutAsJsonAsync(
             $"/setup/revenue/{vehicle.Id}/{joined:yyyy-MM-dd}",
@@ -109,9 +105,9 @@ public sealed class RevenueTests : IDisposable
         string Day(DateOnly date) => date.ToString("d MMM yyyy", CultureInfo.InvariantCulture);
         Assert.Equal([
             $"Corrected revenue for KQA 321M on {Day(joined)}",
-            $"Recorded revenue for KQA 321M on {Day(businessDate)}",
             $"Recorded no revenue for KQA 321M on {Day(joined.AddDays(1))}: Garage",
-            $"Recorded revenue for KQA 321M on {Day(joined)}"], revenueHistory.Select(x => x.Reason));
+            $"Recorded revenue for KQA 321M on {Day(joined)}",
+            $"Recorded revenue for KQA 321M on {Day(businessDate)}"], revenueHistory.Select(x => x.Reason));
         Assert.True(revenueHistory[0] is { Before: not null, After: not null });
     }
 

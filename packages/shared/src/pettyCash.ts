@@ -4,10 +4,13 @@
 // a negative expense is a refund, negative cash is cash taken back, a negative credit note is money repaid.
 // A float can go below zero when its holder spends their own money before cash reaches them.
 
+import { withQuery } from "./query";
+
 export type PettyCashKind = "cash" | "expense" | "credit";
 export type PettyCashStatus = "waiting" | "approved" | "sentBack";
 export type PettyCashBucket = 1 | 2 | 3;
-export type PettyCashPeriod = "day" | "week";
+// "range" is any span asked for with from and to; "week" is what the phone still sends with date and period.
+export type PettyCashPeriod = "day" | "week" | "range";
 
 export const PETTY_CASH_KINDS: readonly PettyCashKind[] = [
   "expense",
@@ -113,9 +116,14 @@ export interface PettyCashOverview {
   floats: PettyCashFloat[];
 }
 
+// from and to go together (at most 367 days, from not after the business date). With them the server ignores date and
+// period, answers period "day" when they are the same day and "range" otherwise, echoes from and to, and sets date to to.
+// The figures open at the start of from and close at the end of to; floats stay to date.
 export interface PettyCashOverviewQuery {
   date?: string;
   period?: PettyCashPeriod;
+  from?: string;
+  to?: string;
   holderId?: string;
 }
 
@@ -322,17 +330,6 @@ export function pettyCashTotal(units: number, unitAmount: number): number {
   const cents =
     size / thousand + (size % thousand >= BigInt(500) ? BigInt(1) : BigInt(0));
   return (negative ? -Number(cents) : Number(cents)) / 100;
-}
-
-function withQuery(path: string, query: object): string {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    const text = Array.isArray(value) ? value.join(",") : value;
-    if (text !== undefined && text !== null && text !== "")
-      params.set(key, String(text));
-  }
-  const search = params.toString();
-  return search ? `${path}?${search}` : path;
 }
 
 export const pettyCashEntriesPath = (query: PettyCashEntryQuery = {}) =>

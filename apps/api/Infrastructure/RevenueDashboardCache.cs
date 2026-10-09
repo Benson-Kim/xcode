@@ -99,8 +99,13 @@ public sealed class CachedRevenueRepository(RevenueRepository inner, RevenueDash
     public Task<RevenueRecord?> Record(SetupActor actor, Guid vehicleId, DateOnly date, CancellationToken ct) =>
         inner.Record(actor, vehicleId, date, ct);
 
-    public Task<DateOnly?> EarliestMissing(SetupActor actor, FleetVehicle vehicle, DateOnly before, CancellationToken ct) =>
-        inner.EarliestMissing(actor, vehicle, before, ct);
+    public Task<RevenueDayDto> Day(SetupActor actor, DateOnly date, Guid? companyId, CancellationToken ct) =>
+        inner.Day(actor, date, companyId, ct);
+
+    public Task<IReadOnlyList<FleetVehicle>> Vehicles(SetupActor actor, Guid[] ids, CancellationToken ct) => inner.Vehicles(actor, ids, ct);
+
+    public Task<IReadOnlyList<RevenueRecord>> Records(SetupActor actor, Guid[] vehicleIds, DateOnly date, CancellationToken ct) =>
+        inner.Records(actor, vehicleIds, date, ct);
 
     public void Add(RevenueRecord record) => inner.Add(record);
 
