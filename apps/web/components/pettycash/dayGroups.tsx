@@ -1,11 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 import type { PettyCashEntry } from "@xcode/shared/pettyCash";
 
 import { useFormats } from "../../lib/formats";
-import { Td, Tr } from "../ui";
 
 export type DayGroup = {
   date: string;
@@ -29,32 +28,26 @@ export function groupByDay(entries: PettyCashEntry[]): DayGroup[] {
   return [...days.values()];
 }
 
-// A row naming a day, with its total in the column that holds the amounts. `before` cells come first and `after`
-// cells follow.
+// A row naming a day (.grp), with what the day came to at its right.
 export function DayRow({
   date,
-  total,
-  before,
-  after,
-  label,
+  span,
+  note,
 }: {
   date: string;
-  total: number;
-  before: number;
-  after: number;
-  label: string;
+  span: number;
+  note: string;
 }) {
   const formats = useFormats();
   return (
-    <Tr className="bg-paper-2" data-day={date}>
-      <Td colSpan={before} className="font-bold text-ink">
-        {formats.formatWeekdayDate(date)}
-      </Td>
-      <Td numeric label={label} className="font-bold text-slate">
-        {formats.formatNumber(total)}
-      </Td>
-      {after > 0 && <Td colSpan={after} />}
-    </Tr>
+    <tr className="grp" data-day={date}>
+      <td colSpan={span}>
+        <div>
+          <span>{formats.formatWeekdayDate(date)}</span>
+          <span>{note}</span>
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -63,53 +56,20 @@ export function Days({
   entries,
   grouped,
   row,
-  before,
-  after,
-  totalLabel,
+  span,
+  note,
 }: {
   entries: PettyCashEntry[];
   grouped: boolean;
   row: (entry: PettyCashEntry) => ReactNode;
-  before: number;
-  after: number;
-  totalLabel: string;
+  span: number;
+  note: (day: DayGroup) => string;
 }) {
   if (!grouped) return entries.map(row);
   return groupByDay(entries).map((day) => (
-    <DayGroupRows
-      key={day.date}
-      day={day}
-      row={row}
-      before={before}
-      after={after}
-      label={totalLabel}
-    />
-  ));
-}
-
-function DayGroupRows({
-  day,
-  row,
-  before,
-  after,
-  label,
-}: {
-  day: DayGroup;
-  row: (entry: PettyCashEntry) => ReactNode;
-  before: number;
-  after: number;
-  label: string;
-}) {
-  return (
-    <>
-      <DayRow
-        date={day.date}
-        total={day.total}
-        before={before}
-        after={after}
-        label={label}
-      />
+    <Fragment key={day.date}>
+      <DayRow date={day.date} span={span} note={note(day)} />
       {day.entries.map(row)}
-    </>
-  );
+    </Fragment>
+  ));
 }

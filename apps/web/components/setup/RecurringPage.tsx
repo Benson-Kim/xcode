@@ -23,10 +23,11 @@ import {
   FormSkeleton,
   PageHeader,
   ListPager,
-  RowButton,
-  SegmentedControl,
+  RowAction,
+  RowActionGroup,
   SelectInput,
   StatusBadge,
+  Tabs,
   Td,
   Toolbar,
   Tr,
@@ -61,8 +62,7 @@ export function RecurringPage({
   newForVehicle?: string;
 }) {
   const { appearance } = useAppearance();
-  const { formatDateOnly, kes } = useFormats();
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>("cost");
   const [companyFilter, setCompanyFilter] = useState("all");
   const [status, setStatus] = useState<Status>("all");
   const [editing, setEditing] = useState<string | null>(
@@ -106,6 +106,7 @@ export function RecurringPage({
       expenseItems={expenseItems.data}
       loadError={options.error || expenseItems.error}
       preselectVehicle={editing === "new" ? newForVehicle : undefined}
+      startKind={filter === "savings" ? 2 : 1}
       canEdit={canManage && !editedItem?.partial}
       onCancel={() => setEditing(null)}
       onSaved={() => {
@@ -118,7 +119,7 @@ export function RecurringPage({
     <Dialog
       open
       size="lg"
-      title="Scheduled expense or saving"
+      title="Scheduled expense"
       onClose={() => setEditing(null)}
     >
       {recurring.error || !stillLoading ? (
@@ -158,189 +159,301 @@ export function RecurringPage({
     (left, right) =>
       finished(left) - finished(right) || left.name.localeCompare(right.name),
   );
+  const savings = filter === "savings";
+  const fleet = options.data
+    ? new Set(
+        options.data
+          .filter((vehicle) => vehicle.active !== false)
+          .map((vehicle) => vehicle.id),
+      )
+    : null;
   return (
-    <section>
+    <>
       <PageHeader
-        title="Scheduled expenses and savings"
-        description="Set once. Each posts to its vehicles on its own dates and shows in their reports."
+        title="Scheduled expenses"
         actions={
           canManage ? (
             <Button tone="primary" onClick={() => setEditing("new")}>
-              Add scheduled expense or saving
+              {savings ? "New saving" : "New scheduled expense"}
             </Button>
           ) : undefined
         }
       />
-      {editor}
       {(paged.error || options.error) && (
-        <Banner className="mb-3.5">
-          {streamError(paged) || options.error}
-        </Banner>
+        <Banner>{streamError(paged) || options.error}</Banner>
       )}
-      <Toolbar>
-        <SegmentedControl
-          label="Show"
-          options={[
-            { value: "all", label: "All" },
-            { value: "cost", label: "Costs" },
-            { value: "savings", label: "Savings" },
-          ]}
-          value={filter}
-          onChange={setFilter}
-        />
-        {companies.length > 1 && (
-          <>
-            <label
-              htmlFor="recurring-company"
-              className="text-[13px] text-grey"
-            >
-              Company
-            </label>
-            <SelectInput
-              id="recurring-company"
-              density="compact"
-              inline
-              value={companyFilter}
-              onChange={(event) => setCompanyFilter(event.target.value)}
-            >
-              <option value="all">All companies</option>
-              {companies.map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
-              ))}
-            </SelectInput>
-          </>
-        )}
-        <label htmlFor="recurring-status" className="text-[13px] text-grey">
-          Show
-        </label>
-        <SelectInput
-          id="recurring-status"
-          density="compact"
-          inline
-          value={status}
-          onChange={(event) => setStatus(event.target.value as Status)}
-        >
-          <option value="all">All</option>
-          <option value="running">Running</option>
-          <option value="stopped">Stopped</option>
-        </SelectInput>
-      </Toolbar>
-      <DataTable
-        columns={[
-          { label: "Item" },
-          { label: "Amount each time", numeric: true },
-          { label: "How often" },
-          { label: "Vehicles" },
-          { label: "Period" },
-          { label: "Next posting" },
+      <Tabs
+        id="recurring"
+        label="Show"
+        options={[
+          { value: "cost", label: "Scheduled expenses" },
+          { value: "savings", label: "Savings" },
         ]}
-        loading={paged.loading}
-        pendingRows={paged.pendingRows}
-        loadingLabel="Loading scheduled expenses and savings"
-        isEmpty={!visible.length}
-        failed={Boolean(paged.error)}
-        emptyMessage="Nothing here yet."
+        value={savings ? "savings" : "cost"}
+        onChange={setFilter}
       >
-        {visible.map((item) => {
-          const active = hasActiveVehicle(item);
-          const isStopped = stopped(item);
-          const futureStop =
-            item.stoppedFrom && today && item.stoppedFrom > today
-              ? item.stoppedFrom
-              : null;
-          const next =
-            isStopped || !active || !today
-              ? null
-              : recurringNextPosting(item, today);
-          const registrations = item.allocations
-            .map((allocation) => allocation.registration)
-            .filter((registration): registration is string =>
-              Boolean(registration),
-            );
-          const outOfFleetCount = item.allocations.filter(
-            (allocation) => allocation.active === false,
-          ).length;
-          // What posts now. `amount` is the saved total, which still counts vehicles not in the fleet today.
-          const posting = item.activeAmount ?? item.amount;
-          // A cost counts in its item's bucket; a row saved before expense items counts in its old type's bucket.
-          const bucket = costBucket(item);
-          const countsAs = bucket ? expenseBucketNames[bucket] : "Savings";
-          return (
-            <Tr key={item.id}>
-              <Td label="Item">
-                <RowButton onClick={() => setEditing(item.id)}>
-                  {item.name}
-                </RowButton>
-                <CellNote>
-                  {item.note ? `${item.note}. ` : ""}
-                  {countsAs}
-                </CellNote>
-              </Td>
-              <Td label="Amount each time" numeric>
-                {kes(posting)}
-                <CellNote>
-                  {item.partial ? "Your vehicles' share. " : ""}
-                  {posting !== item.amount
-                    ? `${kes(item.amount)} in total, with ${outOfFleetCount === 1 ? "1 share for a vehicle" : `${outOfFleetCount} shares for vehicles`} not in the fleet today. `
-                    : ""}
-                  About {kes(recurringMonthlyEstimate(posting, item.frequency))}{" "}
-                  a month
-                </CellNote>
-              </Td>
-              <Td label="How often">{recurringFrequency(item)}</Td>
-              <Td label="Vehicles">
-                {plural(item.allocations.length, "vehicle", "vehicles")}
-                <CellNote className="flex flex-wrap items-center gap-1">
-                  {registrations.slice(0, 2).map((registration) => (
-                    <RegPlate key={registration}>{registration}</RegPlate>
-                  ))}
-                  {item.allocations.length > 2
-                    ? ` and ${item.allocations.length - 2} more`
-                    : ""}
-                  {outOfFleetCount
-                    ? `, ${outOfFleetCount} not in the fleet today`
-                    : ""}
-                  {item.partial ? ", plus vehicles you can't see" : ""}
-                </CellNote>
-              </Td>
-              <Td label="Period">
-                {formatDateOnly(item.start)}
-                {item.end ? (
-                  ` to ${formatDateOnly(item.end)}`
-                ) : (
-                  <CellNote>No end date</CellNote>
-                )}
-              </Td>
-              <Td label="Next posting">
-                {isStopped ? (
-                  <StatusBadge tone="off">Stopped</StatusBadge>
-                ) : !active ? (
-                  <StatusBadge tone="off">No active vehicles</StatusBadge>
-                ) : !today ? (
-                  "—"
-                ) : next ? (
-                  <>
-                    {formatDateOnly(next)}
-                    {futureStop && (
-                      <CellNote>Stops {formatDateOnly(futureStop)}</CellNote>
-                    )}
-                  </>
-                ) : futureStop ? (
-                  <StatusBadge tone="warn">
-                    Stops {formatDateOnly(futureStop)}
-                  </StatusBadge>
-                ) : (
-                  <StatusBadge tone="off">Finished</StatusBadge>
-                )}
-              </Td>
-            </Tr>
-          );
-        })}
-      </DataTable>
+        <RecurringFilters
+          companies={companies}
+          companyFilter={companyFilter}
+          setCompanyFilter={setCompanyFilter}
+          status={status}
+          setStatus={setStatus}
+        />
+        <DataTable
+          columns={[
+            { label: savings ? "Saving" : "Item" },
+            { label: "Vehicles" },
+            {
+              label: savings ? "Per vehicle" : "Amount per vehicle",
+              numeric: true,
+            },
+            { label: "Each run", numeric: true },
+            { label: "Runs" },
+            { label: "Next run" },
+            { label: "Status" },
+            { label: "Actions", numeric: true },
+          ]}
+          loading={paged.loading}
+          pendingRows={paged.pendingRows}
+          loadingLabel="Loading scheduled expenses and savings"
+          isEmpty={!visible.length}
+          failed={Boolean(paged.error)}
+          emptyMessage="Nothing scheduled."
+        >
+          {visible.map((item) => (
+            <RecurringRow
+              key={item.id}
+              item={item}
+              today={today}
+              stopped={stopped(item)}
+              active={hasActiveVehicle(item)}
+              fleet={fleet}
+              canEdit={canManage && !item.partial}
+              onOpen={() => setEditing(item.id)}
+            />
+          ))}
+        </DataTable>
+      </Tabs>
       <ListPager list={paged} />
-    </section>
+      {editor}
+    </>
+  );
+}
+
+function RecurringFilters({
+  companies,
+  companyFilter,
+  setCompanyFilter,
+  status,
+  setStatus,
+}: {
+  companies: [string, string][];
+  companyFilter: string;
+  setCompanyFilter: (value: string) => void;
+  status: Status;
+  setStatus: (value: Status) => void;
+}) {
+  return (
+    <Toolbar>
+      {companies.length > 1 && (
+        <>
+          <label htmlFor="recurring-company" className="sr-only">
+            Company
+          </label>
+          <SelectInput
+            id="recurring-company"
+            density="compact"
+            inline
+            value={companyFilter}
+            onChange={(event) => setCompanyFilter(event.target.value)}
+          >
+            <option value="all">All companies</option>
+            {companies.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </SelectInput>
+        </>
+      )}
+      <label htmlFor="recurring-status" className="sr-only">
+        Show
+      </label>
+      <SelectInput
+        id="recurring-status"
+        density="compact"
+        inline
+        value={status}
+        onChange={(event) => setStatus(event.target.value as Status)}
+      >
+        <option value="all">All</option>
+        <option value="running">Running</option>
+        <option value="stopped">Stopped</option>
+      </SelectInput>
+    </Toolbar>
+  );
+}
+
+function RecurringStatus({
+  item,
+  today,
+  stopped,
+  active,
+  next,
+}: {
+  item: RecurringItem;
+  today?: string;
+  stopped: boolean;
+  active: boolean;
+  next: string | null;
+}) {
+  const { formatDateOnly } = useFormats();
+  const futureStop =
+    item.stoppedFrom && today && item.stoppedFrom > today
+      ? item.stoppedFrom
+      : null;
+  if (stopped) return <StatusBadge tone="off">Stopped</StatusBadge>;
+  if (!active) return <StatusBadge tone="off">No active vehicles</StatusBadge>;
+  if (futureStop)
+    return (
+      <StatusBadge tone="warn">Stops {formatDateOnly(futureStop)}</StatusBadge>
+    );
+  if (today && !next) return <StatusBadge tone="neutral">Finished</StatusBadge>;
+  return <StatusBadge tone="ok">Running</StatusBadge>;
+}
+
+function RecurringRow({
+  item,
+  today,
+  stopped,
+  active,
+  fleet,
+  canEdit,
+  onOpen,
+}: {
+  item: RecurringItem;
+  today?: string;
+  stopped: boolean;
+  active: boolean;
+  fleet: Set<string> | null;
+  canEdit: boolean;
+  onOpen: () => void;
+}) {
+  const { formatDateOnly, formatNumber, kes } = useFormats();
+  const next =
+    stopped || !active || !today ? null : recurringNextPosting(item, today);
+  const outOfFleetCount = item.allocations.filter(
+    (allocation) => allocation.active === false,
+  ).length;
+  // What posts now. `amount` is the saved total, which still counts vehicles not in the fleet today.
+  const posting = item.activeAmount ?? item.amount;
+  const posted = item.allocations.filter(
+    (allocation) => allocation.active !== false,
+  );
+  const shares = posted.length ? posted : item.allocations;
+  const share =
+    shares.length &&
+    shares.every((allocation) => allocation.amount === shares[0].amount)
+      ? formatNumber(shares[0].amount)
+      : "Varies";
+  const action = canEdit ? "Edit" : "Open";
+  const postingNote = [
+    item.partial ? "Your vehicles' share." : "",
+    posting !== item.amount
+      ? `${kes(item.amount)} in total, with ${outOfFleetCount === 1 ? "1 share for a vehicle" : `${outOfFleetCount} shares for vehicles`} not in the fleet today.`
+      : "",
+    `About ${kes(recurringMonthlyEstimate(posting, item.frequency))} a month`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <Tr>
+      <Td label="Item" className="item nw" title={itemNote(item)}>
+        {item.name}
+      </Td>
+      <Td label="Vehicles" className="nw">
+        <RecurringVehicles
+          item={item}
+          fleet={fleet}
+          outOfFleetCount={outOfFleetCount}
+        />
+      </Td>
+      <Td label="Amount per vehicle" numeric>
+        {share}
+      </Td>
+      <Td label="Each run" numeric className="tot" title={postingNote}>
+        {formatNumber(posting)}
+      </Td>
+      <Td label="Runs" className="nw">
+        {recurringFrequency(item)}
+        <CellNote>
+          {item.end
+            ? `${formatDateOnly(item.start)} to ${formatDateOnly(item.end)}`
+            : `From ${formatDateOnly(item.start)}, no end date`}
+        </CellNote>
+      </Td>
+      <Td label="Next run" className="nw">
+        {next ? formatDateOnly(next) : !today ? "—" : ""}
+      </Td>
+      <Td label="Status" className="nw">
+        <RecurringStatus
+          item={item}
+          today={today}
+          stopped={stopped}
+          active={active}
+          next={next}
+        />
+      </Td>
+      <Td numeric>
+        <RowActionGroup>
+          <RowAction aria-label={`${action} ${item.name}`} onClick={onOpen}>
+            {action}
+          </RowAction>
+        </RowActionGroup>
+      </Td>
+    </Tr>
+  );
+}
+
+// One plate for one vehicle, "All vehicles" when it covers every active vehicle the viewer can see, else a count
+// with the registrations on hover.
+function RecurringVehicles({
+  item,
+  fleet,
+  outOfFleetCount,
+}: {
+  item: RecurringItem;
+  fleet: Set<string> | null;
+  outOfFleetCount: number;
+}) {
+  const registrations = item.allocations
+    .map((allocation) => allocation.registration)
+    .filter((registration): registration is string => Boolean(registration));
+  const covered = new Set(
+    item.allocations
+      .filter((allocation) => allocation.active !== false)
+      .map((allocation) => allocation.vehicleId),
+  );
+  const everyVehicle =
+    !item.partial &&
+    fleet !== null &&
+    fleet.size > 1 &&
+    [...fleet].every((id) => covered.has(id));
+  const title = [
+    registrations.join(", "),
+    outOfFleetCount ? `${outOfFleetCount} not in the fleet today` : "",
+    item.partial ? "plus vehicles you can't see" : "",
+  ]
+    .filter(Boolean)
+    .join("; ");
+  if (item.allocations.length === 1 && !item.partial && registrations.length)
+    return <RegPlate>{registrations[0]}</RegPlate>;
+  return (
+    <span title={title || undefined}>
+      {everyVehicle
+        ? "All vehicles"
+        : plural(item.allocations.length, "vehicle", "vehicles")}
+    </span>
   );
 }
 
@@ -362,4 +475,13 @@ function editorVehicles(
         active: allocation.active !== false,
       })),
   ];
+}
+
+// The note and, for a cost, the bucket it counts under (a cost saved without one counts as a recurring charge).
+function itemNote(item: RecurringItem) {
+  const bucket = costBucket(item);
+  const text = [item.note, bucket ? expenseBucketNames[bucket] : null]
+    .filter(Boolean)
+    .join(". ");
+  return text || undefined;
 }

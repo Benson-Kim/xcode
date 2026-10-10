@@ -59,7 +59,7 @@ const lists: [string, ReactNode, string, string][] = [
     "scheduled items",
     <RecurringPage key="recurring" canManage />,
     "Loading scheduled expenses and savings",
-    "Nothing here yet.",
+    "Nothing scheduled.",
   ],
   [
     "the change log",

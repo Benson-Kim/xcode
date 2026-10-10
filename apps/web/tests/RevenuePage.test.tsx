@@ -265,7 +265,7 @@ it("renders the week grid from one request, with totals, today and a company fil
     within(grid).getByRole("columnheader", { name: "Sun 4" }),
   ).toBeInTheDocument();
   expect(
-    within(grid).getByRole("columnheader", { name: "Week" }),
+    within(grid).getByRole("columnheader", { name: "Week total" }),
   ).toBeInTheDocument();
   expect(
     within(grid).getByRole("columnheader", { name: "vs expected" }),
@@ -277,26 +277,28 @@ it("renders the week grid from one request, with totals, today and a company fil
   const row = within(grid).getByRole("row", { name: /KDA 482M/ });
   expect(within(row).getByRole("rowheader")).toHaveTextContent("KDA 482M");
   expect(within(row).getByText("North Star")).toBeInTheDocument();
-  expect(
-    within(row).getByText("850", { selector: "span" }),
-  ).toBeInTheDocument();
+  // Monday's amount sits in its own day cell, apart from the week total.
+  expect(within(row).getAllByRole("cell")[0]).toHaveTextContent(/^850$/);
   expect(within(row).getByText("Garage")).toBeInTheDocument();
   expect(within(row).getByText("43%")).toBeInTheDocument();
-  // Missing days say so in words, not only by colour.
+  // Missing days say so in words, not only by colour; today's is due.
   expect(
     within(row).getByRole("button", {
       name: "KDA 482M, Wed 30 Sep 2026: Missing",
     }),
-  ).toHaveTextContent("Enter");
+  ).toHaveTextContent(/^Due$/);
 
-  const totals = within(grid).getByRole("row", { name: /All vehicles/ });
+  const totals = within(grid).getByRole("row", { name: /^2 vehicles/ });
   expect(within(totals).getByText("2,050")).toBeInTheDocument();
   expect(within(totals).getByText("3,050")).toBeInTheDocument();
   expect(within(totals).getByText("76%")).toBeInTheDocument();
 
   expect(screen.getByText("28 Sep to 4 Oct 2026")).toBeInTheDocument();
-  expect(screen.getByText("Week to date")).toBeInTheDocument();
-  expect(screen.getByText("of KES 4,000 expected, 76%")).toBeInTheDocument();
+  const stat = (label: string, selector = "*") =>
+    screen.getByText(label, { selector }).nextSibling;
+  expect(stat("Revenue", ".lab")).toHaveTextContent(/^KES 3,050$/);
+  expect(stat("Expected")).toHaveTextContent(/^4,000$/);
+  expect(stat("Reached")).toHaveTextContent(/^76%$/);
   expect(screen.getByRole("button", { name: "Next week" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Previous week" })).toBeEnabled();
   expect(gets(fetcher, "/api/setup/revenue")).toEqual(["/api/setup/revenue"]);
@@ -1146,7 +1148,7 @@ it("shows the day totals the API works out for the whole grid, and opens Capture
     name: /Revenue by vehicle and day/,
   });
   expect(
-    within(within(grid).getByRole("row", { name: /All vehicles/ })).getByText(
+    within(within(grid).getByRole("row", { name: /^2 vehicles/ })).getByText(
       "9,150",
     ),
   ).toBeInTheDocument();
@@ -1294,7 +1296,7 @@ it("renders only the rows near the screen for a large fleet, numbered for screen
   expect(rowOf(grid, "KDA 000A")).toHaveAttribute("aria-rowindex", "2");
   expect(rowOf(grid, "KDA 150A")).toBeNull();
   // The totals are the API's, for every vehicle, whichever rows are rendered.
-  const totals = within(grid).getByText("All vehicles").closest("tr")!;
+  const totals = within(grid).getByText("200 vehicles").closest("tr")!;
   expect(totals).toHaveAttribute("aria-rowindex", "202");
   expect(within(totals).getByText("39,900")).toBeInTheDocument();
 

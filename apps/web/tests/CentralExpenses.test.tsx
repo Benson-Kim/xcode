@@ -21,7 +21,7 @@ import {
   permissionsOf as pettyPermissions,
 } from "./pettyCashServer";
 import { appearanceFixture, renderInApp } from "./renderInApp";
-import { offered, pick } from "./searchSelect";
+import { choose, offered, pick } from "./searchSelect";
 
 // The shell loads Petty cash lazily; a cold first import can outlast findBy's one-second wait.
 beforeAll(() => import("../components/pettycash/PettyCashPage"));
@@ -60,7 +60,7 @@ async function openRecord() {
 function fillPurchase(dialog: HTMLElement, units: string, cost: string) {
   pick(within(dialog).getByLabelText("Item"), "Tyres");
   changeTo(within(dialog).getByLabelText("Qty"), units);
-  changeTo(within(dialog).getByLabelText("Unit cost"), cost);
+  changeTo(within(dialog).getByLabelText("Unit cost, KES"), cost);
 }
 
 const save = (dialog: HTMLElement, name = "Save") =>
@@ -73,13 +73,13 @@ it("shows the period's four figures and its rows, with the totals of everything 
   const figure = (label: string) =>
     within(figures).getByText(label).nextSibling;
   expect(figure("Total")).toHaveTextContent("KES 18,000");
-  expect(figure("Central")).toHaveTextContent("KES 16,500");
-  expect(figure("Petty cash")).toHaveTextContent("KES 300");
-  expect(figure("Scheduled")).toHaveTextContent("KES 1,200");
+  expect(figure("Central")).toHaveTextContent(/^16,500$/);
+  expect(figure("Petty cash")).toHaveTextContent(/^300$/);
+  expect(figure("Scheduled")).toHaveTextContent(/^1,200$/);
 
   const tyres = await screen.findByRole("row", { name: /Tyres/ });
   expect(within(tyres).getByText("7 Oct 2026")).toBeInTheDocument();
-  expect(within(tyres).getByText("Garage and repairs")).toBeInTheDocument();
+  expect(within(tyres).queryByText("Garage and repairs")).toBeNull();
   expect(within(tyres).getByText("Front pair")).toBeInTheDocument();
   expect(within(tyres).getByText("Central")).toBeInTheDocument();
   expect(within(tyres).getByText("Brian Mwangi")).toBeInTheDocument();
@@ -98,7 +98,7 @@ it("shows the period's four figures and its rows, with the totals of everything 
   const insurance = screen.getByRole("row", { name: /Insurance/ });
   expect(within(insurance).getByText("Standing order")).toBeInTheDocument();
   const tag = within(insurance).getByText("Scheduled");
-  expect(tag.className).toContain("rounded-full");
+  expect(tag).toHaveClass("chip", "mute");
   expect(tag.className).not.toContain("before:");
 
   expect(screen.getByText("4 expenses")).toBeInTheDocument();
@@ -106,10 +106,10 @@ it("shows the period's four figures and its rows, with the totals of everything 
     /18,000$/,
   );
   expect(
-    screen.getByRole("columnheader", { name: "Total amount (KES)" }),
+    screen.getByRole("columnheader", { name: "Total amount" }),
   ).toBeInTheDocument();
   expect(
-    screen.getByRole("columnheader", { name: "Unit cost (KES)" }),
+    screen.getByRole("columnheader", { name: "Unit cost" }),
   ).toBeInTheDocument();
   expect(ledgerReads(api)[0]).toBe(
     `setup/expenses/ledger?${WEEK}&page=1&pageSize=25`,
@@ -121,7 +121,7 @@ it("asks again for the source, the search and the period that are chosen", async
   const { api } = renderPage();
   await screen.findByRole("row", { name: /Tyres/ });
 
-  pick(screen.getByLabelText("Source"), "Petty cash");
+  choose(screen.getByLabelText("Source"), "Petty cash");
   await screen.findByRole("row", { name: /Parking/ });
   expect(screen.queryByRole("row", { name: /Tyres/ })).not.toBeInTheDocument();
   expect(ledgerReads(api).at(-1)).toContain(`${WEEK}&source=pettycash`);
@@ -131,7 +131,7 @@ it("asks again for the source, the search and the period that are chosen", async
     "KES 18,000",
   );
 
-  pick(screen.getByLabelText("Source"), "All sources");
+  choose(screen.getByLabelText("Source"), "All sources");
   changeTo(screen.getByLabelText("Search"), "diesel");
   await waitFor(() => expect(ledgerReads(api).at(-1)).toContain("q=diesel"));
   await waitFor(() =>
@@ -152,7 +152,7 @@ it("asks again for the source, the search and the period that are chosen", async
   expect(screen.getByText("28 Sep to 4 Oct 2026")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: /^Period, / }));
-  fireEvent.click(screen.getByRole("button", { name: "Last month" }));
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Last month" }));
   await waitFor(() =>
     expect(ledgerReads(api).at(-1)).toContain("from=2026-09-01&to=2026-09-30"),
   );
@@ -243,9 +243,9 @@ it("takes part of a unit and refuses units or a cost that cannot be", async () =
   ).toBeInTheDocument();
   expect(save(dialog)).toBeDisabled();
   changeTo(within(dialog).getByLabelText("Qty"), "2");
-  changeTo(within(dialog).getByLabelText("Unit cost"), "12.345");
+  changeTo(within(dialog).getByLabelText("Unit cost, KES"), "12.345");
   expect(save(dialog)).toBeDisabled();
-  changeTo(within(dialog).getByLabelText("Unit cost"), "10");
+  changeTo(within(dialog).getByLabelText("Unit cost, KES"), "10");
   changeTo(within(dialog).getByLabelText("Date"), "2026-10-10");
   expect(
     within(dialog).getByText("The date cannot be after today."),
@@ -373,7 +373,7 @@ it("opens a central row for change with its values, and sends the version it was
     expect(within(dialog).getByLabelText("Item")).toHaveValue("Tyres"),
   );
   expect(within(dialog).getByLabelText("Qty")).toHaveValue("4");
-  expect(within(dialog).getByLabelText("Unit cost")).toHaveValue("3500");
+  expect(within(dialog).getByLabelText("Unit cost, KES")).toHaveValue("3500");
   expect(within(dialog).getByLabelText("Date")).toHaveValue("2026-10-07");
   expect(within(dialog).getByLabelText("Vehicle")).toHaveValue(
     "KDA 482M, Rongai Express",
@@ -386,7 +386,7 @@ it("opens a central row for change with its values, and sends the version it was
     within(dialog).queryByText(/takes it out of that purchase/),
   ).not.toBeInTheDocument();
 
-  changeTo(within(dialog).getByLabelText("Unit cost"), "3600");
+  changeTo(within(dialog).getByLabelText("Unit cost, KES"), "3600");
   expect(within(dialog).getByText("KES 14,400")).toBeInTheDocument();
   fireEvent.click(save(dialog));
   expect(await screen.findByText("Saved.")).toBeInTheDocument();
@@ -571,7 +571,7 @@ it("returns to page 1 when the page size, the source, the search or the period c
 
   fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
   await screen.findByText("Showing 101–120 of 120");
-  pick(screen.getByLabelText("Source"), "Central");
+  choose(screen.getByLabelText("Source"), "Central");
   await waitFor(() =>
     expect(ledgerReads(api).at(-1)).toContain(
       "source=central&page=1&pageSize=50",
@@ -718,25 +718,27 @@ const before = (first: Element, second: Element) =>
     first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING,
   );
 
-it("lays the record form out date, item, quantity beside a wider unit cost, total, and the vehicle last", async () => {
+it("lays the record form out as the design does: the date beside the vehicle, the item, quantity beside unit cost, total, then the note", async () => {
   renderPage();
   const dialog = await openRecord();
   const field = (label: string) => within(dialog).getByLabelText(label);
-  const row = (label: string) => field(label).closest(".grid") as HTMLElement;
-  expect(row("Qty")).toBe(row("Unit cost"));
-  expect(row("Qty").className).toContain("grid-cols-[1fr_2fr]");
-  expect(row("Qty").className).toContain("max-[420px]:grid-cols-1");
-  expect(field("Date").closest(".grid")).toBeNull();
-  expect(field("Vehicle").closest(".grid")).toBeNull();
+  const pair = field("Date").closest(".mrow2");
+  expect(pair).not.toBeNull();
+  expect(field("Vehicle").closest(".mrow2")).toBe(pair);
+  const row = field("Qty").closest(".mrow");
+  expect(row).not.toBeNull();
+  expect(field("Unit cost, KES").closest(".mrow")).toBe(row);
+  expect(field("Item").closest(".mrow, .mrow2")).toBeNull();
   const total = within(dialog).getByText("Total amount").parentElement!;
+  expect(total).toHaveClass("mtot");
   const order = [
     field("Date"),
+    field("Vehicle"),
     field("Item"),
     field("Qty"),
-    field("Unit cost"),
+    field("Unit cost, KES"),
     total,
     field("Note"),
-    field("Vehicle"),
   ];
   order.slice(1).forEach((element, index) => {
     expect(before(order[index], element)).toBe(true);
@@ -744,7 +746,7 @@ it("lays the record form out date, item, quantity beside a wider unit cost, tota
   expect(within(dialog).queryByText(/^Recorded by/)).not.toBeInTheDocument();
 });
 
-it("turns the vehicle into the split rows in place, still after everything else", async () => {
+it("turns the vehicle into the split rows under the total, as the design does, ahead of the note", async () => {
   renderPage();
   const dialog = await openRecord();
   const note = within(dialog).getByLabelText("Note");
@@ -752,9 +754,10 @@ it("turns the vehicle into the split rows in place, still after everything else"
     within(dialog).getByRole("button", { name: "Split across vehicles" }),
   );
   expect(within(dialog).queryByLabelText("Vehicle")).toBeNull();
+  expect(within(dialog).getByLabelText("Date").closest(".mrow2")).toBeNull();
   const first = within(dialog).getByLabelText("Vehicle 1");
   expect(before(within(dialog).getByText("Total amount"), first)).toBe(true);
-  expect(before(note, first)).toBe(true);
+  expect(before(first, note)).toBe(true);
   expect(
     before(first, within(dialog).getByRole("button", { name: /^Save/ })),
   ).toBe(true);
@@ -774,7 +777,7 @@ it("puts who recorded a row under the title of the form that changes it, not in 
   expect(dialog.querySelector("form")).not.toHaveTextContent("Recorded by");
 });
 
-it("searches the item and the source by typing", async () => {
+it("searches the item by typing, and takes the source from its list", async () => {
   const { api } = renderPage();
   const dialog = await openRecord();
   const item = within(dialog).getByLabelText("Item");
@@ -782,7 +785,7 @@ it("searches the item and the source by typing", async () => {
   fireEvent.change(item, { target: { value: "fuel dies" } });
   fireEvent.keyDown(item, { key: "Enter" });
   expect(item).toHaveValue("Diesel");
-  changeTo(within(dialog).getByLabelText("Unit cost"), "100");
+  changeTo(within(dialog).getByLabelText("Unit cost, KES"), "100");
   pick(within(dialog).getByLabelText("Vehicle"), /^KDA/);
   fireEvent.click(save(dialog));
   await screen.findByText("KES 100 recorded on KDA 482M.");
@@ -790,10 +793,7 @@ it("searches the item and the source by typing", async () => {
     expenseItemId: "i2",
   });
 
-  const source = screen.getByLabelText("Source");
-  fireEvent.focus(source);
-  fireEvent.change(source, { target: { value: "pet" } });
-  fireEvent.keyDown(source, { key: "Enter" });
+  choose(screen.getByLabelText("Source"), "Petty cash");
   await waitFor(() =>
     expect(ledgerReads(api).at(-1)).toContain("source=pettycash"),
   );

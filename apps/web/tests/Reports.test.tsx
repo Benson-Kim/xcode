@@ -17,7 +17,7 @@ import { AppShell } from "../components/AppShell";
 import { ReportsPage } from "../components/reports/ReportsPage";
 import { fakeApi, type Reply } from "./fakeApi";
 import { appearanceFixture, renderInApp } from "./renderInApp";
-import { optionsOf, pick } from "./searchSelect";
+import { choose, pick } from "./searchSelect";
 
 const BUSINESS_DATE = "2026-10-09";
 const WEEK = "from=2026-10-05&to=2026-10-11";
@@ -157,7 +157,11 @@ const exportAs = (format: "Excel" | "PDF") => {
   fireEvent.click(screen.getByRole("menuitem", { name: format }));
 };
 
-const optionNames = optionsOf;
+// The names of the options a native select offers.
+const optionNames = (select: HTMLElement) =>
+  Array.from((select as HTMLSelectElement).options).map(
+    (option) => option.textContent,
+  );
 
 const clicks: { download: string; href: string }[] = [];
 
@@ -181,7 +185,7 @@ it("lists only the reports the access allows, under the labels of the catalog", 
     "Revenue against target",
     "Investment",
   ]);
-  expect(select).toHaveValue("Net by vehicle");
+  expect(select).toHaveDisplayValue("Net by vehicle");
 });
 
 it("opens the first allowed report for this week", async () => {
@@ -200,11 +204,13 @@ it("opens the first allowed report for this week", async () => {
 
 it("shows the headline and the figures as cards", async () => {
   renderPage();
-  const figures = await screen.findByRole("group", { name: "Report figures" });
+  const figures = await screen.findByRole("region", {
+    name: "Report figures",
+  });
   const value = (label: string) => within(figures).getByText(label).nextSibling;
   expect(value("Net contribution")).toHaveTextContent("KES 6,000");
-  expect(value("Revenue")).toHaveTextContent("KES 15,000");
-  expect(value("Worst vehicle")).toHaveTextContent("KES -2,000");
+  expect(value("Revenue")).toHaveTextContent(/^15,000$/);
+  expect(value("Worst vehicle")).toHaveTextContent(/^-2,000$/);
   // On the headline card a loss takes the card's loss colour.
   expect(value("Worst vehicle")?.parentElement).toHaveClass("neg");
   expect(value("Net contribution")).not.toHaveClass("neg");
@@ -263,7 +269,7 @@ it("asks again with the new period when the period changes", async () => {
   );
 
   openPeriod();
-  fireEvent.click(screen.getByRole("button", { name: "Last month" }));
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Last month" }));
   await waitFor(() =>
     expect(reads(api).at(-1)).toBe(
       "setup/reports/fleet/net?from=2026-09-01&to=2026-09-30",
@@ -284,7 +290,7 @@ it("asks again with the new period when the period changes", async () => {
 it("keeps a report that takes no period free of the picker and of from and to", async () => {
   const api = renderPage();
   await screen.findByRole("row", { name: /KDA 482M/ });
-  pick(screen.getByLabelText("Report"), "Investment");
+  choose(screen.getByLabelText("Report"), "Investment");
   await waitFor(() =>
     expect(reads(api).at(-1)).toBe("setup/reports/fleet/investment"),
   );
@@ -295,12 +301,12 @@ it("keeps a report that takes no period free of the picker and of from and to", 
     screen.queryByRole("button", { name: "Previous week" }),
   ).not.toBeInTheDocument();
 
-  pick(screen.getByLabelText("Report"), "Net by vehicle");
+  choose(screen.getByLabelText("Report"), "Net by vehicle");
   expect(
     await screen.findByRole("button", { name: /^Period, / }),
   ).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Petty cash" }));
-  pick(await screen.findByLabelText("Report"), "Waiting for approval");
+  choose(await screen.findByLabelText("Report"), "Waiting for approval");
   await waitFor(() =>
     expect(reads(api).at(-1)).toBe("setup/reports/pettycash/waiting"),
   );
@@ -325,7 +331,7 @@ it("cuts petty cash reports to a manager, and leaves fleet reports uncut", async
     expect(reads(api).at(-1)).toBe(`setup/reports/pettycash/cashBook?${WEEK}`),
   );
 
-  pick(manager, "Peter Otieno (not active)");
+  choose(manager, "Peter Otieno (not active)");
   await waitFor(() =>
     expect(reads(api).at(-1)).toBe(
       `setup/reports/pettycash/cashBook?${WEEK}&holderId=h2`,
@@ -333,7 +339,9 @@ it("cuts petty cash reports to a manager, and leaves fleet reports uncut", async
   );
 
   fireEvent.click(screen.getByRole("button", { name: "Fleet" }));
-  expect(await screen.findByLabelText("Report")).toHaveValue("Net by vehicle");
+  expect(await screen.findByLabelText("Report")).toHaveDisplayValue(
+    "Net by vehicle",
+  );
   expect(screen.queryByLabelText("Manager")).not.toBeInTheDocument();
   expect(reads(api).filter((path) => path.includes("/fleet/"))).toEqual([
     `setup/reports/fleet/net?${WEEK}`,
@@ -355,11 +363,11 @@ it("shows each cell by its kind", async () => {
   const late = await screen.findByRole("row", { name: /KDB 100X/ });
   const cell = (label: string) =>
     late.querySelector(`[data-label="${label}"]`) as HTMLElement;
-  expect(within(cell("Vehicle")).getByText("KDB 100X").tagName).toBe("STRONG");
-  expect(cell("Revenue (KES)")).toHaveTextContent("3,000");
-  expect(cell("Money out (KES)")).toHaveTextContent("5,000");
-  expect(cell("Net (KES)")).toHaveTextContent("-2,000");
-  expect(within(cell("Net (KES)")).getByText("-2,000")).toHaveClass("text-red");
+  expect(within(cell("Vehicle")).getByText("KDB 100X")).toHaveClass("reg");
+  expect(cell("Revenue")).toHaveTextContent("3,000");
+  expect(cell("Money out")).toHaveTextContent("5,000");
+  expect(cell("Net")).toHaveTextContent("-2,000");
+  expect(within(cell("Net")).getByText("-2,000")).toHaveClass("neg");
   expect(cell("Days")).toHaveTextContent(/^4$/);
   expect(cell("Share")).toHaveTextContent("20%");
   expect(cell("Last day")).toHaveTextContent("7 Oct 2026");
@@ -369,10 +377,8 @@ it("shows each cell by its kind", async () => {
   const early = screen.getByRole("row", { name: /KDA 482M/ });
   const first = (label: string) =>
     early.querySelector(`[data-label="${label}"]`) as HTMLElement;
-  expect(first("Net (KES)")).toHaveTextContent("8,000");
-  expect(within(first("Net (KES)")).getByText("8,000")).not.toHaveClass(
-    "text-red",
-  );
+  expect(first("Net")).toHaveTextContent("8,000");
+  expect(within(first("Net")).getByText("8,000")).not.toHaveClass("neg");
   expect(first("Share")).toHaveTextContent("66.7%");
   expect(first("Litres")).toHaveTextContent("11.875");
 });
@@ -410,8 +416,8 @@ it("sends the search to the server after a pause, and shows the rows and footer 
   await screen.findByRole("row", { name: /KDA 482M/ });
   expect(rawReads(api)).toHaveLength(1);
 
-  changeTo(screen.getByLabelText("Search"), "kdb");
-  changeTo(screen.getByLabelText("Search"), " kdb late ");
+  changeTo(screen.getByLabelText("Search this report"), "kdb");
+  changeTo(screen.getByLabelText("Search this report"), " kdb late ");
   expect(rawReads(api)).toHaveLength(1);
   await waitFor(() =>
     expect(rawReads(api).at(-1)).toBe(
@@ -432,7 +438,7 @@ it("sends the search to the server after a pause, and shows the rows and footer 
       .map((c) => c.textContent),
   ).toEqual(["1 row", "3,000", "5,000", "-2,000", "4", "", "", "", ""]);
 
-  changeTo(screen.getByLabelText("Search"), "nothing like this");
+  changeTo(screen.getByLabelText("Search this report"), "nothing like this");
   expect(await screen.findByText("Nothing to show.")).toBeInTheDocument();
 });
 
@@ -453,7 +459,7 @@ it("hides Export from someone without reports.export", async () => {
 it("exports the report as shown, with the search, and offers the file under a name that says what it is", async () => {
   const api = renderPage();
   await screen.findByRole("row", { name: /KDA 482M/ });
-  changeTo(screen.getByLabelText("Search"), " kdb ");
+  changeTo(screen.getByLabelText("Search this report"), " kdb ");
   await waitFor(() => expect(reads(api).at(-1)).toContain("q=kdb"));
   await screen.findByText("1 row");
   exportAs("Excel");
@@ -474,7 +480,7 @@ it("exports a petty cash report for the chosen manager, and an undated one witho
   const api = renderPage();
   await screen.findByRole("row", { name: /KDA 482M/ });
   fireEvent.click(screen.getByRole("button", { name: "Petty cash" }));
-  pick(await screen.findByLabelText("Manager"), "Grace Wanjiru");
+  choose(await screen.findByLabelText("Manager"), "Grace Wanjiru");
   await waitFor(() => expect(reads(api).at(-1)).toContain("holderId=h1"));
   await screen.findByRole("row", { name: /KDA 482M/ });
   exportAs("Excel");
@@ -484,7 +490,7 @@ it("exports a petty cash report for the chosen manager, and an undated one witho
   );
   expect(clicks[0].download).toBe("Cash book 5-11 Oct 2026.xlsx");
 
-  pick(screen.getByLabelText("Report"), "Waiting for approval");
+  choose(screen.getByLabelText("Report"), "Waiting for approval");
   await waitFor(() =>
     expect(reads(api).at(-1)).toBe(
       "setup/reports/pettycash/waiting?holderId=h1",
@@ -567,7 +573,7 @@ it("goes back to page 1 when the search, the page size, the report, the period o
 
   fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
   await screen.findByText("Showing 51–75 of 120");
-  changeTo(screen.getByLabelText("Search"), "late");
+  changeTo(screen.getByLabelText("Search this report"), "late");
   await waitFor(() =>
     expect(rawReads(api).at(-1)).toContain("q=late&page=1&pageSize=25"),
   );
@@ -589,14 +595,14 @@ it("goes back to page 1 when the search, the page size, the report, the period o
   );
   expect(rawReads(api).at(-1)).toContain("page=1&pageSize=50");
 
-  pick(screen.getByLabelText("Report"), "Revenue against target");
+  choose(screen.getByLabelText("Report"), "Revenue against target");
   await waitFor(() =>
     expect(rawReads(api).at(-1)).toContain("reports/fleet/target?"),
   );
   expect(rawReads(api).at(-1)).toContain("page=1&pageSize=50");
 
   fireEvent.click(screen.getByRole("button", { name: "Petty cash" }));
-  pick(await screen.findByLabelText("Manager"), "Grace Wanjiru");
+  choose(await screen.findByLabelText("Manager"), "Grace Wanjiru");
   await waitFor(() => expect(rawReads(api).at(-1)).toContain("holderId=h1"));
   expect(rawReads(api).at(-1)).toContain("page=1&pageSize=50");
 });
@@ -606,7 +612,7 @@ it("exports every matching row, not the page that is shown", async () => {
   await screen.findByText("KDA 001M");
   fireEvent.click(screen.getByRole("button", { name: "Next page" }));
   await screen.findByText("Showing 26–50 of 120");
-  changeTo(screen.getByLabelText("Search"), "late");
+  changeTo(screen.getByLabelText("Search this report"), "late");
   await screen.findByText("Showing 1–25 of 60");
   exportAs("Excel");
   await waitFor(() => expect(clicks).toHaveLength(1));
@@ -692,7 +698,7 @@ it("offers Excel and PDF from the Export button, and asks for nothing until one 
 it("exports a PDF with the same filters, and names the file .pdf", async () => {
   const api = renderPage();
   await screen.findByRole("row", { name: /KDA 482M/ });
-  changeTo(screen.getByLabelText("Search"), "kdb");
+  changeTo(screen.getByLabelText("Search this report"), "kdb");
   await screen.findByText("1 row");
   exportAs("PDF");
   await waitFor(() => expect(clicks).toHaveLength(1));
@@ -713,24 +719,24 @@ it("exports an Excel workbook and names the file .xlsx", async () => {
   expect(clicks[0].download).toBe("Net by vehicle 5-11 Oct 2026.xlsx");
 });
 
-it("searches the report by typing", async () => {
+it("asks for the report chosen from the list", async () => {
   const api = renderPage();
   await screen.findByRole("row", { name: /KDA 482M/ });
-  const report = screen.getByLabelText("Report");
-  fireEvent.focus(report);
-  fireEvent.change(report, { target: { value: "against" } });
-  fireEvent.keyDown(report, { key: "Enter" });
+  choose(screen.getByLabelText("Report"), "Revenue against target");
   await waitFor(() =>
     expect(rawReads(api).at(-1)).toContain("reports/fleet/target?"),
   );
 });
 
-it("shows amounts as numbers in the table and names the currency in the column headings", async () => {
+it("shows amounts as numbers in the table and in its column headings, without the currency", async () => {
   renderPage();
   const row = await screen.findByRole("row", { name: /KDB 100X/ });
   expect(within(row).queryByText(/KES/)).not.toBeInTheDocument();
-  for (const name of ["Revenue (KES)", "Money out (KES)", "Net (KES)"])
+  for (const name of ["Revenue", "Money out", "Net"])
     expect(screen.getByRole("columnheader", { name })).toBeInTheDocument();
+  expect(
+    screen.queryByRole("columnheader", { name: /KES/ }),
+  ).not.toBeInTheDocument();
   expect(
     screen.getByRole("columnheader", { name: "Days" }),
   ).toBeInTheDocument();

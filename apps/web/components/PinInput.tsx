@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { PIN_HELP, validatePin } from "@xcode/shared/auth";
 
-import { AlertIcon, Field, LinkButton, TextInput } from "./ui";
+import { Field, LinkButton, TextInput } from "./ui";
 
 export function PinInput({
   value,
@@ -37,7 +37,7 @@ export function PinInput({
       }
     >
       <TextInput
-        className="text-[22px] tracking-[0.4em] placeholder:text-[17px] placeholder:tracking-normal"
+        className="num"
         id="pin"
         name="pin"
         type={visible ? "text" : "password"}
@@ -56,11 +56,7 @@ export function PinInput({
         aria-describedby={error ? "pin-help" : undefined}
       />
       {error && (
-        <p
-          id="pin-help"
-          className="m-0 flex items-start gap-1.5 text-[13px] font-semibold text-clay"
-        >
-          <AlertIcon className="mt-px shrink-0" />
+        <p id="pin-help" className="ferr">
           {PIN_HELP}
         </p>
       )}

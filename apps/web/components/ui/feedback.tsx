@@ -2,35 +2,20 @@ import type { ComponentProps, ReactNode } from "react";
 
 import { Button } from "./button";
 import { cn } from "./cn";
-import { AlertIcon, OfflineIcon } from "./icons";
 
-const BANNER = {
-  error: "border-transparent bg-clay-wash text-clay",
-  offline: "border-transparent bg-gold-wash text-gold",
-} as const;
-
-// A message across the top of a form or page (.banner).
+// A message at the top of a form or page: an error in the design's error text (.ferr), being offline as a hint.
 export function Banner({
   tone = "error",
   role,
   className,
-  children,
   ...props
-}: ComponentProps<"div"> & { tone?: keyof typeof BANNER }) {
-  const Icon = tone === "offline" ? OfflineIcon : AlertIcon;
+}: ComponentProps<"div"> & { tone?: "error" | "offline" }) {
   return (
     <div
       {...props}
       role={role ?? (tone === "error" ? "alert" : "status")}
-      className={cn(
-        "flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-[14.5px] font-semibold",
-        BANNER[tone],
-        className,
-      )}
-    >
-      <Icon size={18} className="mt-0.5 shrink-0" />
-      <span>{children}</span>
-    </div>
+      className={cn(tone === "error" ? "ferr" : "hint", className)}
+    />
   );
 }
 
@@ -45,9 +30,9 @@ export function RetryBanner({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap items-center gap-3", className)}>
+    <div className={cn("bar", className)}>
       <Banner>{children}</Banner>
-      <Button tone="outline" onClick={onRetry}>
+      <Button tone="outline" size="sm" onClick={onRetry}>
         Try again
       </Button>
     </div>
@@ -66,7 +51,7 @@ export function ErrorSummary({ count }: { count: number }) {
   );
 }
 
-// A short explanation inside a form (.note): amber for limits, blue for information.
+// A short explanation inside a form, in the design's hint type. A limit is gold, information slate.
 export function Note({
   tone = "warn",
   className,
@@ -75,23 +60,19 @@ export function Note({
   return (
     <p
       {...props}
-      className={cn(
-        "m-0 rounded-xl px-3.5 py-2.5 text-sm font-semibold",
-        tone === "info" ? "bg-teal-wash text-teal" : "bg-gold-wash text-gold",
-        className,
-      )}
+      className={cn("hint", tone === "warn" && "text-gold", className)}
     />
   );
 }
 
 const STATUS = {
-  ok: "bg-teal-wash text-teal",
-  warn: "bg-gold-wash text-gold",
-  off: "bg-clay-wash text-clay",
-  neutral: "bg-paper-2 text-ink-2",
+  ok: "ok",
+  warn: "wait",
+  off: "bad",
+  neutral: "mute",
 } as const;
 
-// A dot-and-label state in a list (.status).
+// A state in a list (.chip ok|wait|bad|mute).
 export function StatusBadge({
   tone = "neutral",
   children,
@@ -99,29 +80,15 @@ export function StatusBadge({
   tone?: keyof typeof STATUS;
   children: ReactNode;
 }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold whitespace-nowrap",
-        "before:size-1.75 before:rounded-full before:bg-current before:content-['']",
-        STATUS[tone],
-      )}
-    >
-      {children}
-    </span>
-  );
+  return <span className={cn("chip", STATUS[tone])}>{children}</span>;
 }
 
-// A plain label in a list, with no indicator (the source of an expense).
+// A plain label in a list (.chip mute), such as the source of an expense.
 export function PlainTag({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-block rounded-full bg-paper-2 px-2.5 py-0.5 text-xs font-bold whitespace-nowrap text-ink-2">
-      {children}
-    </span>
-  );
+  return <span className="chip mute">{children}</span>;
 }
 
-// Running total against a target, e.g. an allocation (.balance).
+// Running total against a target, e.g. an allocation: slate while it adds up, clay when it does not (.hint.neg).
 export function BalancePanel({
   ok,
   className,
@@ -132,8 +99,8 @@ export function BalancePanel({
       role="status"
       {...props}
       className={cn(
-        "flex flex-wrap justify-between gap-3 rounded-xl p-3 font-bold",
-        ok ? "bg-teal-wash text-teal" : "bg-clay-wash text-clay",
+        "hint bal flex flex-wrap justify-between gap-3",
+        !ok && "neg",
         className,
       )}
     />

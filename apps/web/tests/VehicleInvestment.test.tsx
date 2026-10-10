@@ -88,7 +88,7 @@ async function openVehicle(
     { permissions: ["vehicles.manage", ...permissions] },
     { businessDate: businessDateShown },
   );
-  fireEvent.click(await screen.findByRole("button", { name: "KDA 482M" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit KDA 482M" }));
 }
 
 afterEach(() => vi.useRealTimers());
@@ -138,7 +138,9 @@ it("shows what went in, with what has come back left blank until it can be worke
   expect(dates).toEqual(["5 May 2025", "20 May 2025"]);
   expect(screen.getByText("2 entries")).toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: /Add investment|Edit|Remove/ }),
+    within(screen.getByRole("dialog")).queryByRole("button", {
+      name: /Add investment|Edit|Remove/,
+    }),
   ).not.toBeInTheDocument();
 });
 
@@ -258,7 +260,7 @@ it("dates a new vehicle from the business date, never the computer clock", async
   const { unmount } = renderInApp(<VehiclesPage />, {
     permissions: ["vehicles.manage"],
   });
-  fireEvent.click(await screen.findByRole("button", { name: "Add vehicle" }));
+  fireEvent.click(await screen.findByRole("button", { name: "New vehicle" }));
   expect(screen.getByLabelText("In the fleet from")).toHaveValue("");
   unmount();
 
@@ -267,7 +269,7 @@ it("dates a new vehicle from the business date, never the computer clock", async
     { permissions: ["vehicles.manage"] },
     { businessDate },
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Add vehicle" }));
+  fireEvent.click(await screen.findByRole("button", { name: "New vehicle" }));
   expect(screen.getByLabelText("In the fleet from")).toHaveValue(businessDate);
   expect(screen.getByLabelText("In the fleet from")).toHaveAttribute(
     "max",

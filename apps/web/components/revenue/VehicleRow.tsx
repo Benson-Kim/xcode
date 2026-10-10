@@ -8,7 +8,7 @@ import { useFormats } from "../../lib/formats";
 import { ChevronIcon, cn } from "../ui";
 import { DayCell } from "./DayCell";
 import { RegPlate } from "./RegPlate";
-import { CELL, DAY_COLUMN, EDGE } from "./styles";
+import { DAY_COLUMN } from "./styles";
 import type { OpenDay } from "./useCaptureFlow";
 import { VehicleWeek } from "./VehicleWeek";
 
@@ -39,15 +39,7 @@ export const VehicleRow = memo(function VehicleRow({
       <tr ref={measure} data-measure={vehicle.id} aria-rowindex={rowIndex}>
         <VehicleLabel vehicle={vehicle} isOpen={isOpen} onToggle={onToggle} />
         {vehicle.days.map((day) => (
-          <td
-            key={day.date}
-            className={cn(
-              CELL,
-              DAY_COLUMN,
-              "text-right",
-              day.date === today && "bg-teal-wash/40",
-            )}
-          >
+          <td key={day.date} className={cn("r", DAY_COLUMN)}>
             <DayCell
               vehicle={vehicle}
               cell={day}
@@ -57,18 +49,18 @@ export const VehicleRow = memo(function VehicleRow({
             />
           </td>
         ))}
-        <td className={cn(CELL, "text-right")}>
-          <strong className="font-extrabold text-ink">
-            {formats.formatNumber(vehicle.totalAmount)}
-          </strong>
-        </td>
-        <td className={cn(CELL, EDGE, "text-right")}>
+        <td className="r tot">{formats.formatNumber(vehicle.totalAmount)}</td>
+        <td>
           {vehicle.percent !== null && (
-            <span
-              className={cn("font-bold", vehicle.percent < 90 && "text-clay")}
-            >
-              {percentText(vehicle.percent)}
-            </span>
+            <div className="prog">
+              <div className="t" aria-hidden="true">
+                <i
+                  className={vehicle.percent >= 100 ? "full" : undefined}
+                  style={{ width: `${Math.min(vehicle.percent, 100)}%` }}
+                />
+              </div>
+              <span>{percentText(vehicle.percent)}</span>
+            </div>
           )}
         </td>
       </tr>
@@ -79,10 +71,7 @@ export const VehicleRow = memo(function VehicleRow({
           data-measure={`${vehicle.id}:detail`}
           aria-rowindex={rowIndex === undefined ? undefined : rowIndex + 1}
         >
-          <td
-            colSpan={10}
-            className="border-b border-divider bg-paper px-(--gut) pt-1 pb-4"
-          >
+          <td colSpan={10}>
             <VehicleWeek
               vehicle={vehicle}
               days={days}
@@ -107,24 +96,18 @@ function VehicleLabel({
   onToggle: (id: string) => void;
 }) {
   return (
-    <th
-      scope="row"
-      className={cn(
-        CELL,
-        EDGE,
-        "sticky left-0 z-1 min-w-35 bg-surface text-left font-normal",
-      )}
-    >
+    // A row header; the design's cell type and case, not a column heading's.
+    <th scope="row" className="font-normal tracking-normal normal-case">
       <button
         type="button"
         aria-expanded={isOpen}
         aria-controls={isOpen ? `revenue-detail-${vehicle.id}` : undefined}
         onClick={() => onToggle(vehicle.id)}
-        className="inline-flex min-h-8 items-center gap-1.5 text-left font-bold text-ink"
+        className="inline-flex items-center gap-1.5 text-left"
       >
         <ChevronIcon
           className={cn(
-            "shrink-0 transition-transform motion-reduce:transition-none",
+            "shrink-0 text-slate transition-transform motion-reduce:transition-none",
             !isOpen && "-rotate-90",
           )}
         />

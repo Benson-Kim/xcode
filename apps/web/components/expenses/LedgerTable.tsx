@@ -22,16 +22,16 @@ import {
 } from "../ui";
 import { rowLabel } from "./labels";
 
-const columns = (currency: string): Column[] => [
+const columns: Column[] = [
   { label: "Date" },
   { label: "Vehicle" },
   { label: "Item" },
   { label: "Qty", numeric: true },
-  { label: `Unit cost (${currency})`, numeric: true },
-  { label: `Total amount (${currency})`, numeric: true },
+  { label: "Unit cost", numeric: true },
+  { label: "Total amount", numeric: true },
   { label: "Source" },
   { label: "Recorded by" },
-  { label: "Actions", hidden: true },
+  { label: "Actions", numeric: true },
 ];
 
 export type LedgerActions = {
@@ -60,12 +60,11 @@ export function LedgerTable({
   actions: LedgerActions;
 }) {
   const formats = useFormats();
-  const currency = formats.currencyCode();
   const locale = useAppearance().appearance?.formats.locale ?? "en-GB";
   const unitsText = useMemo(() => unitsFormat(locale), [locale]);
   return (
     <DataTable
-      columns={columns(currency)}
+      columns={columns}
       loading={loading}
       loadingLabel="Loading expenses"
       isEmpty={!rows.length}
@@ -87,40 +86,38 @@ export function LedgerTable({
         const label = rowLabel(formats, row);
         return (
           <Tr key={row.id}>
-            <Td label="Date" className="whitespace-nowrap">
+            <Td label="Date" className="nw">
               {formats.formatDateOnly(row.date)}
             </Td>
             <Td label="Vehicle">
               <RegPlate>{row.registration}</RegPlate>
             </Td>
-            <Td label="Item">
-              <span className="font-semibold text-ink">{row.itemName}</span>
-              {row.categoryName && <CellNote>{row.categoryName}</CellNote>}
-              {row.note && <CellNote>{row.note}</CellNote>}
-              {row.group && (
+            <Td label="Item" className="item nw">
+              {row.itemName}
+              {row.group ? (
                 <CellNote>
                   Shared by {row.group.size} vehicles,{" "}
                   {formats.kes(row.group.total)} in all
                 </CellNote>
+              ) : (
+                row.note && <CellNote>{row.note}</CellNote>
               )}
             </Td>
             <Td label="Qty" numeric>
               {unitsText(row.units)}
             </Td>
-            <Td label={`Unit cost (${currency})`} numeric>
+            <Td label="Unit cost" numeric>
               {formats.formatNumber(row.unitAmount)}
             </Td>
-            <Td label={`Total amount (${currency})`} numeric>
-              <strong className="font-bold text-ink">
-                {formats.formatNumber(row.total)}
-              </strong>
+            <Td label="Total amount" numeric className="tot">
+              {formats.formatNumber(row.total)}
             </Td>
             <Td label="Source">
               <PlainTag>{EXPENSE_SOURCE_LABELS[row.source]}</PlainTag>
             </Td>
-            <Td label="Recorded by">
+            <Td label="Recorded by" className="nw">
               {row.source === "scheduled" ? (
-                <span className="text-slate">Standing order</span>
+                <span className="muted">Standing order</span>
               ) : (
                 row.recordedByName
               )}
@@ -129,7 +126,7 @@ export function LedgerTable({
               )}
             </Td>
             <Td>
-              <span className="flex flex-nowrap justify-end gap-0.5">
+              <div className="tacts">
                 {row.canEdit && (
                   <RowAction
                     aria-label={`Edit ${label}`}
@@ -149,13 +146,14 @@ export function LedgerTable({
                 )}
                 {row.source === "pettycash" && actions.onOpenDay && (
                   <RowAction
+                    tone="plain"
                     aria-label={`Open ${formats.formatDateOnly(row.date)} in Petty cash`}
                     onClick={() => actions.onOpenDay?.(row)}
                   >
                     Open day
                   </RowAction>
                 )}
-              </span>
+              </div>
             </Td>
           </Tr>
         );

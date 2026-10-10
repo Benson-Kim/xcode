@@ -26,7 +26,7 @@ import {
   PageHeader,
   RetryBanner,
   SegmentedControl,
-  SearchSelect,
+  SelectInput,
   Skeleton,
   Spacer,
   TextInput,
@@ -45,14 +45,14 @@ const GROUPS: { value: ReportGroup; label: string }[] = [
 export function ReportsPage() {
   const access = useResource<ReportsAccess>(REPORTS_ACCESS_PATH);
   return (
-    <section className="flex flex-col gap-3.5">
+    <>
       <PageHeader title="Reports" description="" />
       {access.error && !access.data && (
         <RetryBanner onRetry={access.reload}>{access.error}</RetryBanner>
       )}
       {!access.data && !access.error && <Skeleton className="h-11 w-2/3" />}
       {access.data && <ReportsView access={access.data} />}
-    </section>
+    </>
   );
 }
 
@@ -105,6 +105,7 @@ function ReportsView({ access }: { access: ReportsAccess }) {
   return (
     <>
       <HeroBand
+        label="Report figures"
         period={
           dated ? (
             <PeriodPicker
@@ -131,17 +132,17 @@ function ReportsView({ access }: { access: ReportsAccess }) {
             }}
           />
         )}
-        <SearchSelect
+        <SelectInput
           aria-label="Report"
-          density="compact"
-          inline
-          options={reports.map((entry) => ({
-            value: entry.id,
-            label: entry.label,
-          }))}
           value={report?.id ?? ""}
-          onChange={(id) => setChosen(id as ReportId)}
-        />
+          onChange={(event) => setChosen(event.target.value as ReportId)}
+        >
+          {reports.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {entry.label}
+            </option>
+          ))}
+        </SelectInput>
         {group === "pettycash" && access.holders.length > 1 && (
           <HolderSelect
             holders={access.holders}
@@ -151,11 +152,9 @@ function ReportsView({ access }: { access: ReportsAccess }) {
         )}
         <TextInput
           type="search"
-          aria-label="Search"
-          density="compact"
-          inline
-          className="max-w-80 flex-[1_1_110px]"
-          placeholder="Search the rows"
+          aria-label="Search this report"
+          className="srch"
+          placeholder="Search"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
@@ -201,19 +200,17 @@ function HolderSelect({
   onChange: (holderId: string) => void;
 }) {
   return (
-    <SearchSelect
+    <SelectInput
       aria-label="Manager"
-      density="compact"
-      inline
-      options={[
-        { value: "", label: "All managers" },
-        ...holders.map((entry) => ({
-          value: entry.id,
-          label: `${entry.name}${entry.active ? "" : " (not active)"}`,
-        })),
-      ]}
       value={value}
-      onChange={onChange}
-    />
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <option value="">All managers</option>
+      {holders.map((entry) => (
+        <option key={entry.id} value={entry.id}>
+          {`${entry.name}${entry.active ? "" : " (not active)"}`}
+        </option>
+      ))}
+    </SelectInput>
   );
 }

@@ -7,33 +7,34 @@ import { DataTable, Td, Tr } from "../ui";
 import { Days } from "./dayGroups";
 import { RowActions, type EntryActions } from "./RowActions";
 
-const columns = (currency: string) => [
+const columns = [
   { label: "Manager" },
-  { label: "What" },
-  { label: `Amount (${currency})`, numeric: true },
-  { label: "Actions", hidden: true },
+  { label: "Reason" },
+  { label: "Amount", numeric: true },
+  { label: "Actions", numeric: true },
 ];
 
 // Cash given to floats and taken back from them. Cash taken back reads "Less KES 300", as cash returned does in the
-// design.
+// design. The footer nets every entry out when they are all on this page.
 export function CashTable({
   entries,
+  total,
   days,
   loading,
   failed,
   actions,
 }: {
   entries: PettyCashEntry[];
+  total: number;
   days: boolean;
   loading: boolean;
   failed: boolean;
   actions: EntryActions;
 }) {
   const formats = useFormats();
-  const currency = formats.currencyCode();
   return (
     <DataTable
-      columns={columns(currency)}
+      columns={columns}
       loading={loading}
       loadingLabel="Loading cash received"
       isEmpty={!entries.length}
@@ -43,35 +44,38 @@ export function CashTable({
           ? "No cash movements in this period."
           : "No cash movements on this day."
       }
+      footer={
+        <tr>
+          <td colSpan={2}>Net cash received</td>
+          <td className="r">
+            {entries.length === total &&
+              formats.formatNumber(
+                entries.reduce((sum, entry) => sum + entry.total, 0),
+              )}
+          </td>
+          <td />
+        </tr>
+      }
     >
       <Days
         entries={entries}
         grouped={days}
-        before={2}
-        after={1}
-        totalLabel={`Day total (${currency})`}
+        span={4}
+        note={(day) => `Net cash received ${formats.kes(day.total)}`}
         row={(entry) => {
           const back = entry.total < 0;
           return (
             <Tr key={entry.id}>
-              <Td label="Manager">
-                <strong className="font-bold text-ink">
-                  {entry.holderName}
-                </strong>
+              <Td label="Manager" className="nw">
+                {entry.holderName}
               </Td>
-              <Td label="What">
+              <Td label="Reason">
                 {entry.note || (back ? "Cash returned" : "Cash given")}
               </Td>
-              <Td label={`Amount (${currency})`} numeric>
-                <strong
-                  className={
-                    back ? "font-bold text-clay" : "font-bold text-ink"
-                  }
-                >
-                  {back
-                    ? `Less ${formats.formatNumber(-entry.total)}`
-                    : formats.formatNumber(entry.total)}
-                </strong>
+              <Td label="Amount" numeric className={back ? "tot neg" : "tot"}>
+                {back
+                  ? `Less ${formats.formatNumber(-entry.total)}`
+                  : formats.formatNumber(entry.total)}
               </Td>
               <Td>
                 <RowActions entry={entry} actions={actions} />

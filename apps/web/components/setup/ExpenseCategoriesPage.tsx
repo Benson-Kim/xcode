@@ -14,7 +14,6 @@ import type {
 import {
   Banner,
   Button,
-  CellNote,
   DataTable,
   Dialog,
   Field,
@@ -28,7 +27,6 @@ import {
   TextInput,
   Toolbar,
   Tr,
-  cn,
   useToast,
 } from "../ui";
 import { expenseBucketNames } from "./shared";
@@ -213,7 +211,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
 
   function actions(kind: Kind, entity: ExpenseCategory | ExpenseItem) {
     return (
-      <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
+      <div className="tacts">
         <RowAction
           disabled={busy}
           aria-label={`Edit ${entity.name}`}
@@ -252,7 +250,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
 
   const statusFilter = (
     <>
-      <label htmlFor="expense-status" className="text-[13px] text-grey">
+      <label htmlFor="expense-status" className="sr-only">
         Show
       </label>
       <SelectInput
@@ -269,7 +267,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
     </>
   );
   const statusCell = (entity: ExpenseCategory | ExpenseItem) => (
-    <Td label="Status">
+    <Td label="Status" className="nw">
       <StatusBadge tone={entity.active ? "ok" : "off"}>
         {!entity.active
           ? "Turned off"
@@ -279,38 +277,43 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
       </StatusBadge>
     </Td>
   );
-  const actionColumn = canManage ? [{ label: "Actions", hidden: true }] : [];
+  const actionColumn = canManage ? [{ label: "Actions", numeric: true }] : [];
 
   return (
-    <section>
+    <>
       <PageHeader
-        title="Expense categories"
-        description="Items are what people pick when they record an expense, in petty cash and in other expenses."
+        title="Expense items"
         actions={
           canManage ? (
             <Button
               tone="primary"
               onClick={() => openAdd(tab === "items" ? "item" : "category")}
             >
-              {tab === "items" ? "Add item" : "Add category"}
+              {tab === "items" ? "New item" : "New category"}
             </Button>
           ) : undefined
         }
       />
       {(categories.error || error) && (
-        <Banner className="mb-3.5">{streamError(categories) || error}</Banner>
+        <Banner>{streamError(categories) || error}</Banner>
       )}
       {!canManage && (
-        <p className="m-0 mb-3.5 text-[13px] text-grey">
-          You can see the categories and items but not change them.
-        </p>
+        <Hint>You can see the categories and items but not change them.</Hint>
       )}
       <Tabs
         id="expenses"
         label="Expense categories"
         options={[
-          { value: "items", label: "Items" },
-          { value: "categories", label: "Categories" },
+          {
+            value: "items",
+            label: "Items",
+            note: `${sorted.flatMap((category) => category.items).filter((item) => item.active).length} in use`,
+          },
+          {
+            value: "categories",
+            label: "Categories",
+            note: String(sorted.length),
+          },
         ]}
         value={tab}
         onChange={(next) => {
@@ -321,10 +324,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
         {tab === "items" ? (
           <>
             <Toolbar>
-              <label
-                htmlFor="expense-category"
-                className="text-[13px] text-grey"
-              >
+              <label htmlFor="expense-category" className="sr-only">
                 Category
               </label>
               <SelectInput
@@ -362,26 +362,21 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
             >
               {visibleItems.map(({ item, category }) => (
                 <Tr key={item.id}>
-                  <Td label="Item">
-                    <span
-                      className={cn(
-                        "font-semibold text-ink",
-                        !item.active && "text-grey line-through",
-                      )}
-                    >
-                      {item.name}
-                    </span>
+                  <Td label="Item" className="item">
+                    {item.name}
                   </Td>
-                  <Td label="Category">
-                    {category.name}
-                    <CellNote>
-                      {category.active
+                  <Td
+                    label="Category"
+                    title={
+                      category.active
                         ? `Counts as ${expenseBucketNames[category.bucket]}`
-                        : "Its category is turned off"}
-                    </CellNote>
+                        : "Its category is turned off"
+                    }
+                  >
+                    {category.name}
                   </Td>
                   {statusCell(item)}
-                  {canManage && <Td>{actions("item", item)}</Td>}
+                  {canManage && <Td numeric>{actions("item", item)}</Td>}
                 </Tr>
               ))}
             </DataTable>
@@ -413,15 +408,8 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
             >
               {visibleCategories.map((category) => (
                 <Tr key={category.id}>
-                  <Td label="Category">
-                    <span
-                      className={cn(
-                        "font-semibold text-ink",
-                        !category.active && "text-grey line-through",
-                      )}
-                    >
-                      {category.name}
-                    </span>
+                  <Td label="Category" className="item">
+                    {category.name}
                   </Td>
                   <Td label="Counts as">
                     {expenseBucketNames[category.bucket]}
@@ -430,7 +418,9 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
                     {category.items.filter((item) => item.active).length}
                   </Td>
                   {statusCell(category)}
-                  {canManage && <Td>{actions("category", category)}</Td>}
+                  {canManage && (
+                    <Td numeric>{actions("category", category)}</Td>
+                  )}
                 </Tr>
               ))}
             </DataTable>
@@ -439,6 +429,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
       </Tabs>
       <Dialog
         open={Boolean(adding)}
+        size="sm"
         title={adding?.kind === "category" ? "New category" : "New item"}
         onClose={() => setAdding(null)}
         footer={
@@ -452,7 +443,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
               tone="ok"
               disabled={busy}
             >
-              Add
+              Save
             </Button>
           </>
         }
@@ -460,7 +451,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
         {adding && (
           <form
             id="expense-add-form"
-            className="flex flex-col gap-3.5"
+            className="contents"
             onSubmit={(event) => {
               event.preventDefault();
               void add();
@@ -526,6 +517,7 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
       </Dialog>
       <Dialog
         open={Boolean(editing && editingEntity)}
+        size="sm"
         title={editing?.kind === "category" ? "Edit category" : "Edit item"}
         subtitle={editingEntity?.name}
         onClose={() => setEditing(null)}
@@ -548,19 +540,13 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
         {editing && editingEntity && (
           <form
             id="expense-edit-form"
-            className="flex flex-col gap-3.5"
+            className="contents"
             onSubmit={(event) => {
               event.preventDefault();
               void saveEdit(editingEntity);
             }}
           >
-            <Field
-              id="expense-edit-name"
-              label={
-                editing.kind === "category" ? "Category name" : "Item name"
-              }
-              error={editing.error}
-            >
+            <Field id="expense-edit-name" label="Name" error={editing.error}>
               <TextInput
                 autoFocus
                 maxLength={NAME_LIMIT}
@@ -596,6 +582,6 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
           </form>
         )}
       </Dialog>
-    </section>
+    </>
   );
 }

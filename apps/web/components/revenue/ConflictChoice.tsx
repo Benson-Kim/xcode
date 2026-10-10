@@ -1,7 +1,8 @@
 import type { RevenueCell, SaveRevenue } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
-import { Button, FormActions, Hint, Note, Stat, StatGrid } from "../ui";
+import { DialogFooter } from "../pettycash/DialogFooter";
+import { Button, Hint, Note, Stat, StatGrid } from "../ui";
 import { entryLabel } from "./capture";
 
 // A save that met a newer record: keep what is saved or replace it with the person's entry.
@@ -36,7 +37,7 @@ export function ConflictChoice({
           Your access does not include changing the saved record for this day.
         </Hint>
       )}
-      <FormActions className="-mx-[22px] -mb-5 justify-end border-t border-line bg-paper px-[22px] py-3.5 max-[600px]:[&_button]:flex-1 [&_button]:min-w-27">
+      <DialogFooter>
         <Button tone="outline" disabled={saving} onClick={onKeep}>
           Keep saved
         </Button>
@@ -45,7 +46,7 @@ export function ConflictChoice({
             {saving ? "Saving…" : "Replace with mine"}
           </Button>
         )}
-      </FormActions>
+      </DialogFooter>
     </>
   );
 }

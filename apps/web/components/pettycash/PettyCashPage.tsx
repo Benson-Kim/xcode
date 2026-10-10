@@ -28,6 +28,7 @@ import {
   HeroBand,
   PageHeader,
   Pager,
+  RetryBanner,
   usePaging,
   useToast,
 } from "../ui";
@@ -217,7 +218,7 @@ export function PettyCashPage({
     : undefined;
 
   return (
-    <section className="flex flex-col gap-3.5">
+    <>
       <PageHeader title="Petty cash" description="" srOnlyTitle />
 
       <HeroBand
@@ -239,6 +240,7 @@ export function PettyCashPage({
           <>
             {permissions && (
               <RecordButtons
+                tab={tab}
                 permissions={permissions}
                 onRecord={(kind) => setEntryDialog({ kind })}
               />
@@ -255,12 +257,7 @@ export function PettyCashPage({
       {notice && <Banner>{notice}</Banner>}
 
       {overview.error && !known && (
-        <div className="flex flex-wrap items-center gap-3">
-          <Banner>{overview.error}</Banner>
-          <Button tone="outline" onClick={overview.reload}>
-            Try again
-          </Button>
-        </div>
+        <RetryBanner onRetry={overview.reload}>{overview.error}</RetryBanner>
       )}
 
       <FiltersBar
@@ -268,6 +265,7 @@ export function PettyCashPage({
           <ViewPills
             id="petty"
             label="Petty cash"
+            panelId="pcT"
             options={TABS}
             value={tab}
             onChange={setTab}
@@ -294,17 +292,18 @@ export function PettyCashPage({
         }
       />
 
+      {list.error && <Banner>{list.error}</Banner>}
+
       <div
         role="tabpanel"
-        id="petty-panel"
+        id="pcT"
         aria-labelledby={`petty-tab-${tab}`}
-        className="flex flex-col gap-3.5"
+        className="stack"
       >
-        {list.error && <Banner>{list.error}</Banner>}
-
         {tab === "expenses" ? (
           <EntriesTable
             entries={items}
+            total={list.data?.total ?? 0}
             days={!oneDay}
             loading={loading}
             failed={Boolean(list.error)}
@@ -314,6 +313,7 @@ export function PettyCashPage({
           <>
             <CashTable
               entries={items}
+              total={list.data?.total ?? 0}
               days={!oneDay}
               loading={loading}
               failed={Boolean(list.error)}
@@ -325,15 +325,15 @@ export function PettyCashPage({
             />
           </>
         )}
-
-        <Pager
-          page={paging.page}
-          pageSize={paging.pageSize}
-          total={list.data?.total ?? 0}
-          onPageChange={paging.setPage}
-          onPageSizeChange={paging.setPageSize}
-        />
       </div>
+
+      <Pager
+        page={paging.page}
+        pageSize={paging.pageSize}
+        total={list.data?.total ?? 0}
+        onPageChange={paging.setPage}
+        onPageSizeChange={paging.setPageSize}
+      />
 
       {permissions && formDate && businessDate && (
         <EntryDialog
@@ -361,18 +361,26 @@ export function PettyCashPage({
         onConflict={conflict}
         onClose={() => setRemoving(null)}
       />
-    </section>
+    </>
   );
 }
 
-// What this person may record: the actions on the headline card.
+// What this person may record in the view shown: the actions on the headline card.
 function RecordButtons({
+  tab,
   permissions,
   onRecord,
 }: {
+  tab: Tab;
   permissions: PettyCashPermissions;
   onRecord: (kind: PettyCashKind) => void;
 }) {
+  if (tab === "expenses")
+    return permissions.canSpend ? (
+      <Button tone="primary" onClick={() => onRecord("expense")}>
+        Record spending
+      </Button>
+    ) : null;
   return (
     <>
       {(permissions.canSpend || permissions.canIssue) && (
@@ -381,13 +389,8 @@ function RecordButtons({
         </Button>
       )}
       {permissions.canIssue && (
-        <Button tone="outline" onClick={() => onRecord("cash")}>
-          Cash
-        </Button>
-      )}
-      {permissions.canSpend && (
-        <Button tone="primary" onClick={() => onRecord("expense")}>
-          Expense
+        <Button tone="primary" onClick={() => onRecord("cash")}>
+          Issue cash
         </Button>
       )}
     </>

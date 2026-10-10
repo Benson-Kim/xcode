@@ -9,8 +9,20 @@ export type SetField = <K extends keyof RecurringFields>(
   value: RecurringFields[K],
 ) => void;
 
-export function useRecurringFields(item?: RecurringItem) {
-  const [fields, setFields] = useState(() => initialFields(item));
+// A new item may start as a saving (kind 2) when opened from the Savings tab.
+export function useRecurringFields(item?: RecurringItem, startKind?: number) {
+  const [fields, setFields] = useState(() => {
+    const base = initialFields(item);
+    if (item || !startKind || startKind === base.kind) return base;
+    return {
+      ...base,
+      kind: startKind,
+      frequency:
+        startKind === 2 && base.frequency === RECURRING_FREQUENCY.yearly
+          ? RECURRING_FREQUENCY.monthly
+          : base.frequency,
+    };
+  });
 
   function set<K extends keyof RecurringFields>(
     key: K,

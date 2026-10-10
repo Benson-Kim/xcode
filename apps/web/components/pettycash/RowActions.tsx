@@ -26,27 +26,7 @@ export function RowActions({
   const label = entryLabel(formats, entry);
   const busy = actions.busyId === entry.id;
   return (
-    <span className="flex flex-nowrap items-center justify-end gap-0.5">
-      {entry.canReview && (
-        <>
-          <RowAction
-            tone="ok"
-            disabled={busy}
-            aria-label={`Approve ${label}`}
-            onClick={() => actions.onApprove(entry)}
-          >
-            Approve
-          </RowAction>
-          <RowAction
-            tone="warn"
-            disabled={busy}
-            aria-label={`Send back ${label}`}
-            onClick={() => actions.onSendBack(entry)}
-          >
-            Send back
-          </RowAction>
-        </>
-      )}
+    <div className="tacts">
       {entry.aboveLimit && (
         <StatusBadge tone="warn">Above your limit</StatusBadge>
       )}
@@ -59,6 +39,16 @@ export function RowActions({
           Edit
         </RowAction>
       )}
+      {entry.canReview && (
+        <RowAction
+          tone="warn"
+          disabled={busy}
+          aria-label={`Send back ${label}`}
+          onClick={() => actions.onSendBack(entry)}
+        >
+          Send back
+        </RowAction>
+      )}
       {entry.canRemove && (
         <RowAction
           tone="bad"
@@ -69,6 +59,16 @@ export function RowActions({
           Delete
         </RowAction>
       )}
-    </span>
+      {entry.canReview && (
+        <RowAction
+          tone="ok"
+          disabled={busy}
+          aria-label={`Approve ${label}`}
+          onClick={() => actions.onApprove(entry)}
+        >
+          Approve
+        </RowAction>
+      )}
+    </div>
   );
 }

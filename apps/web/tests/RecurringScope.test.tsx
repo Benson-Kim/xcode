@@ -56,10 +56,10 @@ it("opens an item shared with vehicles outside your scope read-only", async () =
   });
 
   expect(
-    await screen.findByText(/plus vehicles you can't see/),
+    await screen.findByTitle(/plus vehicles you can't see/),
   ).toBeInTheDocument();
-  expect(screen.getByText(/Your vehicles' share/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Office rent" }));
+  expect(screen.getByTitle(/Your vehicles' share/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open Office rent" }));
   expect(
     await screen.findByText(
       /only someone who can see all of them can change it/,

@@ -29,20 +29,19 @@ import {
   CardHeader,
   CardList,
   CardListItem,
-  CellNote,
   CurrencyInput,
   DataTable,
   Dialog,
   ErrorSummary,
   Field,
   FormActions,
-  FormLayout,
   Grid2,
   Hint,
   ListSkeleton,
   Note,
   PageHeader,
   ListPager,
+  RowAction,
   RowButton,
   SegmentedControl,
   SelectInput,
@@ -81,7 +80,7 @@ export function VehiclesPage({
 }) {
   const { can } = useSession();
   const { appearance } = useAppearance();
-  const { formatDateOnly, kes } = useFormats();
+  const { formatDateOnly, formatNumber, kes } = useFormats();
   // invest.view alone lists the vehicles read-only, to reach each one's Investment tab.
   const canManage = can("vehicles.manage");
   // Vehicle managers may not manage companies; ask the server for active company options in that case. A read-only
@@ -123,18 +122,104 @@ export function VehiclesPage({
     : undefined;
 
   return (
-    <section>
+    <>
       <PageHeader
         title="Vehicles"
-        description="Registration, company, weekly target, and the scheduled items that post to each vehicle."
         actions={
           canManage && !editing ? (
             <Button tone="primary" onClick={() => setEditing({ id: null })}>
-              Add vehicle
+              New vehicle
             </Button>
           ) : undefined
         }
       />
+      {(vehicles.error || companyOptions.error) && (
+        <Banner>{streamError(vehicles) || companyOptions.error}</Banner>
+      )}
+      <Toolbar>
+        <CompanyFilter
+          value={filter}
+          companies={companies}
+          onChange={setFilter}
+        />
+      </Toolbar>
+      <DataTable
+        // Targets and scheduled items are for vehicle managers; the server leaves them out for anyone else.
+        columns={[
+          { label: "Registration" },
+          { label: "PSV company" },
+          ...(canManage ? [{ label: "Weekly target", numeric: true }] : []),
+          { label: "In the fleet from" },
+          ...(canManage ? [{ label: "Scheduled items", numeric: true }] : []),
+          { label: "Status" },
+          { label: "Actions", numeric: true },
+        ]}
+        loading={vehicles.loading}
+        pendingRows={vehicles.pendingRows}
+        loadingLabel="Loading vehicles"
+        footer={
+          <tr>
+            <td colSpan={canManage ? 7 : 5}>
+              {plural(vehicles.total, "vehicle", "vehicles")}
+            </td>
+          </tr>
+        }
+        isEmpty={!rows.length}
+        failed={Boolean(vehicles.error)}
+        emptyMessage={
+          filter === "all"
+            ? "No vehicles yet. Add the first one above."
+            : "No vehicles in this company yet."
+        }
+      >
+        {rows.map((vehicle) => {
+          const status = fleetStatus(vehicle, formatDateOnly);
+          return (
+            <Tr key={vehicle.id}>
+              <Td label="Registration">
+                <RegPlate>{vehicle.registration}</RegPlate>
+              </Td>
+              <Td label="PSV company">{vehicle.companyName}</Td>
+              {canManage && (
+                // Leaving the fleet ends the target: no "KES 0 a day" for a vehicle that no longer runs.
+                <Td
+                  label="Weekly target"
+                  numeric
+                  title={
+                    status.left
+                      ? "Target ended"
+                      : `About ${kes(Math.round((vehicle.weeklyTarget ?? 0) / 7))} a day`
+                  }
+                >
+                  {status.left ? "—" : formatNumber(vehicle.weeklyTarget ?? 0)}
+                </Td>
+              )}
+              <Td label="In the fleet from" className="nw">
+                {formatDateOnly(vehicle.joinedOn)}
+              </Td>
+              {canManage && (
+                <Td label="Scheduled items" numeric>
+                  {vehicle.recurringItems ?? 0}
+                </Td>
+              )}
+              <Td label="Status" className="nw">
+                <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+              </Td>
+              <Td numeric>
+                <div className="tacts">
+                  <RowAction
+                    aria-label={`${canManage ? "Edit" : "Open"} ${vehicle.registration}`}
+                    onClick={() => setEditing({ id: vehicle.id })}
+                  >
+                    {canManage ? "Edit" : "Open"}
+                  </RowAction>
+                </div>
+              </Td>
+            </Tr>
+          );
+        })}
+      </DataTable>
+      <ListPager list={vehicles} />
       {editing && (
         <VehicleEditor
           vehicle={editedVehicle}
@@ -157,87 +242,7 @@ export function VehiclesPage({
           }}
         />
       )}
-      {(vehicles.error || companyOptions.error) && (
-        <Banner className="mb-3.5">
-          {streamError(vehicles) || companyOptions.error}
-        </Banner>
-      )}
-      <Toolbar>
-        <CompanyFilter
-          value={filter}
-          companies={companies}
-          onChange={setFilter}
-        />
-        {!vehicles.loading && (
-          <Hint>{plural(vehicles.total, "vehicle", "vehicles")}</Hint>
-        )}
-      </Toolbar>
-      <DataTable
-        // Targets and scheduled items are for vehicle managers; the server leaves them out for anyone else.
-        columns={[
-          { label: "Registration" },
-          { label: "Company" },
-          { label: "Status" },
-          ...(canManage ? [{ label: "Weekly target", numeric: true }] : []),
-          { label: "In the fleet from" },
-          ...(canManage ? [{ label: "Scheduled items", numeric: true }] : []),
-        ]}
-        loading={vehicles.loading}
-        pendingRows={vehicles.pendingRows}
-        loadingLabel="Loading vehicles"
-        isEmpty={!rows.length}
-        failed={Boolean(vehicles.error)}
-        emptyMessage={
-          filter === "all"
-            ? "No vehicles yet. Add the first one above."
-            : "No vehicles in this company yet."
-        }
-      >
-        {rows.map((vehicle) => {
-          const status = fleetStatus(vehicle, formatDateOnly);
-          return (
-            <Tr key={vehicle.id}>
-              <Td label="Registration">
-                <RowButton onClick={() => setEditing({ id: vehicle.id })}>
-                  <RegPlate>{vehicle.registration}</RegPlate>
-                </RowButton>
-              </Td>
-              <Td label="Company">{vehicle.companyName}</Td>
-              <Td label="Status">
-                <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
-              </Td>
-              {canManage && (
-                <Td label="Weekly target" numeric>
-                  {/* Leaving the fleet ends the target: no "KES 0 a day" for a vehicle that no longer runs. */}
-                  {status.left ? (
-                    <>
-                      —<CellNote>Target ended</CellNote>
-                    </>
-                  ) : (
-                    <>
-                      {kes(vehicle.weeklyTarget ?? 0)}
-                      <CellNote>
-                        About {kes(Math.round((vehicle.weeklyTarget ?? 0) / 7))}{" "}
-                        a day
-                      </CellNote>
-                    </>
-                  )}
-                </Td>
-              )}
-              <Td label="In the fleet from">
-                {formatDateOnly(vehicle.joinedOn)}
-              </Td>
-              {canManage && (
-                <Td label="Scheduled items" numeric>
-                  {vehicle.recurringItems ?? 0}
-                </Td>
-              )}
-            </Tr>
-          );
-        })}
-      </DataTable>
-      <ListPager list={vehicles} />
-    </section>
+    </>
   );
 }
 
@@ -279,7 +284,7 @@ function CompanyFilter({
 }) {
   return (
     <>
-      <label htmlFor="vehicle-filter" className="text-[13px] text-grey">
+      <label htmlFor="vehicle-filter" className="sr-only">
         Company
       </label>
       <SelectInput
@@ -548,12 +553,13 @@ function VehicleEditor({
   const details = (
     <form
       id="vehicle-form"
+      className="contents"
       onSubmit={(event) => {
         event.preventDefault();
         void save();
       }}
     >
-      <FormLayout className="mt-0">
+      <>
         <ErrorSummary count={Object.keys(errors).length} />
         {saveError && <Banner>{saveError}</Banner>}
         {joinsLater && (
@@ -565,107 +571,104 @@ function VehicleEditor({
               : ""}
           </Note>
         )}
-        <Card density="form">
-          <CardHeader title="Vehicle" />
-          <Grid2>
-            <Field
-              id="vehicle-registration"
-              label="Registration number"
-              error={errors.registration}
-              hint={
-                isNew
-                  ? "Kenyan format, for example KDA 482M."
-                  : "A registration cannot change. Add the vehicle again if it is re-registered."
+        <div className="mrow2">
+          <Field
+            id="vehicle-registration"
+            label="Registration"
+            error={errors.registration}
+            hint={
+              isNew
+                ? "Kenyan format, for example KDA 482M."
+                : "A registration cannot change. Add the vehicle again if it is re-registered."
+            }
+          >
+            <TextInput
+              value={form.registration}
+              disabled={!isNew || retired}
+              placeholder="KDA 482M"
+              autoCapitalize="characters"
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  registration: event.target.value.toUpperCase(),
+                })
+              }
+            />
+          </Field>
+          <Field
+            id="vehicle-company"
+            label="PSV company"
+            error={errors.companyId}
+          >
+            <SelectInput
+              value={form.companyId}
+              disabled={retired}
+              onChange={(event) =>
+                setForm({ ...form, companyId: event.target.value })
               }
             >
-              <TextInput
-                value={form.registration}
-                disabled={!isNew || retired}
-                placeholder="KDA 482M"
-                autoCapitalize="characters"
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    registration: event.target.value.toUpperCase(),
-                  })
-                }
-              />
-            </Field>
-            <Field
-              id="vehicle-company"
-              label="PSV company"
-              error={errors.companyId}
-            >
-              <SelectInput
-                value={form.companyId}
-                disabled={retired}
-                onChange={(event) =>
-                  setForm({ ...form, companyId: event.target.value })
-                }
-              >
-                <option value="">Choose a company</option>
-                {companies
-                  .filter(
-                    (company) =>
-                      company.active !== false ||
-                      company.id === vehicle?.companyId,
-                  )
-                  .map((company) => (
-                    <option key={company.id} value={company.id}>
-                      {company.name}
-                      {company.active === false ? " (archived)" : ""}
-                    </option>
-                  ))}
-              </SelectInput>
-            </Field>
-            <Field
-              id="vehicle-target"
-              label="Weekly performance target"
-              error={errors.weeklyTarget}
-              hint={`${weekly ? `About ${kes(Math.round(weekly / 7))} a day.` : "Revenue you expect in a Monday to Sunday week."}${isNew ? "" : " A change applies from today. Past days keep their old target."}`}
-            >
-              <CurrencyInput
-                disabled={retired}
-                min="1"
-                step="1"
-                value={form.weeklyTarget}
-                onChange={(event) =>
-                  setForm({ ...form, weeklyTarget: event.target.value })
-                }
-              />
-            </Field>
-            <Field
-              id="vehicle-joined"
-              label="In the fleet from"
-              error={errors.joinedOn}
-              hint="Missing revenue days are only counted from this date."
-            >
-              <TextInput
-                disabled={retired}
-                type="date"
-                max={today}
-                value={joinedOn}
-                onChange={(event) =>
-                  setForm({ ...form, joinedOn: event.target.value })
-                }
-              />
-            </Field>
-          </Grid2>
-          {history.length > 1 && (
-            <div>
-              <p className="m-0 text-sm font-semibold">Target history</p>
-              <CardList>
-                {history.map((target, index) => (
-                  <CardListItem
-                    key={`${target.effectiveFrom}-${target.revision}`}
-                    left={`${kes(target.weeklyAmount)} a week`}
-                    rightSub={`${index === 0 ? "From" : "Was from"} ${formatDateOnly(target.effectiveFrom)}`}
-                  />
+              <option value="">Choose a company</option>
+              {companies
+                .filter(
+                  (company) =>
+                    company.active !== false ||
+                    company.id === vehicle?.companyId,
+                )
+                .map((company) => (
+                  <option key={company.id} value={company.id}>
+                    {company.name}
+                    {company.active === false ? " (archived)" : ""}
+                  </option>
                 ))}
-              </CardList>
-            </div>
-          )}
-        </Card>
+            </SelectInput>
+          </Field>
+          <Field
+            id="vehicle-target"
+            label="Weekly target"
+            error={errors.weeklyTarget}
+            hint={`${weekly ? `About ${kes(Math.round(weekly / 7))} a day.` : "Revenue you expect in a Monday to Sunday week."}${isNew ? "" : " A change applies from today. Past days keep their old target."}`}
+          >
+            <CurrencyInput
+              disabled={retired}
+              min="1"
+              step="1"
+              value={form.weeklyTarget}
+              onChange={(event) =>
+                setForm({ ...form, weeklyTarget: event.target.value })
+              }
+            />
+          </Field>
+          <Field
+            id="vehicle-joined"
+            label="In the fleet from"
+            error={errors.joinedOn}
+            hint="Missing revenue days are only counted from this date."
+          >
+            <TextInput
+              disabled={retired}
+              type="date"
+              max={today}
+              value={joinedOn}
+              onChange={(event) =>
+                setForm({ ...form, joinedOn: event.target.value })
+              }
+            />
+          </Field>
+        </div>
+        {history.length > 1 && (
+          <div className="f">
+            <span className="flab">Target history</span>
+            <CardList>
+              {history.map((target, index) => (
+                <CardListItem
+                  key={`${target.effectiveFrom}-${target.revision}`}
+                  left={`${kes(target.weeklyAmount)} a week`}
+                  rightSub={`${index === 0 ? "From" : "Was from"} ${formatDateOnly(target.effectiveFrom)}`}
+                />
+              ))}
+            </CardList>
+          </div>
+        )}
         {vehicle && (
           <Card density="form">
             <CardHeader
@@ -740,10 +743,8 @@ function VehicleEditor({
               </>
             )}
             {away.length > 0 && (
-              <div>
-                <p className="m-0 text-sm font-semibold">
-                  Time away from the fleet
-                </p>
+              <div className="f">
+                <span className="flab">Time away from the fleet</span>
                 <CardList>
                   {away.map((period) => (
                     <CardListItem
@@ -760,7 +761,7 @@ function VehicleEditor({
             )}
           </Card>
         )}
-      </FormLayout>
+      </>
     </form>
   );
   const onDetails = isNew || shownTab === "details";
@@ -768,11 +769,17 @@ function VehicleEditor({
     <Dialog
       open
       size="lg"
-      title={isNew ? "Add vehicle" : vehicle.registration}
+      title={
+        isNew
+          ? "New vehicle"
+          : can("vehicles.manage")
+            ? "Edit vehicle"
+            : vehicle.registration
+      }
       subtitle={
         isNew
           ? "It shows on reports and the dashboard straight away."
-          : `${companyName}${retired ? " · Left the fleet" : joinsLater ? ` · Joins ${formatDateOnly(vehicle.joinedOn)}` : ""}`
+          : `${can("vehicles.manage") ? `${vehicle.registration} · ` : ""}${companyName}${retired ? " · Left the fleet" : joinsLater ? ` · Joins ${formatDateOnly(vehicle.joinedOn)}` : ""}`
       }
       onClose={onClose}
       footer={
@@ -787,7 +794,7 @@ function VehicleEditor({
               tone="ok"
               disabled={busy || retired}
             >
-              {isNew ? "Add vehicle" : "Save changes"}
+              Save
             </Button>
           </>
         ) : (
@@ -808,19 +815,13 @@ function VehicleEditor({
           onChange={setTab}
         >
           {shownTab === "details" && details}
-          {shownTab === "report" && (
-            <FormLayout>
-              <VehicleReportCard vehicle={vehicle} />
-            </FormLayout>
-          )}
+          {shownTab === "report" && <VehicleReportCard vehicle={vehicle} />}
           {shownTab === "scheduled" && (
-            <FormLayout>
-              <VehicleRecurringCard
-                vehicle={vehicle}
-                onOpen={onOpenRecurring}
-                onAdd={onAddRecurring}
-              />
-            </FormLayout>
+            <VehicleRecurringCard
+              vehicle={vehicle}
+              onOpen={onOpenRecurring}
+              onAdd={onAddRecurring}
+            />
           )}
           {shownTab === "investment" && (
             <VehicleInvestmentTab vehicle={vehicle} today={today} />
@@ -876,12 +877,11 @@ function VehicleReportCard({ vehicle }: { vehicle: Vehicle }) {
         options={REVENUE_REPORT_PERIODS.map((option) => ({ ...option }))}
         value={period}
         onChange={setPeriod}
-        className="self-start"
       />
       {report.error ? (
         <Hint>{report.error}</Hint>
       ) : report.loading || !data ? (
-        <div role="status" aria-busy="true" className="flex flex-col gap-2.5">
+        <div role="status" aria-busy="true">
           <span className="sr-only">Loading the vehicle report</span>
           <StatGridSkeleton count={9} />
           <ListSkeleton rows={2} />

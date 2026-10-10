@@ -72,7 +72,11 @@ it("shows Vehicles in the menu for invest.view", async () => {
     ),
   );
   expect(
-    await screen.findByRole("button", { name: "KDA 482M" }, { timeout: 6000 }),
+    await screen.findByRole(
+      "button",
+      { name: "Open KDA 482M" },
+      { timeout: 6000 },
+    ),
   ).toBeInTheDocument();
 });
 
@@ -84,9 +88,9 @@ it("lists vehicles read-only and opens only the Investment tab", async () => {
     { businessDate: "2026-09-21" },
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "KDA 482M" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open KDA 482M" }));
   expect(
-    screen.queryByRole("button", { name: "Add vehicle" }),
+    screen.queryByRole("button", { name: "New vehicle" }),
   ).not.toBeInTheDocument();
   expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
     "Investment",
@@ -96,12 +100,10 @@ it("lists vehicles read-only and opens only the Investment tab", async () => {
     "true",
   );
   expect(await screen.findByText("KES 1,280,000")).toBeInTheDocument();
-  expect(
-    screen.queryByLabelText("Weekly performance target"),
-  ).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Weekly target")).not.toBeInTheDocument();
   expect(
     screen.queryByRole("button", {
-      name: /Save changes|Retire vehicle|Add investment/,
+      name: /^Save$|Retire vehicle|Add investment/,
     }),
   ).not.toBeInTheDocument();
   // Nothing it may not read: no company options, no vehicle report.
@@ -120,7 +122,7 @@ it("adds the scheduled items tab when commitments.view is also given", async () 
     { businessDate: "2026-09-21" },
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "KDA 482M" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open KDA 482M" }));
   expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
     "Scheduled items",
     "Investment",
@@ -158,7 +160,7 @@ it("lists the vehicles without the targets and scheduled items the server leaves
 
   const table = await screen.findByRole("table");
   expect(
-    await within(table).findByRole("button", { name: "KDA 482M" }),
+    await within(table).findByRole("button", { name: "Open KDA 482M" }),
   ).toBeInTheDocument();
   expect(
     within(table).queryByRole("columnheader", { name: "Weekly target" }),

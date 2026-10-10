@@ -1,7 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
-
 import type { ExpenseGroup } from "@xcode/shared/expenses";
 
 import { useFormats } from "../../lib/formats";
@@ -14,15 +12,6 @@ import {
   TextInput,
   type SearchOption,
 } from "../ui";
-
-// Quantity and unit cost side by side, the quantity narrower; one above the other on a phone.
-function QuantityRow({ children }: { children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[1fr_2fr] gap-x-3.5 gap-y-3.5 max-[420px]:grid-cols-1">
-      {children}
-    </div>
-  );
-}
 
 export function DateField({
   date,
@@ -81,6 +70,50 @@ export function VehicleField({
   );
 }
 
+// The date with the vehicle beside it (.mrow2); once the purchase is split, the date alone.
+export function DateAndVehicle({
+  date,
+  businessDate,
+  dateProblem,
+  onDate,
+  split,
+  vehicleId,
+  vehicleOptions,
+  onVehicle,
+  onSplit,
+}: {
+  date: string;
+  businessDate: string;
+  dateProblem: string;
+  onDate: (value: string) => void;
+  split: boolean;
+  vehicleId: string;
+  vehicleOptions: SearchOption[];
+  onVehicle: (id: string) => void;
+  onSplit?: () => void;
+}) {
+  const dateField = (
+    <DateField
+      date={date}
+      businessDate={businessDate}
+      problem={dateProblem}
+      onChange={onDate}
+    />
+  );
+  if (split) return dateField;
+  return (
+    <div className="mrow2">
+      {dateField}
+      <VehicleField
+        vehicleId={vehicleId}
+        options={vehicleOptions}
+        onVehicle={onVehicle}
+        onSplit={onSplit}
+      />
+    </div>
+  );
+}
+
 // The item, quantity and unit cost of the purchase, with the total they make.
 export function PurchaseFields({
   itemId,
@@ -114,22 +147,23 @@ export function PurchaseFields({
         <SearchSelect
           options={itemOptions}
           value={itemId}
-          placeholder="Choose the item"
+          placeholder="Search item"
           onChange={onItem}
         />
       </Field>
-      <QuantityRow>
+      <div className="mrow">
         <Field id="ex-units" label="Qty" error={unitsProblem}>
           <TextInput
             inputMode="decimal"
             autoComplete="off"
+            className="num"
             value={units}
             onChange={(event) => onUnits(event.target.value)}
           />
         </Field>
         <Field
           id="ex-cost"
-          label="Unit cost"
+          label={`Unit cost, ${formats.currencyCode()}`}
           hint="Use a minus sign for a refund."
           error={costProblem}
         >
@@ -138,20 +172,18 @@ export function PurchaseFields({
             onChange={(event) => onCost(event.target.value)}
           />
         </Field>
-      </QuantityRow>
+      </div>
       {group && (
         <Note tone="info">
           This expense was shared by {group.size} vehicles. Changing the item,
           quantity or unit cost takes it out of that purchase.
         </Note>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-linear-to-br from-card-a to-card-b px-4 py-[11px] text-white">
-        <span className="text-xs font-bold tracking-[.06em] text-on-deep uppercase">
-          Total amount
-        </span>
-        <output className="text-[22px] font-extrabold tabular-nums">
-          {formats.kes(total ?? 0)}
-        </output>
+      <div className="mtot">
+        <span>Total amount</span>
+        <b className="num">
+          <output>{formats.kes(total ?? 0)}</output>
+        </b>
       </div>
     </>
   );

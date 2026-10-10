@@ -12,7 +12,6 @@ import { AmountInput } from "../pettycash/AmountInput";
 import {
   BalancePanel,
   CloseIcon,
-  IconButton,
   LinkButton,
   SearchSelect,
   type SearchOption,
@@ -84,10 +83,10 @@ export function SplitRows({
   }
 
   return (
-    <div className="flex flex-col gap-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-semibold">Vehicles</span>
-        <span className="flex gap-1">
+    <div className="f">
+      <div className="flabrow">
+        <span className="flab">Vehicles</span>
+        <span className="mlinks">
           <LinkButton compact disabled={total === null} onClick={splitEqually}>
             Split equally
           </LinkButton>
@@ -100,31 +99,34 @@ export function SplitRows({
           </LinkButton>
         </span>
       </div>
-      {splits.map((split, index) => (
-        <div
-          key={index}
-          className="grid grid-cols-[minmax(0,1fr)_minmax(0,9rem)_auto] items-center gap-2"
-        >
-          <SearchSelect
-            aria-label={`Vehicle ${index + 1}`}
-            options={vehicleOptions}
-            value={split.vehicleId}
-            placeholder="Choose the vehicle"
-            onChange={(id) => change(index, { vehicleId: id })}
-          />
-          <AmountInput
-            aria-label={`Amount for vehicle ${index + 1}`}
-            value={split.amount}
-            onChange={(event) => change(index, { amount: event.target.value })}
-          />
-          <IconButton
-            aria-label={`Remove vehicle ${index + 1}`}
-            onClick={() => remove(index)}
-          >
-            <CloseIcon />
-          </IconButton>
-        </div>
-      ))}
+      <div className="msplit">
+        {splits.map((split, index) => (
+          <div key={index} className="arow">
+            <SearchSelect
+              aria-label={`Vehicle ${index + 1}`}
+              options={vehicleOptions}
+              value={split.vehicleId}
+              placeholder="Choose vehicle"
+              onChange={(id) => change(index, { vehicleId: id })}
+            />
+            <AmountInput
+              aria-label={`Amount for vehicle ${index + 1}`}
+              value={split.amount}
+              onChange={(event) =>
+                change(index, { amount: event.target.value })
+              }
+            />
+            <button
+              type="button"
+              className="rmx"
+              aria-label={`Remove vehicle ${index + 1}`}
+              onClick={() => remove(index)}
+            >
+              <CloseIcon />
+            </button>
+          </div>
+        ))}
+      </div>
       {total !== null && left !== null && (
         <BalancePanel ok={valid}>
           {duplicate

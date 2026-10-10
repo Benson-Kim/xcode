@@ -59,7 +59,7 @@ function ExpenseItemSelect({
   return (
     <Field
       id="recurring-item"
-      label="Expense item"
+      label="Item"
       error={errors.expenseItem}
       hint={itemHint(picker, fields.expenseItemId)}
     >

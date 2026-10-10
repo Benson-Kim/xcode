@@ -2,26 +2,33 @@ import type { Formatter } from "@xcode/shared/format";
 import type {
   ReportCell,
   ReportCellKind,
+  ReportColumn,
   ReportFigure,
 } from "@xcode/shared/reports";
 
-import { RegPlate } from "../revenue/RegPlate";
-import { ProgressBar, cn } from "../ui";
-
-export const NUMERIC_KINDS: readonly ReportCellKind[] = [
-  "money",
-  "net",
-  "count",
-  "quantity",
-  "percent",
-];
+import { RegPlate, Td, cn } from "../ui";
 
 export type Units = (value: number) => string;
 
 const percent = (value: number) => `${Math.round(value * 10) / 10}%`;
 
+// Shares and how much of a target was reached draw a bar (.prog); other percentages are plain figures.
+const PLAIN_PERCENT = ["recovered"];
+const isBar = (column: ReportColumn) =>
+  column.kind === "percent" && !PLAIN_PERCENT.includes(column.key);
+
+// Right-aligned columns (th.r, td.r), as the design's money, net, int and pct1 columns.
+export const isNumeric = (column: ReportColumn) =>
+  ["money", "net", "count", "quantity", "percent"].includes(column.kind) &&
+  !isBar(column);
+
+// The row's name (td.item): the item, what is missing, the manager leading a row.
+const isItem = (column: ReportColumn, index: number) =>
+  ["item", "missing", "what"].includes(column.key) ||
+  (column.key === "manager" && index === 0);
+
 // What a number reads as: money and net as amounts (with the currency, unless inCurrency is false, as in the
-// columns of a table whose headings name it), count as a whole number, quantity up to three decimals, percent as n%.
+// columns and the figures beside the headline), count as a whole number, quantity up to three decimals, percent as n%.
 export function numberText(
   formats: Formatter,
   units: Units,
@@ -56,29 +63,61 @@ export function cellText(
   return cell;
 }
 
-export function CellValue({
+// One cell as the design's cellHtml draws it: plates for vehicles (plain text in the footer), net in bold with a
+// loss in clay, shares as a bar with the figure beside it.
+export function ReportTd({
   formats,
   units,
-  kind,
+  column,
+  index,
   cell,
+  foot = false,
 }: {
   formats: Formatter;
   units: Units;
-  kind: ReportCellKind;
+  column: ReportColumn;
+  index: number;
   cell: ReportCell;
+  foot?: boolean;
 }) {
-  const text = cellText(formats, units, kind, cell);
-  if (kind === "net" && typeof cell === "number" && cell < 0)
-    return <span className="font-semibold text-red">{text}</span>;
-  if (kind === "percent" && typeof cell === "number")
+  const label = foot ? undefined : column.label;
+  const text = cellText(formats, units, column.kind, cell);
+  if (text === "") return <Td label={label} />;
+  if (column.kind === "vehicle")
+    return <Td label={label}>{foot ? text : <RegPlate>{text}</RegPlate>}</Td>;
+  if (column.kind === "net")
     return (
-      <span className="flex min-w-24 flex-col items-end gap-1">
-        <span>{text}</span>
-        <span className="w-full">
-          <ProgressBar value={cell} />
-        </span>
-      </span>
+      <Td
+        label={label}
+        numeric
+        className={cn("tot", typeof cell === "number" && cell < 0 && "neg")}
+      >
+        {text}
+      </Td>
     );
-  if (kind === "vehicle") return <RegPlate>{text}</RegPlate>;
-  return <span className={cn(kind === "text" && "block")}>{text}</span>;
+  if (isBar(column) && typeof cell === "number") {
+    const width = Math.max(0, Math.min(cell, 100));
+    return (
+      <Td label={label}>
+        <div className="prog">
+          <div className="t">
+            <i
+              className={cn(width >= 100 && "full") || undefined}
+              style={{ width: `${width}%` }}
+            />
+          </div>
+          <span>{text}</span>
+        </div>
+      </Td>
+    );
+  }
+  return (
+    <Td
+      label={label}
+      numeric={isNumeric(column)}
+      item={!foot && isItem(column, index)}
+    >
+      {text}
+    </Td>
+  );
 }

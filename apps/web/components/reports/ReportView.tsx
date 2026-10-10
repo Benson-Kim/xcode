@@ -3,11 +3,7 @@
 import { useMemo } from "react";
 
 import { plural } from "@xcode/shared/format";
-import type {
-  ReportColumn,
-  ReportFigure,
-  ReportTable,
-} from "@xcode/shared/reports";
+import type { ReportFigure, ReportTable } from "@xcode/shared/reports";
 
 import { useAppearance } from "../../lib/appearance";
 import { useFormats } from "../../lib/formats";
@@ -22,7 +18,7 @@ import {
   Tr,
   type Column,
 } from "../ui";
-import { CellValue, NUMERIC_KINDS, numberText, type Units } from "./cells";
+import { ReportTd, isNumeric, numberText, type Units } from "./cells";
 
 export function useReportText() {
   const formats = useFormats();
@@ -34,13 +30,14 @@ export function useReportText() {
 const isMoney = (figure: ReportFigure) =>
   figure.kind === "money" || figure.kind === "net";
 
-// The headline card of a report: its headline figure and the others beside it.
+// The headline card of a report: its headline figure and the others beside it, amounts without the currency as in
+// the design.
 export function ReportBand({ table }: { table: ReportTable | undefined }) {
   const { formats, units } = useReportText();
   if (!table) return <BandSkeleton />;
   const { headline } = table;
   return (
-    <div role="group" aria-label="Report figures" className="contents">
+    <>
       <BandFigure
         label={headline.label}
         value={numberText(formats, units, headline.kind, headline.value, false)}
@@ -51,7 +48,7 @@ export function ReportBand({ table }: { table: ReportTable | undefined }) {
         <BandStats
           items={table.figures.map((figure) => ({
             label: figure.label,
-            value: numberText(formats, units, figure.kind, figure.value),
+            value: numberText(formats, units, figure.kind, figure.value, false),
             tone:
               figure.kind === "net" && figure.value < 0
                 ? ("neg" as const)
@@ -59,7 +56,7 @@ export function ReportBand({ table }: { table: ReportTable | undefined }) {
           }))}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -70,8 +67,8 @@ export type ReportPaging = {
   setPageSize: (pageSize: number) => void;
 };
 
-// A report as the server built it: one page of its rows with a footer that counts and adds up every matching
-// row, and the pager.
+// A report as the server built it (#repT): one page of its rows with a footer that counts and adds up every
+// matching row, and the pager.
 export function ReportView({
   table,
   loading,
@@ -84,69 +81,62 @@ export function ReportView({
   paging: ReportPaging;
 }) {
   const { formats, units } = useReportText();
-  const currency = formats.currencyCode();
-  const named = (column: ReportColumn) =>
-    column.kind === "money" || column.kind === "net"
-      ? `${column.label} (${currency})`
-      : column.label;
   const columns: Column[] = (table?.columns ?? []).map((column) => ({
-    label: named(column),
-    numeric: NUMERIC_KINDS.includes(column.kind),
+    label: column.label,
+    numeric: isNumeric(column),
   }));
 
   return (
     <>
-      <DataTable
-        columns={columns}
-        loading={loading || (!table && !failed)}
-        loadingLabel="Loading the report"
-        isEmpty={!table?.rows.length}
-        failed={failed}
-        emptyMessage="Nothing to show."
-        footer={
-          table && (
-            <Tr>
+      <div id="repT">
+        <DataTable
+          className="rep"
+          columns={columns}
+          loading={loading || (!table && !failed)}
+          loadingLabel="Loading the report"
+          isEmpty={!table?.rows.length}
+          failed={failed}
+          emptyMessage="Nothing to show."
+          footer={
+            table && (
+              <Tr>
+                {table.columns.map((column, index) =>
+                  index === 0 ? (
+                    <Td key={column.key}>
+                      {plural(table.total, "row", "rows")}
+                    </Td>
+                  ) : (
+                    <ReportTd
+                      key={column.key}
+                      formats={formats}
+                      units={units}
+                      column={column}
+                      index={index}
+                      cell={table.totals[index] ?? null}
+                      foot
+                    />
+                  ),
+                )}
+              </Tr>
+            )
+          }
+        >
+          {table?.rows.map((row, at) => (
+            <Tr key={at}>
               {table.columns.map((column, index) => (
-                <Td
+                <ReportTd
                   key={column.key}
-                  numeric={NUMERIC_KINDS.includes(column.kind)}
-                >
-                  {index === 0
-                    ? plural(table.total, "row", "rows")
-                    : table.totals[index] == null
-                      ? ""
-                      : numberText(
-                          formats,
-                          units,
-                          column.kind,
-                          table.totals[index],
-                          false,
-                        )}
-                </Td>
-              ))}
-            </Tr>
-          )
-        }
-      >
-        {table?.rows.map((row, at) => (
-          <Tr key={at}>
-            {table.columns.map((column, index) => (
-              <Td
-                key={column.key}
-                label={named(column)}
-                numeric={NUMERIC_KINDS.includes(column.kind)}
-              >
-                <CellValue
                   formats={formats}
                   units={units}
-                  kind={column.kind}
+                  column={column}
+                  index={index}
                   cell={row[index]}
                 />
-              </Td>
-            ))}
-          </Tr>
-        ))}
-      </DataTable>
+              ))}
+            </Tr>
+          ))}
+        </DataTable>
+      </div>
       <Pager
         page={paging.page}
         pageSize={paging.pageSize}

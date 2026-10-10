@@ -92,10 +92,8 @@ it("lists the presets in the panel, marks the current one and applies the one ch
   const panel = open();
   expect(
     within(panel)
-      .getAllByRole("button", {
-        name: /Today|Yesterday|week|month|4 weeks/i,
-      })
-      .map((button) => button.textContent),
+      .getAllByRole("menuitemradio")
+      .map((item) => item.textContent),
   ).toEqual([
     "Today",
     "Yesterday",
@@ -106,9 +104,11 @@ it("lists the presets in the panel, marks the current one and applies the one ch
     "Last month",
   ]);
   expect(
-    within(panel).getByRole("button", { name: "This week" }),
-  ).toHaveAttribute("aria-current", "true");
-  fireEvent.click(within(panel).getByRole("button", { name: "Last 4 weeks" }));
+    within(panel).getByRole("menuitemradio", { name: "This week" }),
+  ).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(
+    within(panel).getByRole("menuitemradio", { name: "Last 4 weeks" }),
+  );
   expect(onChange).toHaveBeenLastCalledWith({
     from: "2026-09-07",
     to: "2026-10-04",
@@ -125,8 +125,8 @@ it("marks no preset when stepping lands on none of them", () => {
   const panel = open();
   expect(
     within(panel)
-      .getAllByRole("button")
-      .some((button) => button.getAttribute("aria-current") === "true"),
+      .getAllByRole("menuitemradio")
+      .some((item) => item.getAttribute("aria-checked") === "true"),
   ).toBe(false);
 });
 
@@ -219,7 +219,9 @@ it("closes on a press outside it, and not on a press inside", () => {
 it("closes when the period is pressed again, and puts focus on the first preset when it opens", () => {
   render(<Harness start={presetPeriod("today", TODAY, 1)} />);
   const panel = open();
-  expect(within(panel).getByRole("button", { name: "Today" })).toHaveFocus();
+  expect(
+    within(panel).getByRole("menuitemradio", { name: "Today" }),
+  ).toHaveFocus();
   fireEvent.click(trigger());
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

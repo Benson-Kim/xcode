@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { plural } from "@xcode/shared/format";
 import type { PettyCashEntry } from "@xcode/shared/pettyCash";
 
 import { useAppearance } from "../../lib/appearance";
@@ -13,39 +14,41 @@ import { unitsFormat } from "./labels";
 import { RowActions, type EntryActions } from "./RowActions";
 import { StatusTag } from "./StatusTag";
 
-const columns = (currency: string) => [
+const columns = [
   { label: "Vehicle" },
   { label: "Item" },
-  { label: "Units", numeric: true },
-  { label: `Amount (${currency})`, numeric: true },
-  { label: `Total (${currency})`, numeric: true },
+  { label: "Qty", numeric: true },
+  { label: "Unit cost", numeric: true },
+  { label: "Total amount", numeric: true },
   { label: "Manager" },
   { label: "Status" },
-  { label: "Actions", hidden: true },
+  { label: "Actions", numeric: true },
 ];
 
 // Expenses and credit notes of the days shown, under a row for each day when there are several. A credit note names
-// its payee and belongs to no vehicle.
+// its payee and belongs to no vehicle. The footer counts every matching entry; it adds them up (less those sent
+// back) when they are all on this page.
 export function EntriesTable({
   entries,
+  total,
   days,
   loading,
   failed,
   actions,
 }: {
   entries: PettyCashEntry[];
+  total: number;
   days: boolean;
   loading: boolean;
   failed: boolean;
   actions: EntryActions;
 }) {
   const formats = useFormats();
-  const currency = formats.currencyCode();
   const locale = useAppearance().appearance?.formats.locale ?? "en-GB";
   const unitsText = useMemo(() => unitsFormat(locale), [locale]);
   return (
     <DataTable
-      columns={columns(currency)}
+      columns={columns}
       loading={loading}
       loadingLabel="Loading expenses"
       isEmpty={!entries.length}
@@ -55,20 +58,35 @@ export function EntriesTable({
           ? "Nothing recorded in this period."
           : "Nothing recorded on this day."
       }
+      footer={
+        <tr>
+          <td colSpan={4}>Expenses, {plural(total, "entry", "entries")}</td>
+          <td className="r">
+            {entries.length === total &&
+              formats.formatNumber(
+                entries
+                  .filter((entry) => entry.status !== "sentBack")
+                  .reduce((sum, entry) => sum + entry.total, 0),
+              )}
+          </td>
+          <td colSpan={3} />
+        </tr>
+      }
     >
       <Days
         entries={entries}
         grouped={days}
-        before={4}
-        after={3}
-        totalLabel={`Day total (${currency})`}
+        span={8}
+        note={(day) =>
+          `${plural(day.entries.length, "entry", "entries")}, ${formats.kes(day.total)}`
+        }
         row={(entry) => {
           const credit = entry.kind === "credit";
           return (
             <Tr key={entry.id}>
               <Td label={credit ? "Payee" : "Vehicle"}>
                 {credit ? (
-                  <strong className="font-bold text-ink">{entry.payee}</strong>
+                  <strong>{entry.payee}</strong>
                 ) : (
                   <RegPlate>{entry.registration}</RegPlate>
                 )}
@@ -78,39 +96,33 @@ export function EntriesTable({
                   </CellNote>
                 )}
               </Td>
-              <Td label={credit ? "Reason" : "Item"}>
-                <span className="font-semibold text-ink">
-                  {credit ? entry.note : entry.expenseItemName}
-                </span>
+              <Td label={credit ? "Reason" : "Item"} className="item">
+                {credit ? entry.note : entry.expenseItemName}
                 {credit && entry.reimbursable && (
                   <CellNote>To be paid back</CellNote>
                 )}
                 {!credit && entry.note && <CellNote>{entry.note}</CellNote>}
                 {entry.status === "sentBack" && entry.sentBackNote && (
-                  <CellNote className="text-clay">
-                    Sent back: {entry.sentBackNote}
-                  </CellNote>
+                  <CellNote>Sent back: {entry.sentBackNote}</CellNote>
                 )}
               </Td>
-              <Td label="Units" numeric>
+              <Td label="Qty" numeric>
                 {credit ? "" : unitsText(entry.units)}
               </Td>
-              <Td label={`Amount (${currency})`} numeric>
+              <Td label="Unit cost" numeric>
                 {credit ? "" : formats.formatNumber(entry.unitAmount)}
               </Td>
-              <Td label={`Total (${currency})`} numeric>
-                <strong
-                  className={
-                    entry.total < 0
-                      ? "font-bold text-clay"
-                      : "font-bold text-ink"
-                  }
-                >
-                  {formats.formatNumber(entry.total)}
-                </strong>
+              <Td
+                label="Total amount"
+                numeric
+                className={entry.total < 0 ? "tot neg" : "tot"}
+              >
+                {formats.formatNumber(entry.total)}
                 {entry.total < 0 && <CellNote>Money back</CellNote>}
               </Td>
-              <Td label="Manager">{entry.holderName}</Td>
+              <Td label="Manager" className="nw">
+                {entry.holderName}
+              </Td>
               <Td label="Status">
                 {entry.status && <StatusTag status={entry.status} />}
               </Td>

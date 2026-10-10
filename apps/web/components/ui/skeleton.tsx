@@ -4,7 +4,7 @@ import { Card } from "./card";
 import { cn } from "./cn";
 import { FormLayout, Grid2 } from "./layout";
 
-// A placeholder bar in the shape of the content that is on its way.
+// A placeholder bar in the shape of the content that is on its way, in the design's quiet fill (paper-2).
 export function Skeleton({ className }: { className?: string }) {
   return (
     <span
@@ -53,12 +53,9 @@ export function TableRowsSkeleton({
   return (
     <>
       {Array.from({ length: rows }, (_, row) => (
-        <tr key={row} className="[&:last-child>td]:border-b-0">
+        <tr key={row}>
           {Array.from({ length: columns }, (_, column) => (
-            <td
-              key={column}
-              className="border-b border-divider px-4 py-3.5 max-[720px]:block max-[720px]:border-0 max-[720px]:py-1.5"
-            >
+            <td key={column}>
               <Skeleton className={WIDTHS[(row + column) % WIDTHS.length]} />
               {column === 0 && <Skeleton className="mt-2 h-3 w-1/3" />}
             </td>
@@ -148,7 +145,7 @@ export function StatGridSkeleton({ count = 5 }: { count?: number }) {
       {Array.from({ length: count }, (_, index) => (
         <div
           key={index}
-          className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3"
+          className="flex flex-col gap-2 rounded-xl border border-line bg-surface px-4 py-2.5"
         >
           <Skeleton className="h-3 w-2/3" />
           <Skeleton className="h-5 w-1/2" />

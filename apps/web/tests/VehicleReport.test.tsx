@@ -121,7 +121,9 @@ async function openReport() {
     { permissions: ["vehicles.manage"] },
     { businessDate: "2026-03-31" },
   );
-  fireEvent.click(await screen.findByRole("button", { name: "KDA 482M" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^(Edit|Open) KDA 482M$/ }),
+  );
   fireEvent.click(screen.getByRole("tab", { name: "Report" }));
   await screen.findByText("Money in", { selector: "small" });
 }

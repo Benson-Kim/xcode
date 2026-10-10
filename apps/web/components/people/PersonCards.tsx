@@ -1,19 +1,13 @@
 import type { ComponentProps, ReactNode } from "react";
 
-import { formatPhone } from "@xcode/shared/format";
-
 import type { Person, Role } from "../../lib/types";
 import {
   Banner,
   Button,
-  CardHeader,
-  cn,
   CurrencyInput,
   ErrorSummary,
   Field,
-  FormActions,
   Note,
-  PageHeader,
   SelectInput,
   Skeleton,
   Spacer,
@@ -28,50 +22,23 @@ type FormProps = {
   editable: boolean;
 };
 
-export function FormSection({
-  className,
-  ...props
-}: ComponentProps<"section">) {
-  return (
-    <section
-      {...props}
-      className={cn(
-        "flex min-w-0 flex-col gap-3.5 border-t border-line pt-[22px] first:border-t-0 first:pt-0",
-        className,
-      )}
-    />
-  );
+export function FormSection(props: ComponentProps<"section">) {
+  return <section {...props} className="f" />;
 }
 
-export function FieldGrid({
-  narrow = false,
-  className,
-  ...props
-}: ComponentProps<"div"> & { narrow?: boolean }) {
+// A section title inside the person pop up (.flab), with its explanation under it.
+export function SectionLabel({
+  title,
+  description,
+}: {
+  title: string;
+  description?: ReactNode;
+}) {
   return (
-    <div
-      {...props}
-      className={cn(
-        "grid gap-x-5 gap-y-4",
-        narrow
-          ? "grid-cols-[repeat(auto-fill,minmax(200px,1fr))]"
-          : "grid-cols-[repeat(auto-fit,minmax(200px,1fr))]",
-        className,
-      )}
-    />
-  );
-}
-
-export function PersonHeader({ person }: { person?: Person }) {
-  return (
-    <PageHeader
-      title={person ? `${person.firstName} ${person.lastName}` : "Add person"}
-      description={
-        person
-          ? `Mobile ${formatPhone(person.phoneNumber)}`
-          : "They sign in with this mobile number and set their own PIN with an email code."
-      }
-    />
+    <>
+      <h3 className="flab">{title}</h3>
+      {description && <div className="hint">{description}</div>}
+    </>
   );
 }
 
@@ -118,58 +85,55 @@ export function PersonDetailsCard({
   editable,
 }: FormProps) {
   return (
-    <FormSection>
-      <CardHeader title="Details" />
-      <FieldGrid>
-        <Field id="person-first" label="First name" error={errors.firstName}>
-          <TextInput
-            value={form.firstName}
-            disabled={!editable}
-            autoComplete="off"
-            onChange={(event) => setField("firstName", event.target.value)}
-          />
-        </Field>
-        <Field id="person-last" label="Last name" error={errors.lastName}>
-          <TextInput
-            value={form.lastName}
-            disabled={!editable}
-            autoComplete="off"
-            onChange={(event) => setField("lastName", event.target.value)}
-          />
-        </Field>
-        <Field
-          id="person-mobile"
-          label="Mobile number"
-          error={errors.phoneNumber}
-          hint="Used to sign in. Changing it signs them out of every device."
-        >
-          <TextInput
-            type="tel"
-            inputMode="numeric"
-            placeholder="0712 345 678"
-            value={form.phoneNumber}
-            disabled={!editable}
-            onChange={(event) => setField("phoneNumber", event.target.value)}
-          />
-        </Field>
-        <Field
-          id="person-email"
-          label="Email"
-          error={errors.email}
-          hint="Only used to send one time codes. Changing it signs them out of every device."
-        >
-          <TextInput
-            type="email"
-            autoCapitalize="none"
-            spellCheck={false}
-            placeholder="name@company.co.ke"
-            value={form.email}
-            disabled={!editable}
-            onChange={(event) => setField("email", event.target.value)}
-          />
-        </Field>
-      </FieldGrid>
-    </FormSection>
+    <>
+      <Field id="person-first" label="First name" error={errors.firstName}>
+        <TextInput
+          value={form.firstName}
+          disabled={!editable}
+          autoComplete="off"
+          onChange={(event) => setField("firstName", event.target.value)}
+        />
+      </Field>
+      <Field id="person-last" label="Last name" error={errors.lastName}>
+        <TextInput
+          value={form.lastName}
+          disabled={!editable}
+          autoComplete="off"
+          onChange={(event) => setField("lastName", event.target.value)}
+        />
+      </Field>
+      <Field
+        id="person-mobile"
+        label="Mobile number"
+        error={errors.phoneNumber}
+        hint="Used to sign in. Changing it signs them out of every device."
+      >
+        <TextInput
+          type="tel"
+          inputMode="numeric"
+          placeholder="0712 345 678"
+          value={form.phoneNumber}
+          disabled={!editable}
+          onChange={(event) => setField("phoneNumber", event.target.value)}
+        />
+      </Field>
+      <Field
+        id="person-email"
+        label="Email for codes"
+        error={errors.email}
+        hint="Only used to send one time codes. Changing it signs them out of every device."
+      >
+        <TextInput
+          type="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          placeholder="name@company.co.ke"
+          value={form.email}
+          disabled={!editable}
+          onChange={(event) => setField("email", event.target.value)}
+        />
+      </Field>
+    </>
   );
 }
 
@@ -191,42 +155,34 @@ export function PersonRoleCard({
   onChange: (role: string) => void;
 }) {
   return (
-    <FormSection>
-      <CardHeader
-        title="Role"
-        description="A starting set of permissions. You can change single permissions further down."
-      />
-      <FieldGrid narrow>
-        <Field
-          id="person-role"
-          label="Role"
-          error={error}
-          hint={
-            person
-              ? "Changing the role resets single permissions to the new role."
-              : roles && !assignable.length
-                ? "You cannot assign any available role."
-                : undefined
-          }
+    <Field
+      id="person-role"
+      label="Role"
+      error={error}
+      hint={
+        person
+          ? "Changing the role resets single permissions to the new role."
+          : roles && !assignable.length
+            ? "You cannot assign any available role."
+            : "A starting set of permissions. You can change single permissions under Access."
+      }
+    >
+      {!roles ? (
+        <Skeleton className="h-11" />
+      ) : (
+        <SelectInput
+          value={selectedRole}
+          disabled={!editable || !assignable.length}
+          onChange={(event) => onChange(event.target.value)}
         >
-          {!roles ? (
-            <Skeleton className="h-12 rounded-[10px]" />
-          ) : (
-            <SelectInput
-              value={selectedRole}
-              disabled={!editable || !assignable.length}
-              onChange={(event) => onChange(event.target.value)}
-            >
-              {assignable.map((role) => (
-                <option key={role.id} value={role.name}>
-                  {role.name}
-                </option>
-              ))}
-            </SelectInput>
-          )}
-        </Field>
-      </FieldGrid>
-    </FormSection>
+          {assignable.map((role) => (
+            <option key={role.id} value={role.name}>
+              {role.name}
+            </option>
+          ))}
+        </SelectInput>
+      )}
+    </Field>
   );
 }
 
@@ -240,27 +196,19 @@ export function ApprovalLimitCard({
   onChange: (value: string) => void;
 }) {
   return (
-    <FormSection>
-      <CardHeader
-        title="Approval limit"
-        description="The most they can approve in one entry."
+    <Field
+      id="person-limit"
+      label="Limit per entry"
+      hint="The most they can approve in one entry. Leave empty for no limit."
+    >
+      <CurrencyInput
+        min="0"
+        step="1"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
       />
-      <FieldGrid narrow>
-        <Field
-          id="person-limit"
-          label="Limit per entry"
-          hint="Leave empty for no limit."
-        >
-          <CurrencyInput
-            min="0"
-            step="1"
-            value={value}
-            disabled={disabled}
-            onChange={(event) => onChange(event.target.value)}
-          />
-        </Field>
-      </FieldGrid>
-    </FormSection>
+    </Field>
   );
 }
 
@@ -275,7 +223,7 @@ export function RemoveAccessCard({
 }) {
   return (
     <FormSection>
-      <CardHeader
+      <SectionLabel
         title="Reason for removing access"
         description="A short reason is required and is kept in the change log."
       />
@@ -342,24 +290,25 @@ function LifecycleButtons({
   );
 }
 
+// The pop up's footer (.mf): what changes the person's access on the left, then Cancel and Save.
 export function PersonActions(props: ActionsProps) {
   const { person, editable } = props;
   return (
-    <FormActions className="border-t border-line pt-5">
+    <>
+      {editable && person && <LifecycleButtons {...props} person={person} />}
+      <Spacer />
+      <Button tone="outline" onClick={props.onClose}>
+        {editable ? "Cancel" : "Close"}
+      </Button>
       {editable && (
         <Button
           tone="ok"
           disabled={props.busy || props.saveDisabled}
           onClick={props.onSave}
         >
-          {person ? "Save changes" : "Save person"}
+          Save
         </Button>
       )}
-      <Button tone="quiet" onClick={props.onClose}>
-        {editable ? "Cancel" : "Back"}
-      </Button>
-      <Spacer />
-      {editable && person && <LifecycleButtons {...props} person={person} />}
-    </FormActions>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 
 import { RecurringEditor } from "../components/RecurringEditor";
@@ -117,15 +117,13 @@ it("lists what posts now, and says when retired shares make the saved total larg
   );
   renderInApp(<RecurringPage canManage={false} />, {}, { businessDate });
 
-  const cell = await screen.findByText("KES 1,200", {
-    selector: "td[data-label='Amount each time']",
+  const cell = await screen.findByText("1,200", {
+    selector: "td[data-label='Each run']",
   });
-  expect(
-    within(cell).getByText(
-      /KES 2,000 in total, with 1 share for a vehicle not in the fleet today/,
-    ),
-  ).toBeInTheDocument();
-  expect(within(cell).getByText(/About KES 1,200 a month/)).toBeInTheDocument();
+  expect(cell.getAttribute("title")).toMatch(
+    /KES 2,000 in total, with 1 share for a vehicle not in the fleet today/,
+  );
+  expect(cell.getAttribute("title")).toMatch(/About KES 1,200 a month/);
 });
 
 it("opens balanced, with a retired vehicle's share counted and read-only", () => {

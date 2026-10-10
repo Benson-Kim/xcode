@@ -132,13 +132,13 @@ it("AUTH-03 displays remaining pause time and keeps PIN reset available", async 
   fillSignIn();
   expect(await screen.findByRole("timer")).toHaveTextContent("15:00");
   expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", { name: "Forgot PIN?" }));
+  fireEvent.click(screen.getByRole("button", { name: "Forgot PIN" }));
   expect(screen.getByRole("button", { name: "Send code" })).not.toBeDisabled();
 });
 
 it.each([
   ["First time here?", "setup-pin"],
-  ["Forgot PIN?", "pin-reset"],
+  ["Forgot PIN", "pin-reset"],
 ])("%s requires code before submitting a new PIN", async (label, operation) => {
   vi.mocked(authApi)
     .mockResolvedValueOnce({ status: "check_email" })

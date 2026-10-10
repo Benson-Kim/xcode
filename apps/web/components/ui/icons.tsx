@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 
-// Stroke icons from the design (24px grid, drawn at the size given).
+// Stroke icons from the design (24px grid, drawn at the size given). The design draws its own at 19px, stroke 1.9.
 function Icon({
   size = 20,
   children,
@@ -37,7 +37,7 @@ export function BrandIcon(props: ComponentProps<"svg"> & { size?: number }) {
 
 export function MenuIcon(props: ComponentProps<"svg"> & { size?: number }) {
   return (
-    <Icon size={22} {...props}>
+    <Icon size={19} strokeWidth="1.9" {...props}>
       <path d="M4 6h16" />
       <path d="M4 12h16" />
       <path d="M4 18h16" />
@@ -47,7 +47,7 @@ export function MenuIcon(props: ComponentProps<"svg"> & { size?: number }) {
 
 export function ChevronIcon(props: ComponentProps<"svg"> & { size?: number }) {
   return (
-    <Icon size={16} {...props}>
+    <Icon size={19} strokeWidth="1.9" {...props}>
       <path d="M6 9l6 6 6-6" />
     </Icon>
   );
@@ -75,7 +75,7 @@ export function DownloadIcon(props: ComponentProps<"svg"> & { size?: number }) {
 
 export function CloseIcon(props: ComponentProps<"svg"> & { size?: number }) {
   return (
-    <Icon {...props}>
+    <Icon size={19} strokeWidth="1.9" {...props}>
       <path d="M6 6l12 12" />
       <path d="M18 6L6 18" />
     </Icon>

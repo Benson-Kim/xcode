@@ -22,7 +22,7 @@ import { useRecurringFields } from "./recurring/useRecurringFields";
 import { VehicleAllocationCard } from "./recurring/VehicleAllocationCard";
 import { WhatAndWhenCard } from "./recurring/WhatAndWhenCard";
 import type { RecurringItem, VehicleOption } from "./setup/shared";
-import { Dialog, FormLayout } from "./ui";
+import { Dialog } from "./ui";
 
 type Props = {
   item?: RecurringItem;
@@ -33,6 +33,8 @@ type Props = {
   onSaved: () => Promise<void> | void;
   canEdit?: boolean;
   preselectVehicle?: string;
+  // What a new item starts as: 1 a cost, 2 a saving.
+  startKind?: number;
   // The vehicle picker's list is still loading; the rest of the form is usable meanwhile.
   vehiclesLoading?: boolean;
   // Why a picker's list could not be loaded.
@@ -47,11 +49,12 @@ export function RecurringEditor({
   onSaved,
   canEdit = true,
   preselectVehicle,
+  startKind,
   vehiclesLoading = false,
   loadError,
 }: Props) {
   const today = useAppearance().appearance?.businessDate;
-  const { fields, set, setKind } = useRecurringFields(item);
+  const { fields, set, setKind } = useRecurringFields(item, startKind);
   const alloc = useAllocations({
     item,
     vehicles,
@@ -69,12 +72,12 @@ export function RecurringEditor({
   });
   const disabled = !canEdit || status.stopped || actions.busy;
 
-  const heading = recurringHeading(item);
+  const heading = recurringHeading(item, fields.kind, canEdit);
 
   return (
     <Dialog
       open
-      size="lg"
+      size="md"
       title={heading.title}
       subtitle={heading.description}
       onClose={onCancel}
@@ -99,7 +102,7 @@ export function RecurringEditor({
         />
       }
     >
-      <FormLayout className="mt-0">
+      <>
         <RecurringNotices
           item={item}
           status={status}
@@ -142,7 +145,7 @@ export function RecurringEditor({
             onChange={actions.changeStopReason}
           />
         )}
-      </FormLayout>
+      </>
     </Dialog>
   );
 }

@@ -134,7 +134,7 @@ export function VehicleInvestmentTab({
 
   const paidOff = data?.percentPaidOff ?? null;
   return (
-    <div className="mt-5">
+    <div className="stack">
       <Card>
         <CardHeader
           title={`What went into ${vehicle.registration}`}
@@ -178,7 +178,7 @@ export function VehicleInvestmentTab({
           </>
         )}
       </Card>
-      {error && <Banner className="mt-4">{error}</Banner>}
+      {error && <Banner>{error}</Banner>}
       <Toolbar>
         {data && <Hint>{plural(entries.length, "entry", "entries")}</Hint>}
         <Spacer />
@@ -199,7 +199,7 @@ export function VehicleInvestmentTab({
           { label: "Date" },
           { label: "What it was" },
           { label: "Amount", numeric: true },
-          ...(canManage ? [{ label: "Actions", hidden: true }] : []),
+          ...(canManage ? [{ label: "Actions", numeric: true }] : []),
         ]}
         loading={investment.loading}
         loadingLabel="Loading investment entries"
@@ -246,8 +246,8 @@ export function VehicleInvestmentTab({
                   }
                 />
               </Td>
-              <Td>
-                <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
+              <Td numeric>
+                <div className="tacts">
                   <RowAction
                     tone="ok"
                     disabled={busy}
@@ -268,20 +268,18 @@ export function VehicleInvestmentTab({
             </Tr>
           ) : (
             <Tr key={entry.id}>
-              <Td label="Date" className="whitespace-nowrap">
+              <Td label="Date" className="nw">
                 {formatDateOnly(entry.date)}
               </Td>
-              <Td label="What it was">
-                <span className="font-semibold text-ink">
-                  {entry.description}
-                </span>
+              <Td label="What it was" className="item">
+                {entry.description}
               </Td>
               <Td label="Amount" numeric>
                 {kes(entry.amount)}
               </Td>
               {canManage && (
-                <Td>
-                  <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
+                <Td numeric>
+                  <div className="tacts">
                     <RowAction
                       disabled={busy}
                       aria-label={`Edit ${entry.description}`}
@@ -339,7 +337,7 @@ export function VehicleInvestmentTab({
         {adding && (
           <form
             id="investment-add-form"
-            className="flex flex-col gap-3.5"
+            className="contents"
             onSubmit={(event) => {
               event.preventDefault();
               void add();

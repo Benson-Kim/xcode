@@ -1,17 +1,11 @@
+import { Fragment } from "react";
+
 import { plural } from "@xcode/shared/format";
 
 import type { ScopeOptions } from "../../lib/types";
-import {
-  CardHeader,
-  Choice,
-  ChoiceGroup,
-  ErrorText,
-  GroupLabel,
-  Hint,
-  ListSkeleton,
-} from "../ui";
+import { Choice, ChoiceGroup, ErrorText, Hint, ListSkeleton } from "../ui";
 import { keptCounts, type PersonForm, scopeGroups } from "./model";
-import { FormSection } from "./PersonCards";
+import { FormSection, SectionLabel } from "./PersonCards";
 
 type Props = {
   form: PersonForm;
@@ -78,11 +72,11 @@ function VehicleChoices({
 }) {
   const keptVehicles = keptCounts(form, options).vehicles;
   return (
-    <div role="group" aria-label="Vehicles they can see">
+    <div role="group" aria-label="Vehicles they can see" className="vgrid">
       {scopeGroups(options).map((company) => (
-        <div key={company.id || "other"}>
-          {company.name && <GroupLabel>{company.name}</GroupLabel>}
-          <ChoiceGroup>
+        <Fragment key={company.id || "other"}>
+          <span className="cogrp">{company.name}</span>
+          <ChoiceGroup className="checks">
             {company.vehicles.map((vehicle) => (
               <Choice
                 key={vehicle.id}
@@ -95,7 +89,7 @@ function VehicleChoices({
               />
             ))}
           </ChoiceGroup>
-        </div>
+        </Fragment>
       ))}
       {!options.vehicles.length && (
         <Hint>There are no vehicles in your own scope to choose from.</Hint>
@@ -113,7 +107,7 @@ export function ScopeCard(props: Props) {
   const { form, setField, scopeOptions, selectedRole, editable } = props;
   return (
     <FormSection>
-      <CardHeader
+      <SectionLabel
         title="What they can see"
         description="Every number, list and report is limited to this."
       />

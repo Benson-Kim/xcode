@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 
 import {
   PETTY_CASH_COMMENT_LIMIT,
@@ -12,9 +12,9 @@ import {
 } from "@xcode/shared/pettyCash";
 
 import { useFormats } from "../../lib/formats";
-import { Banner, Button, CardNote, Dialog, Field, TextInput } from "../ui";
-import { DialogFooter } from "./DialogFooter";
-import { entryLabel } from "./labels";
+import { RegPlate } from "../revenue/RegPlate";
+import { Banner, Button, Field, TextInput } from "../ui";
+import { DialogFooter, FormDialog } from "./DialogFooter";
 import { entryPath, sendJson } from "./request";
 import { useDialogAction } from "./useDialogAction";
 
@@ -31,6 +31,7 @@ function ReasonForm({
   hint,
   limit,
   missing,
+  quick,
   submitLabel,
   tone,
   send,
@@ -43,14 +44,16 @@ function ReasonForm({
   hint: string;
   limit: number;
   missing: string;
+  // Ready answers that fill the field (.quick).
+  quick?: string[];
   submitLabel: string;
   tone: "warn" | "danger";
   send: (text: string) => Promise<string>;
 }) {
-  const formats = useFormats();
   const [text, setText] = useState("");
   const [problem, setProblem] = useState("");
   const { saving, error, run } = useDialogAction(onConflict);
+  const formId = useId();
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -61,10 +64,13 @@ function ReasonForm({
   }
 
   return (
-    <form noValidate onSubmit={submit} className="flex flex-col gap-3.5">
-      <CardNote>
-        {entryLabel(formats, entry)}, {entry.holderName}
-      </CardNote>
+    <form
+      id={formId}
+      noValidate
+      onSubmit={submit}
+      className="flex flex-col gap-3.5"
+    >
+      <EntryContext entry={entry} />
       <Field id="pc-reason" label={label} hint={hint} error={problem}>
         <TextInput
           autoFocus
@@ -74,12 +80,21 @@ function ReasonForm({
           onChange={(event) => setText(event.target.value)}
         />
       </Field>
+      {quick && (
+        <div className="quick">
+          {quick.map((answer) => (
+            <button key={answer} type="button" onClick={() => setText(answer)}>
+              {answer}
+            </button>
+          ))}
+        </div>
+      )}
       {error && <Banner>{error}</Banner>}
       <DialogFooter>
         <Button tone="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button type="submit" tone={tone} disabled={saving}>
+        <Button type="submit" form={formId} tone={tone} disabled={saving}>
           {submitLabel}
         </Button>
       </DialogFooter>
@@ -87,9 +102,43 @@ function ReasonForm({
   );
 }
 
-export function SendBackDialog({ entry, onDone, onConflict, onClose }: Shared) {
+// What the entry is (.mctx): the vehicle and item, or the payee and reason, with its amount.
+function EntryContext({ entry }: { entry: PettyCashEntry }) {
+  const formats = useFormats();
+  const credit = entry.kind === "credit";
   return (
-    <Dialog open={Boolean(entry)} title="Send back" onClose={onClose}>
+    <div className="mctx">
+      <div className="what">
+        {entry.registration && <RegPlate>{entry.registration}</RegPlate>}
+        <span>
+          {entry.kind === "expense"
+            ? entry.expenseItemName
+            : credit
+              ? `Credit note to ${entry.payee ?? "payee"}`
+              : `Cash for ${entry.holderName}`}
+        </span>
+      </div>
+      <b className="num">{formats.kes(entry.total)}</b>
+    </div>
+  );
+}
+
+function useEntrySubtitle(entry: PettyCashEntry | null) {
+  const formats = useFormats();
+  return entry
+    ? `${entry.holderName} · ${formats.formatWeekdayDate(entry.date)}`
+    : undefined;
+}
+
+export function SendBackDialog({ entry, onDone, onConflict, onClose }: Shared) {
+  const subtitle = useEntrySubtitle(entry);
+  return (
+    <FormDialog
+      open={Boolean(entry)}
+      title="Send back"
+      subtitle={subtitle}
+      onClose={onClose}
+    >
       {entry && (
         <ReasonForm
           entry={entry}
@@ -97,6 +146,7 @@ export function SendBackDialog({ entry, onDone, onConflict, onClose }: Shared) {
           hint="What the manager should fix."
           limit={PETTY_CASH_COMMENT_LIMIT}
           missing="Say what the manager should fix."
+          quick={["No receipt", "Not agreed", "Wrong amount", "Wrong vehicle"]}
           submitLabel="Send back"
           tone="warn"
           onDone={onDone}
@@ -116,13 +166,19 @@ export function SendBackDialog({ entry, onDone, onConflict, onClose }: Shared) {
           }}
         />
       )}
-    </Dialog>
+    </FormDialog>
   );
 }
 
 export function RemoveDialog({ entry, onDone, onConflict, onClose }: Shared) {
+  const subtitle = useEntrySubtitle(entry);
   return (
-    <Dialog open={Boolean(entry)} title="Delete this entry" onClose={onClose}>
+    <FormDialog
+      open={Boolean(entry)}
+      title="Delete this entry"
+      subtitle={subtitle}
+      onClose={onClose}
+    >
       {entry && (
         <ReasonForm
           entry={entry}
@@ -149,6 +205,6 @@ export function RemoveDialog({ entry, onDone, onConflict, onClose }: Shared) {
           }}
         />
       )}
-    </Dialog>
+    </FormDialog>
   );
 }

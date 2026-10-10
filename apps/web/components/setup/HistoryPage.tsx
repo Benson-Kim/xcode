@@ -203,43 +203,25 @@ function useHistoryPages(query: string) {
   return usePagedList<HistoryRow>(`setup/history?includeTotal=true${query}`);
 }
 
-function ChangeTable({
-  caption,
+// The values before or after a change, one line a field. With several fields each line is named; with one, the
+// field's name is on hover.
+function ChangeValues({
   changes,
+  side,
 }: {
-  caption: string;
   changes: FieldChange[];
+  side: "before" | "after";
 }) {
-  const cell =
-    "border-t border-divider py-1 pr-3 align-top text-left [overflow-wrap:anywhere]";
+  if (changes.length === 1)
+    return <span title={changes[0].label}>{changes[0][side]}</span>;
   return (
-    <table className="mt-2 w-full table-fixed border-collapse text-[13px]">
-      <caption className="sr-only">{caption}</caption>
-      <thead>
-        <tr>
-          {["Field", "Before", "After"].map((heading) => (
-            <th
-              key={heading}
-              scope="col"
-              className="py-1 pr-3 text-left font-semibold text-grey"
-            >
-              {heading}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {changes.map((change) => (
-          <tr key={change.key}>
-            <th scope="row" className={`${cell} font-semibold`}>
-              {change.label}
-            </th>
-            <td className={`${cell} text-slate`}>{change.before}</td>
-            <td className={`${cell} text-ink`}>{change.after}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <>
+      {changes.map((change) => (
+        <div key={change.key}>
+          {change.label}: {change[side]}
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -261,17 +243,13 @@ export function HistoryPage() {
   const some = narrowed(applied);
   const set = (part: Partial<Filters>) =>
     setFilters((current) => ({ ...current, ...part }));
-  const label = "text-[13px] text-grey";
   return (
-    <section>
-      <PageHeader
-        title="Change log"
-        description="Who changed what in setup, organization settings, people and access, with each value before and after the change."
-      />
-      {history.error && <Banner className="mb-3.5">{history.error}</Banner>}
+    <>
+      <PageHeader title="Change log" />
+      {history.error && <Banner>{history.error}</Banner>}
 
       <Toolbar>
-        <label htmlFor="log-section" className={label}>
+        <label htmlFor="log-section" className="sr-only">
           Section
         </label>
         <SelectInput
@@ -288,7 +266,7 @@ export function HistoryPage() {
             </option>
           ))}
         </SelectInput>
-        <label htmlFor="log-from" className={label}>
+        <label htmlFor="log-from" className="hint">
           From
         </label>
         {/* The range cannot be set backwards here, and the server refuses it as well. */}
@@ -301,7 +279,7 @@ export function HistoryPage() {
           value={filters.from}
           onChange={(event) => set({ from: event.target.value })}
         />
-        <label htmlFor="log-to" className={label}>
+        <label htmlFor="log-to" className="hint">
           To
         </label>
         <TextInput
@@ -313,7 +291,7 @@ export function HistoryPage() {
           value={filters.to}
           onChange={(event) => set({ to: event.target.value })}
         />
-        <label htmlFor="log-search" className={label}>
+        <label htmlFor="log-search" className="sr-only">
           Search
         </label>
         <TextInput
@@ -337,6 +315,8 @@ export function HistoryPage() {
           { label: "When" },
           { label: "Who" },
           { label: "What changed" },
+          { label: "Before" },
+          { label: "After" },
         ]}
         loading={history.loading}
         loadingLabel="Loading the change log"
@@ -347,27 +327,27 @@ export function HistoryPage() {
         }
       >
         {rows.map((row) => {
-          const what = `${sections[row.section] ?? row.section}: ${row.reason}`;
           const changes = fieldChanges(formats, row.before, row.after);
           return (
             <Tr key={rowKey(row)}>
-              <Td label="When" className="whitespace-nowrap">
+              <Td label="When" className="num nw">
                 {formats.formatDateTime(row.occurredAt)}
               </Td>
-              <Td label="Who">
+              <Td label="Who" className="nw">
                 {row.actorName || "Someone no longer in the organization"}
               </Td>
               <Td
                 label="What changed"
+                className="item"
                 title={sections[row.section] ?? row.section}
               >
-                <div className="font-semibold text-ink">{what}</div>
-                {changes.length > 0 && (
-                  <ChangeTable
-                    caption={`${what}, before and after`}
-                    changes={changes}
-                  />
-                )}
+                {row.reason}
+              </Td>
+              <Td label="Before" className="muted">
+                <ChangeValues changes={changes} side="before" />
+              </Td>
+              <Td label="After">
+                <ChangeValues changes={changes} side="after" />
               </Td>
             </Tr>
           );
@@ -380,6 +360,6 @@ export function HistoryPage() {
         onPageChange={history.paging.setPage}
         onPageSizeChange={history.paging.setPageSize}
       />
-    </section>
+    </>
   );
 }

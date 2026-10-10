@@ -1,5 +1,4 @@
 import type { ExpenseItemOption } from "../../lib/types";
-import { Card, CardHeader, Grid2 } from "../ui";
 import type { Derived } from "./derive";
 import type { RecurringFields } from "./fields";
 import { KindAndItemFields } from "./KindAndItemFields";
@@ -22,9 +21,8 @@ type Props = {
 export function WhatAndWhenCard(props: Props) {
   const { fields, set, errors, disabled, derived } = props;
   return (
-    <Card density="form">
-      <CardHeader title="What and how often" />
-      <Grid2>
+    <>
+      <div className="mrow2">
         <KindAndItemFields {...props} picker={derived.picker} />
         <FrequencyFields
           fields={fields}
@@ -32,8 +30,8 @@ export function WhatAndWhenCard(props: Props) {
           errors={errors}
           disabled={disabled}
         />
-      </Grid2>
-      <Grid2 narrow>
+      </div>
+      <div className="mrow2">
         <PeriodFields
           fields={fields}
           set={set}
@@ -44,7 +42,7 @@ export function WhatAndWhenCard(props: Props) {
           startLocked={derived.status.startLocked}
           periodIsValid={derived.periodOk}
         />
-      </Grid2>
-    </Card>
+      </div>
+    </>
   );
 }

@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 
 import { EXPENSE_MAX_DAYS } from "@xcode/shared/expenses";
 import {
@@ -16,7 +23,15 @@ import {
 } from "@xcode/shared/periods";
 
 import { useFormats } from "../../lib/formats";
-import { Button, ChevronIcon, ErrorText, cn, useDismiss } from "../ui";
+import {
+  Button,
+  ChevronIcon,
+  ErrorText,
+  cn,
+  controlClass,
+  useAnchoredPosition,
+  useDismiss,
+} from "../ui";
 
 const UNIT_NAMES: Record<PeriodUnit, string> = {
   day: "day",
@@ -41,11 +56,6 @@ const MONTHS = [
   "Dec",
 ];
 
-const STEP_BUTTON =
-  "grid h-[34px] w-[30px] place-items-center rounded-[9px] text-ink hover:enabled:bg-paper-2 disabled:cursor-default disabled:opacity-30 [.hero_&]:text-white [.hero_&]:hover:enabled:bg-glass-2";
-
-const SMALL_LABEL = "text-xs font-bold tracking-[.07em] text-slate uppercase";
-
 // The message for a custom span that cannot be used, or "" when it can.
 export function customRangeProblem(
   from: string,
@@ -60,8 +70,9 @@ export function customRangeProblem(
   return "";
 }
 
-// Steps through periods of the same kind with the arrows, and opens a panel under the period to pick a preset or
-// two dates. Presets count from the business date.
+// The design's date control (.step): ‹ and › step through periods of the same kind, and the period itself (.d) opens
+// a pop over (.pop.date) with the presets (.plist.two) and two custom dates (.pcustom). Presets count from the
+// business date.
 export function PeriodPicker({
   period,
   businessDate,
@@ -77,6 +88,7 @@ export function PeriodPicker({
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const unit = UNIT_NAMES[period.unit];
   const label =
@@ -89,6 +101,7 @@ export function PeriodPicker({
     if (returnFocus) trigger.current?.focus();
   }, []);
   useDismiss(open, wrapper, close);
+  useAnchoredPosition(open, wrapper, panel);
 
   function choose(next: Period) {
     onChange(next);
@@ -96,17 +109,13 @@ export function PeriodPicker({
   }
 
   return (
-    <div
-      ref={wrapper}
-      className="relative inline-flex items-center rounded-xl border border-line bg-surface p-[3px] [.hero_&]:border-glass-line [.hero_&]:bg-glass"
-    >
+    <div ref={wrapper} className={cn("step", period.unit === "day" && "day")}>
       <button
         type="button"
         aria-label={`Previous ${unit}`}
-        className={STEP_BUTTON}
         onClick={() => onChange(shiftPeriod(period, -1))}
       >
-        <ChevronIcon size={20} className="rotate-90" />
+        ‹
       </button>
       <button
         ref={trigger}
@@ -115,32 +124,24 @@ export function PeriodPicker({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
+        title="Choose dates"
         onClick={() => setOpen((current) => !current)}
-        className={cn(
-          "flex h-[34px] items-center justify-center gap-[3px] rounded-[9px] pr-1 pl-2.5 text-[15px] font-bold whitespace-nowrap text-ink hover:bg-paper-2 [.hero_&]:text-white [.hero_&]:hover:bg-glass-2 max-[600px]:min-w-0",
-          period.unit === "day" ? "min-w-[150px]" : "min-w-[222px]",
-        )}
+        className="d"
       >
         <span aria-live="polite">{label}</span>
-        <ChevronIcon
-          size={15}
-          className={cn(
-            "shrink-0 opacity-80 transition-transform motion-reduce:transition-none",
-            open && "rotate-180",
-          )}
-        />
+        <ChevronIcon />
       </button>
       <button
         type="button"
         aria-label={`Next ${unit}`}
         disabled={!canMoveNext(period, businessDate)}
-        className={STEP_BUTTON}
         onClick={() => onChange(shiftPeriod(period, 1))}
       >
-        <ChevronIcon size={20} className="-rotate-90" />
+        ›
       </button>
       {open && (
         <PeriodPanel
+          panelRef={panel}
           id={panelId}
           period={period}
           businessDate={businessDate}
@@ -152,13 +153,32 @@ export function PeriodPicker({
   );
 }
 
+// Up and down (or left and right) move between the presets, as in a menu.
+function moveInMenu(event: KeyboardEvent<HTMLDivElement>) {
+  const step =
+    event.key === "ArrowDown" || event.key === "ArrowRight"
+      ? 1
+      : event.key === "ArrowUp" || event.key === "ArrowLeft"
+        ? -1
+        : 0;
+  if (!step) return;
+  event.preventDefault();
+  const items = [
+    ...event.currentTarget.querySelectorAll<HTMLElement>('[role^="menuitem"]'),
+  ];
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  items[(at + step + items.length) % items.length]?.focus();
+}
+
 function PeriodPanel({
+  panelRef,
   id,
   period,
   businessDate,
   firstDayOfWeek,
   onChoose,
 }: {
+  panelRef: RefObject<HTMLDivElement | null>;
   id: string;
   period: Period;
   businessDate: string;
@@ -182,30 +202,35 @@ function PeriodPanel({
 
   return (
     <div
+      ref={panelRef}
       id={id}
       role="dialog"
       aria-label="Choose a period"
-      className="absolute top-full left-0 z-40 mt-2 flex w-[min(308px,calc(100vw-2rem))] flex-col gap-1.5 rounded-2xl border border-line bg-surface p-2 text-ink shadow-[0_18px_44px_rgba(4,32,47,.24)]"
+      className="pop date max-w-[calc(100vw-16px)]"
     >
-      <ul className="m-0 grid list-none grid-cols-2 gap-0.5 p-0">
+      <div
+        className="plist two"
+        role="menu"
+        aria-label="Periods"
+        onKeyDown={moveInMenu}
+      >
         {PERIOD_PRESETS.map((preset) => (
-          <li key={preset.id}>
-            <button
-              type="button"
-              autoFocus={preset.id === (current ?? PERIOD_PRESETS[0].id)}
-              aria-current={preset.id === current ? "true" : undefined}
-              onClick={() =>
-                onChoose(presetPeriod(preset.id, businessDate, firstDayOfWeek))
-              }
-              className="flex w-full items-center justify-between gap-2.5 rounded-[9px] px-3 py-[9px] text-left text-[14.5px] font-semibold whitespace-nowrap text-ink hover:bg-paper aria-[current=true]:bg-teal-wash aria-[current=true]:font-bold aria-[current=true]:text-teal aria-[current=true]:after:font-extrabold aria-[current=true]:after:content-['\2713']"
-            >
-              {preset.label}
-            </button>
-          </li>
+          <button
+            key={preset.id}
+            type="button"
+            role="menuitemradio"
+            autoFocus={preset.id === (current ?? PERIOD_PRESETS[0].id)}
+            aria-checked={preset.id === current}
+            onClick={() =>
+              onChoose(presetPeriod(preset.id, businessDate, firstDayOfWeek))
+            }
+          >
+            {preset.label}
+          </button>
         ))}
-      </ul>
-      <div className="flex flex-col gap-2.5 border-t border-divider px-1.5 pt-3 pb-1">
-        <span className={SMALL_LABEL}>Custom dates</span>
+      </div>
+      <div className="pcustom">
+        <span className="flab">Custom dates</span>
         <DateField
           label="From"
           value={from}
@@ -230,9 +255,6 @@ function PeriodPanel({
     </div>
   );
 }
-
-const SELECT =
-  "w-full min-w-0 rounded-[10px] border border-line bg-surface px-1.5 py-2 text-sm text-ink focus:border-teal focus:outline-3 focus:outline-offset-1 focus:outline-teal/30 aria-invalid:border-clay aria-invalid:bg-clay-wash";
 
 // Day, month and year lists over one ISO date. The date input beside them holds the same value for keyboards
 // and assistive technology that prefer it.
@@ -274,13 +296,13 @@ function DateField({
 
   const invalidFlag = invalid ? true : undefined;
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className={SMALL_LABEL}>{label}</span>
-      <div className="grid grid-cols-[62px_minmax(0,1fr)_76px] gap-1.5">
+    <div className="f">
+      <span className="flab">{label}</span>
+      <div className="dsel">
         <select
           aria-label={`${label} day`}
           aria-invalid={invalidFlag}
-          className={SELECT}
+          className={controlClass(invalidFlag)}
           value={day ?? ""}
           onChange={(event) => pick({ day: Number(event.target.value) })}
         >
@@ -294,7 +316,7 @@ function DateField({
         <select
           aria-label={`${label} month`}
           aria-invalid={invalidFlag}
-          className={SELECT}
+          className={controlClass(invalidFlag)}
           value={month ?? ""}
           onChange={(event) => pick({ month: Number(event.target.value) })}
         >
@@ -308,7 +330,7 @@ function DateField({
         <select
           aria-label={`${label} year`}
           aria-invalid={invalidFlag}
-          className={SELECT}
+          className={controlClass(invalidFlag)}
           value={year ?? ""}
           onChange={(event) => pick({ year: Number(event.target.value) })}
         >

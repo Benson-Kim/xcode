@@ -21,7 +21,7 @@ import {
   writes,
 } from "./pettyCashServer";
 import { renderInApp } from "./renderInApp";
-import { listboxOf, offered, optionsOf, pick } from "./searchSelect";
+import { choose, listboxOf, offered, optionsOf, pick } from "./searchSelect";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -43,6 +43,14 @@ async function openDialog(name: string, opener: string) {
   return screen.findByRole("dialog", { name });
 }
 
+// Credit notes and cash are recorded from the Cash received view.
+const showCash = async () =>
+  fireEvent.click(await screen.findByRole("tab", { name: "Cash received" }));
+
+// The live total of an expense, under its amounts.
+const totalOf = (dialog: HTMLElement) =>
+  within(dialog).getByText("Total amount").nextSibling;
+
 it("shows the four day figures from the overview and the day's expenses and credit notes, but no cash rows", async () => {
   const fetcher = servePettyCash({ entries: [expense(), credit(), cash()] });
   renderInApp(<PettyCashPage />);
@@ -52,10 +60,10 @@ it("shows the four day figures from the overview and the day's expenses and cred
   const figure = (label: string) =>
     within(figures).getByText(label).nextSibling;
   expect(figure("Cash balance")).toHaveTextContent("KES 13,000");
-  expect(figure("Opening balance")).toHaveTextContent("KES 12,000");
-  expect(figure("Cash issued")).toHaveTextContent("KES 5,000");
-  expect(figure("Expenses")).toHaveTextContent("KES 3,500");
-  expect(figure("Credit notes")).toHaveTextContent("KES 500");
+  expect(figure("Opening balance")).toHaveTextContent(/^12,000$/);
+  expect(figure("Cash issued")).toHaveTextContent(/^5,000$/);
+  expect(figure("Expenses")).toHaveTextContent(/^3,500$/);
+  expect(figure("Credit notes")).toHaveTextContent(/^500$/);
 
   const tyres = await screen.findByRole("row", { name: /KDA 482M/ });
   expect(within(tyres).getByText("Tyres")).toBeInTheDocument();
@@ -107,7 +115,7 @@ it("writes a balance below zero with its minus sign, KES -750, in red", async ()
   expect(closing).toHaveClass("neg");
   expect(
     within(figures).getByText("Cash issued").nextSibling,
-  ).toHaveTextContent("KES -200 returned");
+  ).toHaveTextContent(/^-200 returned$/);
 });
 
 it("offers Approve and Send back only on entries the server lets this person review, and says so when one is above their limit", async () => {
@@ -270,9 +278,10 @@ it("will not delete an entry without a reason", async () => {
 it("needs a payee and a reason on a credit note, takes a negative amount and refuses zero", async () => {
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
-  const dialog = await openDialog("Add credit note", "Credit note");
+  await showCash();
+  const dialog = await openDialog("Credit note", "Credit note");
   const add = () =>
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
   add();
   expect(
@@ -292,7 +301,7 @@ it("needs a payee and a reason on a credit note, takes a negative amount and ref
   fireEvent.change(within(dialog).getByLabelText("Reason"), {
     target: { value: "Double charge" },
   });
-  fireEvent.change(within(dialog).getByLabelText("Amount"), {
+  fireEvent.change(within(dialog).getByLabelText("Amount, KES"), {
     target: { value: "0" },
   });
   add();
@@ -301,7 +310,7 @@ it("needs a payee and a reason on a credit note, takes a negative amount and ref
   ).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([]);
 
-  fireEvent.change(within(dialog).getByLabelText("Amount"), {
+  fireEvent.change(within(dialog).getByLabelText("Amount, KES"), {
     target: { value: "-500" },
   });
   add();
@@ -333,7 +342,8 @@ it("lets an issuer pick the float for a credit note and sends it", async () => {
     }),
   });
   renderInApp(<PettyCashPage />);
-  const dialog = await openDialog("Add credit note", "Credit note");
+  await showCash();
+  const dialog = await openDialog("Credit note", "Credit note");
   await offered(within(dialog).getByLabelText("Manager"), "Peter Otieno");
   pick(within(dialog).getByLabelText("Manager"), "Peter Otieno");
   fireEvent.change(within(dialog).getByLabelText("Paid to"), {
@@ -342,13 +352,13 @@ it("lets an issuer pick the float for a credit note and sends it", async () => {
   fireEvent.change(within(dialog).getByLabelText("Reason"), {
     target: { value: "Fuel" },
   });
-  fireEvent.change(within(dialog).getByLabelText("Amount"), {
+  fireEvent.change(within(dialog).getByLabelText("Amount, KES"), {
     target: { value: "1,200.50" },
   });
   fireEvent.click(
     within(dialog).getByLabelText("The payee should pay this back"),
   );
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   await screen.findByText(
     /Credit note of KES 1,200.50 to Fuel station recorded/,
   );
@@ -362,19 +372,19 @@ it("lets an issuer pick the float for a credit note and sends it", async () => {
 it("shows the live total of an expense and sends units, amount, vehicle and item with a fresh id", async () => {
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
-  const dialog = await openDialog("Add expense", "Expense");
+  const dialog = await openDialog("Record spending", "Record spending");
   await offered(
     within(dialog).getByLabelText("Vehicle"),
     "KDA 482M, Rongai Express",
   );
-  const item = within(dialog).getByLabelText("What it was for");
+  const item = within(dialog).getByLabelText("Item");
   expect(optionsOf(item)).toEqual(["Tyres", "Brake pads", "Parking"]);
   expect(
-    within(listboxOf(item)).getByText("Garage and repairs"),
-  ).toBeInTheDocument();
+    within(listboxOf(item)).getAllByText("Garage and repairs"),
+  ).toHaveLength(2);
   expect(within(listboxOf(item)).getByText("Fees")).toBeInTheDocument();
 
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   expect(
     await within(dialog).findByText("Choose the vehicle."),
   ).toBeInTheDocument();
@@ -383,19 +393,19 @@ it("shows the live total of an expense and sends units, amount, vehicle and item
   ).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([]);
 
-  fireEvent.change(within(dialog).getByLabelText("Units"), {
+  fireEvent.change(within(dialog).getByLabelText("Qty"), {
     target: { value: "4" },
   });
-  fireEvent.change(within(dialog).getByLabelText("Amount each"), {
+  fireEvent.change(within(dialog).getByLabelText("Unit cost, KES"), {
     target: { value: "1250" },
   });
-  expect(within(dialog).getByText(/Total KES 5,000\./)).toBeInTheDocument();
+  expect(totalOf(dialog)).toHaveTextContent(/^KES 5,000$/);
   pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
-  pick(within(dialog).getByLabelText("What it was for"), "Tyres");
+  pick(within(dialog).getByLabelText("Item"), "Tyres");
   fireEvent.change(within(dialog).getByLabelText("Note"), {
     target: { value: "Front left" },
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
   expect(
     await screen.findByText(
@@ -419,27 +429,27 @@ async function fillExpense(dialog: HTMLElement, units: string, amount: string) {
     within(dialog).getByLabelText("Vehicle"),
     "KDA 482M, Rongai Express",
   );
-  fireEvent.change(within(dialog).getByLabelText("Units"), {
+  fireEvent.change(within(dialog).getByLabelText("Qty"), {
     target: { value: units },
   });
-  fireEvent.change(within(dialog).getByLabelText("Amount each"), {
+  fireEvent.change(within(dialog).getByLabelText("Unit cost, KES"), {
     target: { value: amount },
   });
   pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
-  pick(within(dialog).getByLabelText("What it was for"), "Tyres");
+  pick(within(dialog).getByLabelText("Item"), "Tyres");
 }
 
 it("takes part of a unit, shows the exact live total and sends the units as a number", async () => {
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
-  const dialog = await openDialog("Add expense", "Expense");
+  const dialog = await openDialog("Record spending", "Record spending");
   await fillExpense(dialog, "11.875", "182.40");
-  expect(within(dialog).getByLabelText("Units")).toHaveAttribute(
+  expect(within(dialog).getByLabelText("Qty")).toHaveAttribute(
     "inputmode",
     "decimal",
   );
-  expect(within(dialog).getByText(/Total KES 2,166\./)).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  expect(totalOf(dialog)).toHaveTextContent(/^KES 2,166$/);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   expect(
     await screen.findByText(
       "KES 2,166 recorded on KDA 482M. It waits for approval.",
@@ -455,17 +465,19 @@ it("takes part of a unit, shows the exact live total and sends the units as a nu
 it("accepts 4.5 units and more than a thousand units", async () => {
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
-  const dialog = await openDialog("Add expense", "Expense");
+  const dialog = await openDialog("Record spending", "Record spending");
   await fillExpense(dialog, "4.5", "900");
-  expect(within(dialog).getByText(/Total KES 4,050\./)).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  expect(totalOf(dialog)).toHaveTextContent(/^KES 4,050$/);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   await screen.findByText(/recorded on KDA 482M/);
   expect(writes(fetcher)[0].body.units).toBe(4.5);
 
-  fireEvent.click(await screen.findByRole("button", { name: "Expense" }));
-  const again = await screen.findByRole("dialog", { name: "Add expense" });
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Record spending" }),
+  );
+  const again = await screen.findByRole("dialog", { name: "Record spending" });
   await fillExpense(again, "1001", "10");
-  fireEvent.click(within(again).getByRole("button", { name: "Add" }));
+  fireEvent.click(within(again).getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(fetcher)).toHaveLength(2));
   expect(writes(fetcher)[1].body.units).toBe(1001);
 });
@@ -475,9 +487,9 @@ it.each(["0", "1.2345", "", "-2"])(
   async (units) => {
     const fetcher = servePettyCash();
     renderInApp(<PettyCashPage />);
-    const dialog = await openDialog("Add expense", "Expense");
+    const dialog = await openDialog("Record spending", "Record spending");
     await fillExpense(dialog, units, "10");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     expect(
       await within(dialog).findByText(PETTY_CASH_UNITS_ERROR),
     ).toBeInTheDocument();
@@ -488,12 +500,12 @@ it.each(["0", "1.2345", "", "-2"])(
 it("refuses a date after the business date", async () => {
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
-  const dialog = await openDialog("Add expense", "Expense");
+  const dialog = await openDialog("Record spending", "Record spending");
   await fillExpense(dialog, "2", "10");
   fireEvent.change(within(dialog).getByLabelText("Date"), {
     target: { value: "2026-10-01" },
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   expect(
     await within(dialog).findByText("The date cannot be after today."),
   ).toBeInTheDocument();
@@ -506,24 +518,25 @@ it.each([0, -300])(
     const [first] = overviewOf(permissionsOf()).floats;
     const fetcher = servePettyCash({ floats: [{ ...first, balance }] });
     renderInApp(<PettyCashPage />);
-    const dialog = await openDialog("Add expense", "Expense");
+    const dialog = await openDialog("Record spending", "Record spending");
     await fillExpense(dialog, "1", "500");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await screen.findByText(
       "KES 500 recorded on KDA 482M. It waits for approval.",
     );
 
-    const note = await openDialog("Add credit note", "Credit note");
+    await showCash();
+    const note = await openDialog("Credit note", "Credit note");
     fireEvent.change(within(note).getByLabelText("Paid to"), {
       target: { value: "Mama Njeri" },
     });
     fireEvent.change(within(note).getByLabelText("Reason"), {
       target: { value: "Double charge" },
     });
-    fireEvent.change(within(note).getByLabelText("Amount"), {
+    fireEvent.change(within(note).getByLabelText("Amount, KES"), {
       target: { value: "800" },
     });
-    fireEvent.click(within(note).getByRole("button", { name: "Add" }));
+    fireEvent.click(within(note).getByRole("button", { name: "Save" }));
     await screen.findByText(/Credit note of KES 800 to Mama Njeri recorded/);
     expect(writes(fetcher).map((write) => write.body.kind)).toEqual([
       "expense",
@@ -554,23 +567,23 @@ it("reports a refused save with role alert and keeps one id for the retry", asyn
     },
   });
   renderInApp(<PettyCashPage />);
-  const dialog = await openDialog("Add expense", "Expense");
+  const dialog = await openDialog("Record spending", "Record spending");
   await offered(
     within(dialog).getByLabelText("Vehicle"),
     "KDA 482M, Rongai Express",
   );
-  fireEvent.change(within(dialog).getByLabelText("Amount each"), {
+  fireEvent.change(within(dialog).getByLabelText("Unit cost, KES"), {
     target: { value: "300" },
   });
   pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
-  pick(within(dialog).getByLabelText("What it was for"), "Parking");
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  pick(within(dialog).getByLabelText("Item"), "Parking");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
   const alert = await within(dialog).findByRole("alert");
   expect(alert).toHaveTextContent(
     "This takes the float below zero. Ask for cash first.",
   );
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   await screen.findByText(/recorded on KDA 482M/);
   const [first, second] = writes(fetcher);
   expect(first.body.id).toMatch(UUID);
@@ -582,17 +595,17 @@ it("still sends a fresh id from a page opened over plain http, where crypto.rand
   vi.stubGlobal("crypto", { getRandomValues: real.getRandomValues.bind(real) });
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
-  const dialog = await openDialog("Add expense", "Expense");
+  const dialog = await openDialog("Record spending", "Record spending");
   await offered(
     within(dialog).getByLabelText("Vehicle"),
     "KDA 482M, Rongai Express",
   );
-  fireEvent.change(within(dialog).getByLabelText("Amount each"), {
+  fireEvent.change(within(dialog).getByLabelText("Unit cost, KES"), {
     target: { value: "300" },
   });
   pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
-  pick(within(dialog).getByLabelText("What it was for"), "Parking");
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  pick(within(dialog).getByLabelText("Item"), "Parking");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   await screen.findByText(/recorded on KDA 482M/);
   expect(writes(fetcher)[0].body.id).toMatch(UUID);
 });
@@ -605,9 +618,9 @@ it("changes an entry with its version and without a new id", async () => {
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit KDA 482M, KES 3,500" }),
   );
-  const dialog = await screen.findByRole("dialog", { name: "Edit expense" });
-  expect(within(dialog).getByLabelText("Amount each")).toHaveValue("3500");
-  fireEvent.change(within(dialog).getByLabelText("Amount each"), {
+  const dialog = await screen.findByRole("dialog", { name: "Edit spending" });
+  expect(within(dialog).getByLabelText("Unit cost, KES")).toHaveValue("3500");
+  fireEvent.change(within(dialog).getByLabelText("Unit cost, KES"), {
     target: { value: "3000" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
@@ -699,7 +712,7 @@ const openPeriod = async (name: string | RegExp = /^Period, /) =>
   fireEvent.click(await trigger(name));
 const choosePreset = async (preset: string) => {
   await openPeriod();
-  fireEvent.click(await screen.findByRole("button", { name: preset }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: preset }));
 };
 
 it("moves a day at a time and stops at the business date", async () => {
@@ -735,7 +748,9 @@ it("opens on the business date, with the same period picker as Central expenses 
   const manager = await screen.findByRole("combobox", { name: "Manager" });
   const status = screen.getByRole("combobox", { name: "Show" });
   const search = screen.getByRole("searchbox", { name: "Search" });
-  const approve = await screen.findByRole("button", { name: "Expense" });
+  const approve = await screen.findByRole("button", {
+    name: "Record spending",
+  });
   const follows = (first: HTMLElement, second: HTMLElement) =>
     Boolean(
       first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -773,10 +788,10 @@ it("shows several days: asks for the figures and entries of the span, labels the
   expect(await trigger("Period, 28 Sep to 4 Oct 2026")).toBeInTheDocument();
   const figure = (label: string) =>
     within(figures).getByText(label).nextSibling;
-  expect(figure("Expenses")).toHaveTextContent("KES 14,000");
-  expect(figure("Credit notes")).toHaveTextContent("KES 2,000");
-  expect(figure("Cash issued")).toHaveTextContent("KES 21,000");
-  expect(figure("Opening balance")).toHaveTextContent("KES 9,000");
+  expect(figure("Expenses")).toHaveTextContent(/^14,000$/);
+  expect(figure("Credit notes")).toHaveTextContent(/^2,000$/);
+  expect(figure("Cash issued")).toHaveTextContent(/^21,000$/);
+  expect(figure("Opening balance")).toHaveTextContent(/^9,000$/);
   expect(paths(fetcher)).toContain(
     "/api/setup/pettycash/overview?from=2026-09-28&to=2026-10-04",
   );
@@ -845,7 +860,7 @@ it("groups the entries of several days under a row for each day with that day's 
   );
   expect(rows).toEqual(["day", "entry", "entry", "day", "entry"]);
   expect(
-    screen.getByRole("columnheader", { name: "Total (KES)" }),
+    screen.getByRole("columnheader", { name: "Total amount" }),
   ).toBeInTheDocument();
 });
 
@@ -909,12 +924,16 @@ it("opens a new entry on the last day of a past period, and on today when the pe
   servePettyCash();
   renderInApp(<PettyCashPage />);
   await choosePreset("Last week");
-  fireEvent.click(await screen.findByRole("button", { name: "Expense" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Record spending" }),
+  );
   expect(await screen.findByLabelText("Date")).toHaveValue("2026-09-27");
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
   await choosePreset("This week");
-  fireEvent.click(await screen.findByRole("button", { name: "Expense" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Record spending" }),
+  );
   expect(await screen.findByLabelText("Date")).toHaveValue("2026-09-30");
 });
 
@@ -944,7 +963,7 @@ it("offers the manager filter only to someone who may see every float, and sends
   const fetcher = servePettyCash({ permissions: REVIEWER });
   const first = renderInApp(<PettyCashPage />);
   const manager = await screen.findByRole("combobox", { name: "Manager" });
-  pick(manager, "Peter Otieno");
+  choose(manager, "Peter Otieno");
   await waitFor(() =>
     expect(paths(fetcher)).toContain(
       "/api/setup/pettycash/overview?holderId=h2",
@@ -960,7 +979,7 @@ it("offers the manager filter only to someone who may see every float, and sends
 
   servePettyCash({ permissions: permissionsOf() });
   renderInApp(<PettyCashPage />);
-  await screen.findByRole("button", { name: "Expense" });
+  await screen.findByRole("button", { name: "Record spending" });
   expect(
     screen.queryByRole("combobox", { name: "Manager" }),
   ).not.toBeInTheDocument();
@@ -972,7 +991,7 @@ it("filters expenses by status and by search", async () => {
   });
   renderInApp(<PettyCashPage />);
   await screen.findByRole("row", { name: /KDA 482M/ });
-  pick(screen.getByRole("combobox", { name: "Show" }), "Waiting");
+  choose(screen.getByRole("combobox", { name: "Show" }), "Waiting");
   await waitFor(() =>
     expect(
       entryReads(fetcher).some((path) => path.includes("status=waiting")),
@@ -995,15 +1014,15 @@ it("filters expenses by status and by search", async () => {
 it("opens on the waiting filter when asked to", async () => {
   const fetcher = servePettyCash({ entries: [expense()] });
   renderInApp(<PettyCashPage initialStatus="waiting" />);
-  expect(await screen.findByRole("combobox", { name: "Show" })).toHaveValue(
-    "Waiting",
-  );
+  expect(
+    await screen.findByRole("combobox", { name: "Show" }),
+  ).toHaveDisplayValue("Waiting");
   await waitFor(() =>
     expect(entryReads(fetcher)[0]).toContain("status=waiting"),
   );
 });
 
-it("keeps Expense, Credit note, Cash and Approve day to the permissions the server reports", async () => {
+it("keeps Record spending, Credit note, Issue cash and Approve day to the permissions the server reports", async () => {
   servePettyCash({
     permissions: permissionsOf({
       canSpend: false,
@@ -1017,13 +1036,14 @@ it("keeps Expense, Credit note, Cash and Approve day to the permissions the serv
     await screen.findByRole("button", { name: "Approve day" }),
   ).toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Expense" }),
+    screen.queryByRole("button", { name: "Record spending" }),
   ).not.toBeInTheDocument();
+  await showCash();
   expect(
     screen.queryByRole("button", { name: "Credit note" }),
   ).not.toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Cash" }),
+    screen.queryByRole("button", { name: "Issue cash" }),
   ).not.toBeInTheDocument();
   first.unmount();
   clearDataCache();
@@ -1033,12 +1053,18 @@ it("keeps Expense, Credit note, Cash and Approve day to the permissions the serv
   });
   renderInApp(<PettyCashPage />);
   expect(
-    await screen.findByRole("button", { name: "Expense" }),
+    await screen.findByRole("button", { name: "Record spending" }),
   ).toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "Credit note" }),
+    screen.queryByRole("button", { name: "Approve day" }),
+  ).not.toBeInTheDocument();
+  await showCash();
+  expect(
+    await screen.findByRole("button", { name: "Credit note" }),
   ).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Cash" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Issue cash" }),
+  ).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "Approve day" }),
   ).not.toBeInTheDocument();
@@ -1058,7 +1084,7 @@ it("approves a day for the chosen manager and reports what was left", async () =
         : undefined,
   });
   renderInApp(<PettyCashPage />);
-  pick(
+  choose(
     await screen.findByRole("combobox", { name: "Manager" }),
     "Peter Otieno",
   );
@@ -1110,7 +1136,7 @@ it("lists cash on the Cash received tab with the floats, and moves between tabs 
   ).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Floats" })).toBeInTheDocument();
   const floats = screen
-    .getByRole("columnheader", { name: "Cash in hand (KES)" })
+    .getByRole("columnheader", { name: "Cash in hand" })
     .closest("table")!;
   expect(within(floats).getByText("12,500")).toBeInTheDocument();
   expect(
@@ -1174,14 +1200,22 @@ it("puts the toolbar buttons in the design's order", async () => {
   });
   renderInApp(<PettyCashPage />);
   await screen.findByRole("button", { name: "Approve day" });
-  const names = screen
-    .getAllByRole("button")
-    .map((button) => button.textContent)
-    .filter((name) =>
-      ["Expense", "Cash", "Credit note", "Approve day"].includes(name ?? ""),
-    );
-  // The actions on the headline card end with the main one, then Approve day on the bar.
-  expect(names).toEqual(["Credit note", "Cash", "Expense", "Approve day"]);
+  const names = () =>
+    screen
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+      .filter((name) =>
+        [
+          "Record spending",
+          "Issue cash",
+          "Credit note",
+          "Approve day",
+        ].includes(name ?? ""),
+      );
+  // The actions on the headline card follow the view and end with the main one, then Approve day on the bar.
+  expect(names()).toEqual(["Record spending", "Approve day"]);
+  await showCash();
+  expect(names()).toEqual(["Credit note", "Issue cash", "Approve day"]);
 });
 
 it("gives cash to a chosen manager, and takes it back with a minus sign", async () => {
@@ -1193,19 +1227,20 @@ it("gives cash to a chosen manager, and takes it back with a minus sign", async 
     }),
   });
   renderInApp(<PettyCashPage />);
-  const dialog = await openDialog("Add cash", "Cash");
+  await showCash();
+  const dialog = await openDialog("Issue cash", "Issue cash");
   await offered(within(dialog).getByLabelText("Manager"), "Peter Otieno");
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Issue cash" }));
   expect(
     await within(dialog).findByText("Choose the manager."),
   ).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([]);
 
   pick(within(dialog).getByLabelText("Manager"), "Peter Otieno");
-  fireEvent.change(within(dialog).getByLabelText("Amount"), {
+  fireEvent.change(within(dialog).getByLabelText("Amount, KES"), {
     target: { value: "-300" },
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Issue cash" }));
   expect(
     await screen.findByText("KES 300 taken back from Peter Otieno."),
   ).toBeInTheDocument();
@@ -1250,7 +1285,7 @@ it("pages the entries on the server, 25 to a page, and goes back to page 1 when 
 
   fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
   await screen.findByText("Showing 101–200 of 230");
-  pick(screen.getByLabelText("Show"), "Waiting");
+  choose(screen.getByLabelText("Show"), "Waiting");
   await waitFor(() =>
     expect(entryReads(fetcher).at(-1)).toContain("page=1&pageSize=100"),
   );

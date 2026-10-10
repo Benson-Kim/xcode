@@ -1,16 +1,8 @@
 import { plural } from "@xcode/shared/format";
 
 import type { PermissionGroup } from "../../lib/types";
-import {
-  CardHeader,
-  Chip,
-  ChipGroup,
-  ErrorText,
-  ListSkeleton,
-  Note,
-  Tag,
-} from "../ui";
-import { FormSection } from "./PersonCards";
+import { Chip, ChipGroup, ErrorText, ListSkeleton, Note, Tag } from "../ui";
+import { FormSection, SectionLabel } from "./PersonCards";
 import type { PersonFormState } from "./usePersonForm";
 
 type Props = {
@@ -33,22 +25,19 @@ function PermissionGroupList({
 }) {
   const { permissions, defaults, label } = pf;
   return (
-    <div className="overflow-hidden rounded-xl border border-line">
-      <h3 className="m-0 flex items-center justify-between gap-2.5 border-b border-line bg-paper px-3.5 py-2.5 text-[14.5px] font-bold text-ink">
-        {group.name}
-        <small className="text-[13px] font-bold text-slate">
+    <div className="pg">
+      <h4 className="ph">
+        <b>{group.name}</b>
+        <small className="hint">
           {group.items.filter((item) => permissions.includes(item.key)).length}{" "}
           of {group.items.length}
         </small>
-      </h3>
+      </h4>
       {group.items.map((item) => {
         const ticked = permissions.includes(item.key);
         const inRole = defaults.includes(item.key);
         return (
-          <label
-            key={item.key}
-            className="flex cursor-pointer items-start gap-2.5 border-b border-divider px-3.5 py-[9px] text-[14.5px] font-semibold text-ink last:border-b-0 has-disabled:cursor-default"
-          >
+          <label key={item.key}>
             <input
               type="checkbox"
               aria-label={item.label}
@@ -57,16 +46,18 @@ function PermissionGroupList({
               onChange={(event) =>
                 pf.togglePermission(item, event.target.checked)
               }
-              className="peer m-0 mt-0.5 size-4 shrink-0 accent-teal"
             />
-            <span className="peer-disabled:text-slate">
+            <span>
               {item.label}
               {ticked && !inRole && <Tag tone="add">Added</Tag>}
               {!ticked && inRole && <Tag tone="remove">Removed</Tag>}
               {item.needs.length > 0 && (
-                <small className="block text-[13px] font-medium text-slate">
-                  {`Needs: ${item.needs.map(label).join(", ")}`}
-                </small>
+                <>
+                  <br />
+                  <small className="hint">
+                    {`Needs: ${item.needs.map(label).join(", ")}`}
+                  </small>
+                </>
               )}
             </span>
           </label>
@@ -88,8 +79,8 @@ export function PermissionsCard({
   const permissionsEditable = editable && canManageAccess;
   return (
     <FormSection>
-      <CardHeader
-        title="Permissions"
+      <SectionLabel
+        title="Access"
         description={
           !ready
             ? undefined
@@ -119,7 +110,7 @@ export function PermissionsCard({
         </div>
       )}
       {ready && (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(270px,1fr))] items-start gap-3.5">
+        <div className="pgrid">
           {groups!.map((group) => (
             <PermissionGroupList
               key={group.name}
