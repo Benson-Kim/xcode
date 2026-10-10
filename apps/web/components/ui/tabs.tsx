@@ -54,7 +54,7 @@ export function Tabs<T extends string>({
       className={
         stacked
           ? "flex min-w-40 flex-col gap-2 max-[900px]:flex-row"
-          : "mt-4.5 flex flex-wrap gap-2"
+          : "mt-4.5 grid grid-cols-2 gap-3 max-[520px]:grid-cols-1"
       }
     >
       {options.map((option, index) => (
@@ -68,7 +68,7 @@ export function Tabs<T extends string>({
           tabIndex={option.value === value ? 0 : -1}
           onClick={() => onChange(option.value)}
           onKeyDown={(event) => move(event, index)}
-          className={`min-h-11 rounded-xl border border-card-line bg-surface px-4.5 text-[15px] font-semibold text-navy hover:border-blue hover:text-blue-dark aria-selected:border-2 aria-selected:border-blue aria-selected:bg-blue-soft aria-selected:text-blue-dark${stacked ? " flex-1" : ""}`}
+          className={`rounded-[18px] border border-line bg-surface px-[18px] py-3.5 text-left text-[14.5px] font-bold text-ink hover:border-teal-lift aria-selected:border-teal aria-selected:bg-teal-wash${stacked ? " flex-1" : ""}`}
         >
           {option.label}
         </button>

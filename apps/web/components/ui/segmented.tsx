@@ -1,6 +1,6 @@
 import { cn } from "./cn";
 
-// Mutually exclusive filters shown as a pill track (.seg).
+// Mutually exclusive filters shown as a pill track (.pills). On the hero band it turns to glass.
 export function SegmentedControl<T extends string>({
   label,
   options,
@@ -19,7 +19,7 @@ export function SegmentedControl<T extends string>({
       role="group"
       aria-label={label}
       className={cn(
-        "inline-flex gap-0.5 rounded-full bg-divider p-1",
+        "inline-flex flex-wrap gap-1 rounded-xl border border-line bg-surface p-1 [.hero_&]:border-glass-line [.hero_&]:bg-glass",
         className,
       )}
     >
@@ -29,7 +29,7 @@ export function SegmentedControl<T extends string>({
           type="button"
           aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
-          className="min-h-10 rounded-full px-4 text-sm font-semibold text-grey aria-pressed:bg-surface aria-pressed:text-navy aria-pressed:shadow-seg"
+          className="flex items-center gap-[7px] rounded-[9px] px-2.5 py-[7px] text-sm font-semibold whitespace-nowrap text-slate hover:bg-paper aria-pressed:bg-ink aria-pressed:text-on-fill [.hero_&]:text-on-deep [.hero_&]:hover:bg-glass-2 [.hero_&]:aria-pressed:bg-white [.hero_&]:aria-pressed:text-deep"
         >
           {option.label}
         </button>

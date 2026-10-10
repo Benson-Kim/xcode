@@ -116,3 +116,5 @@ export function costBucket(row: {
   if (row.kind !== 1) return null;
   return row.bucket ?? 2;
 }
+
+export { RegPlate } from "../ui";

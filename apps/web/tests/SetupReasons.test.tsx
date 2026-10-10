@@ -71,6 +71,8 @@ it("adds, renames, archives and restores a company without a typed reason", asyn
   await screen.findByText("North Star");
   expect(screen.queryByLabelText(/Reason/)).not.toBeInTheDocument();
 
+  // Every form is a pop-up: the new company's name is asked for in one.
+  fireEvent.click(screen.getByRole("button", { name: "New company" }));
   fireEvent.change(screen.getByLabelText("New PSV company"), {
     target: { value: "Rongai Express" },
   });

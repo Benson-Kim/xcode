@@ -22,7 +22,7 @@ import { PeopleList, type PeopleFilters } from "./people/PeopleList";
 import { PersonEditor } from "./people/PersonEditor";
 import { RecentChanges } from "./people/RecentChanges";
 import type { HistoryRow } from "./setup/shared";
-import { Banner, ListPager, PageHeader } from "./ui";
+import { Banner, Button, ListPager, PageHeader } from "./ui";
 import { usePagedList } from "./usePagedList";
 
 export function PeopleAccessView({
@@ -72,12 +72,19 @@ export function PeopleAccessView({
   }
 
   return (
-    <section>
+    <section className="flex flex-col gap-3.5">
       <PageHeader
         title="People and access"
         description="Everyone who can sign in, what they can see and what they can do."
+        actions={
+          canManage && (
+            <Button tone="primary" onClick={() => setEditing("new")}>
+              Add person
+            </Button>
+          )
+        }
       />
-      {error && <Banner className="mt-5">{error}</Banner>}
+      {error && <Banner>{error}</Banner>}
       <PeopleList
         items={people.items}
         total={people.total}
@@ -90,7 +97,6 @@ export function PeopleAccessView({
         onFilters={setFilters}
         canManage={canManage}
         onEdit={setEditing}
-        onAdd={() => setEditing("new")}
       />
       <ListPager list={people} />
       {can("audit.view") && (

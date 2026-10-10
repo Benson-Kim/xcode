@@ -52,7 +52,7 @@ export function usePaging(filterKey: string, defaultSize = DEFAULT_PAGE_SIZE) {
 }
 
 const NAV_BUTTON =
-  "grid h-11 min-w-11 place-items-center rounded-[10px] border border-line bg-surface px-2 text-[15px] font-semibold text-navy hover:enabled:border-blue hover:enabled:text-blue-dark disabled:cursor-default disabled:opacity-35 aria-[current=page]:border-blue aria-[current=page]:bg-blue-soft aria-[current=page]:text-blue-dark";
+  "grid h-8 min-w-8 place-items-center rounded-full border border-line bg-surface px-2.5 text-[13px] font-bold text-ink hover:enabled:bg-paper disabled:cursor-default disabled:opacity-45 aria-[current=page]:border-ink aria-[current=page]:bg-ink aria-[current=page]:text-on-fill";
 
 // The Pager under a list read a server page at a time (usePagedList).
 export function ListPager({
@@ -108,12 +108,15 @@ export function Pager({
   return (
     <div
       className={cn(
-        "mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 rounded-[14px] border border-card-line bg-surface p-3 max-[720px]:flex-col max-[720px]:items-stretch max-[720px]:text-center",
+        "mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-(--gut) py-3 in-[dialog]:px-0 max-[720px]:flex-col max-[720px]:items-stretch max-[720px]:text-center",
         className,
       )}
     >
       <div className="flex items-center gap-2 max-[720px]:justify-center">
-        <label htmlFor={sizeId} className="text-sm text-grey">
+        <label
+          htmlFor={sizeId}
+          className="text-[13px] font-semibold text-slate"
+        >
           Rows per page
         </label>
         <SearchSelect
@@ -126,7 +129,10 @@ export function Pager({
           onChange={(size) => onPageSizeChange(Number(size))}
         />
       </div>
-      <p className="m-0 text-sm text-grey" aria-live="polite">
+      <p
+        className="m-0 text-[13px] font-semibold text-slate"
+        aria-live="polite"
+      >
         Showing {formatNumber(first)}–{formatNumber(last)} of{" "}
         {formatNumber(total)}
       </p>
@@ -151,7 +157,7 @@ export function Pager({
             disabled={page <= 1}
             onClick={go(page - 1)}
           >
-            <ChevronIcon size={20} className="rotate-90" />
+            <ChevronIcon size={18} className="rotate-90" />
           </button>
           {pageItems(page, pages).map((item, index) =>
             item === "gap" ? (
@@ -178,7 +184,7 @@ export function Pager({
             disabled={page >= pages}
             onClick={go(page + 1)}
           >
-            <ChevronIcon size={20} className="-rotate-90" />
+            <ChevronIcon size={18} className="-rotate-90" />
           </button>
           <button
             type="button"

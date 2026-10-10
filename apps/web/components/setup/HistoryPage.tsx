@@ -234,8 +234,8 @@ function ChangeTable({
             <th scope="row" className={`${cell} font-semibold`}>
               {change.label}
             </th>
-            <td className={cell}>{change.before}</td>
-            <td className={cell}>{change.after}</td>
+            <td className={`${cell} text-slate`}>{change.before}</td>
+            <td className={`${cell} text-ink`}>{change.after}</td>
           </tr>
         ))}
       </tbody>
@@ -268,7 +268,7 @@ export function HistoryPage() {
         title="Change log"
         description="Who changed what in setup, organization settings, people and access, with each value before and after the change."
       />
-      {history.error && <Banner className="mt-5">{history.error}</Banner>}
+      {history.error && <Banner className="mb-3.5">{history.error}</Banner>}
 
       <Toolbar>
         <label htmlFor="log-section" className={label}>
@@ -361,7 +361,7 @@ export function HistoryPage() {
                 label="What changed"
                 title={sections[row.section] ?? row.section}
               >
-                <div>{what}</div>
+                <div className="font-semibold text-ink">{what}</div>
                 {changes.length > 0 && (
                   <ChangeTable
                     caption={`${what}, before and after`}

@@ -63,6 +63,7 @@ import {
   type PettyCashCardFigures,
 } from "./pettycash/dashboardCards";
 import { shiftDate } from "./revenueFormat";
+import type { HeroSlots } from "./ui";
 import {
   Banner,
   Button,
@@ -74,15 +75,15 @@ import {
   CardListItem,
   CardNote,
   CardValue,
-  ChevronIcon,
   Dialog,
   FormActions,
-  IconButton,
   ListSkeleton,
   LoadingRegion,
-  MenuIcon,
+  BandStats,
+  HeroBand,
+  HeroSlotsProvider,
+  NavIcon,
   PageHeader,
-  PageHeaderSlotProvider,
   ProgressBar,
   SegmentedControl,
   Skeleton,
@@ -179,7 +180,7 @@ function isLoadFailure(error: unknown) {
 // leaving keyboard and screen-reader users on the page body.
 function FocusPage() {
   useEffect(() => {
-    // The title is in the top bar, outside main.
+    // The title is in the brand zone, above the sheet.
     const target =
       document.querySelector<HTMLElement>("h1") ??
       document.querySelector<HTMLElement>('main [role="status"]');
@@ -285,7 +286,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [accessOpen, setAccessOpen] = useState(false);
-  const [titleSlot, setTitleSlot] = useState<HTMLElement | null>(null);
+  const [mini, setMini] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -359,88 +360,71 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
     window.scrollTo?.(0, 0);
   }
 
+  const profile = (
+    <UserMenu
+      session={session}
+      displayName={displayName}
+      open={userMenuOpen}
+      onToggle={() => setUserMenuOpen((open) => !open)}
+      onAccess={() => {
+        setUserMenuOpen(false);
+        setAccessOpen(true);
+      }}
+      onPreferences={() => navigate("preferences")}
+      onSignOut={onSignOut}
+    />
+  );
   return (
     <FormatsContext.Provider value={formatter}>
       <SessionProvider value={sessionState}>
         <AppearanceProvider value={appearanceState}>
           <ToastProvider>
-            <PageHeaderSlotProvider value={titleSlot}>
-              <div className="flex min-h-screen flex-col">
-                <header className="sticky top-0 z-20 flex h-16 items-center border-b border-card-line bg-surface">
-                  {/* As wide as the menu below; the title zone then starts where <main> does, with its inset. */}
-                  <div className="flex w-62 shrink-0 items-center gap-3 px-5 max-[899px]:w-auto max-[899px]:gap-1.5 max-[899px]:pr-0 max-[899px]:pl-1">
-                    <IconButton
-                      className="hidden max-[899px]:grid"
-                      aria-label="Open menu"
-                      aria-expanded={menuOpen}
-                      aria-controls="main-menu"
-                      onClick={() => setMenuOpen((open) => !open)}
-                    >
-                      <MenuIcon />
-                    </IconButton>
-                    <Brand
-                      compact
-                      loading={appearanceState.loading && !appearance.error}
-                      name={brand?.displayName}
-                      subline={appearance.data?.organizationName}
-                      logo={brand?.logo}
-                      logoAlt={brand?.logoAlt}
-                    />
-                  </div>
-                  <div
-                    ref={setTitleSlot}
-                    className="min-w-0 flex-1 px-8 max-[899px]:px-4"
+            <div className={cn("app", mini && "mini", menuOpen && "drawer")}>
+              <MainMenu
+                view={view}
+                can={can}
+                onNavigate={navigate}
+                onMini={() => setMini((current) => !current)}
+                brand={
+                  <Brand
+                    compact
+                    loading={appearanceState.loading && !appearance.error}
+                    name={brand?.displayName}
+                    subline={appearance.data?.organizationName}
+                    logo={brand?.logo}
+                    logoAlt={brand?.logoAlt}
                   />
-                  <UserMenu
-                    session={session}
-                    displayName={displayName}
-                    open={userMenuOpen}
-                    onToggle={() => setUserMenuOpen((open) => !open)}
-                    onAccess={() => {
-                      setUserMenuOpen(false);
-                      setAccessOpen(true);
-                    }}
-                    onPreferences={() => navigate("preferences")}
-                    onSignOut={onSignOut}
-                  />
-                </header>
-                <div className="flex min-h-0 flex-1">
-                  <MainMenu
+                }
+              />
+              <Frame
+                menuOpen={menuOpen}
+                onMenu={() => setMenuOpen((open) => !open)}
+                profile={profile}
+              >
+                {/* Keyed on the visit, so a screen still loading shows placeholders, never the page it replaced, and a
+                  page that failed to load is left behind on the next one. */}
+                <PageBoundary key={visit}>
+                  <Page
                     view={view}
-                    open={menuOpen}
-                    can={can}
+                    params={params}
+                    sessionError={sessionError}
                     onNavigate={navigate}
                   />
-                  {menuOpen && (
-                    <button
-                      type="button"
-                      aria-label="Close menu"
-                      onClick={() => setMenuOpen(false)}
-                      className="fixed inset-x-0 top-16 bottom-0 z-25 hidden bg-navy/35 max-[899px]:block"
-                    />
-                  )}
-                  <main className="min-w-0 flex-1 px-8 pt-7 pb-12 max-[899px]:px-4 max-[899px]:pt-5 max-[899px]:pb-10">
-                    {/* Keyed on the visit, so a screen still loading shows placeholders, never the page it replaced, and a
-                    page that failed to load is left behind on the next one. */}
-                    <PageBoundary key={visit}>
-                      <Page
-                        view={view}
-                        params={params}
-                        sessionError={sessionError}
-                        onNavigate={navigate}
-                      />
-                    </PageBoundary>
-                    <p className="mt-8 mb-0 text-xs text-grey">
-                      XCODE Web v0.9
-                    </p>
-                  </main>
-                </div>
-                <AccessDialog
-                  open={accessOpen}
-                  onClose={() => setAccessOpen(false)}
+                </PageBoundary>
+              </Frame>
+              {menuOpen && (
+                <button
+                  type="button"
+                  aria-label="Close menu"
+                  onClick={() => setMenuOpen(false)}
+                  className="scrim"
                 />
-              </div>
-            </PageHeaderSlotProvider>
+              )}
+              <AccessDialog
+                open={accessOpen}
+                onClose={() => setAccessOpen(false)}
+              />
+            </div>
           </ToastProvider>
         </AppearanceProvider>
       </SessionProvider>
@@ -448,31 +432,95 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
   );
 }
 
+// The brand zone (title, actions, profile, headline card) over the working sheet, with the slots pages draw into.
+function Frame({
+  menuOpen,
+  onMenu,
+  profile,
+  children,
+}: {
+  menuOpen: boolean;
+  onMenu: () => void;
+  profile: ReactNode;
+  children: ReactNode;
+}) {
+  const [title, setTitle] = useState<HTMLElement | null>(null);
+  const [actions, setActions] = useState<HTMLElement | null>(null);
+  const [band, setBand] = useState<HTMLElement | null>(null);
+  const [headHidden, setHeadHidden] = useState(false);
+  const slots: HeroSlots = {
+    title,
+    actions,
+    band,
+    profile,
+    hideHead: setHeadHidden,
+  };
+  const menuToggle = (
+    <button
+      type="button"
+      className="menu-m"
+      aria-label="Open menu"
+      aria-expanded={menuOpen}
+      aria-controls="main-menu"
+      onClick={onMenu}
+    >
+      <NavIcon name="menu" />
+    </button>
+  );
+  return (
+    <HeroSlotsProvider value={slots}>
+      <main className="main">
+        <section className="hero">
+          {/* A headline card that carries the actions takes the title row's place; its title stays for screen readers. */}
+          <div className={cn("head", headHidden && "sr-only")}>
+            {!headHidden && menuToggle}
+            <div ref={setTitle} className="ht" />
+            <div className="acts">
+              <div ref={setActions} className="contents" />
+              {!headHidden && profile}
+            </div>
+          </div>
+          <div className="hrow">
+            {headHidden && menuToggle}
+            <div ref={setBand} className="contents" />
+          </div>
+        </section>
+        <div className="pagebody">{children}</div>
+      </main>
+    </HeroSlotsProvider>
+  );
+}
+
 // The side menu: each section in order, a group collapsible like Setup, and only the entries this person may open.
+// On a desk screen it collapses to icons; on a phone it is a drawer.
 function MainMenu({
   view,
-  open: drawerOpen,
   can,
+  brand,
   onNavigate,
+  onMini,
 }: {
   view: ShellView;
-  open: boolean;
   can: PermissionCheck;
+  brand: ReactNode;
   onNavigate: (view: ShellView) => void;
+  onMini: () => void;
 }) {
   const [closedGroups, setClosedGroups] = useState<ReadonlySet<string>>(
     new Set(),
   );
   const allowed = (item: NavItem) => canSee(item, can);
-  const navButton = (item: NavItem) => (
+  const navButton = (item: NavItem, sub: boolean) => (
     <li key={item.id}>
       <button
         type="button"
+        title={item.label}
         aria-current={view === item.id ? "page" : undefined}
         onClick={() => onNavigate(item.id)}
-        className="flex min-h-10.5 w-full items-center rounded-[10px] px-3 text-left text-[15px] hover:bg-hover aria-[current=page]:bg-blue-soft aria-[current=page]:font-bold aria-[current=page]:text-blue-dark"
+        className={cn("ni", sub && "sub")}
       >
-        {item.label}
+        <NavIcon name={item.id} />
+        <span className="lb">{item.label}</span>
       </button>
     </li>
   );
@@ -485,37 +533,30 @@ function MainMenu({
   const navSection = (section: NavSection, index: number) => {
     const visible = navItems(section.items).filter(allowed);
     if (!visible.length) return null;
-    const spacing = index > 0 && "mt-3.5";
     if (section.kind === "items")
       return (
-        <ul
-          key={index}
-          className={cn("m-0 flex list-none flex-col gap-0.5 p-0", spacing)}
-        >
-          {visible.map(navButton)}
+        <ul key={index} className="kids m-0 list-none p-0">
+          {visible.map((item) => navButton(item, false))}
         </ul>
       );
     const open = !closedGroups.has(section.id);
     return (
-      <div key={section.id} className={cn(spacing)}>
+      <div key={section.id} className="kids">
         <button
           type="button"
           aria-expanded={open}
           onClick={() => toggleGroup(section.id)}
-          className="flex min-h-9 w-full items-center justify-between px-3 text-[13px] font-bold text-grey"
+          className="ni grp"
         >
-          {section.label}
-          <ChevronIcon
-            className={cn(
-              "transition-transform motion-reduce:transition-none",
-              !open && "-rotate-90",
-            )}
-          />
+          <NavIcon name={`${section.id}Group`} />
+          <span className="lb">{section.label}</span>
+          <span className="chev">
+            <NavIcon name="chevron" />
+          </span>
         </button>
         {open && (
-          // Indented under the group with a rule down its left side, as in the design (.nav-group ul).
-          <ul className="m-0 mt-0.5 ml-3.5 flex list-none flex-col gap-0.5 border-l border-card-line p-0 pl-2.5">
-            {visible.map(navButton)}
+          <ul className="kids m-0 list-none p-0">
+            {visible.map((item) => navButton(item, true))}
           </ul>
         )}
       </div>
@@ -523,18 +564,21 @@ function MainMenu({
   };
 
   return (
-    <nav
-      id="main-menu"
-      aria-label="Main"
-      className={cn(
-        "w-62 shrink-0 overflow-y-auto border-r border-card-line bg-surface px-3 py-4",
-        "max-[899px]:fixed max-[899px]:top-16 max-[899px]:bottom-0 max-[899px]:left-0 max-[899px]:z-30 max-[899px]:transition-transform motion-reduce:transition-none",
-        drawerOpen
-          ? "max-[899px]:shadow-drawer"
-          : "max-[899px]:-translate-x-full",
-      )}
-    >
+    <nav id="main-menu" aria-label="Main" className="nav">
+      <div className="brandrow">
+        {brand}
+        <button
+          type="button"
+          className="navbtn"
+          aria-label="Collapse or expand menu"
+          title="Collapse or expand menu"
+          onClick={onMini}
+        >
+          <NavIcon name="menu" />
+        </button>
+      </div>
       {NAV_SECTIONS.map(navSection)}
+      <div className="ver">XCODE Web v2.28</div>
     </nav>
   );
 }
@@ -551,7 +595,7 @@ function MenuButton({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className="block min-h-11 w-full rounded-lg px-3 text-left text-[15px] hover:bg-hover"
+      className="block min-h-10 w-full rounded-[9px] px-3 text-left font-semibold text-ink hover:bg-paper"
     >
       {children}
     </button>
@@ -912,21 +956,19 @@ function Dashboard({
         title="Dashboard"
         description="Your fleet at a glance, based on the access you have."
       />
-      <div className="mt-5 mb-6 flex flex-wrap items-center gap-3 rounded-[14px] border border-card-line bg-surface p-3 max-[480px]:flex-col max-[480px]:items-stretch">
-        <SegmentedControl
-          label="Period"
-          options={[...REVENUE_PERIODS]}
-          value={period}
-          onChange={setChosen}
-          className="max-[480px]:grid max-[480px]:grid-cols-3 max-[480px]:self-stretch"
-        />
-        <span className="flex items-center gap-2 text-sm">
-          <span className="text-grey">Scope</span>
-          <span className="inline-flex min-h-9 items-center rounded-full bg-divider px-3 font-semibold">
-            Your access
-          </span>
-        </span>
-      </div>
+      <HeroBand
+        period={
+          <SegmentedControl
+            label="Period"
+            options={[...REVENUE_PERIODS]}
+            value={period}
+            onChange={setChosen}
+            className="max-[480px]:grid max-[480px]:grid-cols-3 max-[480px]:self-stretch"
+          />
+        }
+      >
+        <BandStats items={[{ label: "Scope", value: "Your access" }]} />
+      </HeroBand>
       {error ? (
         <Card className="max-w-140">
           <CardHeader
@@ -944,7 +986,7 @@ function Dashboard({
           />
         </Card>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] items-start gap-4 max-[480px]:grid-cols-1">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] items-start gap-[18px] max-[480px]:grid-cols-1">
           {cards.map((card) => {
             const action = card.action;
             return (
@@ -1106,40 +1148,39 @@ function UserMenu({
   onPreferences: () => void;
   onSignOut: () => void;
 }) {
+  const letters = session ? initials(session.firstName, session.lastName) : "";
   return (
-    <div className="relative mr-5 max-[899px]:mr-2">
+    <>
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={onToggle}
-        className="flex min-h-11 items-center gap-2.5 rounded-xl px-2 py-1 text-left hover:bg-hover"
+        className="prof"
       >
-        <span
-          aria-hidden="true"
-          className="grid size-9 shrink-0 place-items-center rounded-full bg-brand text-sm font-bold text-white"
-        >
-          {session ? initials(session.firstName, session.lastName) : ""}
+        <span className="av" aria-hidden="true">
+          {letters}
         </span>
-        <span className="max-[899px]:hidden">
-          <span className="block text-sm font-semibold">
-            {displayName || "Your account"}
-          </span>
-          <span className="block text-xs text-grey">
-            {session?.role || "Loading your access"}
-          </span>
-        </span>
+        <span className="sr-only">{displayName || "Your account"}</span>
       </button>
       {open && (
-        <div
-          role="menu"
-          className="absolute top-13 right-0 z-40 min-w-50 rounded-xl border border-card-line bg-surface p-1.5 shadow-menu"
-        >
-          <MenuButton onClick={onAccess}>Your access</MenuButton>
-          <MenuButton onClick={onPreferences}>Your preferences</MenuButton>
-          <MenuButton onClick={onSignOut}>Sign out</MenuButton>
+        <div role="menu" className="pmenu">
+          <div className="pwho" role="presentation">
+            <span className="av" aria-hidden="true">
+              {letters}
+            </span>
+            <div>
+              <b>{displayName || "Your account"}</b>
+              <small>{session?.role || "Loading your access"}</small>
+            </div>
+          </div>
+          <div className="flex flex-col gap-0.5 border-t border-divider pt-2">
+            <MenuButton onClick={onAccess}>Your access</MenuButton>
+            <MenuButton onClick={onPreferences}>Your preferences</MenuButton>
+            <MenuButton onClick={onSignOut}>Sign out</MenuButton>
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

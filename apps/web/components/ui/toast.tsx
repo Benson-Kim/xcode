@@ -57,7 +57,7 @@ function ToastMessage({
   return (
     <div
       role="status"
-      className="rounded-xl bg-brand px-4.5 py-3 text-[15px] text-white shadow-toast"
+      className="rounded-full bg-deep px-5 py-[11px] text-[14.5px] font-semibold text-white shadow-[0_10px_24px_rgba(4,32,47,.24)]"
     >
       {message}
     </div>

@@ -24,7 +24,7 @@ export function ReasonPicker({
 }) {
   return (
     <>
-      <p className="m-0 flex items-center gap-3 text-[13px] text-grey before:h-px before:flex-1 before:bg-card-line before:content-[''] after:h-px after:flex-1 after:bg-card-line after:content-['']">
+      <p className="m-0 flex items-center gap-3 text-[13px] font-semibold text-slate before:h-px before:flex-1 before:bg-line before:content-[''] after:h-px after:flex-1 after:bg-line after:content-['']">
         or no revenue
       </p>
       <div
@@ -38,7 +38,7 @@ export function ReasonPicker({
             type="button"
             aria-pressed={reason === item}
             onClick={() => onChoose(item)}
-            className="min-h-12 rounded-xl border border-line bg-surface text-[15px] font-semibold aria-pressed:border-2 aria-pressed:border-blue aria-pressed:bg-blue-soft aria-pressed:text-blue-dark"
+            className="min-h-12 rounded-xl border border-line bg-surface text-[15px] font-semibold aria-pressed:border-2 aria-pressed:border-teal aria-pressed:bg-teal-wash aria-pressed:text-teal"
           >
             {item}
           </button>

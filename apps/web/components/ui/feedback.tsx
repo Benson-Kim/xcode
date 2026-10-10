@@ -5,8 +5,8 @@ import { cn } from "./cn";
 import { AlertIcon, OfflineIcon } from "./icons";
 
 const BANNER = {
-  error: "border-red-line bg-red-bg text-red-text",
-  offline: "border-amber-line bg-amber-bg text-amber-text",
+  error: "border-transparent bg-clay-wash text-clay",
+  offline: "border-transparent bg-gold-wash text-gold",
 } as const;
 
 // A message across the top of a form or page (.banner).
@@ -23,7 +23,7 @@ export function Banner({
       {...props}
       role={role ?? (tone === "error" ? "alert" : "status")}
       className={cn(
-        "flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-[15px]",
+        "flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-[14.5px] font-semibold",
         BANNER[tone],
         className,
       )}
@@ -76,10 +76,8 @@ export function Note({
     <p
       {...props}
       className={cn(
-        "m-0 rounded-[10px] px-3 py-2.5 text-sm",
-        tone === "info"
-          ? "bg-blue-soft text-blue-dark"
-          : "bg-amber-bg text-amber-text",
+        "m-0 rounded-xl px-3.5 py-2.5 text-sm font-semibold",
+        tone === "info" ? "bg-teal-wash text-teal" : "bg-gold-wash text-gold",
         className,
       )}
     />
@@ -87,10 +85,10 @@ export function Note({
 }
 
 const STATUS = {
-  ok: "bg-green-bg text-green",
-  warn: "bg-amber-bg text-amber-text",
-  off: "bg-red-bg text-red-text",
-  neutral: "bg-divider text-navy",
+  ok: "bg-teal-wash text-teal",
+  warn: "bg-gold-wash text-gold",
+  off: "bg-clay-wash text-clay",
+  neutral: "bg-paper-2 text-ink-2",
 } as const;
 
 // A dot-and-label state in a list (.status).
@@ -104,7 +102,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[13px] font-semibold whitespace-nowrap",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold whitespace-nowrap",
         "before:size-1.75 before:rounded-full before:bg-current before:content-['']",
         STATUS[tone],
       )}
@@ -117,7 +115,7 @@ export function StatusBadge({
 // A plain label in a list, with no indicator (the source of an expense).
 export function PlainTag({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-block rounded-full bg-divider px-2.5 py-0.5 text-[13px] font-semibold whitespace-nowrap text-navy">
+    <span className="inline-block rounded-full bg-paper-2 px-2.5 py-0.5 text-xs font-bold whitespace-nowrap text-ink-2">
       {children}
     </span>
   );
@@ -134,8 +132,8 @@ export function BalancePanel({
       role="status"
       {...props}
       className={cn(
-        "flex flex-wrap justify-between gap-3 rounded-[10px] p-3 font-bold",
-        ok ? "bg-green-bg text-green" : "bg-red-bg text-red-text",
+        "flex flex-wrap justify-between gap-3 rounded-xl p-3 font-bold",
+        ok ? "bg-teal-wash text-teal" : "bg-clay-wash text-clay",
         className,
       )}
     />

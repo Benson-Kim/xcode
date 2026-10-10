@@ -1,6 +1,7 @@
-@import url("https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=Fraunces:opsz,wght@9..144,700&display=swap");
 @import "tailwindcss";
 @import "./tokens.css";
+@import "./brand.css";
 @source "../components";
 
 @theme {
@@ -22,10 +23,12 @@
   }
   body {
     background-color: var(--color-cream);
-    color: var(--color-navy);
+    color: var(--color-ink-2);
     font-family: var(--font-sans);
-    font-size: 16px;
+    font-size: 14.5px;
+    font-weight: 500;
     line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
     -webkit-text-size-adjust: 100%;
   }
   h1,
@@ -38,8 +41,14 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+  h1,
+  h2,
+  h3 {
+    color: var(--color-ink);
+    letter-spacing: -0.01em;
+  }
   :focus-visible {
-    outline: 3px solid color-mix(in srgb, var(--color-blue) 45%, transparent);
+    outline: 2px solid var(--color-teal);
     outline-offset: 2px;
   }
   /* The person's "Reduce motion" preference, on top of the operating system's. */

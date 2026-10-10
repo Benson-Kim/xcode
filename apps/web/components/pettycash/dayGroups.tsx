@@ -46,11 +46,11 @@ export function DayRow({
 }) {
   const formats = useFormats();
   return (
-    <Tr className="bg-paper" data-day={date}>
-      <Td colSpan={before} className="font-bold">
+    <Tr className="bg-paper-2" data-day={date}>
+      <Td colSpan={before} className="font-bold text-ink">
         {formats.formatWeekdayDate(date)}
       </Td>
-      <Td numeric label={label} className="font-bold">
+      <Td numeric label={label} className="font-bold text-slate">
         {formats.formatNumber(total)}
       </Td>
       {after > 0 && <Td colSpan={after} />}

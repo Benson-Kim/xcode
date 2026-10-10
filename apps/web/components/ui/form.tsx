@@ -26,7 +26,7 @@ export function ErrorText({
     <p
       id={id}
       role="alert"
-      className="m-0 flex items-start gap-1.5 text-[13px] text-red"
+      className="m-0 flex items-start gap-1.5 text-[13px] font-semibold text-clay"
     >
       <AlertIcon className="mt-px shrink-0" />
       <span>{children}</span>
@@ -58,8 +58,11 @@ export function Field({
     undefined;
   return (
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
-      <div className="flex items-center justify-between">
-        <label htmlFor={id} className="text-sm font-semibold">
+      <div className="flex items-baseline justify-between gap-2.5">
+        <label
+          htmlFor={id}
+          className="text-xs font-bold tracking-[.07em] text-slate uppercase"
+        >
           {label}
         </label>
         {action}
@@ -70,7 +73,10 @@ export function Field({
         {children}
       </FieldContext.Provider>
       {hint && (
-        <p id={`${id}-hint`} className="m-0 text-[13px] text-grey">
+        <p
+          id={`${id}-hint`}
+          className="m-0 text-[13px] font-semibold text-slate"
+        >
           {hint}
         </p>
       )}
@@ -96,10 +102,11 @@ export function useFieldProps<
 }
 
 const CONTROL =
-  "rounded-[10px] border border-line bg-surface px-3 text-navy placeholder:text-grey/70 focus:border-blue focus:outline-3 focus:outline-offset-1 focus:outline-blue/30 aria-invalid:border-2 aria-invalid:border-red disabled:bg-hover disabled:text-grey";
+  "rounded-[10px] border border-line bg-surface px-3 text-ink placeholder:text-slate/70 focus:border-teal focus:outline-3 focus:outline-offset-1 focus:outline-teal/30 aria-invalid:border-clay aria-invalid:bg-clay-wash disabled:bg-paper disabled:text-slate";
 const DENSITY = {
-  standard: "h-12 text-base",
-  compact: "h-11 text-[15px]",
+  standard:
+    "py-[9px] text-[14.5px] in-[dialog]:py-[11px] in-[dialog]:text-[15px] max-[600px]:in-[dialog]:text-base",
+  compact: "py-[7px] text-[14px] in-[dialog]:py-[9px]",
 } as const;
 
 // `inline` sizes the control to its content (in a toolbar) instead of filling its column. It still may not
@@ -171,7 +178,7 @@ export function CurrencyInput({
   const { currencyCode } = useFormats();
   return (
     <div className="flex w-full min-w-0 items-stretch">
-      <span className="flex shrink-0 items-center rounded-l-[10px] border border-r-0 border-line bg-paper px-3 text-[15px] text-grey">
+      <span className="flex shrink-0 items-center rounded-l-[10px] border border-r-0 border-line bg-paper px-3 text-[14.5px] font-semibold text-slate">
         {currency ?? currencyCode()}
       </span>
       <input
@@ -219,7 +226,7 @@ export function ColorInput({
         value={valid ? value.toLowerCase() : "#000000"}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value.toUpperCase())}
-        className="h-12 w-14 shrink-0 cursor-pointer rounded-[10px] border border-line bg-surface p-1 disabled:cursor-default"
+        className="h-10 w-14 shrink-0 cursor-pointer rounded-[10px] border border-line bg-surface p-1 disabled:cursor-default"
       />
       <TextInput
         value={value}
@@ -248,7 +255,7 @@ export function ChoiceGroup({
     <div
       role={role}
       aria-label={label}
-      className={cn("flex flex-wrap gap-x-5 gap-y-1", className)}
+      className={cn("flex flex-wrap gap-x-2.5 gap-y-2", className)}
     >
       {children}
     </div>
@@ -276,19 +283,22 @@ export function ChoiceField({
     [hint && hintId, error && errorId].filter(Boolean).join(" ") || undefined;
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <span id={id} className="text-sm font-semibold">
+      <span
+        id={id}
+        className="text-xs font-bold tracking-[.07em] text-slate uppercase"
+      >
         {label}
       </span>
       <div
         role={role}
         aria-labelledby={id}
         aria-describedby={describedBy}
-        className="flex flex-wrap gap-x-5 gap-y-1"
+        className="flex flex-wrap gap-x-2.5 gap-y-2"
       >
         {children}
       </div>
       {hint && (
-        <p id={hintId} className="m-0 text-[13px] text-grey">
+        <p id={hintId} className="m-0 text-[13px] font-semibold text-slate">
           {hint}
         </p>
       )}
@@ -312,19 +322,21 @@ export function Choice({
   return (
     <label
       className={cn(
-        "flex min-h-11 cursor-pointer items-center gap-2.5 text-[15px] has-disabled:cursor-default",
+        "flex cursor-pointer items-center gap-2 rounded-[10px] border border-line bg-surface px-3 py-[7px] text-[14.5px] font-semibold text-ink has-disabled:cursor-default",
         className,
       )}
     >
       <input
         {...props}
         type={type}
-        className="peer m-0 size-5 shrink-0 accent-blue"
+        className="peer m-0 size-4 shrink-0 accent-teal"
       />
-      <span className="peer-disabled:text-grey">
+      <span className="peer-disabled:text-slate">
         {label}
         {description && (
-          <small className="block text-[13px] text-grey">{description}</small>
+          <small className="block text-[13px] font-medium text-slate">
+            {description}
+          </small>
         )}
       </span>
     </label>
@@ -336,7 +348,7 @@ export function GroupLabel({ className, ...props }: ComponentProps<"p">) {
   return (
     <p
       {...props}
-      className={cn("mt-2 mb-0 text-[13px] font-bold text-grey", className)}
+      className={cn("mt-2 mb-0 text-[13.5px] font-bold text-ink", className)}
     />
   );
 }
@@ -353,9 +365,7 @@ export function Tag({
     <span
       className={cn(
         "ml-1.5 rounded-md px-1.5 py-px text-xs font-bold whitespace-nowrap",
-        tone === "add"
-          ? "bg-blue-soft text-blue-dark"
-          : "bg-red-bg text-red-text",
+        tone === "add" ? "bg-teal-wash text-teal" : "bg-clay-wash text-clay",
       )}
     >
       {children}

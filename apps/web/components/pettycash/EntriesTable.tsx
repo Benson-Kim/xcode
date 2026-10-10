@@ -6,6 +6,7 @@ import type { PettyCashEntry } from "@xcode/shared/pettyCash";
 
 import { useAppearance } from "../../lib/appearance";
 import { useFormats } from "../../lib/formats";
+import { RegPlate } from "../revenue/RegPlate";
 import { CellNote, DataTable, StatusBadge, Td, Tr } from "../ui";
 import { Days } from "./dayGroups";
 import { unitsFormat } from "./labels";
@@ -66,21 +67,27 @@ export function EntriesTable({
           return (
             <Tr key={entry.id}>
               <Td label={credit ? "Payee" : "Vehicle"}>
-                <strong>{credit ? entry.payee : entry.registration}</strong>
+                {credit ? (
+                  <strong className="font-bold text-ink">{entry.payee}</strong>
+                ) : (
+                  <RegPlate>{entry.registration}</RegPlate>
+                )}
                 {credit && (
                   <CellNote>
-                    <StatusBadge>Credit note</StatusBadge>
+                    <StatusBadge tone="off">Credit note</StatusBadge>
                   </CellNote>
                 )}
               </Td>
               <Td label={credit ? "Reason" : "Item"}>
-                {credit ? entry.note : entry.expenseItemName}
+                <span className="font-semibold text-ink">
+                  {credit ? entry.note : entry.expenseItemName}
+                </span>
                 {credit && entry.reimbursable && (
                   <CellNote>To be paid back</CellNote>
                 )}
                 {!credit && entry.note && <CellNote>{entry.note}</CellNote>}
                 {entry.status === "sentBack" && entry.sentBackNote && (
-                  <CellNote className="text-red-text">
+                  <CellNote className="text-clay">
                     Sent back: {entry.sentBackNote}
                   </CellNote>
                 )}
@@ -92,7 +99,15 @@ export function EntriesTable({
                 {credit ? "" : formats.formatNumber(entry.unitAmount)}
               </Td>
               <Td label={`Total (${currency})`} numeric>
-                <strong>{formats.formatNumber(entry.total)}</strong>
+                <strong
+                  className={
+                    entry.total < 0
+                      ? "font-bold text-clay"
+                      : "font-bold text-ink"
+                  }
+                >
+                  {formats.formatNumber(entry.total)}
+                </strong>
                 {entry.total < 0 && <CellNote>Money back</CellNote>}
               </Td>
               <Td label="Manager">{entry.holderName}</Td>

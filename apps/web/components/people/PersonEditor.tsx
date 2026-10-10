@@ -5,7 +5,6 @@ import type {
   Role,
   ScopeOptions,
 } from "../../lib/types";
-import { FormLayout } from "../ui";
 import { PermissionsCard } from "./PermissionsCard";
 import {
   ApprovalLimitCard,
@@ -57,7 +56,7 @@ export function PersonEditor({
   return (
     <section>
       <PersonHeader person={person} />
-      <FormLayout>
+      <div className="flex flex-col gap-[22px] rounded-[18px] border border-line bg-surface p-[22px]">
         <PersonNotices
           person={person}
           canManage={canManage}
@@ -122,7 +121,7 @@ export function PersonEditor({
           onClose={onClose}
           onLifecycle={(action) => void actions.lifecycle(action)}
         />
-      </FormLayout>
+      </div>
     </section>
   );
 }

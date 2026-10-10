@@ -8,14 +8,14 @@ import {
   Banner,
   Button,
   DataTable,
+  Dialog,
   Field,
-  FormActions,
   PageHeader,
   ListPager,
+  RowAction,
   StatusBadge,
   Td,
   TextInput,
-  Toolbar,
   Tr,
   useToast,
 } from "../ui";
@@ -27,6 +27,7 @@ const archivedOnRecord = (company: Company) =>
   Boolean(company.archivedOn) || company.active === false;
 
 export function CompaniesPage() {
+  const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [addError, setAddError] = useState("");
   // Changes carry no typed reason: the server writes one for the change log.
@@ -60,6 +61,7 @@ export function CompaniesPage() {
       });
       setName("");
       setAddError("");
+      setAdding(false);
       toast(`${trimmed} added.`);
       companies.reload();
     } catch (value) {
@@ -124,43 +126,124 @@ export function CompaniesPage() {
     }
   }
 
+  function closeAdd() {
+    setAdding(false);
+    setName("");
+    setAddError("");
+  }
+
+  const renamingCompany = renaming
+    ? rows.find((company) => company.id === renaming.id)
+    : undefined;
+
   return (
     <section>
       <PageHeader
         title="PSV companies"
         description="Every vehicle belongs to one company. Archive a company after its vehicles have left the fleet."
+        actions={
+          <Button tone="primary" onClick={() => setAdding(true)}>
+            New company
+          </Button>
+        }
       />
-      {(companies.error || addError) && (
-        <Banner className="mt-5">{streamError(companies) || addError}</Banner>
+      {(companies.error || (addError && !adding)) && (
+        <Banner className="mb-3.5">{streamError(companies) || addError}</Banner>
       )}
-      <Toolbar align="start">
-        <Field
-          id="new-company"
-          label="New PSV company"
-          error={addError}
-          className="min-w-55 flex-1"
+      <Dialog
+        open={adding}
+        title="New company"
+        size="md"
+        onClose={closeAdd}
+        footer={
+          <>
+            <Button tone="outline" onClick={closeAdd}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="company-add-form"
+              tone="ok"
+              disabled={busy}
+            >
+              Add company
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="company-add-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void add();
+          }}
         >
-          <TextInput
-            placeholder="Company name"
-            value={name}
-            onChange={(event) => {
-              setName(event.target.value);
-              setAddError("");
+          <Field
+            id="new-company"
+            label="New PSV company"
+            error={adding ? addError : ""}
+          >
+            <TextInput
+              placeholder="Company name"
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value);
+                setAddError("");
+              }}
+            />
+          </Field>
+        </form>
+      </Dialog>
+      <Dialog
+        open={Boolean(renaming && renamingCompany)}
+        title="Rename company"
+        subtitle={renamingCompany?.name}
+        size="md"
+        onClose={() => setRenaming(null)}
+        footer={
+          <>
+            <Button tone="outline" onClick={() => setRenaming(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="company-rename-form"
+              tone="ok"
+              disabled={busy}
+            >
+              Save
+            </Button>
+          </>
+        }
+      >
+        {renaming && renamingCompany && (
+          <form
+            id="company-rename-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveRename(renamingCompany);
             }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void add();
-            }}
-          />
-        </Field>
-        <Button
-          tone="ok"
-          className="mt-6.5 max-[480px]:mt-0"
-          disabled={busy}
-          onClick={() => void add()}
-        >
-          Add company
-        </Button>
-      </Toolbar>
+          >
+            <Field
+              id={`rename-${renamingCompany.id}`}
+              label="New name"
+              error={renaming.error}
+            >
+              <TextInput
+                autoFocus
+                value={renaming.name}
+                onChange={(event) =>
+                  setRenaming({
+                    ...renaming,
+                    name: event.target.value,
+                    error: "",
+                  })
+                }
+              />
+            </Field>
+          </form>
+        )}
+      </Dialog>
       <DataTable
         columns={[
           { label: "Company" },
@@ -174,111 +257,63 @@ export function CompaniesPage() {
         failed={Boolean(companies.error)}
         emptyMessage="No PSV companies yet. Add the first one above."
       >
-        {rows.map((company) =>
-          renaming?.id === company.id ? (
-            <Tr key={company.id}>
-              <Td colSpan={4}>
-                <div className="flex flex-wrap items-start gap-3">
-                  <Field
-                    id={`rename-${company.id}`}
-                    label="New name"
-                    error={renaming.error}
-                    className="min-w-50 flex-1"
-                  >
-                    <TextInput
-                      autoFocus
-                      value={renaming.name}
-                      onChange={(event) =>
-                        setRenaming({
-                          ...renaming,
-                          name: event.target.value,
-                          error: "",
-                        })
-                      }
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") void saveRename(company);
-                        if (event.key === "Escape") setRenaming(null);
-                      }}
-                    />
-                  </Field>
-                  <Button
-                    tone="ok"
-                    className="mt-6.5"
+        {rows.map((company) => (
+          <Tr key={company.id}>
+            <Td label="Company">
+              <span className="font-semibold text-ink">{company.name}</span>
+            </Td>
+            <Td label="Status">
+              <StatusBadge
+                tone={
+                  company.active === false
+                    ? "off"
+                    : company.archivedOn
+                      ? "warn"
+                      : "ok"
+                }
+              >
+                {company.active === false
+                  ? "Archived"
+                  : company.archivedOn
+                    ? `Archives on ${formatDateOnly(company.archivedOn)}`
+                    : "Active"}
+              </StatusBadge>
+            </Td>
+            <Td label="Vehicles" numeric>
+              {company.vehicleCount}
+            </Td>
+            <Td>
+              <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
+                {company.active !== false && (
+                  <RowAction
                     disabled={busy}
-                    onClick={() => void saveRename(company)}
+                    onClick={() =>
+                      setRenaming({
+                        id: company.id,
+                        name: company.name,
+                        error: "",
+                      })
+                    }
+                    aria-label={`Rename ${company.name}`}
                   >
-                    Save
-                  </Button>
-                  <Button
-                    className="mt-6.5"
-                    tone="quiet"
-                    onClick={() => setRenaming(null)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </Td>
-            </Tr>
-          ) : (
-            <Tr key={company.id}>
-              <Td label="Company">
-                <strong>{company.name}</strong>
-              </Td>
-              <Td label="Status">
-                <StatusBadge
-                  tone={
-                    company.active === false
-                      ? "off"
-                      : company.archivedOn
-                        ? "warn"
-                        : "ok"
+                    Rename
+                  </RowAction>
+                )}
+                {/* An archive dated ahead has not taken effect, so it can still be cancelled with Restore. */}
+                <RowAction
+                  tone={archivedOnRecord(company) ? "ok" : "warn"}
+                  disabled={busy}
+                  aria-label={`${archivedOnRecord(company) ? "Restore" : "Archive"} ${company.name}`}
+                  onClick={() =>
+                    void setArchived(company, !archivedOnRecord(company))
                   }
                 >
-                  {company.active === false
-                    ? "Archived"
-                    : company.archivedOn
-                      ? `Archives on ${formatDateOnly(company.archivedOn)}`
-                      : "Active"}
-                </StatusBadge>
-              </Td>
-              <Td label="Vehicles" numeric>
-                {company.vehicleCount}
-              </Td>
-              <Td>
-                {/* Every row ends with its actions, side by side at the end of the row (.row-acts). */}
-                <FormActions className="justify-end gap-2">
-                  {company.active !== false && (
-                    <Button
-                      tone="outline"
-                      disabled={busy}
-                      onClick={() =>
-                        setRenaming({
-                          id: company.id,
-                          name: company.name,
-                          error: "",
-                        })
-                      }
-                      aria-label={`Rename ${company.name}`}
-                    >
-                      Rename
-                    </Button>
-                  )}
-                  {/* An archive dated ahead has not taken effect, so it can still be cancelled with Restore. */}
-                  <Button
-                    tone={archivedOnRecord(company) ? "ok" : "warn"}
-                    disabled={busy}
-                    aria-label={`${archivedOnRecord(company) ? "Restore" : "Archive"} ${company.name}`}
-                    onClick={() =>
-                      void setArchived(company, !archivedOnRecord(company))
-                    }
-                  >
-                    {archivedOnRecord(company) ? "Restore" : "Archive"}
-                  </Button>
-                </FormActions>
-              </Td>
-            </Tr>
-          ),
-        )}
+                  {archivedOnRecord(company) ? "Restore" : "Archive"}
+                </RowAction>
+              </div>
+            </Td>
+          </Tr>
+        ))}
       </DataTable>
       <ListPager list={companies} />
     </section>

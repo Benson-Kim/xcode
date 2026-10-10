@@ -14,6 +14,7 @@ import { WeekGrid } from "./revenue/WeekGrid";
 import { WeekToolbar } from "./revenue/WeekToolbar";
 import {
   Banner,
+  Button,
   LoadingRegion,
   PageHeader,
   TableRowsSkeleton,
@@ -57,27 +58,38 @@ export function RevenuePage() {
   }
 
   return (
-    <section>
-      <PageHeader title="Revenue" />
+    <section className="flex flex-col gap-3.5">
+      <PageHeader
+        title="Revenue"
+        actions={
+          canCapture && (
+            <Button
+              tone="primary"
+              disabled={grid.stale || !data}
+              aria-busy={grid.stale ? true : undefined}
+              onClick={() => data && setCapturing(captureDayFor(data))}
+            >
+              Capture revenue
+            </Button>
+          )
+        }
+      />
       <WeekToolbar
         start={grid.start}
         shown={grid.shown}
         data={data}
         companyId={grid.companyId}
-        canCapture={canCapture}
-        stale={grid.stale}
         onWeek={grid.setWeekStart}
         onCompany={grid.setCompanyId}
-        onCapture={(shown) => setCapturing(captureDayFor(shown))}
       />
 
-      {week.error && <Banner className="mt-4">{week.error}</Banner>}
+      {week.error && <Banner>{week.error}</Banner>}
 
       {!data ? (
         week.loading && (
           <LoadingRegion
             label="Loading revenue"
-            className="mt-4 overflow-hidden rounded-[14px] border border-card-line bg-surface"
+            className="-mx-(--gut) overflow-hidden border-y border-line bg-surface"
           >
             <table className="w-full border-collapse">
               <tbody>

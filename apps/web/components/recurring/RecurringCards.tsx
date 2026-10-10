@@ -11,9 +11,7 @@ import {
   Card,
   CardHeader,
   Field,
-  FormActions,
   Hint,
-  Spacer,
   TextInput,
 } from "../ui";
 import type { Derived } from "./derive";
@@ -131,7 +129,32 @@ export function RecurringActions(props: ActionsProps) {
   const { busy, canEdit, stopped, futureStop } = props;
   const editable = canEdit && !stopped;
   return (
-    <FormActions>
+    <>
+      {props.hasItem && editable && futureStop && (
+        <Button
+          tone="outline"
+          className="mr-auto"
+          disabled={busy}
+          onClick={props.onCancelStop}
+        >
+          Cancel stop
+        </Button>
+      )}
+      {props.hasItem && editable && !futureStop && (
+        <Button
+          tone="warn"
+          className="mr-auto"
+          disabled={busy}
+          onClick={props.onStop}
+        >
+          {props.confirmStop
+            ? "Tap again to stop from today"
+            : "Stop from today"}
+        </Button>
+      )}
+      <Button tone="outline" disabled={busy} onClick={props.onCancel}>
+        {editable ? "Cancel" : "Back"}
+      </Button>
       {editable && (
         <Button
           tone="ok"
@@ -142,22 +165,6 @@ export function RecurringActions(props: ActionsProps) {
           {busy ? "Saving..." : props.isNew ? "Add" : "Save changes"}
         </Button>
       )}
-      <Button tone="quiet" disabled={busy} onClick={props.onCancel}>
-        {editable ? "Cancel" : "Back"}
-      </Button>
-      <Spacer />
-      {props.hasItem && editable && futureStop && (
-        <Button tone="outline" disabled={busy} onClick={props.onCancelStop}>
-          Cancel stop
-        </Button>
-      )}
-      {props.hasItem && editable && !futureStop && (
-        <Button tone="warn" disabled={busy} onClick={props.onStop}>
-          {props.confirmStop
-            ? "Tap again to stop from today"
-            : "Stop from today"}
-        </Button>
-      )}
-    </FormActions>
+    </>
   );
 }

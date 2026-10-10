@@ -131,7 +131,8 @@ it("shows what went in, with what has come back left blank until it can be worke
   expect(stat("Back so far")).toHaveTextContent("—");
   expect(stat("Paid back")).toHaveTextContent("—");
   // Oldest first.
-  const dates = [...screen.getAllByRole("row")]
+  // The investments open in a pop-up over the vehicle list.
+  const dates = [...within(screen.getByRole("dialog")).getAllByRole("row")]
     .slice(1)
     .map((row) => row.querySelector("td")?.textContent);
   expect(dates).toEqual(["5 May 2025", "20 May 2025"]);

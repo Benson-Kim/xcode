@@ -3,33 +3,43 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "./cn";
 
 const PILL =
-  "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border-2 px-5 text-[15px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-full border px-[18px] py-[9px] text-[14.5px] font-bold whitespace-nowrap transition-colors disabled:cursor-default disabled:opacity-45";
 
-// Colour backs up what the button does, as in the design (.btn-pill): green to save or add, amber to turn off, stop
-// or pause, red to remove or block, plain grey to cancel or go back. Blue is for the main action that is none of those.
-const TONES = {
-  primary:
-    "border-blue bg-blue text-on-fill hover:enabled:border-blue-dark hover:enabled:bg-blue-dark aria-busy:bg-blue-busy",
-  outline: "border-blue bg-transparent text-blue hover:enabled:bg-blue-tint",
-  ok: "border-green bg-green text-on-fill hover:enabled:border-green-dark hover:enabled:bg-green-dark aria-busy:opacity-80",
-  warn: "border-amber bg-amber-bg text-amber-text hover:enabled:bg-amber-hover",
-  danger: "border-red bg-red-bg text-red-text hover:enabled:bg-red-hover",
-  quiet:
-    "border-line bg-transparent text-grey hover:enabled:bg-hover hover:enabled:text-navy",
+const SIZES = {
+  sm: "px-[13px] py-1.5 text-[13px]",
 } as const;
 
-// pill button .
+// Colour backs up what the button does: ink for the page's main action, teal to save or confirm, gold to turn off
+// or pause, clay to remove or block, white to cancel or go back. Inside the hero band the same tones sit on glass.
+const TONES = {
+  primary:
+    "border-ink bg-ink text-on-fill hover:enabled:border-ink-2 hover:enabled:bg-ink-2 aria-busy:opacity-80 [.hero_&]:border-white [.hero_&]:bg-white [.hero_&]:text-deep [.hero_&]:hover:enabled:border-paper-2 [.hero_&]:hover:enabled:bg-paper-2",
+  outline:
+    "border-line bg-surface text-ink hover:enabled:bg-paper [.hero_&]:border-glass-line [.hero_&]:bg-glass [.hero_&]:text-white [.hero_&]:hover:enabled:bg-glass-2",
+  ok: "border-teal bg-teal text-on-fill hover:enabled:border-teal-dark hover:enabled:bg-teal-dark aria-busy:opacity-80 [.hero_&]:border-teal-bright [.hero_&]:bg-teal-bright [.hero_&]:text-deep [.hero_&]:hover:enabled:border-teal-lift [.hero_&]:hover:enabled:bg-teal-lift",
+  warn: "border-gold-pure bg-gold-wash text-gold hover:enabled:bg-gold-pure hover:enabled:text-ink",
+  danger:
+    "border-clay bg-clay text-on-fill hover:enabled:border-clay-dark hover:enabled:bg-clay-dark",
+  quiet:
+    "border-transparent bg-transparent text-slate hover:enabled:bg-paper hover:enabled:text-ink [.hero_&]:text-on-deep [.hero_&]:hover:enabled:bg-glass",
+} as const;
+
+// pill button (.btn)
 export function Button({
   tone = "primary",
+  size,
   className,
   type = "button",
   ...props
-}: ComponentProps<"button"> & { tone?: keyof typeof TONES }) {
+}: ComponentProps<"button"> & {
+  tone?: keyof typeof TONES;
+  size?: keyof typeof SIZES;
+}) {
   return (
     <button
       {...props}
       type={type}
-      className={cn(PILL, TONES[tone], className)}
+      className={cn(PILL, TONES[tone], size && SIZES[size], className)}
     />
   );
 }
@@ -53,8 +63,8 @@ export function FileButton({
       className={cn(
         PILL,
         TONES[tone],
-        "cursor-pointer focus-within:outline-3 focus-within:outline-offset-2 focus-within:outline-blue/45",
-        disabled && "pointer-events-none opacity-50",
+        "cursor-pointer focus-within:outline-3 focus-within:outline-offset-2 focus-within:outline-teal/45",
+        disabled && "pointer-events-none opacity-45",
       )}
     >
       {children}
@@ -84,7 +94,7 @@ export function Chip({
       {...props}
       type={type}
       className={cn(
-        "min-h-9 rounded-full border border-line bg-surface px-3.5 text-sm font-semibold text-navy hover:enabled:border-blue hover:enabled:text-blue-dark disabled:cursor-not-allowed disabled:opacity-50",
+        "rounded-full border border-line bg-surface px-3.5 py-1.5 text-[13px] font-bold text-ink hover:enabled:border-teal-lift hover:enabled:bg-paper disabled:cursor-default disabled:opacity-45",
         className,
       )}
     />
@@ -92,14 +102,13 @@ export function Chip({
 }
 
 const ACT_TONES = {
-  plain:
-    "border-line bg-surface text-navy hover:enabled:border-blue hover:enabled:text-blue-dark",
-  ok: "border-green bg-green-bg text-green",
-  warn: "border-amber bg-amber-bg text-amber-text",
-  bad: "border-red bg-red-bg text-red-text",
+  plain: "text-slate hover:enabled:bg-paper",
+  ok: "text-teal hover:enabled:bg-teal-wash",
+  warn: "text-gold hover:enabled:bg-gold-wash",
+  bad: "text-clay hover:enabled:bg-clay-wash",
 } as const;
 
-// A row's own action (.act): smaller and quieter than the page's pill buttons, coloured the same way.
+// A row's own action (.act): no border, smaller and quieter than the page's pill buttons, coloured the same way.
 export function RowAction({
   tone = "plain",
   className,
@@ -111,7 +120,7 @@ export function RowAction({
       {...props}
       type={type}
       className={cn(
-        "min-h-9 rounded-full border px-2.5 text-sm font-semibold whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50",
+        "rounded-lg px-[9px] py-[5px] text-[13px] font-bold whitespace-nowrap text-ink hover:enabled:bg-paper-2 disabled:cursor-default disabled:opacity-45",
         ACT_TONES[tone],
         className,
       )}
@@ -138,7 +147,7 @@ export function LinkButton({
       type={type}
       className={cn(
         compact ? "min-h-9" : "min-h-11",
-        "px-2 text-[15px] font-semibold text-blue hover:enabled:text-blue-dark hover:enabled:underline disabled:cursor-default disabled:font-medium disabled:text-grey",
+        "px-2 text-[14.5px] font-bold text-teal hover:enabled:text-teal-dark hover:enabled:underline disabled:cursor-default disabled:font-medium disabled:text-slate",
         align === "start" && "pl-0",
         align === "end" && "pr-0",
         className,
@@ -158,7 +167,7 @@ export function RowButton({
       {...props}
       type={type}
       className={cn(
-        "min-h-8 p-0 text-left text-[15px] font-bold text-blue hover:underline",
+        "min-h-8 p-0 text-left text-[14.5px] font-bold text-ink hover:text-teal hover:underline",
         className,
       )}
     />
@@ -175,7 +184,7 @@ export function IconButton({
       {...props}
       type={type}
       className={cn(
-        "grid size-11 shrink-0 place-items-center rounded-[10px] text-navy hover:enabled:bg-hover disabled:cursor-default disabled:opacity-35",
+        "grid size-11 shrink-0 place-items-center rounded-[10px] text-ink hover:enabled:bg-paper-2 disabled:cursor-default disabled:opacity-35",
         className,
       )}
     />
@@ -194,10 +203,10 @@ export function CardAction({
       {...props}
       type={type}
       className={cn(
-        "mt-1.5 min-h-11 self-start rounded-full border-2 border-blue px-5 text-[15px] font-semibold",
+        "mt-1.5 self-start rounded-full border px-[18px] py-[9px] text-[14.5px] font-bold",
         primary
-          ? "bg-blue text-on-fill hover:bg-blue-dark"
-          : "bg-transparent text-blue hover:bg-blue-tint",
+          ? "border-ink bg-ink text-on-fill hover:bg-ink-2"
+          : "border-line bg-surface text-ink hover:bg-paper",
         className,
       )}
     />

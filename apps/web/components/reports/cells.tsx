@@ -5,6 +5,7 @@ import type {
   ReportFigure,
 } from "@xcode/shared/reports";
 
+import { RegPlate } from "../revenue/RegPlate";
 import { ProgressBar, cn } from "../ui";
 
 export const NUMERIC_KINDS: readonly ReportCellKind[] = [
@@ -78,6 +79,6 @@ export function CellValue({
         </span>
       </span>
     );
-  if (kind === "vehicle") return <strong>{text}</strong>;
+  if (kind === "vehicle") return <RegPlate>{text}</RegPlate>;
   return <span className={cn(kind === "text" && "block")}>{text}</span>;
 }

@@ -2,16 +2,15 @@ import { plural } from "@xcode/shared/format";
 
 import type { PermissionGroup } from "../../lib/types";
 import {
-  Card,
   CardHeader,
   Chip,
   ChipGroup,
-  Choice,
   ErrorText,
   ListSkeleton,
   Note,
   Tag,
 } from "../ui";
+import { FormSection } from "./PersonCards";
 import type { PersonFormState } from "./usePersonForm";
 
 type Props = {
@@ -34,44 +33,45 @@ function PermissionGroupList({
 }) {
   const { permissions, defaults, label } = pf;
   return (
-    <div className="border-t border-divider pt-3">
-      <h3 className="m-0 mb-1 flex justify-between gap-2 text-[15px] font-bold">
+    <div className="overflow-hidden rounded-xl border border-line">
+      <h3 className="m-0 flex items-center justify-between gap-2.5 border-b border-line bg-paper px-3.5 py-2.5 text-[14.5px] font-bold text-ink">
         {group.name}
-        <small className="text-[13px] font-medium text-grey">
+        <small className="text-[13px] font-bold text-slate">
           {group.items.filter((item) => permissions.includes(item.key)).length}{" "}
           of {group.items.length}
         </small>
       </h3>
-      {/* Side by side on wide screens, as in the design's permissions panel (.pg-list). */}
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-x-6 max-[720px]:grid-cols-1">
-        {group.items.map((item) => {
-          const ticked = permissions.includes(item.key);
-          const inRole = defaults.includes(item.key);
-          return (
-            <Choice
-              key={item.key}
-              label={
-                <>
-                  {item.label}
-                  {ticked && !inRole && <Tag tone="add">Added</Tag>}
-                  {!ticked && inRole && <Tag tone="remove">Removed</Tag>}
-                </>
-              }
+      {group.items.map((item) => {
+        const ticked = permissions.includes(item.key);
+        const inRole = defaults.includes(item.key);
+        return (
+          <label
+            key={item.key}
+            className="flex cursor-pointer items-start gap-2.5 border-b border-divider px-3.5 py-[9px] text-[14.5px] font-semibold text-ink last:border-b-0 has-disabled:cursor-default"
+          >
+            <input
+              type="checkbox"
               aria-label={item.label}
-              description={
-                item.needs.length
-                  ? `Needs: ${item.needs.map(label).join(", ")}`
-                  : undefined
-              }
               checked={ticked}
               disabled={!editable}
               onChange={(event) =>
                 pf.togglePermission(item, event.target.checked)
               }
+              className="peer m-0 mt-0.5 size-4 shrink-0 accent-teal"
             />
-          );
-        })}
-      </div>
+            <span className="peer-disabled:text-slate">
+              {item.label}
+              {ticked && !inRole && <Tag tone="add">Added</Tag>}
+              {!ticked && inRole && <Tag tone="remove">Removed</Tag>}
+              {item.needs.length > 0 && (
+                <small className="block text-[13px] font-medium text-slate">
+                  {`Needs: ${item.needs.map(label).join(", ")}`}
+                </small>
+              )}
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -87,7 +87,7 @@ export function PermissionsCard({
   const { permissions, changes, selectedRole } = pf;
   const permissionsEditable = editable && canManageAccess;
   return (
-    <Card density="form">
+    <FormSection>
       <CardHeader
         title="Permissions"
         description={
@@ -118,16 +118,19 @@ export function PermissionsCard({
           <ListSkeleton rows={4} />
         </div>
       )}
-      {ready &&
-        groups!.map((group) => (
-          <PermissionGroupList
-            key={group.name}
-            group={group}
-            pf={pf}
-            editable={permissionsEditable}
-          />
-        ))}
+      {ready && (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(270px,1fr))] items-start gap-3.5">
+          {groups!.map((group) => (
+            <PermissionGroupList
+              key={group.name}
+              group={group}
+              pf={pf}
+              editable={permissionsEditable}
+            />
+          ))}
+        </div>
+      )}
       {error && <ErrorText>{error}</ErrorText>}
-    </Card>
+    </FormSection>
   );
 }

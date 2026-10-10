@@ -19,13 +19,13 @@ import {
   Button,
   CellNote,
   DataTable,
+  Dialog,
   FormSkeleton,
   PageHeader,
   ListPager,
   RowButton,
   SegmentedControl,
   SelectInput,
-  Spacer,
   StatusBadge,
   Td,
   Toolbar,
@@ -36,6 +36,7 @@ import {
   costBucket,
   expenseBucketNames,
   type RecurringItem,
+  RegPlate,
   type VehicleOption,
 } from "./shared";
 
@@ -90,45 +91,45 @@ export function RecurringPage({
   );
   const items = recurring.items;
 
-  if (editing) {
-    const item =
-      editing === "new"
-        ? undefined
-        : items.find((candidate) => candidate.id === editing);
-    // An existing item opens as soon as the page holding it arrives; a new one opens straight away. The
-    // vehicle picker fills in when its own request lands.
-    if (editing !== "new" && !item) {
-      const stillLoading = recurring.loading || recurring.pendingRows > 0;
-      return (
-        <section>
-          <PageHeader title="Scheduled expense or saving" />
-          {recurring.error || !stillLoading ? (
-            <Banner className="mt-5">
-              {recurring.error || "This item is no longer in your list."}
-            </Banner>
-          ) : (
-            <FormSkeleton cards={3} label="Loading the scheduled item" />
-          )}
-        </section>
-      );
-    }
-    return (
-      <RecurringEditor
-        item={item}
-        vehiclesLoading={canManage && options.loading}
-        vehicles={editorVehicles(options.data ?? [], item)}
-        expenseItems={expenseItems.data}
-        loadError={options.error || expenseItems.error}
-        preselectVehicle={editing === "new" ? newForVehicle : undefined}
-        canEdit={canManage && !item?.partial}
-        onCancel={() => setEditing(null)}
-        onSaved={() => {
-          setEditing(null);
-          recurring.reload();
-        }}
-      />
-    );
-  }
+  // An existing item opens as soon as the page holding it arrives; a new one opens straight away. The vehicle
+  // picker fills in when its own request lands.
+  const editedItem =
+    editing && editing !== "new"
+      ? items.find((candidate) => candidate.id === editing)
+      : undefined;
+  const stillLoading = recurring.loading || recurring.pendingRows > 0;
+  const editor = !editing ? null : editing === "new" || editedItem ? (
+    <RecurringEditor
+      item={editedItem}
+      vehiclesLoading={canManage && options.loading}
+      vehicles={editorVehicles(options.data ?? [], editedItem)}
+      expenseItems={expenseItems.data}
+      loadError={options.error || expenseItems.error}
+      preselectVehicle={editing === "new" ? newForVehicle : undefined}
+      canEdit={canManage && !editedItem?.partial}
+      onCancel={() => setEditing(null)}
+      onSaved={() => {
+        setEditing(null);
+        recurring.reload();
+        if (recurring !== paged) paged.reload();
+      }}
+    />
+  ) : (
+    <Dialog
+      open
+      size="lg"
+      title="Scheduled expense or saving"
+      onClose={() => setEditing(null)}
+    >
+      {recurring.error || !stillLoading ? (
+        <Banner>
+          {recurring.error || "This item is no longer in your list."}
+        </Banner>
+      ) : (
+        <FormSkeleton cards={3} label="Loading the scheduled item" />
+      )}
+    </Dialog>
+  );
 
   // Due dates count from the organization's business date, never the computer clock. Until the appearance has
   // loaded, next postings wait for it.
@@ -153,7 +154,7 @@ export function RecurringPage({
     ).entries(),
   ].sort((left, right) => left[1].localeCompare(right[1]));
   // The server filters and puts running items first; within the page they read by name.
-  const visible = [...items].sort(
+  const visible = [...paged.items].sort(
     (left, right) =>
       finished(left) - finished(right) || left.name.localeCompare(right.name),
   );
@@ -162,10 +163,18 @@ export function RecurringPage({
       <PageHeader
         title="Scheduled expenses and savings"
         description="Set once. Each posts to its vehicles on its own dates and shows in their reports."
+        actions={
+          canManage ? (
+            <Button tone="primary" onClick={() => setEditing("new")}>
+              Add scheduled expense or saving
+            </Button>
+          ) : undefined
+        }
       />
-      {(recurring.error || options.error) && (
-        <Banner className="mt-5">
-          {streamError(recurring) || options.error}
+      {editor}
+      {(paged.error || options.error) && (
+        <Banner className="mb-3.5">
+          {streamError(paged) || options.error}
         </Banner>
       )}
       <Toolbar>
@@ -217,12 +226,6 @@ export function RecurringPage({
           <option value="running">Running</option>
           <option value="stopped">Stopped</option>
         </SelectInput>
-        <Spacer />
-        {canManage && (
-          <Button tone="ok" onClick={() => setEditing("new")}>
-            Add scheduled expense or saving
-          </Button>
-        )}
       </Toolbar>
       <DataTable
         columns={[
@@ -233,11 +236,11 @@ export function RecurringPage({
           { label: "Period" },
           { label: "Next posting" },
         ]}
-        loading={recurring.loading}
-        pendingRows={recurring.pendingRows}
+        loading={paged.loading}
+        pendingRows={paged.pendingRows}
         loadingLabel="Loading scheduled expenses and savings"
         isEmpty={!visible.length}
-        failed={Boolean(recurring.error)}
+        failed={Boolean(paged.error)}
         emptyMessage="Nothing here yet."
       >
         {visible.map((item) => {
@@ -289,8 +292,10 @@ export function RecurringPage({
               <Td label="How often">{recurringFrequency(item)}</Td>
               <Td label="Vehicles">
                 {plural(item.allocations.length, "vehicle", "vehicles")}
-                <CellNote>
-                  {registrations.slice(0, 2).join(", ")}
+                <CellNote className="flex flex-wrap items-center gap-1">
+                  {registrations.slice(0, 2).map((registration) => (
+                    <RegPlate key={registration}>{registration}</RegPlate>
+                  ))}
                   {item.allocations.length > 2
                     ? ` and ${item.allocations.length - 2} more`
                     : ""}
@@ -334,7 +339,7 @@ export function RecurringPage({
           );
         })}
       </DataTable>
-      {!missing && <ListPager list={paged} />}
+      <ListPager list={paged} />
     </section>
   );
 }

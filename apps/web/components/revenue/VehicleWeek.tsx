@@ -95,7 +95,7 @@ function revenueValue(formats: Formatter, cell: RevenueCell, today: string) {
       <span
         className={cn(
           "text-[13px] font-bold",
-          cell.date === today ? "text-blue-dark" : TONE_CLASS[meta.tone],
+          cell.date === today ? "text-teal" : TONE_CLASS[meta.tone],
         )}
       >
         {cell.date < today ? "No record" : "Not yet"}

@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useId, useRef, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 
 import { shiftDate } from "@xcode/shared/dates";
 import {
@@ -17,7 +23,6 @@ import {
   ChevronIcon,
   cn,
   Dialog,
-  FormActions,
   IconButton,
   ListSkeleton,
   LoadingRegion,
@@ -26,6 +31,7 @@ import {
   TextInput,
 } from "../ui";
 import { dayTotal, type DayEntry } from "./fleetDay";
+import { RegPlate } from "./RegPlate";
 import { CELL, HEAD } from "./styles";
 import { useFleetDay } from "./useFleetDay";
 
@@ -84,9 +90,20 @@ export function FleetDayDialog({
       title="Capture revenue"
       subtitle={companyName || undefined}
       onClose={onClose}
+      footer={
+        date !== null && (
+          <DayActions
+            saveRef={saveRef}
+            disabled={!day || capture.saving}
+            saving={capture.saving}
+            onCancel={onClose}
+            onSave={capture.save}
+          />
+        )
+      }
     >
       {date !== null && (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3.5">
           <DayStepper
             date={date}
             last={day?.businessDate ?? today}
@@ -107,52 +124,56 @@ export function FleetDayDialog({
                   {`Showing the first ${day.vehicles.length} vehicles. Choose a company to capture the rest.`}
                 </Note>
               )}
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr>
-                    <th className={cn(HEAD, "text-left")}>Vehicle</th>
-                    <th className={cn(HEAD, "text-right", LAST_WEEK)}>
-                      Same day last week
-                    </th>
-                    <th className={cn(HEAD, "text-right")}>
-                      {`Revenue, ${formats.currencyCode()}`}
-                    </th>
-                    <th className={cn(HEAD, "text-left")}>No revenue reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {day.vehicles.map((vehicle) => (
-                    <DayRow
-                      key={vehicle.id}
-                      vehicle={vehicle}
-                      entry={capture.entry(vehicle.id)}
-                      invalid={invalid.has(vehicle.id)}
-                      canChooseReason={canChooseReason}
-                      inputId={inputId(vehicle.id)}
-                      onAmount={(value) =>
-                        capture.typeAmount(vehicle.id, value)
-                      }
-                      onReason={(value) =>
-                        capture.chooseReason(vehicle.id, value)
-                      }
-                      onNote={(value) => capture.typeNote(vehicle.id, value)}
-                      onKeyDown={next(vehicle.id)}
-                    />
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="font-bold">
-                    <td className={CELL}>
-                      {`${day.vehicles.length} vehicle${day.vehicles.length === 1 ? "" : "s"}`}
-                    </td>
-                    <td className={cn(CELL, LAST_WEEK)} />
-                    <td className={cn(CELL, "text-right")}>
-                      {formats.formatNumber(dayTotal(day, capture.typed))}
-                    </td>
-                    <td className={CELL} />
-                  </tr>
-                </tfoot>
-              </table>
+              <div className="overflow-x-auto rounded-2xl border border-line">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr>
+                      <th className={cn(HEAD, "text-left")}>Vehicle</th>
+                      <th className={cn(HEAD, "text-right", LAST_WEEK)}>
+                        Same day last week
+                      </th>
+                      <th className={cn(HEAD, "text-right")}>
+                        {`Revenue, ${formats.currencyCode()}`}
+                      </th>
+                      <th className={cn(HEAD, "text-left")}>
+                        No revenue reason
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {day.vehicles.map((vehicle) => (
+                      <DayRow
+                        key={vehicle.id}
+                        vehicle={vehicle}
+                        entry={capture.entry(vehicle.id)}
+                        invalid={invalid.has(vehicle.id)}
+                        canChooseReason={canChooseReason}
+                        inputId={inputId(vehicle.id)}
+                        onAmount={(value) =>
+                          capture.typeAmount(vehicle.id, value)
+                        }
+                        onReason={(value) =>
+                          capture.chooseReason(vehicle.id, value)
+                        }
+                        onNote={(value) => capture.typeNote(vehicle.id, value)}
+                        onKeyDown={next(vehicle.id)}
+                      />
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-paper-2 font-bold text-ink">
+                      <td className={CELL}>
+                        {`${day.vehicles.length} vehicle${day.vehicles.length === 1 ? "" : "s"}`}
+                      </td>
+                      <td className={cn(CELL, LAST_WEEK)} />
+                      <td className={cn(CELL, "text-right")}>
+                        {formats.formatNumber(dayTotal(day, capture.typed))}
+                      </td>
+                      <td className={CELL} />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             </>
           )}
           {capture.problems.length > 0 && (
@@ -165,23 +186,40 @@ export function FleetDayDialog({
             </Banner>
           )}
           {capture.error && <Banner>{capture.error}</Banner>}
-          <FormActions>
-            <Button
-              ref={saveRef}
-              tone="ok"
-              disabled={!day || capture.saving}
-              aria-busy={capture.saving || undefined}
-              onClick={capture.save}
-            >
-              Save day
-            </Button>
-            <Button tone="quiet" onClick={onClose}>
-              Cancel
-            </Button>
-          </FormActions>
         </div>
       )}
     </Dialog>
+  );
+}
+
+function DayActions({
+  saveRef,
+  disabled,
+  saving,
+  onCancel,
+  onSave,
+}: {
+  saveRef: RefObject<HTMLButtonElement | null>;
+  disabled: boolean;
+  saving: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <>
+      <Button tone="outline" onClick={onCancel}>
+        Cancel
+      </Button>
+      <Button
+        ref={saveRef}
+        tone="ok"
+        disabled={disabled}
+        aria-busy={saving || undefined}
+        onClick={onSave}
+      >
+        Save day
+      </Button>
+    </>
   );
 }
 
@@ -249,10 +287,10 @@ function DayRow({
         : cell.reason;
   return (
     <tr>
-      <td className={cn(CELL, "font-semibold whitespace-nowrap")}>
-        {registration}
+      <td className={cn(CELL, "whitespace-nowrap")}>
+        <RegPlate>{registration}</RegPlate>
       </td>
-      <td className={cn(CELL, "text-right text-grey", LAST_WEEK)}>
+      <td className={cn(CELL, "text-right text-slate", LAST_WEEK)}>
         {lastWeek === null
           ? ""
           : lastWeek.amount !== null
@@ -305,7 +343,7 @@ function DayRow({
             )}
           </div>
         ) : (
-          <span className="text-grey">{saved}</span>
+          <span className="text-slate">{saved}</span>
         )}
       </td>
     </tr>

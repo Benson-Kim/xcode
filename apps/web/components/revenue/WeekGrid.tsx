@@ -6,7 +6,7 @@ import type { RevenueWeek } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
 import { cn } from "../ui";
-import { DAY_COLUMN, HEAD } from "./styles";
+import { DAY_COLUMN, EDGE, HEAD } from "./styles";
 import type { OpenDay } from "./useCaptureFlow";
 import type { useGridRows } from "./useGridRows";
 import { VehicleRow } from "./VehicleRow";
@@ -50,7 +50,7 @@ export function WeekGrid({
     <div
       ref={gridRef}
       tabIndex={-1}
-      className="relative mt-4 overflow-x-auto rounded-[14px] border border-card-line bg-surface"
+      className="relative -mx-(--gut) overflow-x-auto border-y border-line bg-surface"
     >
       <table
         aria-rowcount={windowed ? rowCount : undefined}
@@ -64,7 +64,10 @@ export function WeekGrid({
         <tbody ref={bodyRef}>
           {vehicles.length === 0 ? (
             <tr>
-              <td colSpan={10} className="px-4 py-6 text-center text-grey">
+              <td
+                colSpan={10}
+                className="px-(--gut) py-6 text-center text-slate"
+              >
                 No vehicles.
               </td>
             </tr>
@@ -113,7 +116,11 @@ function GridHead({
       <tr aria-rowindex={windowed ? 1 : undefined}>
         <th
           scope="col"
-          className={cn(HEAD, "sticky left-0 z-1 min-w-35 text-left")}
+          className={cn(
+            HEAD,
+            EDGE,
+            "sticky left-0 z-1 min-w-35 bg-surface text-left",
+          )}
         >
           Vehicle
         </th>
@@ -126,14 +133,14 @@ function GridHead({
               HEAD,
               DAY_COLUMN,
               "text-right",
-              date === today && "shadow-[inset_0_-3px_0_var(--color-blue)]",
+              date === today && "text-teal",
             )}
           >
             {shortName}{" "}
             <span
               className={cn(
-                "block text-base font-bold text-navy",
-                date === today && "text-blue-dark",
+                "block text-base font-bold text-ink",
+                date === today && "text-teal",
               )}
             >
               {dayOfMonth}
@@ -144,7 +151,7 @@ function GridHead({
         <th scope="col" className={cn(HEAD, "text-right")}>
           Week
         </th>
-        <th scope="col" className={cn(HEAD, "text-right")}>
+        <th scope="col" className={cn(HEAD, EDGE, "text-right")}>
           vs expected
         </th>
       </tr>
@@ -162,10 +169,10 @@ function GridTotals({
   const formats = useFormats();
   return (
     <tfoot>
-      <tr aria-rowindex={rowIndex} className="bg-paper font-bold">
+      <tr aria-rowindex={rowIndex} className="bg-paper-2 font-bold text-ink">
         <th
           scope="row"
-          className="sticky left-0 z-1 bg-paper px-2 py-2 text-left"
+          className="sticky left-0 z-1 bg-paper-2 py-2 pr-2 pl-(--gut) text-left"
         >
           All vehicles
         </th>
@@ -180,7 +187,7 @@ function GridTotals({
         <td className="px-2 py-2 text-right tabular-nums">
           {formats.formatNumber(data.totalAmount)}
         </td>
-        <td className="px-2 py-2 text-right tabular-nums">
+        <td className="py-2 pr-(--gut) pl-2 text-right tabular-nums">
           {data.percent === null ? "" : percentText(data.percent)}
         </td>
       </tr>

@@ -1,7 +1,7 @@
-import { BrandIcon, Skeleton, cn } from "./ui";
+import { Skeleton, cn } from "./ui";
 
-// The organization's mark and name: its uploaded logo, or the XCODE mark in its brand colour.
-// `compact` hides the second line on narrow screens (top bar).
+// The organization's mark and name on the brand colour: its uploaded logo, or the XCODE mark, then the wordmark.
+// `compact` hides the second line on narrow screens.
 export function Brand({
   name = "XCODE",
   subline = "Fleet finance",
@@ -9,6 +9,7 @@ export function Brand({
   logoAlt,
   loading = false,
   compact = false,
+  size = 30,
 }: {
   name?: string;
   subline?: string;
@@ -16,43 +17,47 @@ export function Brand({
   logoAlt?: string;
   loading?: boolean;
   compact?: boolean;
+  size?: number;
 }) {
   return (
-    <span className="flex min-w-0 items-center gap-2.5">
+    <span className="logo">
       {logo ? (
         // The logo is a data URL from the API, which next/image cannot optimise.
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={logo}
           alt={logoAlt || name}
-          className="size-9.5 shrink-0 rounded-[10px] object-contain"
+          width={size}
+          height={size}
+          className="mark shrink-0 rounded-[8px] object-contain"
         />
       ) : (
-        <span
+        <svg
+          className="mark"
+          width={size}
+          height={size}
+          viewBox="0 0 40 40"
           aria-hidden="true"
-          className="grid size-9.5 shrink-0 place-items-center rounded-[10px] bg-brand text-white"
         >
-          <BrandIcon />
-        </span>
+          <path className="a" d="M9 9 L31 31" />
+          <path className="b" d="M31 9 L24.5 15.5" />
+          <path className="b" d="M15.5 24.5 L9 31" />
+        </svg>
       )}
       {loading ? (
-        <span className="flex w-28 flex-col gap-1.5" aria-hidden="true">
-          <Skeleton className="h-4 w-20" />
+        <span className="txt flex w-28 flex-col gap-1.5" aria-hidden="true">
+          <Skeleton className="h-4 w-20 opacity-40" />
           <Skeleton
-            className={cn("h-3 w-24", compact && "max-[899px]:hidden")}
+            className={cn(
+              "h-3 w-24 opacity-40",
+              compact && "max-[899px]:hidden",
+            )}
           />
         </span>
       ) : (
-        <span className="min-w-0">
-          <span className="block truncate text-lg font-bold tracking-[0.04em]">
-            {name}
-          </span>
-          <span
-            className={cn(
-              "block truncate text-[13px] text-grey",
-              compact && "max-[899px]:hidden",
-            )}
-          >
+        <span className="txt">
+          <span className="wm">{name}</span>
+          <span className={cn("wmsub", compact && "max-[899px]:hidden")}>
             {subline}
           </span>
         </span>

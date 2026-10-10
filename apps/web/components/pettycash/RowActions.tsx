@@ -26,7 +26,7 @@ export function RowActions({
   const label = entryLabel(formats, entry);
   const busy = actions.busyId === entry.id;
   return (
-    <span className="flex flex-wrap justify-end gap-2">
+    <span className="flex flex-nowrap items-center justify-end gap-0.5">
       {entry.canReview && (
         <>
           <RowAction

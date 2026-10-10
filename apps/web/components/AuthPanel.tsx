@@ -270,7 +270,7 @@ export function AuthPanel() {
       <>
         {screen === "verify-device" ? "New device. " : ""}We sent a code to{" "}
         {maskedEmail ? (
-          <strong className="text-navy">{maskedEmail}</strong>
+          <strong className="text-ink">{maskedEmail}</strong>
         ) : (
           "your registered email"
         )}
@@ -283,12 +283,15 @@ export function AuthPanel() {
     );
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="flex items-center gap-2.5 px-6 pt-8 min-[720px]:px-12 min-[720px]:pt-7">
-        <Brand />
+    <div className="grid min-h-screen grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] max-[760px]:grid-cols-1 max-[760px]:grid-rows-[auto_1fr]">
+      <header className="relative flex flex-col justify-between gap-6 overflow-hidden bg-linear-168 from-deep from-0% via-deep-2 via-52% to-deep-3 to-100% p-[clamp(24px,5vw,64px)] text-on-deep before:pointer-events-none before:absolute before:top-[46%] before:-left-1/5 before:h-30 before:w-[140%] before:-rotate-30 before:rounded-full before:bg-glass before:opacity-30 before:content-[''] after:pointer-events-none after:absolute after:top-[46%] after:-left-1/5 after:h-30 after:w-[140%] after:rotate-30 after:rounded-full after:bg-glass after:opacity-[.18] after:content-[''] max-[760px]:flex-row max-[760px]:items-center max-[760px]:py-5 [&>*]:relative [&_.wm]:text-[clamp(30px,3.6vw,44px)] [&_.wmsub]:mt-[9px] [&_.wmsub]:text-[13px]">
+        <Brand size={46} />
+        <p className="m-0 text-[13px] font-semibold tracking-[.02em] max-[760px]:hidden">
+          Every sign in is recorded against your name. XCODE Web v0.9
+        </p>
       </header>
-      <main className="flex flex-1 flex-col px-6 pt-7 pb-4 min-[720px]:items-center min-[720px]:justify-center min-[720px]:gap-5 min-[720px]:pt-6 min-[720px]:pb-10">
-        <div className="w-full min-[720px]:w-110 min-[720px]:rounded-[20px] min-[720px]:border min-[720px]:border-card-line min-[720px]:bg-surface min-[720px]:p-10 min-[720px]:shadow-panel">
+      <main className="flex flex-col items-center justify-center gap-5 bg-paper p-[clamp(24px,6vw,88px)] max-[760px]:items-stretch max-[760px]:justify-start">
+        <div className="w-full max-w-115 [&_input:not([type=checkbox])]:px-3.5 [&_input:not([type=checkbox])]:py-[13px]">
           {restoring ? (
             <section
               aria-busy="true"
@@ -306,7 +309,7 @@ export function AuthPanel() {
             <form
               onSubmit={submit}
               aria-labelledby="auth-title"
-              className="flex flex-col gap-4"
+              className="flex flex-col gap-[18px]"
             >
               <PageHeader title={title} description={lead} />
 
@@ -378,7 +381,7 @@ export function AuthPanel() {
                       onChange={(event) =>
                         setRememberDevice(event.target.checked)
                       }
-                      className="m-0 size-5.5 shrink-0 accent-blue"
+                      className="m-0 size-5.5 shrink-0 accent-teal"
                     />
                     <span>
                       Remember this device. Next time you only need your mobile
@@ -402,7 +405,8 @@ export function AuthPanel() {
                 type="submit"
                 aria-busy={busy || undefined}
                 disabled={busy || (remaining > 0 && screen === "sign-in")}
-                className="h-14 w-full border-0 px-0 text-[17px] disabled:opacity-55 aria-busy:cursor-progress aria-busy:bg-blue-busy min-[720px]:h-13"
+                tone="ok"
+                className="h-12 w-full px-0 text-[15px] aria-busy:cursor-progress"
               >
                 {busy
                   ? "Please wait..."
@@ -420,7 +424,7 @@ export function AuthPanel() {
                   tone="outline"
                   disabled={busy}
                   onClick={() => beginPinReset(true)}
-                  className="h-14 w-full px-0 text-[17px] disabled:opacity-55 min-[720px]:h-13"
+                  className="h-12 w-full px-0 text-[15px]"
                 >
                   Reset PIN
                 </Button>
@@ -494,17 +498,17 @@ export function AuthPanel() {
 
               {verifying && (
                 <>
-                  <p className="m-0 text-sm text-grey">
+                  <p className="m-0 text-sm text-slate">
                     No email? Check your spam folder, or ask your admin to
                     confirm your email address.
                   </p>
                   {developmentCode && (
                     <div
                       data-demo-code={developmentCode}
-                      className="m-0 rounded-xl border border-dashed border-line px-3.5 py-2.5 text-sm text-grey"
+                      className="m-0 rounded-xl border border-dashed border-line px-3.5 py-2.5 text-sm text-slate"
                     >
                       Demo only: your code is{" "}
-                      <strong className="tracking-[0.08em] text-navy">
+                      <strong className="tracking-[0.08em] text-ink">
                         {formattedDevelopmentCode}
                       </strong>
                     </div>
@@ -515,8 +519,8 @@ export function AuthPanel() {
               {/* Demo numbers for development only. A PIN someone chose is never kept or shown. */}
               {screen === "sign-in" &&
                 process.env.NODE_ENV !== "production" && (
-                  <div className="m-0 rounded-xl border border-dashed border-line px-3.5 py-3 text-sm text-grey">
-                    <strong className="text-navy">Demo logins</strong>
+                  <div className="m-0 rounded-xl border border-dashed border-line px-3.5 py-3 text-sm text-slate">
+                    <strong className="text-ink">Demo logins</strong>
                     <ul className="mt-1.5 mb-0 list-disc pl-4.5">
                       {[
                         ["Owner", "0733 520 614"],
@@ -534,17 +538,14 @@ export function AuthPanel() {
             </form>
           )}
         </div>
-        <p className="mt-auto mb-0 pt-6 text-center text-sm text-grey min-[720px]:m-0 min-[720px]:pt-0">
+        <p className="m-0 w-full max-w-115 text-center text-sm text-slate">
           New here? Your admin adds you with your mobile number and email
           address.
         </p>
-        <p className="mt-2 mb-0 text-center text-xs text-grey min-[720px]:hidden">
-          XCODE Web v0.9
+        <p className="m-0 text-center text-xs text-slate min-[761px]:hidden">
+          Every sign in is recorded against your name. XCODE Web v0.9
         </p>
       </main>
-      <p className="m-0 hidden px-12 pb-6 text-[13px] text-grey min-[720px]:block">
-        Every sign in is recorded against your name. XCODE Web v0.9
-      </p>
     </div>
   );
 }

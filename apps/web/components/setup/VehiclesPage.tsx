@@ -32,6 +32,7 @@ import {
   CellNote,
   CurrencyInput,
   DataTable,
+  Dialog,
   ErrorSummary,
   Field,
   FormActions,
@@ -45,7 +46,6 @@ import {
   RowButton,
   SegmentedControl,
   SelectInput,
-  Spacer,
   Stat,
   StatGrid,
   StatGridSkeleton,
@@ -62,6 +62,7 @@ import { usePagedList } from "../usePagedList";
 import {
   costBucket,
   expenseBucketNames,
+  RegPlate,
   type Company,
   type RecurringItem,
   type Vehicle,
@@ -121,38 +122,43 @@ export function VehiclesPage({
       : (rows.find((vehicle) => vehicle.id === editing.id) ?? editing.saved)
     : undefined;
 
-  if (editing)
-    return (
-      <VehicleEditor
-        vehicle={editedVehicle}
-        // A new vehicle starts on the filtered company only while it can be chosen: never on an archived one.
-        defaultCompany={
-          companies.some(
-            (company) => company.id === filter && company.active !== false,
-          )
-            ? filter
-            : ""
-        }
-        companies={companies}
-        today={today}
-        onOpenRecurring={onOpenRecurring}
-        onAddRecurring={onAddRecurring}
-        onClose={() => setEditing(null)}
-        onSaved={(saved) => {
-          vehicles.reload();
-          setEditing({ id: saved.id, saved, rows });
-        }}
-      />
-    );
-
   return (
     <section>
       <PageHeader
         title="Vehicles"
         description="Registration, company, weekly target, and the scheduled items that post to each vehicle."
+        actions={
+          canManage && !editing ? (
+            <Button tone="primary" onClick={() => setEditing({ id: null })}>
+              Add vehicle
+            </Button>
+          ) : undefined
+        }
       />
+      {editing && (
+        <VehicleEditor
+          vehicle={editedVehicle}
+          // A new vehicle starts on the filtered company only while it can be chosen: never on an archived one.
+          defaultCompany={
+            companies.some(
+              (company) => company.id === filter && company.active !== false,
+            )
+              ? filter
+              : ""
+          }
+          companies={companies}
+          today={today}
+          onOpenRecurring={onOpenRecurring}
+          onAddRecurring={onAddRecurring}
+          onClose={() => setEditing(null)}
+          onSaved={(saved) => {
+            vehicles.reload();
+            setEditing({ id: saved.id, saved, rows });
+          }}
+        />
+      )}
       {(vehicles.error || companyOptions.error) && (
-        <Banner className="mt-5">
+        <Banner className="mb-3.5">
           {streamError(vehicles) || companyOptions.error}
         </Banner>
       )}
@@ -164,12 +170,6 @@ export function VehiclesPage({
         />
         {!vehicles.loading && (
           <Hint>{plural(vehicles.total, "vehicle", "vehicles")}</Hint>
-        )}
-        <Spacer />
-        {canManage && (
-          <Button tone="ok" onClick={() => setEditing({ id: null })}>
-            Add vehicle
-          </Button>
         )}
       </Toolbar>
       <DataTable
@@ -199,7 +199,7 @@ export function VehiclesPage({
             <Tr key={vehicle.id}>
               <Td label="Registration">
                 <RowButton onClick={() => setEditing({ id: vehicle.id })}>
-                  {vehicle.registration}
+                  <RegPlate>{vehicle.registration}</RegPlate>
                 </RowButton>
               </Td>
               <Td label="Company">{vehicle.companyName}</Td>
@@ -545,245 +545,258 @@ function VehicleEditor({
       right.effectiveFrom.localeCompare(left.effectiveFrom) ||
       right.revision - left.revision,
   );
-  const back = (
-    <FormActions>
-      <Button tone="quiet" onClick={onClose}>
-        Back
-      </Button>
-    </FormActions>
-  );
   const details = (
-    <FormLayout>
-      <ErrorSummary count={Object.keys(errors).length} />
-      {saveError && <Banner>{saveError}</Banner>}
-      {joinsLater && (
-        <Note tone="info">
-          Joins the fleet on {formatDateOnly(vehicle!.joinedOn)}, after the
-          business date.
-          {today
-            ? ` To save a change, set a join date on or before ${formatDateOnly(today)}.`
-            : ""}
-        </Note>
-      )}
-      <Card density="form">
-        <CardHeader title="Vehicle" />
-        <Grid2>
-          <Field
-            id="vehicle-registration"
-            label="Registration number"
-            error={errors.registration}
-            hint={
-              isNew
-                ? "Kenyan format, for example KDA 482M."
-                : "A registration cannot change. Add the vehicle again if it is re-registered."
-            }
-          >
-            <TextInput
-              value={form.registration}
-              disabled={!isNew || retired}
-              placeholder="KDA 482M"
-              autoCapitalize="characters"
-              onChange={(event) =>
-                setForm({
-                  ...form,
-                  registration: event.target.value.toUpperCase(),
-                })
-              }
-            />
-          </Field>
-          <Field
-            id="vehicle-company"
-            label="PSV company"
-            error={errors.companyId}
-          >
-            <SelectInput
-              value={form.companyId}
-              disabled={retired}
-              onChange={(event) =>
-                setForm({ ...form, companyId: event.target.value })
+    <form
+      id="vehicle-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <FormLayout className="mt-0">
+        <ErrorSummary count={Object.keys(errors).length} />
+        {saveError && <Banner>{saveError}</Banner>}
+        {joinsLater && (
+          <Note tone="info">
+            Joins the fleet on {formatDateOnly(vehicle!.joinedOn)}, after the
+            business date.
+            {today
+              ? ` To save a change, set a join date on or before ${formatDateOnly(today)}.`
+              : ""}
+          </Note>
+        )}
+        <Card density="form">
+          <CardHeader title="Vehicle" />
+          <Grid2>
+            <Field
+              id="vehicle-registration"
+              label="Registration number"
+              error={errors.registration}
+              hint={
+                isNew
+                  ? "Kenyan format, for example KDA 482M."
+                  : "A registration cannot change. Add the vehicle again if it is re-registered."
               }
             >
-              <option value="">Choose a company</option>
-              {companies
-                .filter(
-                  (company) =>
-                    company.active !== false ||
-                    company.id === vehicle?.companyId,
-                )
-                .map((company) => (
-                  <option key={company.id} value={company.id}>
-                    {company.name}
-                    {company.active === false ? " (archived)" : ""}
-                  </option>
-                ))}
-            </SelectInput>
-          </Field>
-          <Field
-            id="vehicle-target"
-            label="Weekly performance target"
-            error={errors.weeklyTarget}
-            hint={`${weekly ? `About ${kes(Math.round(weekly / 7))} a day.` : "Revenue you expect in a Monday to Sunday week."}${isNew ? "" : " A change applies from today. Past days keep their old target."}`}
-          >
-            <CurrencyInput
-              disabled={retired}
-              min="1"
-              step="1"
-              value={form.weeklyTarget}
-              onChange={(event) =>
-                setForm({ ...form, weeklyTarget: event.target.value })
-              }
-            />
-          </Field>
-          <Field
-            id="vehicle-joined"
-            label="In the fleet from"
-            error={errors.joinedOn}
-            hint="Missing revenue days are only counted from this date."
-          >
-            <TextInput
-              disabled={retired}
-              type="date"
-              max={today}
-              value={joinedOn}
-              onChange={(event) =>
-                setForm({ ...form, joinedOn: event.target.value })
-              }
-            />
-          </Field>
-        </Grid2>
-        {history.length > 1 && (
-          <div>
-            <p className="m-0 text-sm font-semibold">Target history</p>
-            <CardList>
-              {history.map((target, index) => (
-                <CardListItem
-                  key={`${target.effectiveFrom}-${target.revision}`}
-                  left={`${kes(target.weeklyAmount)} a week`}
-                  rightSub={`${index === 0 ? "From" : "Was from"} ${formatDateOnly(target.effectiveFrom)}`}
-                />
-              ))}
-            </CardList>
-          </div>
-        )}
-      </Card>
-      {vehicle && (
-        <Card density="form">
-          <CardHeader
-            title="Fleet lifecycle"
-            description="Leaving the fleet stops targets, scheduled item shares, and future report postings from that date."
-          />
-          {retired ? (
-            <>
-              <Hint>
-                {vehicle.active === false
-                  ? "Left the fleet on"
-                  : "Leaves the fleet on"}{" "}
-                {formatDateOnly(vehicle.leftOn!)}.
-              </Hint>
-              <Grid2 narrow>
-                <Field
-                  id="vehicle-returned-on"
-                  label="Returns to the fleet"
-                  hint={
-                    returnedOn > vehicle.leftOn!
-                      ? `${formatDateRange(vehicle.leftOn!, shiftDate(returnedOn, -1))} is recorded as time away: those days are neither expected nor missing.`
-                      : "Returning on the day it left undoes the leave outright."
-                  }
-                >
-                  <TextInput
-                    type="date"
-                    min={vehicle.leftOn!}
-                    max={today}
-                    value={returnedOn}
-                    onChange={(event) => setReturnDate(event.target.value)}
-                  />
-                </Field>
-              </Grid2>
-              <FormActions>
-                <Button
-                  tone="ok"
-                  disabled={busy}
-                  onClick={() => void restoreVehicle()}
-                >
-                  Restore to active fleet
-                </Button>
-              </FormActions>
-            </>
-          ) : joinsLater ? (
-            <Hint>It can leave the fleet once it has joined.</Hint>
-          ) : (
-            <>
-              <Grid2 narrow>
-                <Field
-                  id="vehicle-left-on"
-                  label="Leaves the fleet"
-                  hint="No target or scheduled posting is active on this date."
-                >
-                  <TextInput
-                    type="date"
-                    min={vehicle.joinedOn}
-                    max={today}
-                    value={lifecycleDate}
-                    onChange={(event) => setLifecycleDate(event.target.value)}
-                  />
-                </Field>
-              </Grid2>
-              <FormActions>
-                <Button
-                  tone="warn"
-                  disabled={busy}
-                  onClick={() => void retireVehicle()}
-                >
-                  Retire vehicle
-                </Button>
-              </FormActions>
-            </>
-          )}
-          {away.length > 0 && (
+              <TextInput
+                value={form.registration}
+                disabled={!isNew || retired}
+                placeholder="KDA 482M"
+                autoCapitalize="characters"
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    registration: event.target.value.toUpperCase(),
+                  })
+                }
+              />
+            </Field>
+            <Field
+              id="vehicle-company"
+              label="PSV company"
+              error={errors.companyId}
+            >
+              <SelectInput
+                value={form.companyId}
+                disabled={retired}
+                onChange={(event) =>
+                  setForm({ ...form, companyId: event.target.value })
+                }
+              >
+                <option value="">Choose a company</option>
+                {companies
+                  .filter(
+                    (company) =>
+                      company.active !== false ||
+                      company.id === vehicle?.companyId,
+                  )
+                  .map((company) => (
+                    <option key={company.id} value={company.id}>
+                      {company.name}
+                      {company.active === false ? " (archived)" : ""}
+                    </option>
+                  ))}
+              </SelectInput>
+            </Field>
+            <Field
+              id="vehicle-target"
+              label="Weekly performance target"
+              error={errors.weeklyTarget}
+              hint={`${weekly ? `About ${kes(Math.round(weekly / 7))} a day.` : "Revenue you expect in a Monday to Sunday week."}${isNew ? "" : " A change applies from today. Past days keep their old target."}`}
+            >
+              <CurrencyInput
+                disabled={retired}
+                min="1"
+                step="1"
+                value={form.weeklyTarget}
+                onChange={(event) =>
+                  setForm({ ...form, weeklyTarget: event.target.value })
+                }
+              />
+            </Field>
+            <Field
+              id="vehicle-joined"
+              label="In the fleet from"
+              error={errors.joinedOn}
+              hint="Missing revenue days are only counted from this date."
+            >
+              <TextInput
+                disabled={retired}
+                type="date"
+                max={today}
+                value={joinedOn}
+                onChange={(event) =>
+                  setForm({ ...form, joinedOn: event.target.value })
+                }
+              />
+            </Field>
+          </Grid2>
+          {history.length > 1 && (
             <div>
-              <p className="m-0 text-sm font-semibold">
-                Time away from the fleet
-              </p>
+              <p className="m-0 text-sm font-semibold">Target history</p>
               <CardList>
-                {away.map((period) => (
+                {history.map((target, index) => (
                   <CardListItem
-                    key={period.leftOn}
-                    left={formatDateRange(
-                      period.leftOn,
-                      shiftDate(period.returnedOn, -1),
-                    )}
-                    rightSub={`Back on ${formatDateOnly(period.returnedOn)}`}
+                    key={`${target.effectiveFrom}-${target.revision}`}
+                    left={`${kes(target.weeklyAmount)} a week`}
+                    rightSub={`${index === 0 ? "From" : "Was from"} ${formatDateOnly(target.effectiveFrom)}`}
                   />
                 ))}
               </CardList>
             </div>
           )}
         </Card>
-      )}
-      <FormActions>
-        <Button
-          tone="ok"
-          disabled={busy || retired}
-          onClick={() => void save()}
-        >
-          {isNew ? "Add vehicle" : "Save changes"}
-        </Button>
-        <Button tone="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-      </FormActions>
-    </FormLayout>
+        {vehicle && (
+          <Card density="form">
+            <CardHeader
+              title="Fleet lifecycle"
+              description="Leaving the fleet stops targets, scheduled item shares, and future report postings from that date."
+            />
+            {retired ? (
+              <>
+                <Hint>
+                  {vehicle.active === false
+                    ? "Left the fleet on"
+                    : "Leaves the fleet on"}{" "}
+                  {formatDateOnly(vehicle.leftOn!)}.
+                </Hint>
+                <Grid2 narrow>
+                  <Field
+                    id="vehicle-returned-on"
+                    label="Returns to the fleet"
+                    hint={
+                      returnedOn > vehicle.leftOn!
+                        ? `${formatDateRange(vehicle.leftOn!, shiftDate(returnedOn, -1))} is recorded as time away: those days are neither expected nor missing.`
+                        : "Returning on the day it left undoes the leave outright."
+                    }
+                  >
+                    <TextInput
+                      type="date"
+                      min={vehicle.leftOn!}
+                      max={today}
+                      value={returnedOn}
+                      onChange={(event) => setReturnDate(event.target.value)}
+                    />
+                  </Field>
+                </Grid2>
+                <FormActions>
+                  <Button
+                    tone="ok"
+                    disabled={busy}
+                    onClick={() => void restoreVehicle()}
+                  >
+                    Restore to active fleet
+                  </Button>
+                </FormActions>
+              </>
+            ) : joinsLater ? (
+              <Hint>It can leave the fleet once it has joined.</Hint>
+            ) : (
+              <>
+                <Grid2 narrow>
+                  <Field
+                    id="vehicle-left-on"
+                    label="Leaves the fleet"
+                    hint="No target or scheduled posting is active on this date."
+                  >
+                    <TextInput
+                      type="date"
+                      min={vehicle.joinedOn}
+                      max={today}
+                      value={lifecycleDate}
+                      onChange={(event) => setLifecycleDate(event.target.value)}
+                    />
+                  </Field>
+                </Grid2>
+                <FormActions>
+                  <Button
+                    tone="warn"
+                    disabled={busy}
+                    onClick={() => void retireVehicle()}
+                  >
+                    Retire vehicle
+                  </Button>
+                </FormActions>
+              </>
+            )}
+            {away.length > 0 && (
+              <div>
+                <p className="m-0 text-sm font-semibold">
+                  Time away from the fleet
+                </p>
+                <CardList>
+                  {away.map((period) => (
+                    <CardListItem
+                      key={period.leftOn}
+                      left={formatDateRange(
+                        period.leftOn,
+                        shiftDate(period.returnedOn, -1),
+                      )}
+                      rightSub={`Back on ${formatDateOnly(period.returnedOn)}`}
+                    />
+                  ))}
+                </CardList>
+              </div>
+            )}
+          </Card>
+        )}
+      </FormLayout>
+    </form>
   );
+  const onDetails = isNew || shownTab === "details";
   return (
-    <section>
-      <PageHeader
-        title={isNew ? "Add vehicle" : vehicle.registration}
-        description={
-          isNew
-            ? "It shows on reports and the dashboard straight away."
-            : `${companyName}${retired ? " · Left the fleet" : joinsLater ? ` · Joins ${formatDateOnly(vehicle.joinedOn)}` : ""}`
-        }
-      />
+    <Dialog
+      open
+      size="lg"
+      title={isNew ? "Add vehicle" : vehicle.registration}
+      subtitle={
+        isNew
+          ? "It shows on reports and the dashboard straight away."
+          : `${companyName}${retired ? " · Left the fleet" : joinsLater ? ` · Joins ${formatDateOnly(vehicle.joinedOn)}` : ""}`
+      }
+      onClose={onClose}
+      footer={
+        onDetails ? (
+          <>
+            <Button tone="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="vehicle-form"
+              tone="ok"
+              disabled={busy || retired}
+            >
+              {isNew ? "Add vehicle" : "Save changes"}
+            </Button>
+          </>
+        ) : (
+          <Button tone="outline" onClick={onClose}>
+            Back
+          </Button>
+        )
+      }
+    >
       {isNew ? (
         details
       ) : (
@@ -798,7 +811,6 @@ function VehicleEditor({
           {shownTab === "report" && (
             <FormLayout>
               <VehicleReportCard vehicle={vehicle} />
-              {back}
             </FormLayout>
           )}
           {shownTab === "scheduled" && (
@@ -808,18 +820,14 @@ function VehicleEditor({
                 onOpen={onOpenRecurring}
                 onAdd={onAddRecurring}
               />
-              {back}
             </FormLayout>
           )}
           {shownTab === "investment" && (
-            <>
-              <VehicleInvestmentTab vehicle={vehicle} today={today} />
-              <div className="mt-4">{back}</div>
-            </>
+            <VehicleInvestmentTab vehicle={vehicle} today={today} />
           )}
         </Tabs>
       )}
-    </section>
+    </Dialog>
   );
 }
 

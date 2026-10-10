@@ -3,13 +3,12 @@ import { formatPhone, plural } from "@xcode/shared/format";
 import { useFormats } from "../../lib/formats";
 import type { Person, Role, ScopeOptions } from "../../lib/types";
 import {
-  Button,
   CellNote,
   DataTable,
   Hint,
+  RowAction,
   RowButton,
   SelectInput,
-  Spacer,
   StatusBadge,
   Td,
   Toolbar,
@@ -40,7 +39,6 @@ type Props = {
   onFilters: (filters: PeopleFilters) => void;
   canManage: boolean;
   onEdit: (person: Person) => void;
-  onAdd: () => void;
 };
 
 function SignInBadge({ person }: { person: Person }) {
@@ -55,8 +53,11 @@ function PersonRow({
   person,
   roles,
   scope,
+  canManage,
   onEdit,
-}: Pick<Props, "roles" | "scope" | "onEdit"> & { person: Person }) {
+}: Pick<Props, "roles" | "scope" | "canManage" | "onEdit"> & {
+  person: Person;
+}) {
   const { kes } = useFormats();
   const changes = changesFromRole(
     person.permissions,
@@ -90,6 +91,16 @@ function PersonRow({
       <Td label="Sign in">
         <SignInBadge person={person} />
       </Td>
+      <Td className="text-right">
+        <div className="flex justify-end gap-0.5">
+          <RowAction
+            aria-label={`${canManage ? "Edit" : "View"} ${person.firstName} ${person.lastName}`}
+            onClick={() => onEdit(person)}
+          >
+            {canManage ? "Edit" : "View"}
+          </RowAction>
+        </div>
+      </Td>
     </Tr>
   );
 }
@@ -98,7 +109,10 @@ function FilterToolbar(props: Props & { shown: number; filtered: boolean }) {
   const { filters, onFilters } = props;
   return (
     <Toolbar>
-      <label htmlFor="people-role" className="text-[13px] text-grey">
+      <label
+        htmlFor="people-role"
+        className="text-[13px] font-semibold text-slate"
+      >
         Role
       </label>
       <SelectInput
@@ -117,7 +131,10 @@ function FilterToolbar(props: Props & { shown: number; filtered: boolean }) {
           </option>
         ))}
       </SelectInput>
-      <label htmlFor="people-status" className="text-[13px] text-grey">
+      <label
+        htmlFor="people-status"
+        className="text-[13px] font-semibold text-slate"
+      >
         Sign in
       </label>
       <SelectInput
@@ -138,12 +155,6 @@ function FilterToolbar(props: Props & { shown: number; filtered: boolean }) {
         <option value="none">No access</option>
       </SelectInput>
       {!props.loading && <Hint>{plural(props.total, "person", "people")}</Hint>}
-      <Spacer />
-      {props.canManage && (
-        <Button tone="ok" onClick={props.onAdd}>
-          Add person
-        </Button>
-      )}
     </Toolbar>
   );
 }
@@ -163,6 +174,7 @@ export function PeopleList(props: Props) {
           { label: "Role" },
           { label: "Can see" },
           { label: "Sign in" },
+          { label: "Actions", hidden: true },
         ]}
         loading={props.loading}
         pendingRows={props.pendingRows}
@@ -181,6 +193,7 @@ export function PeopleList(props: Props) {
             person={person}
             roles={props.roles}
             scope={props.scope}
+            canManage={props.canManage}
             onEdit={props.onEdit}
           />
         ))}

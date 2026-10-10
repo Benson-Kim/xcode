@@ -11,17 +11,10 @@ import {
 } from "@xcode/shared/expenses";
 
 import { useFormats } from "../../lib/formats";
+import { DialogFooter } from "../pettycash/DialogFooter";
 import { sendJson } from "../pettycash/request";
 import { useDialogAction } from "../pettycash/useDialogAction";
-import {
-  Banner,
-  Button,
-  CardNote,
-  Dialog,
-  Field,
-  FormActions,
-  TextInput,
-} from "../ui";
+import { Banner, Button, CardNote, Dialog, Field, TextInput } from "../ui";
 import { rowLabel } from "./labels";
 
 export function RemoveExpenseDialog({
@@ -99,14 +92,14 @@ function RemoveForm({
         />
       </Field>
       {error && <Banner>{error}</Banner>}
-      <FormActions>
+      <DialogFooter>
+        <Button tone="outline" onClick={onClose}>
+          Cancel
+        </Button>
         <Button type="submit" tone="danger" disabled={saving}>
           Remove
         </Button>
-        <Button tone="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-      </FormActions>
+      </DialogFooter>
     </form>
   );
 }

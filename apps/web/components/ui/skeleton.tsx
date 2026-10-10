@@ -10,7 +10,7 @@ export function Skeleton({ className }: { className?: string }) {
     <span
       aria-hidden="true"
       className={cn(
-        "block h-4 rounded-md bg-divider motion-safe:animate-pulse",
+        "block h-4 rounded-md bg-paper-2 motion-safe:animate-pulse",
         className,
       )}
     />
@@ -108,7 +108,7 @@ export function FormSkeleton({
               {Array.from({ length: fields }, (_, field) => (
                 <div key={field} className="flex flex-col gap-1.5">
                   <Skeleton className="h-3.5 w-1/3" />
-                  <Skeleton className="h-12 rounded-[10px]" />
+                  <Skeleton className="h-10 rounded-[10px]" />
                 </div>
               ))}
             </Grid2>
@@ -148,7 +148,7 @@ export function StatGridSkeleton({ count = 5 }: { count?: number }) {
       {Array.from({ length: count }, (_, index) => (
         <div
           key={index}
-          className="flex flex-col gap-2 rounded-[10px] border border-divider p-3"
+          className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3"
         >
           <Skeleton className="h-3 w-2/3" />
           <Skeleton className="h-5 w-1/2" />

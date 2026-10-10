@@ -156,8 +156,8 @@ it("is one bar with the rows per page on the left, the count in the middle and t
   show({ page: 2, total: 1234 });
   const count = screen.getByText("Showing 51–100 of 1,234");
   const bar = count.parentElement!;
-  expect(bar.className).toContain("rounded-[14px]");
-  expect(bar.className).toContain("bg-surface");
+  // Flat under the list, its ends on the page's side margin like the table's first and last columns.
+  expect(bar.className).toContain("px-(--gut)");
   const [left, middle, right] = [...bar.children];
   expect(
     within(left as HTMLElement).getByLabelText("Rows per page"),
