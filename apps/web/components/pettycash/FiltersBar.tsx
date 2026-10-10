@@ -9,17 +9,11 @@ import {
   type PettyCashStatus,
 } from "@xcode/shared/pettyCash";
 
-import {
-  SearchSelect,
-  Spacer,
-  TextInput,
-  Toolbar,
-  type SearchOption,
-} from "../ui";
+import { SelectInput, TextInput } from "../ui";
 
 export type StatusFilter = PettyCashStatus | "all";
 
-const STATUS_OPTIONS: SearchOption[] = [
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All statuses" },
   ...PETTY_CASH_STATUSES.map((value) => ({
     value,
@@ -52,46 +46,47 @@ export function FiltersBar({
   actions: ReactNode;
 }) {
   return (
-    <Toolbar>
+    <div className="bar">
       {views}
       {holders && (
-        <SearchSelect
+        <SelectInput
           aria-label="Manager"
-          density="compact"
-          inline
           value={holderId}
-          onChange={onHolderChange}
-          options={[
-            { value: "", label: "Everyone" },
-            ...holders.map((holder) => ({
-              value: holder.id,
-              label: `${holder.name}${holder.active ? "" : " (not active)"}`,
-            })),
-          ]}
-        />
+          onChange={(event) => onHolderChange(event.target.value)}
+        >
+          <option value="">All managers</option>
+          {holders.map((holder) => (
+            <option key={holder.id} value={holder.id}>
+              {`${holder.name}${holder.active ? "" : " (not active)"}`}
+            </option>
+          ))}
+        </SelectInput>
       )}
       {status && onStatusChange && (
-        <SearchSelect
+        <SelectInput
           aria-label="Show"
-          density="compact"
-          inline
           value={status}
-          onChange={(value) => onStatusChange(value as StatusFilter)}
-          options={STATUS_OPTIONS}
-        />
+          onChange={(event) =>
+            onStatusChange(event.target.value as StatusFilter)
+          }
+        >
+          {STATUS_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </SelectInput>
       )}
       <TextInput
         type="search"
         aria-label="Search"
-        density="compact"
-        inline
-        className="max-w-80 flex-[1_1_110px]"
+        className="srch"
         placeholder="Search vehicle, item or note"
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
       />
-      <Spacer />
+      <span className="sp" aria-hidden="true" />
       {actions}
-    </Toolbar>
+    </div>
   );
 }

@@ -8,8 +8,6 @@ import { preferencesApi } from "../lib/endpoints/organization";
 import {
   Banner,
   Button,
-  Card,
-  CardHeader,
   Choice,
   ChoiceGroup,
   Field,
@@ -45,17 +43,17 @@ export function PreferencesView() {
   const loaded = useResource<Preferences>(preferencesApi.path);
   if (loaded.error)
     return (
-      <section>
+      <>
         <PageHeader title="Your preferences" description={description} />
         <Banner>{loaded.error}</Banner>
-      </section>
+      </>
     );
   if (loaded.loading || !loaded.data)
     return (
-      <section>
+      <>
         <PageHeader title="Your preferences" description={description} />
         <FormSkeleton cards={1} fields={4} label="Loading your preferences" />
-      </section>
+      </>
     );
   return <PreferencesForm initial={loaded.data} />;
 }
@@ -89,143 +87,142 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
     }
   }
   return (
-    <section>
+    <>
       <PageHeader
         title="Your preferences"
         description={description}
         actions={
-          <Button tone="primary" disabled={busy} onClick={() => void save()}>
+          <Button tone="ok" disabled={busy} onClick={() => void save()}>
             Save preferences
           </Button>
         }
       />
-      <div className="flex flex-col gap-3.5">
-        {error && <Banner>{error}</Banner>}
-        <Card density="form">
-          <CardHeader title="Display" />
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-x-5 gap-y-4">
-            <Field
-              id="pref-locale"
-              label="Locale override"
-              hint={localeLocked ? LOCKED : undefined}
+      {error && <Banner>{error}</Banner>}
+      <section className="sheet" aria-labelledby="pref-display">
+        <h2 id="pref-display">Display</h2>
+        <div className="fgrid">
+          <Field
+            id="pref-locale"
+            label="Locale override"
+            hint={localeLocked ? LOCKED : undefined}
+          >
+            <TextInput
+              value={
+                localeLocked
+                  ? (organization?.locale ?? "")
+                  : preferences.locale || ""
+              }
+              disabled={localeLocked}
+              placeholder={
+                organization
+                  ? `Organization default (${organization.locale})`
+                  : "Use organization default"
+              }
+              onChange={(event) =>
+                setPreferences({
+                  ...preferences,
+                  locale: event.target.value || null,
+                })
+              }
+            />
+          </Field>
+          <Field
+            id="pref-zone"
+            label="Time-zone override"
+            hint={zoneLocked ? LOCKED : undefined}
+          >
+            <TextInput
+              value={
+                zoneLocked
+                  ? (organization?.timeZone ?? "")
+                  : preferences.timeZone || ""
+              }
+              disabled={zoneLocked}
+              placeholder={
+                organization
+                  ? `Organization default (${organization.timeZone})`
+                  : "Use organization default"
+              }
+              onChange={(event) =>
+                setPreferences({
+                  ...preferences,
+                  timeZone: event.target.value || null,
+                })
+              }
+            />
+          </Field>
+          <Field
+            id="pref-theme"
+            label="Theme"
+            hint={themeLocked ? LOCKED : undefined}
+          >
+            <SelectInput
+              value={themeLocked ? "light" : preferences.themeMode || "system"}
+              disabled={themeLocked}
+              onChange={(event) =>
+                setPreferences({
+                  ...preferences,
+                  themeMode: event.target.value,
+                })
+              }
             >
-              <TextInput
-                value={
-                  localeLocked
-                    ? (organization?.locale ?? "")
-                    : preferences.locale || ""
-                }
-                disabled={localeLocked}
-                placeholder={
-                  organization
-                    ? `Organization default (${organization.locale})`
-                    : "Use organization default"
-                }
-                onChange={(event) =>
-                  setPreferences({
-                    ...preferences,
-                    locale: event.target.value || null,
-                  })
-                }
-              />
-            </Field>
-            <Field
-              id="pref-zone"
-              label="Time-zone override"
-              hint={zoneLocked ? LOCKED : undefined}
-            >
-              <TextInput
-                value={
-                  zoneLocked
-                    ? (organization?.timeZone ?? "")
-                    : preferences.timeZone || ""
-                }
-                disabled={zoneLocked}
-                placeholder={
-                  organization
-                    ? `Organization default (${organization.timeZone})`
-                    : "Use organization default"
-                }
-                onChange={(event) =>
-                  setPreferences({
-                    ...preferences,
-                    timeZone: event.target.value || null,
-                  })
-                }
-              />
-            </Field>
-            <Field
-              id="pref-theme"
-              label="Theme"
-              hint={themeLocked ? LOCKED : undefined}
-            >
-              <SelectInput
-                value={
-                  themeLocked ? "light" : preferences.themeMode || "system"
-                }
-                disabled={themeLocked}
-                onChange={(event) =>
-                  setPreferences({
-                    ...preferences,
-                    themeMode: event.target.value,
-                  })
-                }
-              >
-                <option value="system">System</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </SelectInput>
-            </Field>
-            <Field
-              id="pref-clock"
-              label="Clock"
-              hint={hour12Locked ? LOCKED : undefined}
-            >
-              <SelectInput
-                value={
-                  hour12Locked
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </SelectInput>
+          </Field>
+          <Field
+            id="pref-clock"
+            label="Clock"
+            hint={hour12Locked ? LOCKED : undefined}
+          >
+            <SelectInput
+              value={
+                hour12Locked
+                  ? "default"
+                  : preferences.hour12 == null
                     ? "default"
-                    : preferences.hour12 == null
-                      ? "default"
-                      : preferences.hour12
-                        ? "12"
-                        : "24"
-                }
-                disabled={hour12Locked}
-                onChange={(event) =>
-                  setPreferences({
-                    ...preferences,
-                    hour12:
-                      event.target.value === "default"
-                        ? null
-                        : event.target.value === "12",
-                  })
-                }
-              >
-                <option value="default">
-                  Organization default{clockDefault}
-                </option>
-                <option value="12">12-hour</option>
-                <option value="24">24-hour</option>
-              </SelectInput>
-            </Field>
-            <Field id="pref-font" label="Font scale" hint="1 to 3.">
-              <TextInput
-                type="number"
-                min="1"
-                max="3"
-                step="0.1"
-                value={preferences.fontScale}
-                onChange={(event) =>
-                  setPreferences({
-                    ...preferences,
-                    fontScale: Number(event.target.value),
-                  })
-                }
-              />
-            </Field>
-          </div>
-          <ChoiceGroup label="Accessibility">
+                    : preferences.hour12
+                      ? "12"
+                      : "24"
+              }
+              disabled={hour12Locked}
+              onChange={(event) =>
+                setPreferences({
+                  ...preferences,
+                  hour12:
+                    event.target.value === "default"
+                      ? null
+                      : event.target.value === "12",
+                })
+              }
+            >
+              <option value="default">
+                Organization default{clockDefault}
+              </option>
+              <option value="12">12-hour</option>
+              <option value="24">24-hour</option>
+            </SelectInput>
+          </Field>
+          <Field id="pref-font" label="Font scale" hint="1 to 3.">
+            <TextInput
+              type="number"
+              min="1"
+              max="3"
+              step="0.1"
+              value={preferences.fontScale}
+              onChange={(event) =>
+                setPreferences({
+                  ...preferences,
+                  fontScale: Number(event.target.value),
+                })
+              }
+            />
+          </Field>
+        </div>
+        <div className="f">
+          <span className="flab">Accessibility</span>
+          <ChoiceGroup label="Accessibility" className="checks">
             <Choice
               label="Reduce motion"
               checked={preferences.reducedMotion}
@@ -237,8 +234,8 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
               }
             />
           </ChoiceGroup>
-        </Card>
-      </div>
-    </section>
+        </div>
+      </section>
+    </>
   );
 }

@@ -8,9 +8,7 @@ import {
 } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
-import { cn } from "../ui";
 import { cellState } from "./capture";
-import { PILL, TONE_CLASS } from "./styles";
 import type { OpenDay } from "./useCaptureFlow";
 
 export const DayCell = memo(function DayCell({
@@ -35,31 +33,26 @@ export const DayCell = memo(function DayCell({
     cell.amount !== null ? (
       formats.formatNumber(cell.amount)
     ) : (
-      <span className={PILL}>{cell.reason}</span>
+      <span className="chip mute">{cell.reason}</span>
     )
   ) : missing ? (
-    clickable ? (
-      "Enter"
+    now ? (
+      <span className="due">Due</span>
     ) : (
-      meta.label
+      <span className="chip wait">{meta.label}</span>
     )
   ) : (
     <span className="sr-only">{meta.label}</span>
   );
   const edited = cell.editedAfterCapture && (
-    <small className="text-[11px] font-normal text-grey">Edited</small>
-  );
-  const className = cn(
-    "inline-flex min-h-9 min-w-17 flex-col items-end justify-center rounded-lg px-2 tabular-nums",
-    missing && "items-center text-[13px] font-bold",
-    missing && (now ? "text-teal" : TONE_CLASS[meta.tone]),
+    <span className="note">Edited</span>
   );
   if (!clickable)
     return (
-      <span className={className}>
+      <>
         {content}
         {edited}
-      </span>
+      </>
     );
   return (
     <button
@@ -67,12 +60,7 @@ export const DayCell = memo(function DayCell({
       data-opens={`${vehicle.id}|${cell.date}`}
       aria-label={`${vehicle.registration}, ${formats.formatWeekdayDate(cell.date)}: ${cellState(formats, cell)}`}
       onClick={(event) => onOpen(vehicle, cell.date, event.currentTarget)}
-      className={cn(
-        className,
-        "hover:bg-hover",
-        missing && "border border-dashed",
-        missing && (now ? "border-teal" : "border-clay"),
-      )}
+      className="-mx-1.5 rounded-lg px-1.5 py-0.5 text-right hover:bg-paper-2"
     >
       {content}
       {edited}

@@ -51,8 +51,8 @@ export function usePaging(filterKey: string, defaultSize = DEFAULT_PAGE_SIZE) {
   };
 }
 
-const NAV_BUTTON =
-  "grid h-8 min-w-8 place-items-center rounded-full border border-line bg-surface px-2.5 text-[13px] font-bold text-ink hover:enabled:bg-paper disabled:cursor-default disabled:opacity-45 aria-[current=page]:border-ink aria-[current=page]:bg-ink aria-[current=page]:text-on-fill";
+// Small pill buttons (.btn.sm); the page shown is the ink one (.pri).
+const navButton = (current = false) => cn("btn sm", current && "pri");
 
 // The Pager under a list read a server page at a time (usePagedList).
 export function ListPager({
@@ -71,9 +71,9 @@ export function ListPager({
   );
 }
 
-// Under a list, in a bar like the toolbar's: the rows per page on the left, "Showing 51–100 of 1,234" in the middle
-// and the page buttons on the right. Nothing shows while everything fits the smallest page size; one page shows
-// only the size and the count.
+// A quiet bar under the list (.bar), on the page's side margin: the rows per page on the left, "Showing 51–100 of
+// 1,234" in the middle and the page buttons on the right. Nothing shows while everything fits the smallest page
+// size; one page shows only the size and the count.
 export function Pager({
   page,
   pageSize,
@@ -106,17 +106,9 @@ export function Pager({
   ).map((size) => ({ value: String(size), label: String(size) }));
 
   return (
-    <div
-      className={cn(
-        "mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-(--gut) py-3 in-[dialog]:px-0 max-[720px]:flex-col max-[720px]:items-stretch max-[720px]:text-center",
-        className,
-      )}
-    >
-      <div className="flex items-center gap-2 max-[720px]:justify-center">
-        <label
-          htmlFor={sizeId}
-          className="text-[13px] font-semibold text-slate"
-        >
+    <div className={cn("bar justify-between", className)}>
+      <div className="bar">
+        <label htmlFor={sizeId} className="muted">
           Rows per page
         </label>
         <SearchSelect
@@ -129,22 +121,16 @@ export function Pager({
           onChange={(size) => onPageSizeChange(Number(size))}
         />
       </div>
-      <p
-        className="m-0 text-[13px] font-semibold text-slate"
-        aria-live="polite"
-      >
+      <p className="muted" aria-live="polite">
         Showing {formatNumber(first)}–{formatNumber(last)} of{" "}
         {formatNumber(total)}
       </p>
       {pages > 1 ? (
-        <nav
-          aria-label="Pages"
-          className="flex flex-wrap items-center gap-1.5 max-[720px]:justify-center"
-        >
+        <nav aria-label="Pages" className="bar">
           <button
             type="button"
             aria-label="First page"
-            className={NAV_BUTTON}
+            className={navButton()}
             disabled={page <= 1}
             onClick={go(1)}
           >
@@ -153,15 +139,15 @@ export function Pager({
           <button
             type="button"
             aria-label="Previous page"
-            className={NAV_BUTTON}
+            className={navButton()}
             disabled={page <= 1}
             onClick={go(page - 1)}
           >
-            <ChevronIcon size={18} className="rotate-90" />
+            <ChevronIcon size={16} className="rotate-90" />
           </button>
           {pageItems(page, pages).map((item, index) =>
             item === "gap" ? (
-              <span key={`gap${index}`} aria-hidden="true" className="px-1">
+              <span key={`gap${index}`} aria-hidden="true" className="muted">
                 …
               </span>
             ) : (
@@ -170,7 +156,7 @@ export function Pager({
                 type="button"
                 aria-label={`Page ${item}`}
                 aria-current={item === page ? "page" : undefined}
-                className={NAV_BUTTON}
+                className={navButton(item === page)}
                 onClick={go(item)}
               >
                 {formatNumber(item)}
@@ -180,16 +166,16 @@ export function Pager({
           <button
             type="button"
             aria-label="Next page"
-            className={NAV_BUTTON}
+            className={navButton()}
             disabled={page >= pages}
             onClick={go(page + 1)}
           >
-            <ChevronIcon size={18} className="-rotate-90" />
+            <ChevronIcon size={16} className="-rotate-90" />
           </button>
           <button
             type="button"
             aria-label="Last page"
-            className={NAV_BUTTON}
+            className={navButton()}
             disabled={page >= pages}
             onClick={go(pages)}
           >

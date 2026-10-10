@@ -57,9 +57,7 @@ export function Brand({
       ) : (
         <span className="txt">
           <span className="wm">{name}</span>
-          <span className={cn("wmsub", compact && "max-[899px]:hidden")}>
-            {subline}
-          </span>
+          <span className="wmsub">{subline}</span>
         </span>
       )}
     </span>

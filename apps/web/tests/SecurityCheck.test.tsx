@@ -195,11 +195,11 @@ it("shows the message, not a saved toast, when a vehicle save is intercepted", a
   vi.stubGlobal("fetch", fetcher);
   renderInApp(<VehiclesPage />, { permissions: ["vehicles.manage"] });
 
-  fireEvent.click(await screen.findByRole("button", { name: "KDA 482M" }));
-  fireEvent.change(screen.getByLabelText("Weekly performance target"), {
+  fireEvent.click(await screen.findByRole("button", { name: "Edit KDA 482M" }));
+  fireEvent.change(screen.getByLabelText("Weekly target"), {
     target: { value: "16000" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(await screen.findByText(MESSAGE)).toBeInTheDocument();
   expect(screen.queryByText(/Changes saved/)).not.toBeInTheDocument();

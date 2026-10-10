@@ -48,17 +48,15 @@ export function RevenuePage() {
 
   if (!canView) {
     return (
-      <section>
-        <PageHeader
-          title="Revenue"
-          description="Your access does not include revenue records."
-        />
-      </section>
+      <PageHeader
+        title="Revenue"
+        description="Your access does not include revenue records."
+      />
     );
   }
 
   return (
-    <section className="flex flex-col gap-3.5">
+    <>
       <PageHeader
         title="Revenue"
         actions={
@@ -87,15 +85,14 @@ export function RevenuePage() {
 
       {!data ? (
         week.loading && (
-          <LoadingRegion
-            label="Loading revenue"
-            className="-mx-(--gut) overflow-hidden border-y border-line bg-surface"
-          >
-            <table className="w-full border-collapse">
-              <tbody>
-                <TableRowsSkeleton columns={4} />
-              </tbody>
-            </table>
+          <LoadingRegion label="Loading revenue" className="tbl">
+            <div className="scroll">
+              <table>
+                <tbody>
+                  <TableRowsSkeleton columns={4} />
+                </tbody>
+              </table>
+            </div>
           </LoadingRegion>
         )
       ) : (
@@ -135,6 +132,6 @@ export function RevenuePage() {
           }
         }}
       />
-    </section>
+    </>
   );
 }

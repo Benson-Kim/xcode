@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 
 import {
   EXPENSE_ENTRIES_PATH,
@@ -21,12 +21,12 @@ import {
 } from "@xcode/shared/pettyCash";
 
 import { useFormats } from "../../lib/formats";
-import { DialogFooter } from "../pettycash/DialogFooter";
+import { DialogFooter, FormDialog } from "../pettycash/DialogFooter";
 import { itemOptions } from "../pettycash/itemOptions";
 import { newEntryId, sendJson } from "../pettycash/request";
 import { useDialogAction } from "../pettycash/useDialogAction";
-import { Banner, Button, Dialog, Field, TextInput } from "../ui";
-import { DateField, PurchaseFields, VehicleField } from "./PurchaseFields";
+import { Banner, Button, Field, TextInput } from "../ui";
+import { DateAndVehicle, PurchaseFields } from "./PurchaseFields";
 import { SplitRows, splitState, type Split } from "./SplitRows";
 import { isDateShape, useExpenseChoices } from "./useExpenseChoices";
 
@@ -50,7 +50,7 @@ export function ExpenseDialog({
   onClose: () => void;
 }) {
   return (
-    <Dialog
+    <FormDialog
       open={Boolean(state)}
       title={state?.entry ? "Edit expense" : "Record expense"}
       subtitle={
@@ -70,7 +70,7 @@ export function ExpenseDialog({
           onClose={onClose}
         />
       )}
-    </Dialog>
+    </FormDialog>
   );
 }
 
@@ -106,6 +106,31 @@ function recordedText(
     : `${formats.kes(total)} recorded on ${registration}.`;
 }
 
+const dateProblemOf = (date: string, businessDate: string) =>
+  !isDateShape(date)
+    ? "Enter the date."
+    : date > businessDate
+      ? "The date cannot be after today."
+      : "";
+
+function NoteField({
+  note,
+  onNote,
+}: {
+  note: string;
+  onNote: (note: string) => void;
+}) {
+  return (
+    <Field id="ex-note" label="Note" hint="Optional.">
+      <TextInput
+        maxLength={EXPENSE_NOTE_LIMIT}
+        value={note}
+        onChange={(event) => onNote(event.target.value)}
+      />
+    </Field>
+  );
+}
+
 function ExpenseForm({
   entry,
   startDate,
@@ -132,6 +157,7 @@ function ExpenseForm({
   const [vehicleId, setVehicleId] = useState(entry?.vehicleId ?? "");
   const [splits, setSplits] = useState<Split[] | null>(null);
   const { saving, error, run } = useDialogAction(onConflict);
+  const formId = useId();
 
   const {
     vehicleChoices,
@@ -146,12 +172,7 @@ function ExpenseForm({
     parsedCost.ok && count !== null
       ? expenseTotal(count, parsedCost.amount)
       : null;
-
-  const dateProblem = !isDateShape(date)
-    ? "Enter the date."
-    : date > businessDate
-      ? "The date cannot be after today."
-      : "";
+  const dateProblem = dateProblemOf(date, businessDate);
   const unitsProblem =
     units.trim() && count === null ? PETTY_CASH_UNITS_ERROR : "";
   const costProblem = cost.trim() && !parsedCost.ok ? parsedCost.error : "";
@@ -193,13 +214,31 @@ function ExpenseForm({
   }
 
   return (
-    <form noValidate onSubmit={submit} className="flex flex-col gap-3.5">
+    <form
+      id={formId}
+      noValidate
+      onSubmit={submit}
+      className="flex flex-col gap-3.5"
+    >
       {choicesError && <Banner>{choicesError}</Banner>}
-      <DateField
+      <DateAndVehicle
         date={date}
         businessDate={businessDate}
-        problem={dateProblem}
-        onChange={setDate}
+        dateProblem={dateProblem}
+        onDate={setDate}
+        split={Boolean(splits)}
+        vehicleId={vehicleId}
+        vehicleOptions={vehicleOptions}
+        onVehicle={setVehicleId}
+        onSplit={
+          entry
+            ? undefined
+            : () =>
+                setSplits([
+                  { vehicleId, amount: "" },
+                  { vehicleId: "", amount: "" },
+                ])
+        }
       />
       <PurchaseFields
         itemId={itemId}
@@ -214,14 +253,7 @@ function ExpenseForm({
         group={entry?.group ?? null}
         total={total}
       />
-      <Field id="ex-note" label="Note" hint="Optional.">
-        <TextInput
-          maxLength={EXPENSE_NOTE_LIMIT}
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-        />
-      </Field>
-      {splits ? (
+      {splits && (
         <SplitRows
           splits={splits}
           total={total}
@@ -232,28 +264,23 @@ function ExpenseForm({
             setSplits(null);
           }}
         />
-      ) : (
-        <VehicleField
-          vehicleId={vehicleId}
-          options={vehicleOptions}
-          onVehicle={setVehicleId}
-          onSplit={
-            entry
-              ? undefined
-              : () =>
-                  setSplits([
-                    { vehicleId, amount: "" },
-                    { vehicleId: "", amount: "" },
-                  ])
-          }
-        />
       )}
-      {error && <Banner>{error}</Banner>}
+      <NoteField note={note} onNote={setNote} />
+      {error && (
+        <div className="ferr" role="alert">
+          {error}
+        </div>
+      )}
       <DialogFooter>
         <Button tone="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button type="submit" tone="ok" disabled={saving || !valid}>
+        <Button
+          type="submit"
+          form={formId}
+          tone="ok"
+          disabled={saving || !valid}
+        >
           {splits ? `Save ${splits.length} entries` : "Save"}
         </Button>
       </DialogFooter>

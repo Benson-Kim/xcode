@@ -12,31 +12,27 @@ import {
 type Toast = { id: number; message: string };
 const ToastContext = createContext<(message: string) => void>(() => {});
 
-// Short confirmations after a save (.toast), shown along the bottom of the screen for four seconds.
+// Short confirmations after a save (.toast): one deep pill at the bottom centre for four seconds. A new message
+// takes the place of the one showing, as in the design.
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [toast, setToast] = useState<Toast | null>(null);
   const show = useCallback((message: string) => {
-    setToasts((current) => [
-      ...current,
-      { id: Date.now() + Math.random(), message },
-    ]);
+    setToast({ id: Date.now() + Math.random(), message });
   }, []);
   const dismiss = useCallback((id: number) => {
-    setToasts((current) => current.filter((item) => item.id !== id));
+    setToast((current) => (current?.id === id ? null : current));
   }, []);
   return (
     <ToastContext.Provider value={show}>
       {children}
-      <div className="pointer-events-none fixed bottom-6 left-1/2 z-60 flex w-max max-w-[calc(100%-32px)] -translate-x-1/2 flex-col items-center gap-2">
-        {toasts.map((toast) => (
-          <ToastMessage
-            key={toast.id}
-            id={toast.id}
-            message={toast.message}
-            onDone={dismiss}
-          />
-        ))}
-      </div>
+      {toast && (
+        <ToastMessage
+          key={toast.id}
+          id={toast.id}
+          message={toast.message}
+          onDone={dismiss}
+        />
+      )}
     </ToastContext.Provider>
   );
 }
@@ -55,10 +51,7 @@ function ToastMessage({
     return () => clearTimeout(timer);
   }, [id, onDone]);
   return (
-    <div
-      role="status"
-      className="rounded-full bg-deep px-5 py-[11px] text-[14.5px] font-semibold text-white shadow-[0_10px_24px_rgba(4,32,47,.24)]"
-    >
+    <div role="status" className="toast">
       {message}
     </div>
   );

@@ -1,20 +1,29 @@
 import type { KeyboardEvent, ReactNode } from "react";
 
-// Button cards at the top of a screen that show one part of it at a time.
-// Arrow keys, Home and End move between them; the chosen part is the tab panel below.
-// With `aside` the buttons stack beside it (.pc-top), and the up and down arrows move between them too.
+import { cn } from "./cn";
+
+// On the sheet the panel is not a box of its own: its bars and cards keep the page's side margin and a table in it
+// runs edge to edge, as a table straight on the sheet does (.pagebody > .tbl).
+const PANEL_ON_SHEET =
+  "[.pagebody>&]:mx-0 [.pagebody>&]:flex [.pagebody>&]:flex-col [.pagebody>&]:gap-3.5 [.pagebody>&>*]:mx-(--gut) [.pagebody>&>.tbl]:mx-0 [.pagebody>&>.tbl]:rounded-none [.pagebody>&>.tbl]:border-x-0 [.pagebody>&>.tbl_th:first-child]:pl-(--gut) [.pagebody>&>.tbl_td:first-child]:pl-(--gut) [.pagebody>&>.tbl_th:last-child]:pr-(--gut) [.pagebody>&>.tbl_td:last-child]:pr-(--gut)";
+
+// Button cards at the top of a screen that show one part of it at a time (.tabs > .tab, a name over a count).
+// Arrow keys, Home and End move between them; the chosen part is the tab panel below. They keep the tab roles, so the
+// chosen one is aria-selected and takes the design's pressed look from that.
+// With `aside` the buttons stack beside it, and the up and down arrows move between them too.
 export function Tabs<T extends string>({
   id,
   label,
   options,
   value,
   onChange,
+  className,
   aside,
   children,
 }: {
   id: string;
   label: string;
-  options: { value: T; label: string }[];
+  options: { value: T; label: string; note?: ReactNode }[];
   value: T;
   onChange: (value: T) => void;
   className?: string;
@@ -51,11 +60,10 @@ export function Tabs<T extends string>({
       role="tablist"
       aria-label={label}
       aria-orientation={stacked ? "vertical" : undefined}
-      className={
-        stacked
-          ? "flex min-w-40 flex-col gap-2 max-[900px]:flex-row"
-          : "mt-4.5 grid grid-cols-2 gap-3 max-[520px]:grid-cols-1"
-      }
+      className={cn(
+        stacked ? "flex min-w-40 flex-col gap-3 max-[900px]:flex-row" : "tabs",
+        !stacked && className,
+      )}
     >
       {options.map((option, index) => (
         <button
@@ -68,9 +76,13 @@ export function Tabs<T extends string>({
           tabIndex={option.value === value ? 0 : -1}
           onClick={() => onChange(option.value)}
           onKeyDown={(event) => move(event, index)}
-          className={`rounded-[18px] border border-line bg-surface px-[18px] py-3.5 text-left text-[14.5px] font-bold text-ink hover:border-teal-lift aria-selected:border-teal aria-selected:bg-teal-wash${stacked ? " flex-1" : ""}`}
+          className={cn(
+            "tab aria-selected:border-teal aria-selected:bg-teal-wash",
+            stacked && "flex-1",
+          )}
         >
-          {option.label}
+          <span>{option.label}</span>
+          {option.note !== undefined && <small>{option.note}</small>}
         </button>
       ))}
     </div>
@@ -78,7 +90,12 @@ export function Tabs<T extends string>({
   return (
     <>
       {stacked ? (
-        <div className="mt-4.5 flex items-stretch gap-3.5 max-[900px]:flex-col">
+        <div
+          className={cn(
+            "flex items-stretch gap-3.5 max-[900px]:flex-col",
+            className,
+          )}
+        >
           {list}
           <div className="min-w-0 flex-1">{aside}</div>
         </div>
@@ -89,6 +106,7 @@ export function Tabs<T extends string>({
         role="tabpanel"
         id={`${id}-panel`}
         aria-labelledby={`${id}-tab-${value}`}
+        className={PANEL_ON_SHEET}
       >
         {children}
       </div>

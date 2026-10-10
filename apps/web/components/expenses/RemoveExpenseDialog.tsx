@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 
 import {
   EXPENSE_REASON_LIMIT,
@@ -11,11 +11,11 @@ import {
 } from "@xcode/shared/expenses";
 
 import { useFormats } from "../../lib/formats";
-import { DialogFooter } from "../pettycash/DialogFooter";
+import { DialogFooter, FormDialog } from "../pettycash/DialogFooter";
 import { sendJson } from "../pettycash/request";
 import { useDialogAction } from "../pettycash/useDialogAction";
-import { Banner, Button, CardNote, Dialog, Field, TextInput } from "../ui";
-import { rowLabel } from "./labels";
+import { RegPlate } from "../revenue/RegPlate";
+import { Banner, Button, Field, TextInput } from "../ui";
 
 export function RemoveExpenseDialog({
   row,
@@ -29,7 +29,14 @@ export function RemoveExpenseDialog({
   onClose: () => void;
 }) {
   return (
-    <Dialog open={Boolean(row)} title="Remove this expense" onClose={onClose}>
+    <FormDialog
+      open={Boolean(row)}
+      title="Remove this expense"
+      subtitle={
+        row?.recordedByName ? `Recorded by ${row.recordedByName}` : undefined
+      }
+      onClose={onClose}
+    >
       {row && (
         <RemoveForm
           row={row}
@@ -38,7 +45,7 @@ export function RemoveExpenseDialog({
           onClose={onClose}
         />
       )}
-    </Dialog>
+    </FormDialog>
   );
 }
 
@@ -57,6 +64,7 @@ function RemoveForm({
   const [reason, setReason] = useState("");
   const [problem, setProblem] = useState("");
   const { saving, error, run } = useDialogAction(onConflict);
+  const formId = useId();
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -75,8 +83,19 @@ function RemoveForm({
   }
 
   return (
-    <form noValidate onSubmit={submit} className="flex flex-col gap-3.5">
-      <CardNote>{rowLabel(formats, row)}</CardNote>
+    <form
+      id={formId}
+      noValidate
+      onSubmit={submit}
+      className="flex flex-col gap-3.5"
+    >
+      <div className="mctx">
+        <div className="what">
+          <RegPlate>{row.registration}</RegPlate>
+          <span>{row.itemName}</span>
+        </div>
+        <b className="num">{formats.kes(row.total)}</b>
+      </div>
       <Field
         id="ex-reason"
         label="Reason for removing"
@@ -96,7 +115,7 @@ function RemoveForm({
         <Button tone="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button type="submit" tone="danger" disabled={saving}>
+        <Button type="submit" form={formId} tone="danger" disabled={saving}>
           Remove
         </Button>
       </DialogFooter>

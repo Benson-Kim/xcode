@@ -73,11 +73,23 @@ export function RecurringNotices({
   );
 }
 
-export function recurringHeading(item?: RecurringItem) {
+// An item someone can change is titled for the change, with its name under it; one they can only view, by its name.
+export function recurringHeading(
+  item?: RecurringItem,
+  kind?: number,
+  canEdit = true,
+) {
+  const editTitle = item?.kind === 2 ? "Edit saving" : "Edit scheduled expense";
   return {
-    title: item ? item.name : "Add scheduled expense or saving",
+    title: item
+      ? canEdit
+        ? editTitle
+        : item.name
+      : kind === 2
+        ? "New saving"
+        : "New scheduled expense",
     description: item
-      ? `${recurringFrequency(item)}${item.note ? `. ${item.note}` : ""}`
+      ? `${canEdit ? `${item.name} · ` : ""}${recurringFrequency(item)}${item.note ? `. ${item.note}` : ""}`
       : "It posts to the vehicles you choose on every due date.",
   };
 }

@@ -27,18 +27,13 @@ export function ReasonPicker({
       <p className="m-0 flex items-center gap-3 text-[13px] font-semibold text-slate before:h-px before:flex-1 before:bg-line before:content-[''] after:h-px after:flex-1 after:bg-line after:content-['']">
         or no revenue
       </p>
-      <div
-        role="group"
-        aria-label="No revenue reason"
-        className="grid grid-cols-4 gap-2 max-[600px]:grid-cols-2"
-      >
+      <div role="group" aria-label="No revenue reason" className="pills">
         {REVENUE_REASONS.map((item) => (
           <button
             key={item}
             type="button"
             aria-pressed={reason === item}
             onClick={() => onChoose(item)}
-            className="min-h-12 rounded-xl border border-line bg-surface text-[15px] font-semibold aria-pressed:border-2 aria-pressed:border-teal aria-pressed:bg-teal-wash aria-pressed:text-teal"
           >
             {item}
           </button>

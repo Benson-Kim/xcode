@@ -53,33 +53,30 @@ export function PeopleAccessView({
   );
   const error = streamError(people) || roles.error || catalog.error;
 
-  if (editing) {
-    return (
-      <PersonEditor
-        person={editing === "new" ? undefined : editing}
-        roles={roles.data}
-        groups={catalog.data}
-        scopeOptions={canManage ? scope.data : { companies: [], vehicles: [] }}
-        canManage={canManage}
-        canManageAccess={canManageAccess}
-        onClose={() => setEditing(null)}
-        onSaved={() => {
-          setEditing(null);
-          people.reload();
-        }}
-      />
-    );
-  }
+  const editor = editing && (
+    <PersonEditor
+      person={editing === "new" ? undefined : editing}
+      roles={roles.data}
+      groups={catalog.data}
+      scopeOptions={canManage ? scope.data : { companies: [], vehicles: [] }}
+      canManage={canManage}
+      canManageAccess={canManageAccess}
+      onClose={() => setEditing(null)}
+      onSaved={() => {
+        setEditing(null);
+        people.reload();
+      }}
+    />
+  );
 
   return (
-    <section className="flex flex-col gap-3.5">
+    <>
       <PageHeader
         title="People and access"
-        description="Everyone who can sign in, what they can see and what they can do."
         actions={
           canManage && (
             <Button tone="primary" onClick={() => setEditing("new")}>
-              Add person
+              New person
             </Button>
           )
         }
@@ -93,6 +90,10 @@ export function PeopleAccessView({
         failed={Boolean(people.error)}
         roles={roles.data}
         scope={scope.data}
+        permissionTotal={catalog.data?.reduce(
+          (sum, group) => sum + group.items.length,
+          0,
+        )}
         filters={filters}
         onFilters={setFilters}
         canManage={canManage}
@@ -106,6 +107,7 @@ export function PeopleAccessView({
           error={recent.error}
         />
       )}
-    </section>
+      {editor}
+    </>
   );
 }

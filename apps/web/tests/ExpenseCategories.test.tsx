@@ -94,23 +94,23 @@ it("lists items with their category, and categories grouped by bucket, read-only
   const tyres = screen.getByRole("row", { name: /Tyres/ });
   expect(within(tyres).getByText("Garage and repairs")).toBeInTheDocument();
   expect(
-    within(tyres).getByText("Counts as Repairs and maintenance"),
-  ).toBeInTheDocument();
+    within(tyres).getByTitle("Counts as Repairs and maintenance"),
+  ).toHaveTextContent("Garage and repairs");
   expect(within(tyres).getByText("In use")).toBeInTheDocument();
   expect(
     within(screen.getByRole("row", { name: /Spares/ })).getByText("Turned off"),
   ).toBeInTheDocument();
   expect(screen.getByText("3 items")).toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: /Add|Edit|Turn/ }),
+    screen.queryByRole("button", { name: /New|Add|Edit|Turn/ }),
   ).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Show"), { target: { value: "on" } });
   expect(screen.queryByText("Spares")).not.toBeInTheDocument();
   expect(screen.getByText("2 items")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("tab", { name: "Categories" }));
-  expect(screen.getByRole("tab", { name: "Categories" })).toHaveAttribute(
+  fireEvent.click(screen.getByRole("tab", { name: /^Categories/ }));
+  expect(screen.getByRole("tab", { name: /^Categories/ })).toHaveAttribute(
     "aria-selected",
     "true",
   );
@@ -134,14 +134,14 @@ it("moves between the tabs with the arrow keys", async () => {
   renderInApp(<ExpenseCategoriesPage canManage={false} />);
   await screen.findByText("Tyres");
 
-  const items = screen.getByRole("tab", { name: "Items" });
+  const items = screen.getByRole("tab", { name: /^Items/ });
   items.focus();
   fireEvent.keyDown(items, { key: "ArrowRight" });
-  expect(screen.getByRole("tab", { name: "Categories" })).toHaveAttribute(
+  expect(screen.getByRole("tab", { name: /^Categories/ })).toHaveAttribute(
     "aria-selected",
     "true",
   );
-  expect(screen.getByRole("tab", { name: "Categories" })).toHaveFocus();
+  expect(screen.getByRole("tab", { name: /^Categories/ })).toHaveFocus();
   expect(screen.getByRole("tabpanel")).toHaveAttribute(
     "aria-labelledby",
     "expenses-tab-categories",
@@ -155,12 +155,12 @@ it("adds a category and an item, refusing names already taken", async () => {
   });
   await screen.findByText("Tyres");
 
-  fireEvent.click(screen.getByRole("tab", { name: "Categories" }));
-  fireEvent.click(screen.getByRole("button", { name: "Add category" }));
+  fireEvent.click(screen.getByRole("tab", { name: /^Categories/ }));
+  fireEvent.click(screen.getByRole("button", { name: "New category" }));
   fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "loans" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(screen.getByRole("alert")).toHaveTextContent(
     "That category already exists.",
   );
@@ -170,7 +170,7 @@ it("adds a category and an item, refusing names already taken", async () => {
   fireEvent.change(screen.getByLabelText("Counts as"), {
     target: { value: "2" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(writes(fetchMock)).toEqual([
       [
@@ -182,8 +182,8 @@ it("adds a category and an item, refusing names already taken", async () => {
   );
   expect(await screen.findByText("Fuel and road added.")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("tab", { name: "Items" }));
-  fireEvent.click(screen.getByRole("button", { name: "Add item" }));
+  fireEvent.click(screen.getByRole("tab", { name: /^Items/ }));
+  fireEvent.click(screen.getByRole("button", { name: "New item" }));
   const dialog = within(screen.getByRole("dialog", { name: "New item" }));
   fireEvent.change(dialog.getByLabelText("Category"), {
     target: { value: "garage" },
@@ -191,14 +191,14 @@ it("adds a category and an item, refusing names already taken", async () => {
   fireEvent.change(dialog.getByLabelText("Name"), {
     target: { value: "TYRES" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(screen.getByRole("alert")).toHaveTextContent(
     "That item already exists in this category.",
   );
   fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "Towing" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(fetchMock)).toHaveLength(2));
   expect(writes(fetchMock)[1]).toEqual([
     "/api/setup/expense-categories/garage/items",
@@ -215,7 +215,7 @@ it("renames, changes the bucket, turns off and turns on", async () => {
   await screen.findByText("Tyres");
 
   fireEvent.click(screen.getByRole("button", { name: "Edit Tyres" }));
-  fireEvent.change(screen.getByLabelText("Item name"), {
+  fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "Tyres and tubes" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -235,7 +235,7 @@ it("renames, changes the bucket, turns off and turns on", async () => {
   );
   expect(await screen.findByText("Spares turned on.")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("tab", { name: "Categories" }));
+  fireEvent.click(screen.getByRole("tab", { name: /^Categories/ }));
   fireEvent.click(screen.getByRole("button", { name: "Edit Loans" }));
   fireEvent.change(screen.getByLabelText("Counts as"), {
     target: { value: "2" },
@@ -340,7 +340,7 @@ it("cancels a stop dated ahead of the business date with Turn on instead of stop
       ["/api/setup/expense-items/later/restore", "POST", {}],
     ]),
   );
-  fireEvent.click(screen.getByRole("tab", { name: "Categories" }));
+  fireEvent.click(screen.getByRole("tab", { name: /^Categories/ }));
   fireEvent.click(screen.getByRole("button", { name: "Turn on Soon off" }));
   await waitFor(() =>
     expect(writes(fetchMock as ReturnType<typeof serve>)[1]).toEqual([

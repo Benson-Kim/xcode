@@ -137,10 +137,9 @@ export function CompaniesPage() {
     : undefined;
 
   return (
-    <section>
+    <>
       <PageHeader
         title="PSV companies"
-        description="Every vehicle belongs to one company. Archive a company after its vehicles have left the fleet."
         actions={
           <Button tone="primary" onClick={() => setAdding(true)}>
             New company
@@ -148,12 +147,83 @@ export function CompaniesPage() {
         }
       />
       {(companies.error || (addError && !adding)) && (
-        <Banner className="mb-3.5">{streamError(companies) || addError}</Banner>
+        <Banner>{streamError(companies) || addError}</Banner>
       )}
+      <DataTable
+        columns={[
+          { label: "PSV company" },
+          { label: "Vehicles", numeric: true },
+          { label: "Status" },
+          { label: "Actions", numeric: true },
+        ]}
+        loading={companies.loading}
+        loadingLabel="Loading companies"
+        isEmpty={!rows.length}
+        failed={Boolean(companies.error)}
+        emptyMessage="No PSV companies yet. Add the first one above."
+      >
+        {rows.map((company) => (
+          <Tr key={company.id}>
+            <Td label="PSV company" className="item">
+              {company.name}
+            </Td>
+            <Td label="Vehicles" numeric>
+              {company.vehicleCount}
+            </Td>
+            <Td label="Status">
+              <StatusBadge
+                tone={
+                  company.active === false
+                    ? "off"
+                    : company.archivedOn
+                      ? "warn"
+                      : "ok"
+                }
+              >
+                {company.active === false
+                  ? "Archived"
+                  : company.archivedOn
+                    ? `Archives on ${formatDateOnly(company.archivedOn)}`
+                    : "Active"}
+              </StatusBadge>
+            </Td>
+            <Td numeric>
+              <div className="tacts">
+                {company.active !== false && (
+                  <RowAction
+                    disabled={busy}
+                    onClick={() =>
+                      setRenaming({
+                        id: company.id,
+                        name: company.name,
+                        error: "",
+                      })
+                    }
+                    aria-label={`Edit ${company.name}`}
+                  >
+                    Edit
+                  </RowAction>
+                )}
+                {/* An archive dated ahead has not taken effect, so it can still be cancelled with Restore. */}
+                <RowAction
+                  tone={archivedOnRecord(company) ? "ok" : "warn"}
+                  disabled={busy}
+                  aria-label={`${archivedOnRecord(company) ? "Restore" : "Archive"} ${company.name}`}
+                  onClick={() =>
+                    void setArchived(company, !archivedOnRecord(company))
+                  }
+                >
+                  {archivedOnRecord(company) ? "Restore" : "Archive"}
+                </RowAction>
+              </div>
+            </Td>
+          </Tr>
+        ))}
+      </DataTable>
       <Dialog
         open={adding}
         title="New company"
-        size="md"
+        size="sm"
         onClose={closeAdd}
         footer={
           <>
@@ -166,25 +236,22 @@ export function CompaniesPage() {
               tone="ok"
               disabled={busy}
             >
-              Add company
+              Save
             </Button>
           </>
         }
       >
         <form
           id="company-add-form"
+          className="contents"
           onSubmit={(event) => {
             event.preventDefault();
             void add();
           }}
         >
-          <Field
-            id="new-company"
-            label="New PSV company"
-            error={adding ? addError : ""}
-          >
+          <Field id="new-company" label="Name" error={adding ? addError : ""}>
             <TextInput
-              placeholder="Company name"
+              autoFocus
               value={name}
               onChange={(event) => {
                 setName(event.target.value);
@@ -196,9 +263,9 @@ export function CompaniesPage() {
       </Dialog>
       <Dialog
         open={Boolean(renaming && renamingCompany)}
-        title="Rename company"
+        title="Edit company"
         subtitle={renamingCompany?.name}
-        size="md"
+        size="sm"
         onClose={() => setRenaming(null)}
         footer={
           <>
@@ -219,6 +286,7 @@ export function CompaniesPage() {
         {renaming && renamingCompany && (
           <form
             id="company-rename-form"
+            className="contents"
             onSubmit={(event) => {
               event.preventDefault();
               void saveRename(renamingCompany);
@@ -226,7 +294,7 @@ export function CompaniesPage() {
           >
             <Field
               id={`rename-${renamingCompany.id}`}
-              label="New name"
+              label="Name"
               error={renaming.error}
             >
               <TextInput
@@ -244,78 +312,7 @@ export function CompaniesPage() {
           </form>
         )}
       </Dialog>
-      <DataTable
-        columns={[
-          { label: "Company" },
-          { label: "Status" },
-          { label: "Vehicles", numeric: true },
-          { label: "Actions", hidden: true },
-        ]}
-        loading={companies.loading}
-        loadingLabel="Loading companies"
-        isEmpty={!rows.length}
-        failed={Boolean(companies.error)}
-        emptyMessage="No PSV companies yet. Add the first one above."
-      >
-        {rows.map((company) => (
-          <Tr key={company.id}>
-            <Td label="Company">
-              <span className="font-semibold text-ink">{company.name}</span>
-            </Td>
-            <Td label="Status">
-              <StatusBadge
-                tone={
-                  company.active === false
-                    ? "off"
-                    : company.archivedOn
-                      ? "warn"
-                      : "ok"
-                }
-              >
-                {company.active === false
-                  ? "Archived"
-                  : company.archivedOn
-                    ? `Archives on ${formatDateOnly(company.archivedOn)}`
-                    : "Active"}
-              </StatusBadge>
-            </Td>
-            <Td label="Vehicles" numeric>
-              {company.vehicleCount}
-            </Td>
-            <Td>
-              <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
-                {company.active !== false && (
-                  <RowAction
-                    disabled={busy}
-                    onClick={() =>
-                      setRenaming({
-                        id: company.id,
-                        name: company.name,
-                        error: "",
-                      })
-                    }
-                    aria-label={`Rename ${company.name}`}
-                  >
-                    Rename
-                  </RowAction>
-                )}
-                {/* An archive dated ahead has not taken effect, so it can still be cancelled with Restore. */}
-                <RowAction
-                  tone={archivedOnRecord(company) ? "ok" : "warn"}
-                  disabled={busy}
-                  aria-label={`${archivedOnRecord(company) ? "Restore" : "Archive"} ${company.name}`}
-                  onClick={() =>
-                    void setArchived(company, !archivedOnRecord(company))
-                  }
-                >
-                  {archivedOnRecord(company) ? "Restore" : "Archive"}
-                </RowAction>
-              </div>
-            </Td>
-          </Tr>
-        ))}
-      </DataTable>
       <ListPager list={companies} />
-    </section>
+    </>
   );
 }

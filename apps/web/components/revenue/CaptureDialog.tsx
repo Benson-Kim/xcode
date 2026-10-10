@@ -1,5 +1,6 @@
 import { revenueApi } from "../../lib/endpoints/revenue";
-import { Banner, Dialog, ListSkeleton, LoadingRegion } from "../ui";
+import { FormDialog } from "../pettycash/DialogFooter";
+import { Banner, ListSkeleton, LoadingRegion } from "../ui";
 import { CaptureForm } from "./CaptureForm";
 import type { useCaptureFlow } from "./useCaptureFlow";
 
@@ -12,7 +13,7 @@ export function CaptureDialog({
 }) {
   const { capture, vehicle, cell, elsewhere } = flow;
   return (
-    <Dialog open={capture !== null} title={flow.title} onClose={flow.close}>
+    <FormDialog open={capture !== null} title={flow.title} onClose={flow.close}>
       {capture &&
         (vehicle && cell ? (
           <CaptureForm
@@ -41,6 +42,6 @@ export function CaptureDialog({
             <ListSkeleton rows={2} />
           </LoadingRegion>
         ))}
-    </Dialog>
+    </FormDialog>
   );
 }

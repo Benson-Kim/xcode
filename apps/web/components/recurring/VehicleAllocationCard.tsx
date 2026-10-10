@@ -1,15 +1,14 @@
+import { Fragment } from "react";
+
 import { useFormats } from "../../lib/formats";
 import type { VehicleOption } from "../setup/shared";
 import {
   BalancePanel,
-  Card,
-  CardHeader,
   Chip,
   ChipGroup,
   Choice,
   CurrencyInput,
   ErrorText,
-  GroupLabel,
   Hint,
   ListSkeleton,
 } from "../ui";
@@ -81,7 +80,7 @@ function AllocationHints({
   );
 }
 
-function VehicleShareRow({
+function VehicleChoice({
   vehicle,
   disabled,
   alloc,
@@ -92,30 +91,44 @@ function VehicleShareRow({
 }) {
   const ticked = alloc.selected.includes(vehicle.id);
   return (
-    <div className="grid min-h-13 grid-cols-[minmax(0,320px)_200px] items-center gap-4 border-t border-divider max-[720px]:grid-cols-[minmax(0,1fr)_140px] max-[720px]:gap-3">
-      <Choice
-        label={
-          vehicle.active === false
-            ? `${vehicle.registration} (not in the fleet today)`
-            : vehicle.registration
-        }
-        checked={ticked}
-        disabled={disabled || (vehicle.active === false && !ticked)}
-        onChange={(event) =>
-          alloc.toggleVehicle(vehicle.id, event.target.checked)
-        }
-      />
-      {ticked ? (
-        <CurrencyInput
-          density="compact"
-          aria-label={`Share for ${vehicle.registration}`}
-          value={alloc.shares[vehicle.id] ?? "0"}
-          disabled={disabled || vehicle.active === false}
-          onChange={(event) => alloc.setShare(vehicle.id, event.target.value)}
-        />
-      ) : (
-        <span />
-      )}
+    <Choice
+      label={
+        vehicle.active === false
+          ? `${vehicle.registration} (not in the fleet today)`
+          : vehicle.registration
+      }
+      checked={ticked}
+      disabled={disabled || (vehicle.active === false && !ticked)}
+      onChange={(event) =>
+        alloc.toggleVehicle(vehicle.id, event.target.checked)
+      }
+    />
+  );
+}
+
+function ShareCells({
+  vehicles,
+  disabled,
+  alloc,
+}: Pick<Props, "vehicles" | "disabled" | "alloc">) {
+  const ticked = vehicles.filter((vehicle) =>
+    alloc.selected.includes(vehicle.id),
+  );
+  if (!ticked.length) return null;
+  return (
+    <div className="ogrid">
+      {ticked.map((vehicle) => (
+        <div key={vehicle.id} className="ocell">
+          <span className="reg">{vehicle.registration}</span>
+          <CurrencyInput
+            density="compact"
+            aria-label={`Share for ${vehicle.registration}`}
+            value={alloc.shares[vehicle.id] ?? "0"}
+            disabled={disabled || vehicle.active === false}
+            onChange={(event) => alloc.setShare(vehicle.id, event.target.value)}
+          />
+        </div>
+      ))}
     </div>
   );
 }
@@ -134,11 +147,11 @@ export function VehicleAllocationCard({
     ).entries(),
   ];
   return (
-    <Card density="form">
-      <CardHeader
-        title="Vehicles"
-        description="Split the amount across one or more vehicles. It must add up exactly."
-      />
+    <div className="f">
+      <span className="flab">Vehicles</span>
+      <Hint>
+        Split the amount across one or more vehicles. It must add up exactly.
+      </Hint>
       {!disabled && !vehiclesLoading && (
         <SelectionActions companies={companies} alloc={alloc} />
       )}
@@ -149,24 +162,28 @@ export function VehicleAllocationCard({
           <ListSkeleton rows={3} />
         </div>
       )}
-      <div>
-        {!vehiclesLoading &&
-          companies.map(([companyId, companyName]) => (
-            <div key={companyId || "vehicles"}>
-              {companyName && <GroupLabel>{companyName}</GroupLabel>}
-              {vehicles
-                .filter((vehicle) => vehicle.companyId === companyId)
-                .map((vehicle) => (
-                  <VehicleShareRow
-                    key={vehicle.id}
-                    vehicle={vehicle}
-                    disabled={disabled}
-                    alloc={alloc}
-                  />
-                ))}
-            </div>
+      {!vehiclesLoading && (
+        <div className="vgrid">
+          {companies.map(([companyId, companyName]) => (
+            <Fragment key={companyId || "vehicles"}>
+              <span className="cogrp">{companyName}</span>
+              <div className="checks">
+                {vehicles
+                  .filter((vehicle) => vehicle.companyId === companyId)
+                  .map((vehicle) => (
+                    <VehicleChoice
+                      key={vehicle.id}
+                      vehicle={vehicle}
+                      disabled={disabled}
+                      alloc={alloc}
+                    />
+                  ))}
+              </div>
+            </Fragment>
           ))}
-      </div>
+        </div>
+      )}
+      <ShareCells vehicles={vehicles} disabled={disabled} alloc={alloc} />
       <BalancePanel ok={alloc.isBalanced}>
         <span>
           Allocated {kes(alloc.allocationTotal)} of {kes(alloc.total)}
@@ -184,6 +201,6 @@ export function VehicleAllocationCard({
         </span>
       </BalancePanel>
       {error && <ErrorText>{error}</ErrorText>}
-    </Card>
+    </div>
   );
 }

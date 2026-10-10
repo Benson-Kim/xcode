@@ -12,9 +12,15 @@ export function FigureCards({ figures }: { figures: ExpenseFigures }) {
       <BandFigure label="Total" value={formats.formatNumber(figures.total)} />
       <BandStats
         items={[
-          { label: "Central", value: formats.kes(figures.central) },
-          { label: "Petty cash", value: formats.kes(figures.pettyCash) },
-          { label: "Scheduled", value: formats.kes(figures.scheduled) },
+          { label: "Central", value: formats.formatNumber(figures.central) },
+          {
+            label: "Petty cash",
+            value: formats.formatNumber(figures.pettyCash),
+          },
+          {
+            label: "Scheduled",
+            value: formats.formatNumber(figures.scheduled),
+          },
         ]}
       />
     </div>

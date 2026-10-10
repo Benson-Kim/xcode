@@ -3,18 +3,8 @@ import type { RevenueWeek } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
 import { shiftDate } from "../revenueFormat";
-import {
-  BandFigure,
-  BandStats,
-  bandControl,
-  ChevronIcon,
-  HeroBand,
-  Skeleton,
-} from "../ui";
+import { BandFigure, BandStats, HeroBand, Skeleton } from "../ui";
 import { BandSkeleton } from "./RegPlate";
-
-const STEP =
-  "grid h-[34px] w-[30px] place-items-center rounded-[9px] text-white hover:enabled:bg-glass-2 disabled:opacity-30";
 
 function countDays(week: RevenueWeek) {
   let noRevenue = 0;
@@ -45,34 +35,29 @@ export function WeekToolbar({
   const formats = useFormats();
   const counts = data && countDays(data);
   const period = (
-    <div className="inline-flex items-center rounded-xl border border-glass-line bg-glass p-[3px]">
+    <div className="step">
       <button
         type="button"
         aria-label="Previous week"
         disabled={!start}
         onClick={() => onWeek(shiftDate(start, -7))}
-        className={STEP}
       >
-        <ChevronIcon size={20} className="rotate-90" />
+        ‹
       </button>
-      <strong
-        aria-live="polite"
-        className="min-w-[222px] px-2 text-center text-[15px] font-bold text-white max-[600px]:min-w-0"
-      >
+      <span className="d" aria-live="polite">
         {start ? (
           formats.formatDateRange(start, shiftDate(start, 6))
         ) : (
           <Skeleton className="mx-auto w-36" />
         )}
-      </strong>
+      </span>
       <button
         type="button"
         aria-label="Next week"
         disabled={!shown || start >= shown.currentWeekStart}
         onClick={() => onWeek(shiftDate(start, 7))}
-        className={STEP}
       >
-        <ChevronIcon size={20} className="-rotate-90" />
+        ›
       </button>
     </div>
   );
@@ -83,7 +68,7 @@ export function WeekToolbar({
         aria-label="Company"
         value={companyId}
         onChange={(event) => onCompany(event.target.value)}
-        className={bandControl}
+        className="inp"
       >
         <option value="">All companies</option>
         {shown.companies.map((company) => (
@@ -97,18 +82,21 @@ export function WeekToolbar({
     <HeroBand period={period} tools={tools}>
       {data ? (
         <>
-          <div className="flex flex-col gap-0.5">
-            <BandFigure
-              label="Week to date"
-              value={formats.formatNumber(data.totalAmount)}
-            />
-            <small className="text-[13px] font-semibold text-on-deep">
-              {`of ${formats.kes(data.totalExpected)} expected${data.percent === null ? "" : `, ${percentText(data.percent)}`}`}
-            </small>
-          </div>
+          <BandFigure
+            label="Revenue"
+            value={formats.formatNumber(data.totalAmount)}
+          />
           {counts && (
             <BandStats
               items={[
+                {
+                  label: "Expected",
+                  value: formats.formatNumber(data.totalExpected),
+                },
+                {
+                  label: "Reached",
+                  value: data.percent === null ? "" : percentText(data.percent),
+                },
                 { label: "No revenue days", value: String(counts.noRevenue) },
                 {
                   label: "Missing days",

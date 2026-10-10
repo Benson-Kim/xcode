@@ -115,14 +115,18 @@ it("tells a vehicle that has not joined yet from one that has left the fleet", a
     { businessDate },
   );
 
-  await screen.findByRole("button", { name: "KDA 482M" });
+  await screen.findByRole("button", { name: /^(Edit|Open) KDA 482M$/ });
   expect(status("KDA 482M")).toHaveTextContent("Joins 3 Oct 2026");
   expect(status("KCY 117T")).toHaveTextContent("Left fleet 10 Sep 2026");
   expect(status("KDG 905B")).toHaveTextContent("Active");
   // Leaving the fleet ends the target; a vehicle that has not joined yet keeps the one it starts on.
-  expect(row("KCY 117T").getByText("Target ended")).toBeInTheDocument();
+  expect(row("KCY 117T").getByTitle("Target ended")).toHaveTextContent("—");
   expect(row("KCY 117T").queryByText(/KES/)).not.toBeInTheDocument();
-  expect(row("KDA 482M").getByText("KES 15,000")).toBeInTheDocument();
+  expect(
+    row("KDA 482M").getByText("15,000", {
+      selector: "td[data-label='Weekly target']",
+    }),
+  ).toBeInTheDocument();
 });
 
 it("lets a vehicle that has not joined yet be edited, and shows what the server saved", async () => {
@@ -143,14 +147,18 @@ it("lets a vehicle that has not joined yet be edited, and shows what the server 
     { businessDate },
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "KDA 482M" }));
-  expect(screen.getByText("North Star · Joins 3 Oct 2026")).toBeInTheDocument();
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^(Edit|Open) KDA 482M$/ }),
+  );
+  expect(
+    screen.getByText("KDA 482M · North Star · Joins 3 Oct 2026"),
+  ).toBeInTheDocument();
   expect(
     screen.getByText(
       "Joins the fleet on 3 Oct 2026, after the business date. To save a change, set a join date on or before 21 Sep 2026.",
     ),
   ).toBeInTheDocument();
-  expect(screen.getByLabelText("Weekly performance target")).toBeEnabled();
+  expect(screen.getByLabelText("Weekly target")).toBeEnabled();
   expect(
     screen.queryByRole("button", { name: "Restore to active fleet" }),
   ).not.toBeInTheDocument();
@@ -164,10 +172,10 @@ it("lets a vehicle that has not joined yet be edited, and shows what the server 
   fireEvent.change(screen.getByLabelText("In the fleet from"), {
     target: { value: "2026-09-20" },
   });
-  fireEvent.change(screen.getByLabelText("Weekly performance target"), {
+  fireEvent.change(screen.getByLabelText("Weekly target"), {
     target: { value: "16000" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/setup/vehicles/joining",
@@ -195,14 +203,18 @@ it("keeps a retired vehicle read-only until it is restored, and reloads it after
     { businessDate },
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "KCY 117T" }));
-  expect(screen.getByLabelText("Weekly performance target")).toBeDisabled();
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^(Edit|Open) KCY 117T$/ }),
+  );
+  expect(screen.getByLabelText("Weekly target")).toBeDisabled();
   expect(
     screen.getByRole("button", { name: "Restore to active fleet" }),
   ).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-  fireEvent.click(await screen.findByRole("button", { name: "KDG 905B" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^(Edit|Open) KDG 905B$/ }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Retire vehicle" }));
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
@@ -214,9 +226,7 @@ it("keeps a retired vehicle read-only until it is restored, and reloads it after
     await screen.findByText("Left the fleet on 21 Sep 2026."),
   ).toBeInTheDocument();
   // The form keeps the target the server has.
-  expect(screen.getByLabelText("Weekly performance target")).toHaveValue(
-    "15,000",
-  );
+  expect(screen.getByLabelText("Weekly target")).toHaveValue("15,000");
 });
 
 // D4: restoring a vehicle whose leave already took effect records the days it was away, so the editor has to say
@@ -235,7 +245,9 @@ it("restores a retired vehicle on a chosen date and lists the days it was away",
     { businessDate },
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "KCY 117T" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^(Edit|Open) KCY 117T$/ }),
+  );
   // The return date follows the business date until someone chooses another.
   expect(screen.getByLabelText("Returns to the fleet")).toHaveValue(
     "2026-09-21",
@@ -265,7 +277,7 @@ it("restores a retired vehicle on a chosen date and lists the days it was away",
   expect(screen.getByText("10 to 20 Sep 2026")).toBeInTheDocument();
   expect(screen.getByText("Back on 21 Sep 2026")).toBeInTheDocument();
   // Back in the fleet, so it can be edited and retired again.
-  expect(screen.getByLabelText("Weekly performance target")).toBeEnabled();
+  expect(screen.getByLabelText("Weekly target")).toBeEnabled();
   expect(
     screen.getByRole("button", { name: "Retire vehicle" }),
   ).toBeInTheDocument();
@@ -279,7 +291,9 @@ it("says a return on the day it left undoes the leave instead of recording time 
     { businessDate },
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "KCY 117T" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^(Edit|Open) KCY 117T$/ }),
+  );
   fireEvent.change(screen.getByLabelText("Returns to the fleet"), {
     target: { value: "2026-09-10" },
   });

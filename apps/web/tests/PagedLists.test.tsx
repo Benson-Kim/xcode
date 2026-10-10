@@ -85,7 +85,7 @@ it("pages People and access on the server, filters included", async () => {
   renderInApp(<PeopleAccessView />, { permissions: ["people.view"] });
 
   expect(
-    await screen.findByRole("button", { name: "Person25 Test" }),
+    await screen.findByRole("button", { name: "View Person25 Test" }),
   ).toBeInTheDocument();
   expect(reads(api, "setup/people")).toEqual([
     "setup/people?page=1&pageSize=25",
@@ -94,7 +94,7 @@ it("pages People and access on the server, filters included", async () => {
 
   fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
   expect(
-    await screen.findByRole("button", { name: "Person26 Test" }),
+    await screen.findByRole("button", { name: "View Person26 Test" }),
   ).toBeInTheDocument();
   expect(reads(api, "setup/people").at(-1)).toBe(
     "setup/people?page=2&pageSize=25",
@@ -109,9 +109,11 @@ it("pages People and access on the server, filters included", async () => {
     "setup/people?role=Fleet+manager&page=1&pageSize=25",
   );
   expect(
-    screen.getByRole("button", { name: "Person40 Test" }),
+    screen.getByRole("button", { name: "View Person40 Test" }),
   ).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Person39 Test" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "View Person39 Test" }),
+  ).toBeNull();
 });
 
 it("pages Scheduled expenses and savings on the server", async () => {
@@ -145,12 +147,12 @@ it("pages Scheduled expenses and savings on the server", async () => {
 
   expect(await screen.findByText("Cost 25")).toBeInTheDocument();
   expect(reads(api, "setup/recurring?")).toEqual([
-    "setup/recurring?page=1&pageSize=25",
+    "setup/recurring?kind=cost&page=1&pageSize=25",
   ]);
   expect(screen.queryByText("Cost 26")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Next page" }));
   expect(await screen.findByText("Cost 30")).toBeInTheDocument();
   expect(reads(api, "setup/recurring?").at(-1)).toBe(
-    "setup/recurring?page=2&pageSize=25",
+    "setup/recurring?kind=cost&page=2&pageSize=25",
   );
 });

@@ -16,15 +16,7 @@ import { onSessionExpired, restoreSession } from "../lib/session";
 import { AppShell } from "./AppShell";
 import { Brand } from "./Brand";
 import { PinInput } from "./PinInput";
-import {
-  Banner,
-  Button,
-  Field,
-  LinkButton,
-  PageHeader,
-  Skeleton,
-  TextInput,
-} from "./ui";
+import { Banner, Button, Field, LinkButton, Skeleton, TextInput } from "./ui";
 
 type Screen =
   | "sign-in"
@@ -269,11 +261,7 @@ export function AuthPanel() {
     ) : verifying ? (
       <>
         {screen === "verify-device" ? "New device. " : ""}We sent a code to{" "}
-        {maskedEmail ? (
-          <strong className="text-ink">{maskedEmail}</strong>
-        ) : (
-          "your registered email"
-        )}
+        {maskedEmail ? <strong>{maskedEmail}</strong> : "your registered email"}
         , the email your admin registered. It works for 10 minutes.
       </>
     ) : requested ? (
@@ -283,39 +271,39 @@ export function AuthPanel() {
     );
 
   return (
-    <div className="grid min-h-screen grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] max-[760px]:grid-cols-1 max-[760px]:grid-rows-[auto_1fr]">
-      <header className="relative flex flex-col justify-between gap-6 overflow-hidden bg-linear-168 from-deep from-0% via-deep-2 via-52% to-deep-3 to-100% p-[clamp(24px,5vw,64px)] text-on-deep before:pointer-events-none before:absolute before:top-[46%] before:-left-1/5 before:h-30 before:w-[140%] before:-rotate-30 before:rounded-full before:bg-glass before:opacity-30 before:content-[''] after:pointer-events-none after:absolute after:top-[46%] after:-left-1/5 after:h-30 after:w-[140%] after:rotate-30 after:rounded-full after:bg-glass after:opacity-[.18] after:content-[''] max-[760px]:flex-row max-[760px]:items-center max-[760px]:py-5 [&>*]:relative [&_.wm]:text-[clamp(30px,3.6vw,44px)] [&_.wmsub]:mt-[9px] [&_.wmsub]:text-[13px]">
+    <div className="signin min-h-screen">
+      <header className="side">
         <Brand size={46} />
-        <p className="m-0 text-[13px] font-semibold tracking-[.02em] max-[760px]:hidden">
-          Every sign in is recorded against your name. XCODE Web v0.9
-        </p>
+        <div className="cos">
+          Every sign in is recorded against your name. XCODE Web v2.28
+        </div>
       </header>
-      <main className="flex flex-col items-center justify-center gap-5 bg-paper p-[clamp(24px,6vw,88px)] max-[760px]:items-stretch max-[760px]:justify-start">
-        <div className="w-full max-w-115 [&_input:not([type=checkbox])]:px-3.5 [&_input:not([type=checkbox])]:py-[13px]">
+      <main className="formside">
+        <div className="box">
           {restoring ? (
             <section
               aria-busy="true"
               aria-labelledby="auth-title"
-              className="flex flex-col gap-4"
+              className="box"
             >
-              <PageHeader
-                title="Signing you in"
-                description="Checking for your session..."
-              />
-              <Skeleton className="h-14 rounded-xl" />
-              <Skeleton className="h-14 rounded-full" />
+              <h1 id="auth-title">Signing you in</h1>
+              <div className="muted">Checking for your session...</div>
+              <Skeleton className="h-12" />
+              <Skeleton className="h-12" />
             </section>
           ) : (
             <form
               onSubmit={submit}
               aria-labelledby="auth-title"
-              className="flex flex-col gap-[18px]"
+              className="box"
             >
-              <PageHeader title={title} description={lead} />
+              <h1 id="auth-title">{title}</h1>
+              <div className="muted">{lead}</div>
 
               {!verifying && !requested && (
                 <Field id="phoneNumber" label="Mobile number">
                   <TextInput
+                    className="num"
                     id="phoneNumber"
                     name="phoneNumber"
                     type="tel"
@@ -336,7 +324,7 @@ export function AuthPanel() {
               {changingPin && requested && (
                 <Field id="confirmPin" label="Type it again">
                   <TextInput
-                    className="text-[22px] tracking-[0.4em] placeholder:text-[17px] placeholder:tracking-normal"
+                    className="num"
                     id="confirmPin"
                     name="confirmPin"
                     type="password"
@@ -358,7 +346,7 @@ export function AuthPanel() {
                 <>
                   <Field id="code" label="6 digit code">
                     <TextInput
-                      className="text-[22px] tracking-[0.4em] placeholder:text-[17px] placeholder:tracking-normal"
+                      className="num"
                       id="code"
                       name="code"
                       autoComplete="one-time-code"
@@ -374,14 +362,13 @@ export function AuthPanel() {
                     />
                   </Field>
 
-                  <label className="flex min-h-11 cursor-pointer items-start gap-3 pt-2.5 text-[15px]">
+                  <label className="ck">
                     <input
                       type="checkbox"
                       checked={rememberDevice}
                       onChange={(event) =>
                         setRememberDevice(event.target.checked)
                       }
-                      className="m-0 size-5.5 shrink-0 accent-teal"
                     />
                     <span>
                       Remember this device. Next time you only need your mobile
@@ -406,7 +393,6 @@ export function AuthPanel() {
                 aria-busy={busy || undefined}
                 disabled={busy || (remaining > 0 && screen === "sign-in")}
                 tone="ok"
-                className="h-12 w-full px-0 text-[15px] aria-busy:cursor-progress"
               >
                 {busy
                   ? "Please wait..."
@@ -424,14 +410,13 @@ export function AuthPanel() {
                   tone="outline"
                   disabled={busy}
                   onClick={() => beginPinReset(true)}
-                  className="h-12 w-full px-0 text-[15px]"
                 >
                   Reset PIN
                 </Button>
               )}
 
               {screen === "sign-in" ? (
-                <div className="flex flex-wrap items-center justify-between gap-1">
+                <div className="flex flex-wrap items-center justify-between">
                   <LinkButton
                     align="start"
                     disabled={busy}
@@ -447,11 +432,11 @@ export function AuthPanel() {
                     disabled={busy}
                     onClick={() => beginPinReset()}
                   >
-                    Forgot PIN?
+                    Forgot PIN
                   </LinkButton>
                 </div>
               ) : verifying ? (
-                <div className="flex flex-wrap items-center justify-between gap-1">
+                <div className="flex flex-wrap items-center justify-between">
                   <LinkButton
                     align="start"
                     disabled={busy}
@@ -488,7 +473,6 @@ export function AuthPanel() {
               ) : (
                 <LinkButton
                   align="start"
-                  className="self-start"
                   disabled={busy}
                   onClick={() => navigate("sign-in")}
                 >
@@ -498,17 +482,14 @@ export function AuthPanel() {
 
               {verifying && (
                 <>
-                  <p className="m-0 text-sm text-slate">
+                  <p className="muted">
                     No email? Check your spam folder, or ask your admin to
                     confirm your email address.
                   </p>
                   {developmentCode && (
-                    <div
-                      data-demo-code={developmentCode}
-                      className="m-0 rounded-xl border border-dashed border-line px-3.5 py-2.5 text-sm text-slate"
-                    >
+                    <div data-demo-code={developmentCode} className="hint">
                       Demo only: your code is{" "}
-                      <strong className="tracking-[0.08em] text-ink">
+                      <strong className="num">
                         {formattedDevelopmentCode}
                       </strong>
                     </div>
@@ -519,9 +500,9 @@ export function AuthPanel() {
               {/* Demo numbers for development only. A PIN someone chose is never kept or shown. */}
               {screen === "sign-in" &&
                 process.env.NODE_ENV !== "production" && (
-                  <div className="m-0 rounded-xl border border-dashed border-line px-3.5 py-3 text-sm text-slate">
-                    <strong className="text-ink">Demo logins</strong>
-                    <ul className="mt-1.5 mb-0 list-disc pl-4.5">
+                  <div className="hint">
+                    <strong>Demo logins</strong>
+                    <ul className="list-disc pl-4.5">
                       {[
                         ["Owner", "0733 520 614"],
                         ["Revenue clerk", "0712 345 678"],
@@ -537,14 +518,11 @@ export function AuthPanel() {
                 )}
             </form>
           )}
+          <p className="muted">
+            New here? Your admin adds you with your mobile number and email
+            address.
+          </p>
         </div>
-        <p className="m-0 w-full max-w-115 text-center text-sm text-slate">
-          New here? Your admin adds you with your mobile number and email
-          address.
-        </p>
-        <p className="m-0 text-center text-xs text-slate min-[761px]:hidden">
-          Every sign in is recorded against your name. XCODE Web v0.9
-        </p>
       </main>
     </div>
   );

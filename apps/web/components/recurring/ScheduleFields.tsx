@@ -23,7 +23,7 @@ export function FrequencyFields({ fields, set, errors, disabled }: Props) {
   return (
     <>
       <ChoiceField
-        label="How often"
+        label="Runs"
         error={errors.frequency}
         hint={
           frequency === RECURRING_FREQUENCY.daily
@@ -146,7 +146,7 @@ export function PeriodFields({
           onChange={(event) => set("start", event.target.value)}
         />
       </Field>
-      <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="f">
         {!fields.noEnd && (
           <Field
             id="recurring-end"

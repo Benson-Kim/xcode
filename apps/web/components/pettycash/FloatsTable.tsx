@@ -5,13 +5,13 @@ import type { PettyCashFloat } from "@xcode/shared/pettyCash";
 import { useFormats } from "../../lib/formats";
 import { CellNote, DataTable, SubHeading, Td, Tr } from "../ui";
 
-const columns = (currency: string) => [
+const columns = [
   { label: "Manager" },
-  { label: `Cash received (${currency})`, numeric: true },
-  { label: `Money out (${currency})`, numeric: true },
-  { label: `Cash in hand (${currency})`, numeric: true },
-  { label: `Waiting (${currency})`, numeric: true },
-  { label: `Approved (${currency})`, numeric: true },
+  { label: "Cash received", numeric: true },
+  { label: "Money out", numeric: true },
+  { label: "Cash in hand", numeric: true },
+  { label: "Waiting", numeric: true },
+  { label: "Approved", numeric: true },
   { label: "Last cash" },
 ];
 
@@ -24,12 +24,11 @@ export function FloatsTable({
   loading: boolean;
 }) {
   const formats = useFormats();
-  const currency = formats.currencyCode();
   return (
     <>
-      <SubHeading>Floats</SubHeading>
+      <SubHeading className="px-(--gut)">Floats</SubHeading>
       <DataTable
-        columns={columns(currency)}
+        columns={columns}
         loading={loading}
         loadingLabel="Loading floats"
         isEmpty={!floats?.length}
@@ -37,24 +36,24 @@ export function FloatsTable({
       >
         {floats?.map((float) => (
           <Tr key={float.holderId}>
-            <Td label="Manager">
-              <strong className="font-bold text-ink">{float.name}</strong>
+            <Td label="Manager" className="item nw">
+              {float.name}
               {!float.active && <CellNote>Not active</CellNote>}
             </Td>
-            <Td label={`Cash received (${currency})`} numeric>
+            <Td label="Cash received" numeric>
               {formats.formatNumber(float.cashReceived)}
             </Td>
-            <Td label={`Money out (${currency})`} numeric>
+            <Td label="Money out" numeric>
               {formats.formatNumber(float.expenses + float.creditNotes)}
             </Td>
             <Td
-              label={`Cash in hand (${currency})`}
+              label="Cash in hand"
               numeric
-              className={float.balance < 0 ? "text-clay" : undefined}
+              className={float.balance < 0 ? "tot neg" : "tot"}
             >
-              <strong>{formats.formatNumber(float.balance)}</strong>
+              {formats.formatNumber(float.balance)}
             </Td>
-            <Td label={`Waiting (${currency})`} numeric>
+            <Td label="Waiting" numeric>
               {formats.formatNumber(float.waiting)}
               {float.waitingCount > 0 && (
                 <CellNote>
@@ -64,7 +63,7 @@ export function FloatsTable({
                 </CellNote>
               )}
             </Td>
-            <Td label={`Approved (${currency})`} numeric>
+            <Td label="Approved" numeric>
               {formats.formatNumber(float.approved)}
             </Td>
             <Td label="Last cash">

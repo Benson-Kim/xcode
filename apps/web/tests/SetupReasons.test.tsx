@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 
 import { CompaniesPage, VehiclesPage } from "../components/setup";
@@ -65,7 +65,7 @@ const writes = (fetchMock: ReturnType<typeof serve>) =>
     .filter(([, init]) => init?.method)
     .map(([url, init]) => [url, init!.method, JSON.parse(String(init!.body))]);
 
-it("adds, renames, archives and restores a company without a typed reason", async () => {
+it("adds, edits, archives and restores a company without a typed reason", async () => {
   const fetchMock = serve({ companies: [company, archived] });
   renderInApp(<CompaniesPage />, { permissions: ["companies.manage"] });
   await screen.findByText("North Star");
@@ -73,18 +73,20 @@ it("adds, renames, archives and restores a company without a typed reason", asyn
 
   // Every form is a pop-up: the new company's name is asked for in one.
   fireEvent.click(screen.getByRole("button", { name: "New company" }));
-  fireEvent.change(screen.getByLabelText("New PSV company"), {
+  const adding = within(screen.getByRole("dialog", { name: "New company" }));
+  fireEvent.change(adding.getByLabelText("Name"), {
     target: { value: "Rongai Express" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add company" }));
+  fireEvent.click(adding.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
 
-  fireEvent.click(screen.getByRole("button", { name: "Rename North Star" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit North Star" }));
   expect(screen.queryByLabelText(/Reason/)).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("New name"), {
+  const editing = within(screen.getByRole("dialog", { name: "Edit company" }));
+  fireEvent.change(editing.getByLabelText("Name"), {
     target: { value: "North Star Sacco" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(editing.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(fetchMock)).toHaveLength(2));
 
   fireEvent.click(screen.getByRole("button", { name: "Archive North Star" }));
@@ -120,28 +122,28 @@ it("adds, edits, retires and restores a vehicle without a typed reason", async (
     { businessDate },
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "Add vehicle" }));
+  fireEvent.click(await screen.findByRole("button", { name: "New vehicle" }));
   expect(screen.queryByLabelText(/Reason/)).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Registration number"), {
+  fireEvent.change(screen.getByLabelText("Registration"), {
     target: { value: "kdg905b" },
   });
   fireEvent.change(screen.getByLabelText("PSV company"), {
     target: { value: company.id },
   });
-  fireEvent.change(screen.getByLabelText("Weekly performance target"), {
+  fireEvent.change(screen.getByLabelText("Weekly target"), {
     target: { value: "14000" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add vehicle" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
   // A new vehicle stays open once added; Cancel goes back to the list.
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-  fireEvent.click(await screen.findByRole("button", { name: "KDA 482M" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit KDA 482M" }));
   expect(screen.queryByLabelText(/Reason/)).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Weekly performance target"), {
+  fireEvent.change(screen.getByLabelText("Weekly target"), {
     target: { value: "16000" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(fetchMock)).toHaveLength(2));
   fireEvent.change(screen.getByLabelText("Leaves the fleet"), {
     target: { value: "2026-09-20" },
@@ -150,7 +152,7 @@ it("adds, edits, retires and restores a vehicle without a typed reason", async (
   await waitFor(() => expect(writes(fetchMock)).toHaveLength(3));
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-  fireEvent.click(await screen.findByRole("button", { name: "KCY 117T" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit KCY 117T" }));
   expect(screen.queryByLabelText(/Reason/)).not.toBeInTheDocument();
   fireEvent.click(
     screen.getByRole("button", { name: "Restore to active fleet" }),

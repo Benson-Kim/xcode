@@ -1,14 +1,14 @@
-import { useRef } from "react";
+import { useId, useRef } from "react";
 
 import type { RevenueCell, RevenueVehicle } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
+import { DialogFooter } from "../pettycash/DialogFooter";
 import {
   Banner,
   Button,
   CurrencyInput,
   Field,
-  FormActions,
   Hint,
   LinkButton,
   Note,
@@ -53,8 +53,10 @@ export function CaptureForm({
     reload,
   });
   const { opened, conflict, saving, error } = entry;
+  const formId = useId();
   return (
     <form
+      id={formId}
       noValidate
       className="flex flex-col gap-3.5"
       onSubmit={(event) => {
@@ -62,7 +64,9 @@ export function CaptureForm({
         entry.submit();
       }}
     >
-      <p className="m-0 rounded-xl bg-paper px-4 py-3 text-[13.5px] font-semibold text-slate">{`${formats.formatWeekdayDate(cell.date)}. Expected ${formats.kes(cell.expected)}`}</p>
+      <div className="mctx">
+        <span className="what">{`${formats.formatWeekdayDate(cell.date)}. Expected ${formats.kes(cell.expected)}`}</span>
+      </div>
       {gap && <GapHint date={gap} onOpen={onOpenGap} />}
       {!canChooseReason && !conflict && opened.reason && (
         <Hint>{`Recorded as ${entryLabel(formats, opened)}. Enter the revenue to replace it.`}</Hint>
@@ -100,14 +104,14 @@ export function CaptureForm({
             />
           )}
           {error && <Banner>{error}</Banner>}
-          <FormActions className="-mx-[22px] -mb-5 justify-end border-t border-line bg-paper px-[22px] py-3.5 max-[600px]:[&_button]:flex-1 [&_button]:min-w-27">
+          <DialogFooter>
             <Button tone="outline" disabled={saving} onClick={onCancel}>
               Cancel
             </Button>
-            <Button tone="ok" type="submit" disabled={saving}>
+            <Button tone="ok" type="submit" form={formId} disabled={saving}>
               {saving ? "Saving…" : "Save"}
             </Button>
-          </FormActions>
+          </DialogFooter>
         </>
       )}
     </form>

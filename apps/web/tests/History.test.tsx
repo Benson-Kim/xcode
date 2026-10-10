@@ -1,10 +1,4 @@
-import {
-  act,
-  fireEvent,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { HistoryPage } from "../components/setup";
@@ -23,19 +17,34 @@ const change = (version: number, overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-// The table's own rows, not the before-and-after rows inside each change.
+// The log's rows once loaded (while loading, the table is named by its loading caption).
 const changeRows = () =>
   screen
     .getByRole("table", { name: "" })
     .querySelectorAll(":scope > tbody > tr");
-// Each before-and-after row as [field, before, after].
-const fields = (table: ReturnType<typeof within>) =>
-  table
-    .getAllByRole("row")
-    .slice(1)
-    .map((row: HTMLElement) =>
-      [...row.querySelectorAll("th, td")].map((cell) => cell.textContent),
-    );
+// A change's reason, under "What changed" with its section on hover.
+const inSection = (section: string) => ({
+  selector: `td[data-label="What changed"][title="${section}"]`,
+});
+// One side of a change as [field, value]: a line a field, each named, or a single field named on hover.
+function lines(cell: Element): (string | null)[][] {
+  const single = cell.querySelector(":scope > span[title]");
+  if (single) return [[single.getAttribute("title"), single.textContent]];
+  return [...cell.querySelectorAll(":scope > div")].map((line) => {
+    const text = line.textContent ?? "";
+    const at = text.indexOf(": ");
+    return [text.slice(0, at), text.slice(at + 2)];
+  });
+}
+// Each field of a change as [field, before, after].
+function fields(section: string, reason: string) {
+  const row = screen.getByText(reason, inSection(section)).closest("tr")!;
+  const [before, after] = ["Before", "After"].map((side) =>
+    lines(row.querySelector(`td[data-label="${side}"]`)!),
+  );
+  expect(after.map(([field]) => field)).toEqual(before.map(([field]) => field));
+  return before.map(([field, value], index) => [field, value, after[index][1]]);
+}
 
 const pageOf = (
   items: ReturnType<typeof change>[],
@@ -83,7 +92,7 @@ it("asks for only the first page on first render, counted, and the next one on r
   renderInApp(<HistoryPage />);
 
   expect(
-    await screen.findByText("PSV companies: Change 60"),
+    await screen.findByText("Change 60", inSection("PSV companies")),
   ).toBeInTheDocument();
   expect(fetchMock.mock.calls.map(([input]) => input)).toEqual([FIRST]);
   expect(changeRows()).toHaveLength(25);
@@ -91,7 +100,7 @@ it("asks for only the first page on first render, counted, and the next one on r
 
   fireEvent.click(screen.getByRole("button", { name: "Next page" }));
   expect(
-    await screen.findByText("PSV companies: Change 35"),
+    await screen.findByText("Change 35", inSection("PSV companies")),
   ).toBeInTheDocument();
   expect(fetchMock).toHaveBeenLastCalledWith(
     "/api/setup/history?includeTotal=true&page=2&pageSize=25",
@@ -102,7 +111,7 @@ it("asks for only the first page on first render, counted, and the next one on r
 
   fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
   expect(
-    await screen.findByText("PSV companies: Change 1"),
+    await screen.findByText("Change 1", inSection("PSV companies")),
   ).toBeInTheDocument();
   expect(changeRows()).toHaveLength(10);
   expect(screen.getByText("Showing 51–60 of 60")).toBeInTheDocument();
@@ -173,56 +182,33 @@ it("shows each change field by field, with the before and after values side by s
   ]);
   renderInApp(<HistoryPage />);
 
-  const renamed = within(
-    await screen.findByRole("table", {
-      name: "PSV companies: Change 4, before and after",
-    }),
-  );
+  await screen.findByText("Change 4", inSection("PSV companies"));
   expect(
-    renamed.getAllByRole("columnheader").map((cell) => cell.textContent),
-  ).toEqual(["Field", "Before", "After"]);
-  expect(fields(renamed)).toEqual([["Name", "North Star", "North Star Sacco"]]);
+    screen.getAllByRole("columnheader").map((cell) => cell.textContent),
+  ).toEqual(["When", "Who", "What changed", "Before", "After"]);
+  expect(fields("PSV companies", "Change 4")).toEqual([
+    ["Name", "North Star", "North Star Sacco"],
+  ]);
 
-  const created = within(
-    screen.getByRole("table", {
-      name: "PSV companies: Added Metro, before and after",
-    }),
-  );
-  expect(fields(created)).toEqual([
+  expect(fields("PSV companies", "Added Metro")).toEqual([
     ["Name", "—", "Metro"],
     ["Active", "—", "Yes"],
     ["Archived on", "—", "None"],
   ]);
 
-  const revised = within(
-    screen.getByRole("table", {
-      name: "Scheduled expenses and savings: Raised the loan, before and after",
-    }),
-  );
-  expect(fields(revised)).toEqual([
+  expect(fields("Scheduled expenses and savings", "Raised the loan")).toEqual([
     ["Versions 2 › Amount", "—", "1200"],
     ["Versions 2 › Start", "—", "21 Sep 2026"],
   ]);
 
   // Removed: every field it had, and nothing after.
-  expect(
-    fields(
-      within(
-        screen.getByRole("table", {
-          name: "Investment: Removed the deposit, before and after",
-        }),
-      ),
-    ),
-  ).toEqual([
+  expect(fields("Investment", "Removed the deposit")).toEqual([
     ["Description", "Deposit", "—"],
     ["Amount", "5000", "—"],
   ]);
 
   // Not JSON: the saved values are shown as they are.
-  const raw = within(
-    screen.getByRole("table", { name: "Logo: New logo, before and after" }),
-  );
-  expect(fields(raw)).toEqual([
+  expect(fields("Logo", "New logo")).toEqual([
     ["Saved value", "old-logo.png", "new-logo.png"],
   ]);
 });
@@ -289,19 +275,20 @@ it("leaves out internal ids and shows a list of plain values as one field", asyn
   ]);
   renderInApp(<HistoryPage />);
 
-  const changed = within(
-    await screen.findByRole("table", {
-      name: "People and access: Changed role for Grace Achieng, before and after",
-    }),
+  await screen.findByText(
+    "Changed role for Grace Achieng",
+    inSection("People and access"),
   );
-  expect(fields(changed)).toEqual([
-    ["Role", "Revenue clerk", "Fleet manager"],
+  expect(fields("People and access", "Changed role for Grace Achieng")).toEqual(
     [
-      "Permissions",
-      "dash.capture, revenue.view",
-      "dash.capture, revenue.correct, revenue.view",
+      ["Role", "Revenue clerk", "Fleet manager"],
+      [
+        "Permissions",
+        "dash.capture, revenue.view",
+        "dash.capture, revenue.correct, revenue.view",
+      ],
     ],
-  ]);
+  );
 });
 
 // The server does the narrowing, so the filter bar's job is to ask for exactly what the controls say.
@@ -352,7 +339,7 @@ it("narrows the log through the server and starts again at the first page", asyn
   const fetchMock = serveFiltered(rows);
   renderInApp(<HistoryPage />);
   expect(
-    await screen.findByText("Vehicles: Added vehicle KDA 123A"),
+    await screen.findByText("Added vehicle KDA 123A", inSection("Vehicles")),
   ).toBeInTheDocument();
   expect(changeRows()).toHaveLength(3);
 
@@ -366,10 +353,10 @@ it("narrows the log through the server and starts again at the first page", asyn
     ),
   );
   expect(
-    await screen.findByText("People and access: Invited someone"),
+    await screen.findByText("Invited someone", inSection("People and access")),
   ).toBeInTheDocument();
   expect(
-    screen.queryByText("Vehicles: Added vehicle KDA 123A"),
+    screen.queryByText("Added vehicle KDA 123A", inSection("Vehicles")),
   ).not.toBeInTheDocument();
   expect(changeRows()).toHaveLength(1);
 
@@ -391,7 +378,7 @@ it("narrows the log through the server and starts again at the first page", asyn
   );
   expect(fetchMock.mock.calls.length - asked).toBe(1);
   expect(
-    await screen.findByText("People and access: Invited someone"),
+    await screen.findByText("Invited someone", inSection("People and access")),
   ).toBeInTheDocument();
 
   // A date range is sent as the two days it names, both included.
@@ -409,10 +396,10 @@ it("narrows the log through the server and starts again at the first page", asyn
     ),
   );
   expect(
-    await screen.findByText("People and access: Invited someone"),
+    await screen.findByText("Invited someone", inSection("People and access")),
   ).toBeInTheDocument();
   expect(
-    screen.queryByText("PSV companies: Renamed Metro Trans"),
+    screen.queryByText("Renamed Metro Trans", inSection("PSV companies")),
   ).not.toBeInTheDocument();
   // The range cannot be set backwards: each input stops where the other one is.
   expect(screen.getByLabelText("From")).toHaveAttribute("max", "2026-09-21");
@@ -430,9 +417,14 @@ it("names the Central expenses and Reports sections of the change log", async ()
   ]);
   renderInApp(<HistoryPage />);
   expect(
-    await screen.findByText("Central expenses: Removed an expense"),
+    await screen.findByText(
+      "Removed an expense",
+      inSection("Central expenses"),
+    ),
   ).toBeInTheDocument();
-  expect(screen.getByText("Reports: Exported a report")).toBeInTheDocument();
+  expect(
+    screen.getByText("Exported a report", inSection("Reports")),
+  ).toBeInTheDocument();
 });
 
 it("keeps the newer filter's answer when an older request finishes last", async () => {
@@ -464,7 +456,7 @@ it("keeps the newer filter's answer when an older request finishes last", async 
     target: { value: "people" },
   });
   expect(
-    await screen.findByText("People and access: Invited someone"),
+    await screen.findByText("Invited someone", inSection("People and access")),
   ).toBeInTheDocument();
 
   await act(async () => {
@@ -473,11 +465,11 @@ it("keeps the newer filter's answer when an older request finishes last", async 
   });
   expect(oldAnswered).toBe(true);
   expect(
-    screen.getByText("People and access: Invited someone"),
+    screen.getByText("Invited someone", inSection("People and access")),
   ).toBeInTheDocument();
   expect(changeRows()).toHaveLength(1);
   expect(
-    screen.queryByText("PSV companies: Renamed Metro Trans"),
+    screen.queryByText("Renamed Metro Trans", inSection("PSV companies")),
   ).not.toBeInTheDocument();
 });
 
@@ -487,7 +479,7 @@ it("says that nothing matches rather than that there is nothing", async () => {
   ]);
   renderInApp(<HistoryPage />);
   expect(
-    await screen.findByText("PSV companies: Renamed Metro Trans"),
+    await screen.findByText("Renamed Metro Trans", inSection("PSV companies")),
   ).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Section"), {

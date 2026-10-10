@@ -7,7 +7,6 @@ import {
   DataTable,
   Hint,
   RowAction,
-  RowButton,
   SelectInput,
   StatusBadge,
   Td,
@@ -35,6 +34,8 @@ type Props = {
   failed: boolean;
   roles?: Role[];
   scope?: ScopeOptions;
+  // How many permissions there are, for each person's share of them; unknown until the catalog loads.
+  permissionTotal?: number;
   filters: PeopleFilters;
   onFilters: (filters: PeopleFilters) => void;
   canManage: boolean;
@@ -49,13 +50,43 @@ function SignInBadge({ person }: { person: Person }) {
   return <StatusBadge tone="ok">Active</StatusBadge>;
 }
 
+// The person's permissions as a share of all of them (.prog), with how far they are from their role on hover.
+function AccessBar({
+  count,
+  total,
+  title,
+}: {
+  count: number;
+  total?: number;
+  title?: string;
+}) {
+  const share = total ? Math.min(100, Math.round((count / total) * 100)) : 0;
+  return (
+    <div className="prog" title={title}>
+      {total ? (
+        <div className="t" aria-hidden="true">
+          <i
+            className={share === 100 ? "full" : undefined}
+            style={{ width: `${share}%` }}
+          />
+        </div>
+      ) : null}
+      <span>{total ? `${count} of ${total}` : count}</span>
+    </div>
+  );
+}
+
 function PersonRow({
   person,
   roles,
   scope,
+  permissionTotal,
   canManage,
   onEdit,
-}: Pick<Props, "roles" | "scope" | "canManage" | "onEdit"> & {
+}: Pick<
+  Props,
+  "roles" | "scope" | "permissionTotal" | "canManage" | "onEdit"
+> & {
   person: Person;
 }) {
   const { kes } = useFormats();
@@ -65,34 +96,40 @@ function PersonRow({
   );
   return (
     <Tr>
-      <Td label="Name">
-        <RowButton onClick={() => onEdit(person)}>
-          {person.firstName} {person.lastName}
-        </RowButton>
-        <CellNote>{person.email}</CellNote>
+      <Td label="Name" className="item" title={person.email}>
+        {person.firstName} {person.lastName}
+        <CellNote>{person.role}</CellNote>
       </Td>
-      <Td label="Mobile" numeric>
+      <Td label="Mobile number" className="num nw">
         {formatPhone(person.phoneNumber)}
       </Td>
-      <Td label="Role">
-        {person.role}
-        {roles && changes > 0 && (
-          <CellNote>
-            {plural(changes, "change", "changes")} from the role
-          </CellNote>
-        )}
+      <Td label="Access">
+        <AccessBar
+          count={person.permissions.length}
+          total={permissionTotal}
+          title={
+            roles && changes > 0
+              ? `${plural(changes, "change", "changes")} from the role`
+              : undefined
+          }
+        />
       </Td>
-      <Td label="Can see">
+      <Td
+        label="Vehicles"
+        className="nw"
+        title={
+          person.approvalLimit
+            ? `Approves up to ${kes(person.approvalLimit)}`
+            : undefined
+        }
+      >
         {scopeLabel(person, scope)}
-        {person.approvalLimit ? (
-          <CellNote>Approves up to {kes(person.approvalLimit)}</CellNote>
-        ) : null}
       </Td>
-      <Td label="Sign in">
+      <Td label="Status" className="nw">
         <SignInBadge person={person} />
       </Td>
-      <Td className="text-right">
-        <div className="flex justify-end gap-0.5">
+      <Td numeric>
+        <div className="tacts">
           <RowAction
             aria-label={`${canManage ? "Edit" : "View"} ${person.firstName} ${person.lastName}`}
             onClick={() => onEdit(person)}
@@ -109,10 +146,7 @@ function FilterToolbar(props: Props & { shown: number; filtered: boolean }) {
   const { filters, onFilters } = props;
   return (
     <Toolbar>
-      <label
-        htmlFor="people-role"
-        className="text-[13px] font-semibold text-slate"
-      >
+      <label htmlFor="people-role" className="sr-only">
         Role
       </label>
       <SelectInput
@@ -131,10 +165,7 @@ function FilterToolbar(props: Props & { shown: number; filtered: boolean }) {
           </option>
         ))}
       </SelectInput>
-      <label
-        htmlFor="people-status"
-        className="text-[13px] font-semibold text-slate"
-      >
+      <label htmlFor="people-status" className="sr-only">
         Sign in
       </label>
       <SelectInput
@@ -170,11 +201,11 @@ export function PeopleList(props: Props) {
       <DataTable
         columns={[
           { label: "Name" },
-          { label: "Mobile", numeric: true },
-          { label: "Role" },
-          { label: "Can see" },
-          { label: "Sign in" },
-          { label: "Actions", hidden: true },
+          { label: "Mobile number" },
+          { label: "Access" },
+          { label: "Vehicles" },
+          { label: "Status" },
+          { label: "Actions", numeric: true },
         ]}
         loading={props.loading}
         pendingRows={props.pendingRows}
@@ -193,6 +224,7 @@ export function PeopleList(props: Props) {
             person={person}
             roles={props.roles}
             scope={props.scope}
+            permissionTotal={props.permissionTotal}
             canManage={props.canManage}
             onEdit={props.onEdit}
           />

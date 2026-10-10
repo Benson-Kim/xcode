@@ -124,7 +124,7 @@ it("fills the two petty cash cards from the dashboard payload", async () => {
       "KES 11,000 in total. You can approve entries up to KES 5,000. 1 entry is above your limit.",
     ),
   ).toBeInTheDocument();
-  const holders = within(approvals).getAllByRole("listitem");
+  const holders = [...approvals.querySelectorAll<HTMLElement>(".lines > .ln")];
   expect(holders).toHaveLength(2);
   expect(within(holders[0]).getByText("Grace Wanjiru")).toBeInTheDocument();
   expect(
@@ -185,9 +185,9 @@ it("opens Petty cash on the waiting entries from the approval card", async () =>
     ).findByRole("button", { name: "Review entries" }),
   );
 
-  expect(await screen.findByRole("combobox", { name: "Show" })).toHaveValue(
-    "Waiting",
-  );
+  expect(
+    await screen.findByRole("combobox", { name: "Show" }),
+  ).toHaveDisplayValue("Waiting");
   await waitFor(() =>
     expect(
       paths(fetcher).some(

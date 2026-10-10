@@ -2,15 +2,19 @@
 
 import {
   Component,
+  Fragment,
   Suspense,
   lazy,
+  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentType,
   type ReactNode,
 } from "react";
 
+import { weekdayIndex, weekdayName } from "@xcode/shared/dates";
 import {
   createFormatter,
   initials,
@@ -45,6 +49,7 @@ import {
 import {
   AppearanceProvider,
   applyAppearance,
+  useAppearance,
   type Appearance,
 } from "../lib/appearance";
 import { useResource } from "../lib/data";
@@ -67,30 +72,24 @@ import type { HeroSlots } from "./ui";
 import {
   Banner,
   Button,
-  Card,
-  CardAction,
   CardGridSkeleton,
-  CardHeader,
-  CardList,
-  CardListItem,
   CardNote,
-  CardValue,
   Dialog,
   FormActions,
   ListSkeleton,
   LoadingRegion,
+  BandFigure,
   BandStats,
   HeroBand,
   HeroSlotsProvider,
   NavIcon,
   PageHeader,
-  ProgressBar,
   SegmentedControl,
   Skeleton,
-  StatusBadge,
   SubHeading,
   ToastProvider,
   cn,
+  useAnchoredPosition,
 } from "./ui";
 
 // React keeps a failed lazy import for good, so each screen that failed to load leaves a fresh import here. Trying
@@ -266,8 +265,13 @@ type NavItem = {
 };
 
 // Every menu entry is shown to the people holding any of its permissions, as @xcode/shared/permissions says.
+// Two entries carry the design's shorter names on the web.
+const WEB_LABELS: Partial<Record<NavId, string>> = {
+  expenses: "Expense items",
+  recurring: "Scheduled expenses",
+};
 const navItems = (ids: readonly NavId[]): NavItem[] =>
-  ids.map((id) => ({ id, ...NAV[id] }));
+  ids.map((id) => ({ id, ...NAV[id], label: WEB_LABELS[id] ?? NAV[id].label }));
 
 export type ViewParams = {
   openItem?: string;
@@ -276,18 +280,10 @@ export type ViewParams = {
   date?: string;
 };
 
-export function AppShell({ onSignOut }: { onSignOut: () => void }) {
-  const [view, setView] = useState<ShellView>("dashboard");
-  const [params, setParams] = useState<ViewParams>({});
-  // Bumped on every navigation so choosing a menu entry always opens that page fresh (its list, not an open editor).
-  const [visit, setVisit] = useState(0);
+// The signed-in person, loaded once, or why they could not be.
+function useSignedInSession() {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionError, setSessionError] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [accessOpen, setAccessOpen] = useState(false);
-  const [mini, setMini] = useState(false);
-
   useEffect(() => {
     let active = true;
     fetchWithSession("/api/auth/session")
@@ -302,12 +298,25 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
       active = false;
     };
   }, []);
+  return { session, sessionError };
+}
+
+export function AppShell({ onSignOut }: { onSignOut: () => void }) {
+  const [view, setView] = useState<ShellView>("dashboard");
+  const [params, setParams] = useState<ViewParams>({});
+  // Bumped on every navigation so choosing a menu entry always opens that page fresh (its list, not an open editor).
+  const [visit, setVisit] = useState(0);
+  const { session, sessionError } = useSignedInSession();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [profileAt, setProfileAt] = useState<HTMLElement | null>(null);
+  const [accessOpen, setAccessOpen] = useState(false);
+  const [mini, setMini] = useState(false);
 
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setMenuOpen(false);
-      setUserMenuOpen(false);
+      setProfileAt(null);
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
@@ -349,6 +358,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const displayName = session
     ? `${session.firstName} ${session.lastName}`.trim()
     : "";
+  const closeProfile = useCallback(() => setProfileAt(null), []);
 
   function navigate(next: ShellView, nextParams: ViewParams = {}) {
     retryFailedScreens();
@@ -356,18 +366,28 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
     setParams(nextParams);
     setVisit((current) => current + 1);
     setMenuOpen(false);
-    setUserMenuOpen(false);
-    window.scrollTo?.(0, 0);
+    setProfileAt(null);
+    document.getElementById("work")?.scrollTo?.(0, 0);
   }
 
   const profile = (
-    <UserMenu
+    <ProfileButton
       session={session}
       displayName={displayName}
-      open={userMenuOpen}
-      onToggle={() => setUserMenuOpen((open) => !open)}
+      open={!!profileAt}
+      onToggle={(button) =>
+        setProfileAt((current) => (current ? null : button))
+      }
+    />
+  );
+  const profileMenu = profileAt && (
+    <ProfileMenu
+      session={session}
+      displayName={displayName}
+      anchor={profileAt}
+      onClose={closeProfile}
       onAccess={() => {
-        setUserMenuOpen(false);
+        setProfileAt(null);
         setAccessOpen(true);
       }}
       onPreferences={() => navigate("preferences")}
@@ -400,6 +420,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                 menuOpen={menuOpen}
                 onMenu={() => setMenuOpen((open) => !open)}
                 profile={profile}
+                profileMenu={profileMenu}
               >
                 {/* Keyed on the visit, so a screen still loading shows placeholders, never the page it replaced, and a
                   page that failed to load is left behind on the next one. */}
@@ -437,11 +458,13 @@ function Frame({
   menuOpen,
   onMenu,
   profile,
+  profileMenu,
   children,
 }: {
   menuOpen: boolean;
   onMenu: () => void;
   profile: ReactNode;
+  profileMenu: ReactNode;
   children: ReactNode;
 }) {
   const [title, setTitle] = useState<HTMLElement | null>(null);
@@ -469,24 +492,27 @@ function Frame({
   );
   return (
     <HeroSlotsProvider value={slots}>
-      <main className="main">
-        <section className="hero">
-          {/* A headline card that carries the actions takes the title row's place; its title stays for screen readers. */}
-          <div className={cn("head", headHidden && "sr-only")}>
-            {!headHidden && menuToggle}
-            <div ref={setTitle} className="ht" />
-            <div className="acts">
-              <div ref={setActions} className="contents" />
-              {!headHidden && profile}
+      <div className="main">
+        <main className="work" id="work">
+          <section className="hero">
+            {/* A headline card that carries the actions takes the title row's place; its title stays for screen readers. */}
+            <div className={cn("head", headHidden && "sr-only")}>
+              {!headHidden && menuToggle}
+              <div ref={setTitle} className="ht" />
+              <div className="acts">
+                <div ref={setActions} className="contents" />
+                {!headHidden && profile}
+              </div>
             </div>
-          </div>
-          <div className="hrow">
-            {headHidden && menuToggle}
-            <div ref={setBand} className="contents" />
-          </div>
-        </section>
-        <div className="pagebody">{children}</div>
-      </main>
+            <div className="hrow">
+              {headHidden && menuToggle}
+              <div ref={setBand} className="contents" />
+            </div>
+          </section>
+          <div className="pagebody">{children}</div>
+        </main>
+        {profileMenu}
+      </div>
     </HeroSlotsProvider>
   );
 }
@@ -511,18 +537,17 @@ function MainMenu({
   );
   const allowed = (item: NavItem) => canSee(item, can);
   const navButton = (item: NavItem, sub: boolean) => (
-    <li key={item.id}>
-      <button
-        type="button"
-        title={item.label}
-        aria-current={view === item.id ? "page" : undefined}
-        onClick={() => onNavigate(item.id)}
-        className={cn("ni", sub && "sub")}
-      >
-        <NavIcon name={item.id} />
-        <span className="lb">{item.label}</span>
-      </button>
-    </li>
+    <button
+      key={item.id}
+      type="button"
+      title={item.label}
+      aria-current={view === item.id ? "page" : undefined}
+      onClick={() => onNavigate(item.id)}
+      className={cn("ni", sub && "sub", view === item.id && "on")}
+    >
+      <NavIcon name={item.id} />
+      <span className="lb">{item.label}</span>
+    </button>
   );
   const toggleGroup = (id: string) =>
     setClosedGroups((current) => {
@@ -535,13 +560,13 @@ function MainMenu({
     if (!visible.length) return null;
     if (section.kind === "items")
       return (
-        <ul key={index} className="kids m-0 list-none p-0">
+        <Fragment key={index}>
           {visible.map((item) => navButton(item, false))}
-        </ul>
+        </Fragment>
       );
     const open = !closedGroups.has(section.id);
     return (
-      <div key={section.id} className="kids">
+      <div key={section.id} className="flex flex-col gap-0.5">
         <button
           type="button"
           aria-expanded={open}
@@ -554,11 +579,9 @@ function MainMenu({
             <NavIcon name="chevron" />
           </span>
         </button>
-        {open && (
-          <ul className="kids m-0 list-none p-0">
-            {visible.map((item) => navButton(item, true))}
-          </ul>
-        )}
+        <div className="kids" hidden={!open}>
+          {visible.map((item) => navButton(item, true))}
+        </div>
       </div>
     );
   };
@@ -580,25 +603,6 @@ function MainMenu({
       {NAV_SECTIONS.map(navSection)}
       <div className="ver">XCODE Web v2.28</div>
     </nav>
-  );
-}
-
-function MenuButton({
-  onClick,
-  children,
-}: {
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      className="block min-h-10 w-full rounded-[9px] px-3 text-left font-semibold text-ink hover:bg-paper"
-    >
-      {children}
-    </button>
   );
 }
 
@@ -950,101 +954,206 @@ function Dashboard({
     pettyCash,
     canOpenPettyCash(session?.permissions ?? []),
   );
+  const { appearance } = useAppearance();
+  const today = appearance?.businessDate;
   return (
-    <section>
+    <>
       <PageHeader
         title="Dashboard"
-        description="Your fleet at a glance, based on the access you have."
-      />
-      <HeroBand
-        period={
-          <SegmentedControl
-            label="Period"
-            options={[...REVENUE_PERIODS]}
-            value={period}
-            onChange={setChosen}
-            className="max-[480px]:grid max-[480px]:grid-cols-3 max-[480px]:self-stretch"
-          />
+        description={
+          today
+            ? `${weekdayName(weekdayIndex(today))} ${formats.formatDateOnly(today)}`
+            : "Your fleet at a glance, based on the access you have."
         }
-      >
-        <BandStats items={[{ label: "Scope", value: "Your access" }]} />
-      </HeroBand>
+      />
+      <DashboardBand
+        period={period}
+        onPeriod={setChosen}
+        figures={
+          can("dash.revenue") ? (period === "month" ? byMonth : byPeriod) : {}
+        }
+      />
       {error ? (
-        <Card className="max-w-140">
-          <CardHeader
-            title="Your dashboard could not be loaded"
-            description={error}
-          />
-        </Card>
+        <MessageCard title="Your dashboard could not be loaded" sub={error} />
       ) : !session ? (
         <CardGridSkeleton count={3} />
       ) : cards.length === 0 ? (
-        <Card className="max-w-140">
-          <CardHeader
-            title="Nothing to show yet"
-            description="Your admin decides what you can see here."
-          />
-        </Card>
+        <MessageCard
+          title="Nothing to show yet"
+          sub="Your admin decides what you can see here."
+        />
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] items-start gap-[18px] max-[480px]:grid-cols-1">
-          {cards.map((card) => {
-            const action = card.action;
-            return (
-              <Card
-                key={card.permission}
-                aria-labelledby={`card-${card.permission}`}
-                aria-busy={card.busy || undefined}
-              >
-                <CardHeader
-                  id={`card-${card.permission}`}
-                  title={card.title}
-                  description={card.sub}
-                />
-                {card.busy ? (
-                  <>
-                    <Skeleton className="mt-2 h-8 w-3/5" />
-                    <Skeleton className="h-3 w-4/5" />
-                  </>
-                ) : card.unavailable ? (
-                  <p className="m-0">
-                    <StatusBadge>Not available yet</StatusBadge>
-                  </p>
-                ) : (
-                  card.value && (
-                    <CardValue tone={card.bad ? "bad" : undefined}>
-                      {card.value}
-                    </CardValue>
-                  )
-                )}
-                {card.bar !== undefined && <ProgressBar value={card.bar} />}
-                {card.note && <CardNote>{card.note}</CardNote>}
-                {card.list && card.list.length > 0 && (
-                  <CardList>
-                    {card.list.map((row) => (
-                      <CardListItem
-                        key={row.id}
-                        left={row.left}
-                        leftSub={row.leftSub}
-                        right={row.right}
-                        rightSub={row.rightSub}
-                      />
-                    ))}
-                  </CardList>
-                )}
-                {action && (
-                  <CardAction
-                    primary={action.primary}
-                    onClick={() => onOpen(action.view, action.params)}
-                  >
-                    {action.label}
-                  </CardAction>
-                )}
-              </Card>
-            );
-          })}
+        // Two columns as in the design, filled in the shared order so the cards read in that order.
+        <div className="columns-2 gap-[18px] max-[1000px]:columns-1">
+          {cards.map((card) => (
+            <DashboardCardView
+              key={card.permission}
+              card={card}
+              onOpen={onOpen}
+            />
+          ))}
         </div>
       )}
-    </section>
+    </>
+  );
+}
+
+function MessageCard({ title, sub }: { title: string; sub: string }) {
+  return (
+    <article className="card" aria-label={title}>
+      <div className="ch">
+        <div>
+          <h2>{title}</h2>
+          <div className="sub">{sub}</div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+// The headline card: the period first, then the revenue for it against the target.
+function DashboardBand({
+  period,
+  onPeriod,
+  figures,
+}: {
+  period: Period;
+  onPeriod: (period: Period) => void;
+  figures: { data?: RevenueDashboard };
+}) {
+  const formats = useFormats();
+  const data = figures.data;
+  return (
+    <HeroBand
+      period={
+        <SegmentedControl
+          label="Period"
+          options={[...REVENUE_PERIODS]}
+          value={period}
+          onChange={onPeriod}
+        />
+      }
+    >
+      {data && data.revenue !== null ? (
+        <>
+          <BandFigure
+            label="Revenue"
+            value={formats.formatNumber(data.revenue)}
+          />
+          <BandStats
+            items={[
+              ...(data.expected !== null
+                ? [
+                    {
+                      label: "Target",
+                      value: formats.formatNumber(data.expected),
+                    },
+                  ]
+                : []),
+              ...(data.percent !== null
+                ? [
+                    {
+                      label: "Target reached",
+                      value: percentText(data.percent),
+                    },
+                  ]
+                : []),
+              ...(data.capturedToday !== null && data.vehiclesToday
+                ? [
+                    {
+                      label: "Captured today",
+                      value: `${data.capturedToday} of ${data.vehiclesToday}`,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        </>
+      ) : (
+        <BandStats items={[{ label: "Scope", value: "Your access" }]} />
+      )}
+    </HeroBand>
+  );
+}
+
+// One dashboard card (.card): the title and its note with the action beside them, then the figure.
+function DashboardCardView({
+  card,
+  onOpen,
+}: {
+  card: DashboardCard;
+  onOpen: (view: ShellView, params?: ViewParams) => void;
+}) {
+  const action = card.action;
+  return (
+    <article
+      className="card mb-[18px] flex break-inside-avoid flex-col gap-2"
+      aria-labelledby={`card-${card.permission}`}
+      aria-busy={card.busy || undefined}
+    >
+      <div className="ch">
+        <div>
+          <h2 id={`card-${card.permission}`}>{card.title}</h2>
+          <div className="sub">{card.sub}</div>
+        </div>
+        {action && (
+          <button
+            type="button"
+            className={cn("btn sm", action.primary && "pri")}
+            onClick={() => onOpen(action.view, action.params)}
+          >
+            {action.label}
+          </button>
+        )}
+      </div>
+      {card.busy ? (
+        <>
+          <Skeleton className="h-8 w-3/5" />
+          <Skeleton className="h-3 w-4/5" />
+        </>
+      ) : card.unavailable ? (
+        <p className="m-0">
+          <span className="chip mute">Not available yet</span>
+        </p>
+      ) : (
+        card.value && (
+          <p className={cn("ftot m-0 tabular-nums", card.bad && "text-red")}>
+            {card.value}
+          </p>
+        )
+      )}
+      {card.bar !== undefined && (
+        <div className="prog" aria-hidden="true">
+          <div className="t">
+            <i
+              className={card.bar >= 100 ? "full" : undefined}
+              style={{ width: `${Math.max(0, Math.min(card.bar, 100))}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {card.note && <p className="due m-0">{card.note}</p>}
+      {card.list && card.list.length > 0 && (
+        <div className="lines" role="list">
+          {card.list.map((row) => (
+            <div key={row.id} className="ln" role="listitem">
+              <span className="l">
+                <b>{row.left}</b>
+                {row.leftSub && <span className="muted">{row.leftSub}</span>}
+              </span>
+              {(row.right || row.rightSub) && (
+                <span className="text-right">
+                  {row.right && <b className="block">{row.right}</b>}
+                  {row.rightSub && (
+                    <span className="due block">{row.rightSub}</span>
+                  )}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -1130,57 +1239,101 @@ function AccessDialog({
   );
 }
 
-// The signed-in person, and their menu: their access, their preferences and signing out.
-function UserMenu({
+// The signed-in person's button, top right of every page.
+function ProfileButton({
   session,
   displayName,
   open,
   onToggle,
+}: {
+  session: Session | null;
+  displayName: string;
+  open: boolean;
+  onToggle: (button: HTMLElement) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      onClick={(event) => onToggle(event.currentTarget)}
+      className="prof"
+    >
+      <span className="av" aria-hidden="true">
+        {session ? initials(session.firstName, session.lastName) : ""}
+      </span>
+      <span className="sr-only">{displayName || "Your account"}</span>
+    </button>
+  );
+}
+
+// The profile pop over, under the button: who is signed in, the business date, their access, their preferences
+// and signing out. A click outside or Escape closes it.
+function ProfileMenu({
+  session,
+  displayName,
+  anchor,
+  onClose,
   onAccess,
   onPreferences,
   onSignOut,
 }: {
   session: Session | null;
   displayName: string;
-  open: boolean;
-  onToggle: () => void;
+  anchor: HTMLElement;
+  onClose: () => void;
   onAccess: () => void;
   onPreferences: () => void;
   onSignOut: () => void;
 }) {
+  const formats = useFormats();
+  const { appearance } = useAppearance();
+  const today = appearance?.businessDate;
+  const anchorRef = useMemo(() => ({ current: anchor }), [anchor]);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useAnchoredPosition(true, anchorRef, menuRef, { align: "end" });
+  useEffect(() => {
+    const away = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (anchor.contains(target)) return;
+      if ((target as Element).closest?.(".pop.prof")) return;
+      onClose();
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [anchor, onClose]);
   const letters = session ? initials(session.firstName, session.lastName) : "";
   return (
-    <>
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={onToggle}
-        className="prof"
-      >
+    <div ref={menuRef} role="menu" className="pop prof">
+      <div className="pwho" role="presentation">
         <span className="av" aria-hidden="true">
           {letters}
         </span>
-        <span className="sr-only">{displayName || "Your account"}</span>
-      </button>
-      {open && (
-        <div role="menu" className="pmenu">
-          <div className="pwho" role="presentation">
-            <span className="av" aria-hidden="true">
-              {letters}
-            </span>
-            <div>
-              <b>{displayName || "Your account"}</b>
-              <small>{session?.role || "Loading your access"}</small>
-            </div>
-          </div>
-          <div className="flex flex-col gap-0.5 border-t border-divider pt-2">
-            <MenuButton onClick={onAccess}>Your access</MenuButton>
-            <MenuButton onClick={onPreferences}>Your preferences</MenuButton>
-            <MenuButton onClick={onSignOut}>Sign out</MenuButton>
-          </div>
+        <div>
+          <b>{displayName || "Your account"}</b>
+          <small>{session?.role || "Loading your access"}</small>
+        </div>
+      </div>
+      {today && (
+        <div className="ptoday">
+          Today, {weekdayName(weekdayIndex(today))}{" "}
+          {formats.formatDateOnly(today)}
         </div>
       )}
-    </>
+      <button type="button" role="menuitem" className="btn" onClick={onAccess}>
+        Your access
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="btn"
+        onClick={onPreferences}
+      >
+        Your preferences
+      </button>
+      <button type="button" role="menuitem" className="btn" onClick={onSignOut}>
+        Sign out
+      </button>
+    </div>
   );
 }

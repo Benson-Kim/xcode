@@ -186,9 +186,8 @@ export function BandOp({ children }: { children: ReactNode }) {
   );
 }
 
-// Inputs and selects on the headline card: glass on the brand colour.
-export const bandControl =
-  "min-w-0 rounded-[10px] border border-glass-line bg-glass px-[11px] py-2 font-semibold text-white placeholder:text-on-deep [&>option]:bg-surface [&>option]:text-ink";
+// Inputs and selects on the headline card (.band .btools .inp): glass on the brand colour.
+export const bandControl = "inp";
 
 // The bar above a list (.bar): toggles, filters, search, then Export and bulk actions. Align to the top when it holds
 // a labelled field whose error may appear below it.
@@ -200,11 +199,7 @@ export function Toolbar({
   return (
     <div
       {...props}
-      className={cn(
-        "flex flex-wrap gap-2",
-        align === "start" ? "items-start" : "items-center",
-        className,
-      )}
+      className={cn("bar", align === "start" && "items-start", className)}
     />
   );
 }
@@ -215,25 +210,16 @@ export function Spacer() {
 }
 
 export function Hint({ className, ...props }: ComponentProps<"p">) {
-  return (
-    <p {...props} className={cn("m-0 text-[13px] text-grey", className)} />
-  );
+  return <p {...props} className={cn("hint m-0", className)} />;
 }
 
 // A stack of form cards (.form). Forms use the full width of the page, as in the design since v1.6.
 export function FormLayout({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div {...props} className={cn("mt-5 flex flex-col gap-4", className)} />
-  );
+  return <div {...props} className={cn("flex flex-col gap-3.5", className)} />;
 }
 
 export function FormActions({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div
-      {...props}
-      className={cn("flex flex-wrap items-center gap-3", className)}
-    />
-  );
+  return <div {...props} className={cn("acts", className)} />;
 }
 
 // Form columns at least 260px wide, as many as fit, that stack on narrow screens (.grid2). The fields share the
@@ -247,10 +233,8 @@ export function Grid2({
     <div
       {...props}
       className={cn(
-        "grid gap-x-5 gap-y-3.5 max-[720px]:grid-cols-1",
-        narrow
-          ? "grid-cols-[repeat(auto-fill,minmax(260px,1fr))]"
-          : "grid-cols-[repeat(auto-fit,minmax(260px,1fr))]",
+        "fgrid",
+        narrow && "grid-cols-[repeat(auto-fill,minmax(200px,1fr))]",
         className,
       )}
     />
@@ -259,7 +243,5 @@ export function Grid2({
 
 // A heading inside a card or dialog (.access-group).
 export function SubHeading({ className, ...props }: ComponentProps<"h3">) {
-  return (
-    <h3 {...props} className={cn("mt-4 mb-1 text-sm font-bold", className)} />
-  );
+  return <h3 {...props} className={cn("flab mt-1.5", className)} />;
 }

@@ -12,7 +12,7 @@ import {
 import { useFormats } from "../../lib/formats";
 import { cn } from "../ui";
 import { cellState } from "./capture";
-import { MINI, MINI_HEAD, PILL, TONE_CLASS } from "./styles";
+import { TONE_CLASS } from "./styles";
 
 type OnOpen = (date: string, from: HTMLElement) => void;
 
@@ -32,23 +32,21 @@ export function VehicleWeek({
 }) {
   const formats = useFormats();
   return (
-    <table className="ml-6 w-[calc(100%-24px)] border-collapse max-[720px]:ml-0 max-[720px]:w-full">
+    <table className="ml-6 w-[calc(100%-24px)] max-[720px]:ml-0 max-[720px]:w-full">
       <caption className="sr-only">{vehicle.registration} week detail</caption>
       <thead>
         <tr>
-          <th scope="col" className={MINI_HEAD}>
-            Day
-          </th>
-          <th scope="col" className={cn(MINI_HEAD, "text-right")}>
+          <th scope="col">Day</th>
+          <th scope="col" className="r">
             Expected
           </th>
-          <th scope="col" className={cn(MINI_HEAD, "text-right")}>
+          <th scope="col" className="r">
             Revenue
           </th>
-          <th scope="col" className={cn(MINI_HEAD, "text-right")}>
+          <th scope="col" className="r">
             Difference
           </th>
-          <th scope="col" className={MINI_HEAD}>
+          <th scope="col">
             <span className="sr-only">Share of expected</span>
           </th>
         </tr>
@@ -65,17 +63,15 @@ export function VehicleWeek({
             onOpen={onOpen}
           />
         ))}
-        <tr className="font-bold">
-          <th scope="row" className="px-2 py-1.5 text-left text-sm">
+        <tr>
+          <th scope="row" className="tracking-normal normal-case">
             To date
           </th>
-          <td className="px-2 py-1.5 text-right text-sm tabular-nums">
+          <td className="r tot">
             {formats.formatNumber(vehicle.totalExpected)}
           </td>
-          <td className="px-2 py-1.5 text-right text-sm tabular-nums">
-            {formats.formatNumber(vehicle.totalAmount)}
-          </td>
-          <td className="px-2 py-1.5 text-right text-sm tabular-nums">
+          <td className="r tot">{formats.formatNumber(vehicle.totalAmount)}</td>
+          <td className="r tot">
             <Gap
               actual={vehicle.totalAmount}
               expected={vehicle.totalExpected}
@@ -102,7 +98,7 @@ function revenueValue(formats: Formatter, cell: RevenueCell, today: string) {
       </span>
     );
   if (cell.amount !== null) return formats.formatNumber(cell.amount);
-  return <span className={PILL}>{cell.reason}</span>;
+  return <span className="chip mute">{cell.reason}</span>;
 }
 
 function VehicleDayRow({
@@ -122,10 +118,7 @@ function VehicleDayRow({
 }) {
   const formats = useFormats();
   const label = (
-    <th
-      scope="row"
-      className={cn(MINI, "text-left font-normal whitespace-nowrap")}
-    >
+    <th scope="row" className="font-normal tracking-normal normal-case">
       {`${day?.shortName} ${day?.dayOfMonth}`}
     </th>
   );
@@ -134,24 +127,18 @@ function VehicleDayRow({
     return (
       <tr className={TONE_CLASS[meta.tone]}>
         {label}
-        <td colSpan={4} className={MINI}>
-          {meta.label}
-        </td>
+        <td colSpan={4}>{meta.label}</td>
       </tr>
     );
-  const expected = (
-    <td className={cn(MINI, "text-right")}>
-      {formats.formatNumber(cell.expected)}
-    </td>
-  );
+  const expected = <td className="r">{formats.formatNumber(cell.expected)}</td>;
   if (!meta.recorded && !meta.awaitsCapture)
     return (
       <tr className={TONE_CLASS[meta.tone]}>
         {label}
         {expected}
-        <td className={MINI} />
-        <td className={MINI} />
-        <td className={MINI} />
+        <td />
+        <td />
+        <td />
       </tr>
     );
   const value = revenueValue(formats, cell, today);
@@ -173,9 +160,9 @@ function VehicleDayRow({
       <tr>
         {label}
         {expected}
-        <td className={cn(MINI, "text-right")}>{revenue}</td>
-        <td className={MINI} />
-        <td className={MINI} />
+        <td className="r">{revenue}</td>
+        <td />
+        <td />
       </tr>
     );
   const actual = cell.amount ?? 0;
@@ -184,20 +171,18 @@ function VehicleDayRow({
     <tr>
       {label}
       {expected}
-      <td className={cn(MINI, "text-right")}>{revenue}</td>
-      <td className={cn(MINI, "text-right")}>
+      <td className="r">{revenue}</td>
+      <td className="r">
         <Gap actual={actual} expected={cell.expected} />
       </td>
-      <td className={MINI}>
-        <div
-          data-bar
-          aria-hidden="true"
-          className="h-1.5 w-30 overflow-hidden rounded-full bg-card-line max-[720px]:w-12"
-        >
-          <span
-            className={cn("block h-full", share < 90 ? "bg-red" : "bg-blue")}
-            style={{ width: `${Math.min(share, 100)}%` }}
-          />
+      <td>
+        <div data-bar aria-hidden="true" className="prog">
+          <div className="t">
+            <i
+              className={share >= 100 ? "full" : undefined}
+              style={{ width: `${Math.min(share, 100)}%` }}
+            />
+          </div>
         </div>
       </td>
     </tr>

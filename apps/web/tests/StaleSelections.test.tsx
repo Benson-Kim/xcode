@@ -70,14 +70,14 @@ it("never starts a new vehicle on an archived company the list is filtered by, o
     { businessDate: "2026-09-30" },
   );
 
-  await screen.findByRole("button", { name: "KAA 100A" });
+  await screen.findByRole("button", { name: /^(Edit|Open) KAA 100A$/ });
   fireEvent.change(screen.getByLabelText("Company"), {
     target: { value: "company-3" },
   });
   expect(
-    screen.queryByRole("button", { name: "KDA 482M" }),
+    screen.queryByRole("button", { name: /^(Edit|Open) KDA 482M$/ }),
   ).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Add vehicle" }));
+  fireEvent.click(screen.getByRole("button", { name: "New vehicle" }));
 
   const company = screen.getByLabelText("PSV company");
   expect(company).toHaveValue("");
@@ -108,11 +108,11 @@ it("still starts a new vehicle on the company the list is filtered by when it is
     { businessDate: "2026-09-30" },
   );
 
-  await screen.findByRole("button", { name: "KDA 482M" });
+  await screen.findByRole("button", { name: /^(Edit|Open) KDA 482M$/ });
   fireEvent.change(screen.getByLabelText("Company"), {
     target: { value: "company-2" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add vehicle" }));
+  fireEvent.click(screen.getByRole("button", { name: "New vehicle" }));
   expect(screen.getByLabelText("PSV company")).toHaveValue("company-2");
 });
 
@@ -181,8 +181,13 @@ it("shows an owner's role as Owner to someone who may not give that role", async
     permissions: ["people.view", "people.manage"],
   });
 
-  fireEvent.click(await screen.findByRole("button", { name: "Antony Maina" }));
-  const role = await screen.findByLabelText("Role");
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^(Edit|View) Antony Maina$/ }),
+  );
+  // The list's Role filter stays behind the pop up.
+  const role = await within(
+    screen.getByRole("dialog", { name: "Antony Maina" }),
+  ).findByLabelText("Role");
   expect(role).toBeDisabled();
   expect(role).toHaveValue("Owner");
   expect(
@@ -213,7 +218,9 @@ it("says what a person's scope holds beyond the companies and vehicles listed", 
     permissions: ["people.view", "people.manage"],
   });
 
-  fireEvent.click(await screen.findByRole("button", { name: "Jane Njeri" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^(Edit|View) Jane Njeri$/ }),
+  );
   expect(await screen.findByLabelText("North Star")).toBeChecked();
   expect(
     screen.getByText(
@@ -226,7 +233,9 @@ it("says what a person's scope holds beyond the companies and vehicles listed", 
     role: "Office admin",
     permissions: ["people.view", "people.manage"],
   });
-  fireEvent.click(await screen.findByRole("button", { name: "Peter Otieno" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^(Edit|View) Peter Otieno$/ }),
+  );
   expect(await screen.findByLabelText("KDA 482M")).not.toBeChecked();
   expect(
     screen.getByText(

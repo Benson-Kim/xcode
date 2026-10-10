@@ -5,15 +5,7 @@ import {
   recurringMonthlyEstimate,
   recurringNextPostings,
 } from "../recurringPresentation";
-import {
-  Banner,
-  Button,
-  Card,
-  CardHeader,
-  Field,
-  Hint,
-  TextInput,
-} from "../ui";
+import { Banner, Button, Field, Hint, TextInput } from "../ui";
 import type { Derived } from "./derive";
 import type { RecurringFields } from "./fields";
 import type { Allocations } from "./useAllocations";
@@ -40,13 +32,13 @@ export function PostingPreviewCard({
       ? recurringNextPostings(derived.schedule, today, 5)
       : [];
   return (
-    <Card density="form">
-      <CardHeader title="What will post" description="Worked out for you" />
+    <div className="f">
+      <span className="flab">What will post</span>
       {dates.length ? (
         <>
-          <ol className="m-0 list-decimal pl-5">
+          <ol className="lines">
             {dates.map((date) => (
-              <li key={date} className="py-0.5 tabular-nums">
+              <li key={date} className="ln">
                 {formatDateOnly(date)}: {kes(postingTotal)} across{" "}
                 {plural(postingCount, "vehicle", "vehicles")}
               </li>
@@ -74,7 +66,7 @@ export function PostingPreviewCard({
                 : "No postings from today in this period."}
         </Hint>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -90,12 +82,12 @@ export function StopReasonCard({
   onChange: (value: string) => void;
 }) {
   return (
-    <Card density="form">
-      <CardHeader
-        title="Stop from today"
-        description="A short reason is required and is kept in the change log."
-      />
-      <Field id="recurring-stop-reason" label="Reason for stopping">
+    <>
+      <Field
+        id="recurring-stop-reason"
+        label="Reason for stopping"
+        hint="Stops from today. A short reason is required and is kept in the change log."
+      >
         <TextInput
           autoFocus
           maxLength={500}
@@ -107,7 +99,7 @@ export function StopReasonCard({
         />
       </Field>
       {error && <Banner>{error}</Banner>}
-    </Card>
+    </>
   );
 }
 
@@ -162,7 +154,7 @@ export function RecurringActions(props: ActionsProps) {
           aria-busy={busy || undefined}
           onClick={props.onSave}
         >
-          {busy ? "Saving..." : props.isNew ? "Add" : "Save changes"}
+          {busy ? "Saving..." : "Save"}
         </Button>
       )}
     </>

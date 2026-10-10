@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it } from "vitest";
 
 import { PeopleAccessView } from "../components/PeopleAccessView";
@@ -39,14 +39,14 @@ async function openNewPerson(canManageAccess: boolean) {
         ]
       : ["people.view", "people.manage", "revenue.view", "revenue.capture"],
   });
-  fireEvent.click(await screen.findByRole("button", { name: "Add person" }));
+  fireEvent.click(await screen.findByRole("button", { name: "New person" }));
   fireEvent.change(screen.getByLabelText("First name"), {
     target: { value: "Jane" },
   });
   fireEvent.change(screen.getByLabelText("Last name"), {
     target: { value: "Njeri" },
   });
-  fireEvent.change(screen.getByLabelText("Email"), {
+  fireEvent.change(screen.getByLabelText("Email for codes"), {
     target: { value: "jane@example.com" },
   });
   fireEvent.change(screen.getByLabelText("Mobile number"), {
@@ -61,7 +61,7 @@ it("limits a person to chosen vehicles and sends the role's own defaults", async
   expect(screen.getByLabelText("View reports")).not.toBeChecked();
   expect(screen.getByLabelText("View reports")).toBeDisabled();
 
-  fireEvent.click(screen.getByRole("button", { name: "Save person" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   const alerts = screen.getAllByRole("alert");
   expect(alerts).toHaveLength(2);
   expect(alerts[0]).toHaveTextContent("Fix the highlighted field to save.");
@@ -72,7 +72,7 @@ it("limits a person to chosen vehicles and sends the role's own defaults", async
   );
 
   fireEvent.click(await screen.findByLabelText("KDA 482M"));
-  fireEvent.click(screen.getByRole("button", { name: "Save person" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith(
@@ -95,7 +95,7 @@ it("does not silently truncate an overlong phone number when adding a person", a
     target: { value: "07110000012" },
   });
   fireEvent.click(await screen.findByLabelText("KDA 482M"));
-  fireEvent.click(screen.getByRole("button", { name: "Save person" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(
     screen.getByText("Enter all 10 numbers, starting 07 or 01."),
@@ -125,7 +125,7 @@ it("ticking a permission ticks what it needs, wherever it sits in the catalogue"
   ).toBeInTheDocument();
 
   fireEvent.click(await screen.findByLabelText("KDA 482M"));
-  fireEvent.click(screen.getByRole("button", { name: "Save person" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith(
       "/api/setup/people",
@@ -143,7 +143,7 @@ it("offers companies when the scope is chosen companies", async () => {
   fireEvent.click(screen.getByRole("radio", { name: "Chosen companies" }));
   fireEvent.click(await screen.findByLabelText("North Star"));
   fireEvent.click(screen.getByLabelText("View reports"));
-  fireEvent.click(screen.getByRole("button", { name: "Save person" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith(
@@ -169,7 +169,7 @@ it("says why the server refused to save a person", async () => {
   );
   await openNewPerson(false);
   fireEvent.click(await screen.findByLabelText("KDA 482M"));
-  fireEvent.click(screen.getByRole("button", { name: "Save person" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(detail);
   expect(
@@ -184,7 +184,9 @@ it("asks for the reason beside its field before removing someone's access", asyn
     role: "Owner",
     permissions: ["people.view", "people.manage", "access.manage"],
   });
-  fireEvent.click(await screen.findByRole("button", { name: "Grace Achieng" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Grace Achieng" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Remove access" }));
   fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
 
@@ -268,7 +270,7 @@ it("filters the list by role and by where each person is with signing in", async
   });
   expect(await screen.findByText("1 person")).toBeInTheDocument();
   expect(
-    await screen.findByRole("button", { name: "Baraka Test" }),
+    await screen.findByRole("button", { name: "View Baraka Test" }),
   ).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Sign in"), {
@@ -279,21 +281,21 @@ it("filters the list by role and by where each person is with signing in", async
   });
   expect(await screen.findByText("2 people")).toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Baraka Test" }),
+    screen.queryByRole("button", { name: "View Baraka Test" }),
   ).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Sign in"), {
     target: { value: "none" },
   });
   expect(
-    await screen.findByRole("button", { name: "Chebet Test" }),
+    await screen.findByRole("button", { name: "View Chebet Test" }),
   ).toBeInTheDocument();
   expect(
     fake.calls.filter((call) => call.path.startsWith("setup/people?")).at(-1)
       ?.path,
   ).toBe("setup/people?role=Revenue+clerk&status=none&page=1&pageSize=25");
   expect(
-    screen.queryByRole("button", { name: "Amina Test" }),
+    screen.queryByRole("button", { name: "View Amina Test" }),
   ).not.toBeInTheDocument();
 });
 
@@ -309,18 +311,20 @@ it("offers only roles whose defaults the editor can grant", async () => {
     role: "Office admin",
     permissions: ["people.view", "people.manage", "access.manage"],
   });
-  fireEvent.click(await screen.findByRole("button", { name: "Add person" }));
+  fireEvent.click(await screen.findByRole("button", { name: "New person" }));
 
-  const rolePicker = await screen.findByRole("combobox", { name: "Role" });
+  // The list's own Role filter stays behind the pop up and offers every role.
+  const editor = within(screen.getByRole("dialog", { name: "New person" }));
+  const rolePicker = await editor.findByRole("combobox", { name: "Role" });
   await waitFor(() => expect(rolePicker).toHaveValue("People viewer"));
   expect(
-    screen.queryByRole("option", { name: "Revenue clerk" }),
+    editor.queryByRole("option", { name: "Revenue clerk" }),
   ).not.toBeInTheDocument();
   expect(
-    screen.queryByRole("option", { name: "Fleet manager" }),
+    editor.queryByRole("option", { name: "Fleet manager" }),
   ).not.toBeInTheDocument();
   expect(
-    screen.getByRole("option", { name: "People viewer" }),
+    editor.getByRole("option", { name: "People viewer" }),
   ).toBeInTheDocument();
 });
 
@@ -386,8 +390,10 @@ async function openGrace() {
     role: "Owner",
     permissions: ["people.view", "people.manage", "access.manage"],
   });
-  fireEvent.click(await screen.findByRole("button", { name: "Grace Achieng" }));
-  const save = screen.getByRole("button", { name: "Save changes" });
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Grace Achieng" }),
+  );
+  const save = screen.getByRole("button", { name: "Save" });
   await waitFor(() => expect(save).toBeEnabled());
   return save;
 }
@@ -447,7 +453,7 @@ it.each([
     fake.on("POST setup/people", reply);
     await openNewPerson(false);
     fireEvent.click(await screen.findByLabelText("KDA 482M"));
-    const save = screen.getByRole("button", { name: "Save person" });
+    const save = screen.getByRole("button", { name: "Save" });
     fireEvent.click(save);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(message);

@@ -118,10 +118,10 @@ beforeEach(() => {
 
 afterEach(() => vi.useRealTimers());
 
-it("reads recurring items with the reference summary and hides Add without manage permission", async () => {
+it("reads recurring items with the reference summary and hides New without manage permission", async () => {
   // A view-only user has no vehicle access: every vehicle endpoint is forbidden.
   const fetchMock = mockFetch(async (input) => {
-    if (String(input).endsWith("/recurring?page=1&pageSize=25"))
+    if (String(input).endsWith("/recurring?kind=cost&page=1&pageSize=25"))
       return listResponse([
         {
           ...legacy,
@@ -152,23 +152,24 @@ it("reads recurring items with the reference summary and hides Add without manag
   );
 
   expect(
-    await screen.findByRole("button", { name: "Loan repayment" }),
+    await screen.findByRole("button", { name: "Open Loan repayment" }),
   ).toBeInTheDocument();
-  expect(screen.getByText("About KES 30,400 a month")).toBeInTheDocument();
+  expect(screen.getByTitle("About KES 30,400 a month")).toBeInTheDocument();
   expect(screen.getByText("Every day")).toBeInTheDocument();
-  // A cost saved without a bucket counts as a recurring charge, and nothing shows the retired cost types.
-  expect(screen.getByText("Recurring charges")).toBeInTheDocument();
   expect(screen.queryByText("Fixed commitments")).not.toBeInTheDocument();
-  expect(screen.getByText("1 vehicle")).toBeInTheDocument();
-  expect(screen.getByText("KDA 482M")).toBeInTheDocument();
   const row = screen.getByRole("row", { name: /Loan repayment/ });
   expect(
-    within(row).getByText("27 Sep 2026", {
-      selector: "td[data-label='Next posting']",
+    within(row).getByText("KDA 482M", {
+      selector: "td[data-label='Vehicles'] > span",
     }),
   ).toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Add scheduled expense or saving" }),
+    within(row).getByText("27 Sep 2026", {
+      selector: "td[data-label='Next run']",
+    }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /New scheduled expense|New saving/ }),
   ).not.toBeInTheDocument();
   // Without commitments.manage there are no vehicle options to tell companies apart, so only the status filter shows.
   expect(
@@ -177,8 +178,10 @@ it("reads recurring items with the reference summary and hides Add without manag
   expect(screen.getByRole("combobox", { name: "Show" })).toHaveValue("all");
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
-    "/api/setup/recurring?page=1&pageSize=25",
+    "/api/setup/recurring?kind=cost&page=1&pageSize=25",
   ]);
+  // A cost saved without a bucket counts as a recurring charge, and nothing shows the retired cost types.
+  expect(within(row).getByTitle(/Recurring charges/)).toBeInTheDocument();
 });
 
 it("counts due dates from the business date, never the computer clock", async () => {
@@ -206,7 +209,7 @@ it("counts due dates from the business date, never the computer clock", async ()
   const { unmount } = renderInApp(<RecurringPage canManage={false} />);
   const row = await screen.findByRole("row", { name: /Loan repayment/ });
   expect(
-    within(row).getByText("—", { selector: "td[data-label='Next posting']" }),
+    within(row).getByText("—", { selector: "td[data-label='Next run']" }),
   ).toBeInTheDocument();
   expect(within(row).queryByText("1 Dec 2026")).not.toBeInTheDocument();
   unmount();
@@ -215,7 +218,7 @@ it("counts due dates from the business date, never the computer clock", async ()
   const dated = await screen.findByRole("row", { name: /Loan repayment/ });
   expect(
     within(dated).getByText("1 Oct 2026", {
-      selector: "td[data-label='Next posting']",
+      selector: "td[data-label='Next run']",
     }),
   ).toBeInTheDocument();
 });
@@ -239,14 +242,19 @@ it("shows the item's note and bucket and a yearly schedule's monthly share", asy
   renderInApp(<RecurringPage canManage={false} />, {}, { businessDate });
 
   expect(
-    await screen.findByText("Zuri Genesis. Recurring charges"),
-  ).toBeInTheDocument();
+    await screen.findByTitle("Zuri Genesis. Recurring charges"),
+  ).toHaveTextContent("Insurance");
   expect(screen.getByText("Every year on 14th March")).toBeInTheDocument();
-  expect(screen.getByText("About KES 9,800 a month")).toBeInTheDocument();
+  expect(screen.getByTitle("About KES 9,800 a month")).toBeInTheDocument();
   expect(
     screen.getByText("14 Mar 2027", {
-      selector: "td[data-label='Next posting']",
+      selector: "td[data-label='Next run']",
     }),
+  ).toBeInTheDocument();
+  expect(
+    within(screen.getByRole("row", { name: /Insurance/ })).getByTitle(
+      /Recurring charges/,
+    ),
   ).toBeInTheDocument();
 });
 
@@ -260,7 +268,7 @@ it("creates a yearly cost for an expense item, starting on the business date", a
   expect(screen.queryByLabelText(/Reason/)).not.toBeInTheDocument();
   expect(screen.getByLabelText("Starts")).toHaveValue(businessDate);
   expect(screen.getByLabelText("Starts")).toHaveAttribute("min", "2026-09-01");
-  fireEvent.change(screen.getByLabelText("Expense item"), {
+  fireEvent.change(screen.getByLabelText("Item"), {
     target: { value: "insurance" },
   });
   expect(
@@ -285,7 +293,7 @@ it("creates a yearly cost for an expense item, starting on the business date", a
       /About KES 9,800 a month. Counted under Recurring charges/,
     ),
   ).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
@@ -318,7 +326,7 @@ it("keeps savings to a free name, weekly or monthly", async () => {
 
   fireEvent.click(screen.getByRole("radio", { name: "Every year" }));
   fireEvent.click(screen.getByRole("radio", { name: "Savings" }));
-  expect(screen.queryByLabelText("Expense item")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Item")).not.toBeInTheDocument();
   expect(
     screen.queryByRole("radio", { name: "Every year" }),
   ).not.toBeInTheDocument();
@@ -330,7 +338,7 @@ it("keeps savings to a free name, weekly or monthly", async () => {
     target: { value: "5000" },
   });
   fireEvent.click(screen.getByLabelText("KDA 482M"));
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   expect(sentBody(fetchMock)).toMatchObject({
@@ -349,7 +357,7 @@ it("refuses a start before the first of the business date's month, and a note ov
   );
   renderEditor();
 
-  fireEvent.change(screen.getByLabelText("Expense item"), {
+  fireEvent.change(screen.getByLabelText("Item"), {
     target: { value: "loan" },
   });
   fireEvent.change(screen.getByLabelText("Amount each time"), {
@@ -362,7 +370,7 @@ it("refuses a start before the first of the business date's month, and a note ov
     target: { value: "x".repeat(201) },
   });
   fireEvent.click(screen.getByLabelText("KDA 482M"));
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(
     screen.getByText(
@@ -378,7 +386,7 @@ it("refuses a start before the first of the business date's month, and a note ov
     target: { value: "2026-09-01" },
   });
   fireEvent.change(screen.getByLabelText("Note"), { target: { value: "" } });
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   expect(sentBody(fetchMock)).toMatchObject({
     start: "2026-09-01",
@@ -394,8 +402,8 @@ it("updates a scheduled item using its edited allocations and schedule", async (
   );
   const onSaved = renderEditor({ item });
 
-  expect(screen.getByLabelText("Expense item")).toHaveValue("loan");
-  fireEvent.change(screen.getByLabelText("Expense item"), {
+  expect(screen.getByLabelText("Item")).toHaveValue("loan");
+  fireEvent.change(screen.getByLabelText("Item"), {
     target: { value: "insurance" },
   });
   fireEvent.change(screen.getByLabelText("Amount each time"), {
@@ -404,7 +412,7 @@ it("updates a scheduled item using its edited allocations and schedule", async (
   fireEvent.change(screen.getByLabelText("Share for KDA 482M"), {
     target: { value: "1350" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
@@ -443,14 +451,14 @@ it("shows a legacy daily cost read-only and asks for an item and a new frequency
   expect(
     screen.getByText(/Counted under Recurring charges in each vehicle report/),
   ).toBeInTheDocument();
-  expect(screen.getByLabelText("Expense item")).toHaveValue("");
+  expect(screen.getByLabelText("Item")).toHaveValue("");
   expect(
     screen.queryByRole("radio", { name: "Every day" }),
   ).not.toBeInTheDocument();
   for (const option of ["Every week", "Every month", "Every year"])
     expect(screen.getByRole("radio", { name: option })).not.toBeChecked();
 
-  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(screen.getByText("Choose the expense item.")).toBeInTheDocument();
   expect(
     screen.getByText(
@@ -459,11 +467,11 @@ it("shows a legacy daily cost read-only and asks for an item and a new frequency
   ).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalled();
 
-  fireEvent.change(screen.getByLabelText("Expense item"), {
+  fireEvent.change(screen.getByLabelText("Item"), {
     target: { value: "loan" },
   });
   fireEvent.click(screen.getByRole("radio", { name: "Every month" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/setup/recurring/${legacy.id}`,
@@ -524,7 +532,7 @@ it("keeps an item editable before its future stop date, and offers to cancel the
       "Scheduled to stop on 25 Sep 2026. You can still change the schedule, or cancel the stop, before then.",
     ),
   ).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   // The server refuses a second stop on another date (D16), so the only stop action offered is cancelling it.
   expect(screen.getByRole("button", { name: "Cancel stop" })).toBeEnabled();
   expect(
@@ -564,9 +572,7 @@ it("loads expense item options only once the editor opens", async () => {
   );
 
   fireEvent.click(
-    await screen.findByRole("button", {
-      name: "Add scheduled expense or saving",
-    }),
+    await screen.findByRole("button", { name: "New scheduled expense" }),
   );
   expect(
     await screen.findByRole("option", { name: "Loan repayment" }),
@@ -650,9 +656,9 @@ it("filters the list by company and by running or stopped, as the design does", 
     screen
       .getAllByRole("row")
       .slice(1)
-      .map((row) => within(row).getAllByRole("button")[0].textContent);
+      .map((row) => row.querySelector("td[data-label='Item']")?.textContent);
 
-  await screen.findByRole("button", { name: "Parking" });
+  await screen.findByRole("button", { name: "Edit Parking" });
   const company = await screen.findByRole("combobox", { name: "Company" });
   expect(
     [...company.querySelectorAll("option")].map((option) => option.textContent),
@@ -665,20 +671,20 @@ it("filters the list by company and by running or stopped, as the design does", 
   fireEvent.change(company, { target: { value: "company-1" } });
   await waitFor(() => expect(names()).toEqual(["Parking"]));
   expect(lastList()).toBe(
-    "/api/setup/recurring?companyId=company-1&page=1&pageSize=25",
+    "/api/setup/recurring?kind=cost&companyId=company-1&page=1&pageSize=25",
   );
   fireEvent.change(company, { target: { value: "all" } });
   fireEvent.change(status, { target: { value: "stopped" } });
   await waitFor(() => expect(names()).toEqual(["Licence", "SACCO fee"]));
   expect(lastList()).toBe(
-    "/api/setup/recurring?status=stopped&page=1&pageSize=25",
+    "/api/setup/recurring?kind=cost&status=stopped&page=1&pageSize=25",
   );
   fireEvent.change(status, { target: { value: "running" } });
   await waitFor(() => expect(names()).toEqual(["Parking"]));
   fireEvent.change(company, { target: { value: "company-2" } });
-  expect(await screen.findByText("Nothing here yet.")).toBeInTheDocument();
+  expect(await screen.findByText("Nothing scheduled.")).toBeInTheDocument();
   expect(lastList()).toBe(
-    "/api/setup/recurring?companyId=company-2&status=running&page=1&pageSize=25",
+    "/api/setup/recurring?kind=cost&companyId=company-2&status=running&page=1&pageSize=25",
   );
 });
 
@@ -708,7 +714,7 @@ it("shows a future stop separately while listing its next posting as running", a
   const row = await screen.findByRole("row", { name: /Loan repayment/ });
   expect(
     within(row).getByText("21 Sep 2026", {
-      selector: "td[data-label='Next posting']",
+      selector: "td[data-label='Next run']",
     }),
   ).toBeInTheDocument();
   expect(within(row).getByText("Stops 25 Sep 2026")).toBeInTheDocument();
@@ -716,7 +722,7 @@ it("shows a future stop separately while listing its next posting as running", a
   fireEvent.change(screen.getByRole("combobox", { name: "Show" }), {
     target: { value: "stopped" },
   });
-  expect(await screen.findByText("Nothing here yet.")).toBeInTheDocument();
+  expect(await screen.findByText("Nothing scheduled.")).toBeInTheDocument();
   fireEvent.change(screen.getByRole("combobox", { name: "Show" }), {
     target: { value: "running" },
   });

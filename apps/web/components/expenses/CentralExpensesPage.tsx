@@ -20,8 +20,6 @@ import { BandSkeleton } from "../revenue/RegPlate";
 import {
   Banner,
   Button,
-  bandControl,
-  cn,
   HeroBand,
   PageHeader,
   Pager,
@@ -112,7 +110,7 @@ export function CentralExpensesPage({
   }
 
   return (
-    <section className="flex flex-col gap-3.5">
+    <>
       <PageHeader
         title="Central expenses"
         description=""
@@ -142,7 +140,7 @@ export function CentralExpensesPage({
             <input
               type="search"
               aria-label="Search"
-              className={cn(bandControl, "srch")}
+              className="inp srch"
               placeholder="Search vehicle, item or note"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -161,21 +159,23 @@ export function CentralExpensesPage({
 
       {ledger.error && known && <Banner>{ledger.error}</Banner>}
 
-      <LedgerTable
-        rows={rows}
-        total={total}
-        amount={ledger.data?.amount ?? 0}
-        loading={path === null ? !ledger.error : ledger.loading}
-        failed={Boolean(ledger.error)}
-        filtered={filtered}
-        actions={{
-          onEdit: (row) => setDialog({ entry: row }),
-          onRemove: setRemoving,
-          onOpenDay: mayOpenPettyCash
-            ? (row) => onOpenPettyCash(row.date)
-            : undefined,
-        }}
-      />
+      <div id="expT">
+        <LedgerTable
+          rows={rows}
+          total={total}
+          amount={ledger.data?.amount ?? 0}
+          loading={path === null ? !ledger.error : ledger.loading}
+          failed={Boolean(ledger.error)}
+          filtered={filtered}
+          actions={{
+            onEdit: (row) => setDialog({ entry: row }),
+            onRemove: setRemoving,
+            onOpenDay: mayOpenPettyCash
+              ? (row) => onOpenPettyCash(row.date)
+              : undefined,
+          }}
+        />
+      </div>
 
       <Pager
         page={paging.page}
@@ -202,6 +202,6 @@ export function CentralExpensesPage({
         onConflict={done}
         onClose={() => setRemoving(null)}
       />
-    </section>
+    </>
   );
 }

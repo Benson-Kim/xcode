@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 
 import {
   PETTY_CASH_NOTE_LIMIT,
@@ -24,15 +24,13 @@ import {
   Banner,
   Button,
   Choice,
-  Dialog,
   ErrorSummary,
   Field,
-  Grid2,
   SearchSelect,
   TextInput,
 } from "../ui";
 import { AmountInput } from "./AmountInput";
-import { DialogFooter } from "./DialogFooter";
+import { DialogFooter, FormDialog } from "./DialogFooter";
 import { itemOptions } from "./itemOptions";
 import {
   ENTRIES_PATH,
@@ -60,9 +58,9 @@ type Errors = Partial<
 >;
 
 const TITLES: Record<PettyCashKind, [string, string]> = {
-  expense: ["Add expense", "Edit expense"],
-  credit: ["Add credit note", "Edit credit note"],
-  cash: ["Add cash", "Edit cash given"],
+  expense: ["Record spending", "Edit spending"],
+  credit: ["Credit note", "Edit credit note"],
+  cash: ["Issue cash", "Edit cash issued"],
 };
 
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
@@ -89,7 +87,7 @@ export function EntryDialog({
 }) {
   const title = state ? TITLES[state.kind][state.entry ? 1 : 0] : "";
   return (
-    <Dialog open={Boolean(state)} title={title} onClose={onClose}>
+    <FormDialog open={Boolean(state)} title={title} onClose={onClose}>
       {state && (
         <EntryForm
           kind={state.kind}
@@ -103,7 +101,7 @@ export function EntryDialog({
           onClose={onClose}
         />
       )}
-    </Dialog>
+    </FormDialog>
   );
 }
 
@@ -147,6 +145,7 @@ function EntryForm({
   );
   const [errors, setErrors] = useState<Errors>({});
   const { saving, error, run } = useDialogAction(onConflict);
+  const formId = useId();
 
   // The choices follow the date on the form; while the next ones load, the last ones stay.
   const options = useResource<PettyCashOptions>(
@@ -266,36 +265,69 @@ function EntryForm({
   }
 
   const amountHint =
-    total !== null
-      ? `Total ${formats.kes(total)}. Use a minus sign for a refund.`
+    kind === "expense"
+      ? "Use a minus sign for a refund."
       : "Use a minus sign for money coming back.";
 
   return (
-    <form noValidate onSubmit={submit} className="flex flex-col gap-3.5">
+    <form
+      id={formId}
+      noValidate
+      onSubmit={submit}
+      className="flex flex-col gap-3.5"
+    >
       {options.error && !choices && <Banner>{options.error}</Banner>}
       {kind === "expense" ? (
-        <Grid2 narrow>
-          <Field id="pc-units" label="Units" error={errors.units}>
-            <TextInput
-              inputMode="decimal"
-              autoComplete="off"
-              value={units}
-              onChange={(event) => setUnits(event.target.value)}
+        <>
+          <Field id="pc-vehicle" label="Vehicle" error={errors.vehicle}>
+            <SearchSelect
+              options={vehicleChoices.map((vehicle) => ({
+                value: vehicle.id,
+                label: vehicle.companyName
+                  ? `${vehicle.registration}, ${vehicle.companyName}`
+                  : vehicle.registration,
+              }))}
+              value={vehicleId}
+              placeholder="Choose vehicle"
+              onChange={setVehicleId}
             />
           </Field>
-          <Field
-            id="pc-amount"
-            label="Amount each"
-            hint={amountHint}
-            error={errors.amount}
-          >
-            <AmountInput
-              autoFocus
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
+          <Field id="pc-item" label="Item" error={errors.item}>
+            <SearchSelect
+              options={itemOptions(itemChoices)}
+              value={itemId}
+              placeholder="Search item"
+              onChange={setItemId}
             />
           </Field>
-        </Grid2>
+          <div className="mrow">
+            <Field id="pc-units" label="Qty" error={errors.units}>
+              <TextInput
+                inputMode="decimal"
+                autoComplete="off"
+                className="num"
+                value={units}
+                onChange={(event) => setUnits(event.target.value)}
+              />
+            </Field>
+            <Field
+              id="pc-amount"
+              label={`Unit cost, ${formats.currencyCode()}`}
+              hint={amountHint}
+              error={errors.amount}
+            >
+              <AmountInput
+                autoFocus
+                value={amount}
+                onChange={(event) => setAmount(event.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="mtot">
+            <span>Total amount</span>
+            <b className="num">{formats.kes(total ?? 0)}</b>
+          </div>
+        </>
       ) : (
         <>
           {pickHolder && (
@@ -306,7 +338,7 @@ function EntryForm({
                   label: `${candidate.name}${candidate.active ? "" : " (not active)"}`,
                 }))}
                 value={holder}
-                placeholder="Choose the manager"
+                placeholder="Choose manager"
                 onChange={setHolder}
               />
             </Field>
@@ -323,7 +355,7 @@ function EntryForm({
           )}
           <Field
             id="pc-amount"
-            label="Amount"
+            label={`Amount, ${formats.currencyCode()}`}
             hint={amountHint}
             error={errors.amount}
           >
@@ -331,31 +363,6 @@ function EntryForm({
               autoFocus={kind === "cash" && !pickHolder}
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
-            />
-          </Field>
-        </>
-      )}
-      {kind === "expense" && (
-        <>
-          <Field id="pc-vehicle" label="Vehicle" error={errors.vehicle}>
-            <SearchSelect
-              options={vehicleChoices.map((vehicle) => ({
-                value: vehicle.id,
-                label: vehicle.companyName
-                  ? `${vehicle.registration}, ${vehicle.companyName}`
-                  : vehicle.registration,
-              }))}
-              value={vehicleId}
-              placeholder="Choose the vehicle"
-              onChange={setVehicleId}
-            />
-          </Field>
-          <Field id="pc-item" label="What it was for" error={errors.item}>
-            <SearchSelect
-              options={itemOptions(itemChoices)}
-              value={itemId}
-              placeholder="Choose the item"
-              onChange={setItemId}
             />
           </Field>
         </>
@@ -393,8 +400,8 @@ function EntryForm({
         <Button tone="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button type="submit" tone="ok" disabled={saving}>
-          {entry ? "Save" : "Add"}
+        <Button type="submit" form={formId} tone="ok" disabled={saving}>
+          {kind === "cash" && !entry ? "Issue cash" : "Save"}
         </Button>
       </DialogFooter>
     </form>

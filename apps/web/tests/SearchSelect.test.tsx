@@ -204,7 +204,7 @@ it("jumps to the first and last match with Home and End while searching", () => 
   ).toHaveTextContent("KDA 482M");
 });
 
-it("groups options under their heading", () => {
+it("shows each option's group beside it, as the design's item list does", () => {
   render(
     <Harness
       options={[
@@ -216,14 +216,12 @@ it("groups options under their heading", () => {
   );
   fireEvent.focus(input());
   const list = listboxOf(input());
-  expect(within(list).getAllByText("Garage and repairs")).toHaveLength(1);
+  expect(within(list).getAllByText("Garage and repairs")).toHaveLength(2);
   expect(within(list).getByText("Fees")).toBeInTheDocument();
   fireEvent.change(input(), { target: { value: "fees park" } });
-  expect(
-    within(listboxOf(input()))
-      .getAllByRole("option")
-      .map((option) => option.textContent),
-  ).toEqual(["Parking"]);
+  const found = within(listboxOf(input())).getAllByRole("option");
+  expect(found).toHaveLength(1);
+  expect(found[0]).toHaveAccessibleName("Parking");
 });
 
 it("takes the id and the error wiring of the field it is in", () => {

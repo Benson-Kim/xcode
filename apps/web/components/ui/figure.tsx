@@ -1,11 +1,11 @@
 import { cn } from "./cn";
 
-// White figure tiles: the tone only colours the number (cash received teal, money out and negatives clay).
+// A labelled figure in the design's summary strip (.msum span + b). Cash received is teal, a negative clay.
 const TONES = {
-  plain: "text-ink",
-  out: "text-ink",
+  plain: "",
+  out: "",
   in: "text-teal",
-  close: "text-ink",
+  close: "",
 } as const;
 
 export function Figure({
@@ -20,22 +20,11 @@ export function Figure({
   bad?: boolean;
 }) {
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-1.5 rounded-[18px] border border-line bg-surface px-5 py-[18px]",
-      )}
-    >
-      <small className="text-xs font-bold tracking-[.07em] text-slate uppercase">
-        {label}
-      </small>
-      <strong
-        className={cn(
-          "text-[26px] leading-[1.15] font-extrabold tabular-nums",
-          bad ? "text-clay" : TONES[tone],
-        )}
-      >
-        {value}
-      </strong>
+    <div className="msum">
+      <div>
+        <span>{label}</span>
+        <b className={cn(bad ? "text-clay" : TONES[tone])}>{value}</b>
+      </div>
     </div>
   );
 }

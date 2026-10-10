@@ -2,22 +2,25 @@ import type { ReactNode } from "react";
 
 import { cn } from "./cn";
 
-// A vehicle registration, drawn as a plate (.reg).
+// A vehicle registration, drawn as a plate (.reg). With an amount, the vehicle's share of a split sits inside it.
 export function RegPlate({
+  amount,
   className,
   children,
 }: {
+  amount?: ReactNode;
   className?: string;
   children: ReactNode;
 }) {
   return (
-    <strong
-      className={cn(
-        "inline-flex items-baseline gap-[7px] rounded-[7px] bg-paper-2 px-[9px] py-[3px] text-[13px] font-bold tracking-[.03em] whitespace-nowrap text-ink",
-        className,
-      )}
-    >
+    <span className={cn("reg", className)}>
       {children}
-    </strong>
+      {amount !== undefined && <i>{amount}</i>}
+    </span>
   );
+}
+
+// Several plates together, as an expense split across vehicles (.splitv).
+export function RegPlates({ children }: { children: ReactNode }) {
+  return <div className="splitv">{children}</div>;
 }

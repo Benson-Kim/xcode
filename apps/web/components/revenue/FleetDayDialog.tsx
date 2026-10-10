@@ -20,10 +20,8 @@ import { useFormats } from "../../lib/formats";
 import {
   Banner,
   Button,
-  ChevronIcon,
   cn,
   Dialog,
-  IconButton,
   ListSkeleton,
   LoadingRegion,
   Note,
@@ -32,7 +30,6 @@ import {
 } from "../ui";
 import { dayTotal, type DayEntry } from "./fleetDay";
 import { RegPlate } from "./RegPlate";
-import { CELL, HEAD } from "./styles";
 import { useFleetDay } from "./useFleetDay";
 
 const REASON_OPTIONS = REVENUE_REASONS.map((reason) => ({
@@ -103,7 +100,7 @@ export function FleetDayDialog({
       }
     >
       {date !== null && (
-        <div className="flex flex-col gap-3.5">
+        <>
           <DayStepper
             date={date}
             last={day?.businessDate ?? today}
@@ -124,69 +121,75 @@ export function FleetDayDialog({
                   {`Showing the first ${day.vehicles.length} vehicles. Choose a company to capture the rest.`}
                 </Note>
               )}
-              <div className="overflow-x-auto rounded-2xl border border-line">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr>
-                      <th className={cn(HEAD, "text-left")}>Vehicle</th>
-                      <th className={cn(HEAD, "text-right", LAST_WEEK)}>
-                        Same day last week
-                      </th>
-                      <th className={cn(HEAD, "text-right")}>
-                        {`Revenue, ${formats.currencyCode()}`}
-                      </th>
-                      <th className={cn(HEAD, "text-left")}>
-                        No revenue reason
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {day.vehicles.map((vehicle) => (
-                      <DayRow
-                        key={vehicle.id}
-                        vehicle={vehicle}
-                        entry={capture.entry(vehicle.id)}
-                        invalid={invalid.has(vehicle.id)}
-                        canChooseReason={canChooseReason}
-                        inputId={inputId(vehicle.id)}
-                        onAmount={(value) =>
-                          capture.typeAmount(vehicle.id, value)
-                        }
-                        onReason={(value) =>
-                          capture.chooseReason(vehicle.id, value)
-                        }
-                        onNote={(value) => capture.typeNote(vehicle.id, value)}
-                        onKeyDown={next(vehicle.id)}
-                      />
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-paper-2 font-bold text-ink">
-                      <td className={CELL}>
-                        {`${day.vehicles.length} vehicle${day.vehicles.length === 1 ? "" : "s"}`}
-                      </td>
-                      <td className={cn(CELL, LAST_WEEK)} />
-                      <td className={cn(CELL, "text-right")}>
-                        {formats.formatNumber(dayTotal(day, capture.typed))}
-                      </td>
-                      <td className={CELL} />
-                    </tr>
-                  </tfoot>
-                </table>
+              <div className="tbl">
+                <div className="scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Vehicle</th>
+                        <th className={cn("r", LAST_WEEK)}>
+                          Same day last week
+                        </th>
+                        <th className="r">
+                          {`Revenue, ${formats.currencyCode()}`}
+                        </th>
+                        <th>No revenue reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {day.vehicles.map((vehicle) => (
+                        <DayRow
+                          key={vehicle.id}
+                          vehicle={vehicle}
+                          entry={capture.entry(vehicle.id)}
+                          invalid={invalid.has(vehicle.id)}
+                          canChooseReason={canChooseReason}
+                          inputId={inputId(vehicle.id)}
+                          onAmount={(value) =>
+                            capture.typeAmount(vehicle.id, value)
+                          }
+                          onReason={(value) =>
+                            capture.chooseReason(vehicle.id, value)
+                          }
+                          onNote={(value) =>
+                            capture.typeNote(vehicle.id, value)
+                          }
+                          onKeyDown={next(vehicle.id)}
+                        />
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td>
+                          {`${day.vehicles.length} vehicle${day.vehicles.length === 1 ? "" : "s"}`}
+                        </td>
+                        <td className={LAST_WEEK} />
+                        <td className="r">
+                          {formats.formatNumber(dayTotal(day, capture.typed))}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               </div>
             </>
           )}
           {capture.problems.length > 0 && (
-            <Banner>
+            <div className="ferr" role="alert">
               {capture.problems.map((problem) => (
                 <span key={problem.vehicleId} className="block">
                   {problem.message}
                 </span>
               ))}
-            </Banner>
+            </div>
           )}
-          {capture.error && <Banner>{capture.error}</Banner>}
-        </div>
+          {capture.error && (
+            <div className="ferr" role="alert">
+              {capture.error}
+            </div>
+          )}
+        </>
       )}
     </Dialog>
   );
@@ -235,23 +238,27 @@ function DayStepper({
 }) {
   const formats = useFormats();
   return (
-    <div className="flex items-center gap-1">
-      <IconButton
-        aria-label="Previous day"
-        onClick={() => onDate(shiftDate(date, -1))}
-      >
-        <ChevronIcon size={20} className="rotate-90" />
-      </IconButton>
-      <strong aria-live="polite" className="min-w-44 text-center text-[15px]">
-        {formats.formatWeekdayDate(date)}
-      </strong>
-      <IconButton
-        aria-label="Next day"
-        disabled={date >= last}
-        onClick={() => onDate(shiftDate(date, 1))}
-      >
-        <ChevronIcon size={20} className="-rotate-90" />
-      </IconButton>
+    <div className="mstep">
+      <div className="step day">
+        <button
+          type="button"
+          aria-label="Previous day"
+          onClick={() => onDate(shiftDate(date, -1))}
+        >
+          ‹
+        </button>
+        <span className="d" aria-live="polite">
+          {formats.formatWeekdayDate(date)}
+        </span>
+        <button
+          type="button"
+          aria-label="Next day"
+          disabled={date >= last}
+          onClick={() => onDate(shiftDate(date, 1))}
+        >
+          ›
+        </button>
+      </div>
     </div>
   );
 }
@@ -287,39 +294,36 @@ function DayRow({
         : cell.reason;
   return (
     <tr>
-      <td className={cn(CELL, "whitespace-nowrap")}>
+      <td>
         <RegPlate>{registration}</RegPlate>
       </td>
-      <td className={cn(CELL, "text-right text-slate", LAST_WEEK)}>
+      <td className={cn("r muted", LAST_WEEK)}>
         {lastWeek === null
           ? ""
           : lastWeek.amount !== null
             ? formats.formatNumber(lastWeek.amount)
             : lastWeek.reason}
       </td>
-      <td className={cn(CELL, "text-right")}>
+      <td className={cn("r", cell.canEdit && "ed")}>
         {cell.canEdit ? (
-          <div className="ml-auto w-28">
-            <TextInput
-              id={inputId}
-              density="compact"
-              inputMode="decimal"
-              autoComplete="off"
-              aria-label={`Revenue, ${registration}`}
-              aria-invalid={invalid || undefined}
-              value={entry.amount}
-              onChange={(event) => onAmount(event.target.value)}
-              onKeyDown={onKeyDown}
-              className="text-right tabular-nums"
-            />
-          </div>
+          <input
+            id={inputId}
+            inputMode="decimal"
+            autoComplete="off"
+            aria-label={`Revenue, ${registration}`}
+            aria-invalid={invalid || undefined}
+            value={entry.amount}
+            onChange={(event) => onAmount(event.target.value)}
+            onKeyDown={onKeyDown}
+            className={cn("cell wide", invalid && "err")}
+          />
         ) : cell.amount === null ? (
           ""
         ) : (
           formats.formatNumber(cell.amount)
         )}
       </td>
-      <td className={CELL}>
+      <td>
         {cell.canEdit && canChooseReason ? (
           <div className="flex min-w-36 flex-col gap-1.5">
             <SearchSelect
@@ -343,7 +347,7 @@ function DayRow({
             )}
           </div>
         ) : (
-          <span className="text-slate">{saved}</span>
+          <span className="muted">{saved}</span>
         )}
       </td>
     </tr>

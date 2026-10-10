@@ -44,48 +44,46 @@ function signIn(permissions: string[]) {
 }
 
 it.each([["expenses.setup"], ["expenses.view"], ["commitments.view"]])(
-  "lists Expense categories under Setup for %s",
+  "lists Expense items under Setup for %s",
   async (permission) => {
     signIn([permission]);
     const menu = within(screen.getByRole("navigation", { name: "Main" }));
-    fireEvent.click(
-      await menu.findByRole("button", { name: "Expense categories" }),
-    );
+    fireEvent.click(await menu.findByRole("button", { name: "Expense items" }));
     expect(
       await screen.findByRole("heading", {
-        name: "Expense categories",
+        name: "Expense items",
         level: 1,
       }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add item" }) !== null).toBe(
+    expect(screen.queryByRole("button", { name: "New item" }) !== null).toBe(
       permission === "expenses.setup",
     );
   },
 );
 
-it("hides Expense categories and scheduled items without any of their permissions", async () => {
+it("hides Expense items and scheduled items without any of their permissions", async () => {
   signIn(["vehicles.manage"]);
   const menu = within(screen.getByRole("navigation", { name: "Main" }));
   expect(
     await menu.findByRole("button", { name: "Vehicles" }),
   ).toBeInTheDocument();
   expect(
-    menu.queryByRole("button", { name: "Expense categories" }),
+    menu.queryByRole("button", { name: "Expense items" }),
   ).not.toBeInTheDocument();
   expect(
-    menu.queryByRole("button", { name: "Scheduled expenses and savings" }),
+    menu.queryByRole("button", { name: "Scheduled expenses" }),
   ).not.toBeInTheDocument();
 });
 
-it("names the scheduled items page Scheduled expenses and savings", async () => {
+it("names the scheduled items page Scheduled expenses", async () => {
   signIn(["commitments.view"]);
   const menu = within(screen.getByRole("navigation", { name: "Main" }));
   fireEvent.click(
-    await menu.findByRole("button", { name: "Scheduled expenses and savings" }),
+    await menu.findByRole("button", { name: "Scheduled expenses" }),
   );
   expect(
     await screen.findByRole("heading", {
-      name: "Scheduled expenses and savings",
+      name: "Scheduled expenses",
       level: 1,
     }),
   ).toBeInTheDocument();
@@ -96,11 +94,11 @@ const MENU = [
   "Revenue",
   "Central expenses",
   "Petty cash",
-  "Scheduled expenses and savings",
+  "Scheduled expenses",
   "Reports",
   "PSV companies",
   "Vehicles",
-  "Expense categories",
+  "Expense items",
   "People and access",
   "Change log",
   "Organization settings",
@@ -135,12 +133,12 @@ it("groups Expenses and Setup under their own headings, around Reports", async (
     "Expenses",
     "Central expenses",
     "Petty cash",
-    "Scheduled expenses and savings",
+    "Scheduled expenses",
     "Reports",
     "Setup",
     "PSV companies",
     "Vehicles",
-    "Expense categories",
+    "Expense items",
     "People and access",
     "Change log",
     "Organization settings",
@@ -155,11 +153,11 @@ it("groups Expenses and Setup under their own headings, around Reports", async (
   ).not.toBeInTheDocument();
   expect(
     within(group("Expenses")).queryByRole("button", {
-      name: "Expense categories",
+      name: "Expense items",
     }),
   ).not.toBeInTheDocument();
   expect(
-    within(group("Setup")).getByRole("button", { name: "Expense categories" }),
+    within(group("Setup")).getByRole("button", { name: "Expense items" }),
   ).toBeInTheDocument();
   expect(
     within(group("Setup")).getByRole("button", { name: "Vehicles" }),
@@ -194,7 +192,7 @@ it("folds each group on its own, and opens it again", async () => {
 it.each([
   ["Central expenses", "expenses.view"],
   ["Petty cash", "pettycash.spend"],
-  ["Scheduled expenses and savings", "commitments.view"],
+  ["Scheduled expenses", "commitments.view"],
   ["Reports", "reports.view"],
 ])("shows %s, with its group, for %s alone", async (label, permission) => {
   signIn([permission]);
@@ -205,15 +203,16 @@ it.each([
   );
 });
 
-it("keeps Expense categories in Setup, out of the Expenses group, for expenses.setup alone", async () => {
+it("keeps Expense items in Setup, out of the Expenses group, for expenses.setup alone", async () => {
   signIn(["expenses.setup"]);
   const menu = within(screen.getByRole("navigation", { name: "Main" }));
   expect(
-    await menu.findByRole("button", { name: "Expense categories" }),
+    await menu.findByRole("button", { name: "Expense items" }),
   ).toBeInTheDocument();
   expect(
-    menu.getByRole("button", { name: "Expense categories" }).closest("div")
-      ?.firstElementChild,
+    // The group's entries follow its heading button.
+    menu.getByRole("button", { name: "Expense items" }).closest(".kids")
+      ?.previousElementSibling,
   ).toHaveTextContent("Setup");
   expect(
     menu.queryByRole("button", { name: "Expenses" }),

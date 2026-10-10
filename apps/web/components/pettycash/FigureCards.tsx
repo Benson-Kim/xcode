@@ -35,21 +35,27 @@ export function FigureCards({
       <BandOp>=</BandOp>
       <BandTerm
         label="Opening balance"
-        value={formats.kes(figures.openingBalance)}
+        value={formats.formatNumber(figures.openingBalance)}
       />
       <BandOp>+</BandOp>
       <BandTerm
         label="Cash issued"
         value={
           figures.cashReceived < 0
-            ? `${formats.kes(figures.cashReceived)} returned`
-            : formats.kes(figures.cashReceived)
+            ? `${formats.formatNumber(figures.cashReceived)} returned`
+            : formats.formatNumber(figures.cashReceived)
         }
       />
       <BandOp>&minus;</BandOp>
-      <BandTerm label="Expenses" value={formats.kes(figures.expenses)} />
+      <BandTerm
+        label="Expenses"
+        value={formats.formatNumber(figures.expenses)}
+      />
       <BandOp>&minus;</BandOp>
-      <BandTerm label="Credit notes" value={formats.kes(figures.creditNotes)} />
+      <BandTerm
+        label="Credit notes"
+        value={formats.formatNumber(figures.creditNotes)}
+      />
     </div>
   );
 }
