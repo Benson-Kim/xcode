@@ -47,19 +47,15 @@ it("shows the four day figures from the overview and the day's expenses and cred
   const fetcher = servePettyCash({ entries: [expense(), credit(), cash()] });
   renderInApp(<PettyCashPage />);
 
+  // Cash balance = Opening balance + Cash issued - Expenses - Credit notes.
   const figures = await screen.findByRole("group", { name: "Day figures" });
-  expect(
-    within(figures).getByText("Opening cash balance").nextSibling,
-  ).toHaveTextContent("KES 12,000");
-  expect(
-    within(figures).getByText("Today, money out").nextSibling,
-  ).toHaveTextContent("KES 4,000");
-  expect(
-    within(figures).getByText("Today, cash received").nextSibling,
-  ).toHaveTextContent("KES 5,000");
-  expect(
-    within(figures).getByText("Closing cash balance").nextSibling,
-  ).toHaveTextContent("KES 13,000");
+  const figure = (label: string) =>
+    within(figures).getByText(label).nextSibling;
+  expect(figure("Cash balance")).toHaveTextContent("KES 13,000");
+  expect(figure("Opening balance")).toHaveTextContent("KES 12,000");
+  expect(figure("Cash issued")).toHaveTextContent("KES 5,000");
+  expect(figure("Expenses")).toHaveTextContent("KES 3,500");
+  expect(figure("Credit notes")).toHaveTextContent("KES 500");
 
   const tyres = await screen.findByRole("row", { name: /KDA 482M/ });
   expect(within(tyres).getByText("Tyres")).toBeInTheDocument();
@@ -106,11 +102,11 @@ it("writes a balance below zero with its minus sign, KES -750, in red", async ()
   });
   renderInApp(<PettyCashPage />);
   const figures = await screen.findByRole("group", { name: "Day figures" });
-  const closing = within(figures).getByText("Closing cash balance").nextSibling;
+  const closing = within(figures).getByText("Cash balance").nextSibling;
   expect(closing).toHaveTextContent(/^KES -750$/);
-  expect(closing).toHaveClass("text-red");
+  expect(closing).toHaveClass("neg");
   expect(
-    within(figures).getByText("Today, cash received").nextSibling,
+    within(figures).getByText("Cash issued").nextSibling,
   ).toHaveTextContent("KES -200 returned");
 });
 
@@ -744,10 +740,11 @@ it("opens on the business date, with the same period picker as Central expenses 
     Boolean(
       first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING,
     );
-  expect(follows(period, manager)).toBe(true);
+  // The period and the actions sit on the headline card, ahead of the filters.
+  expect(follows(period, approve)).toBe(true);
+  expect(follows(approve, manager)).toBe(true);
   expect(follows(manager, status)).toBe(true);
   expect(follows(status, search)).toBe(true);
-  expect(follows(search, approve)).toBe(true);
   expect(
     screen.queryByRole("group", { name: "Period" }),
   ).not.toBeInTheDocument();
@@ -773,16 +770,13 @@ it("shows several days: asks for the figures and entries of the span, labels the
   const figures = await screen.findByRole("group", {
     name: "Period figures",
   });
-  expect(
-    within(figures).getByText("28 Sep to 4 Oct 2026, money out").nextSibling,
-  ).toHaveTextContent("KES 16,000");
-  expect(
-    within(figures).getByText("28 Sep to 4 Oct 2026, cash received")
-      .nextSibling,
-  ).toHaveTextContent("KES 21,000");
-  expect(
-    within(figures).getByText("Opening cash balance").nextSibling,
-  ).toHaveTextContent("KES 9,000");
+  expect(await trigger("Period, 28 Sep to 4 Oct 2026")).toBeInTheDocument();
+  const figure = (label: string) =>
+    within(figures).getByText(label).nextSibling;
+  expect(figure("Expenses")).toHaveTextContent("KES 14,000");
+  expect(figure("Credit notes")).toHaveTextContent("KES 2,000");
+  expect(figure("Cash issued")).toHaveTextContent("KES 21,000");
+  expect(figure("Opening balance")).toHaveTextContent("KES 9,000");
   expect(paths(fetcher)).toContain(
     "/api/setup/pettycash/overview?from=2026-09-28&to=2026-10-04",
   );
@@ -899,9 +893,7 @@ it("takes any span of days, from the custom dates", async () => {
   expect(paths(fetcher)).toContain(
     "/api/setup/pettycash/overview?from=2026-09-01&to=2026-09-20",
   );
-  expect(
-    await screen.findByText("1 to 20 Sep 2026, money out"),
-  ).toBeInTheDocument();
+  expect(await trigger("Period, 1 to 20 Sep 2026")).toBeInTheDocument();
 });
 
 it("labels the figures of a single past day by its date", async () => {
@@ -909,9 +901,7 @@ it("labels the figures of a single past day by its date", async () => {
   renderInApp(<PettyCashPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Previous day" }));
   const figures = await screen.findByRole("group", { name: "Day figures" });
-  expect(
-    await within(figures).findByText("29 Sep 2026, money out"),
-  ).toBeInTheDocument();
+  expect(await trigger("Period, Tue 29 Sep 2026")).toBeInTheDocument();
   expect(within(figures).queryByText(/Today/)).not.toBeInTheDocument();
 });
 
@@ -1151,10 +1141,11 @@ it("puts the figure cards above the tabs, as Central expenses does, and moves be
     }),
   ).not.toBeInTheDocument();
   for (const label of [
-    "Opening cash balance",
-    "Today, money out",
-    "Today, cash received",
-    "Closing cash balance",
+    "Cash balance",
+    "Opening balance",
+    "Cash issued",
+    "Expenses",
+    "Credit notes",
   ])
     expect(within(figures).getByText(label)).toBeInTheDocument();
 
@@ -1189,7 +1180,8 @@ it("puts the toolbar buttons in the design's order", async () => {
     .filter((name) =>
       ["Expense", "Cash", "Credit note", "Approve day"].includes(name ?? ""),
     );
-  expect(names).toEqual(["Expense", "Cash", "Credit note", "Approve day"]);
+  // The actions on the headline card end with the main one, then Approve day on the bar.
+  expect(names).toEqual(["Credit note", "Cash", "Expense", "Approve day"]);
 });
 
 it("gives cash to a chosen manager, and takes it back with a minus sign", async () => {

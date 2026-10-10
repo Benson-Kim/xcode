@@ -21,10 +21,11 @@ import {
 } from "@xcode/shared/pettyCash";
 
 import { useFormats } from "../../lib/formats";
+import { DialogFooter } from "../pettycash/DialogFooter";
 import { itemOptions } from "../pettycash/itemOptions";
 import { newEntryId, sendJson } from "../pettycash/request";
 import { useDialogAction } from "../pettycash/useDialogAction";
-import { Banner, Button, Dialog, Field, FormActions, TextInput } from "../ui";
+import { Banner, Button, Dialog, Field, TextInput } from "../ui";
 import { DateField, PurchaseFields, VehicleField } from "./PurchaseFields";
 import { SplitRows, splitState, type Split } from "./SplitRows";
 import { isDateShape, useExpenseChoices } from "./useExpenseChoices";
@@ -248,14 +249,14 @@ function ExpenseForm({
         />
       )}
       {error && <Banner>{error}</Banner>}
-      <FormActions>
+      <DialogFooter>
+        <Button tone="outline" onClick={onClose}>
+          Cancel
+        </Button>
         <Button type="submit" tone="ok" disabled={saving || !valid}>
           {splits ? `Save ${splits.length} entries` : "Save"}
         </Button>
-        <Button tone="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-      </FormActions>
+      </DialogFooter>
     </form>
   );
 }

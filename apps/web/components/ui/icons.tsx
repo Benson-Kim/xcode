@@ -65,6 +65,14 @@ export function ChevronsLeftIcon(
   );
 }
 
+export function DownloadIcon(props: ComponentProps<"svg"> & { size?: number }) {
+  return (
+    <Icon size={19} strokeWidth="1.9" {...props}>
+      <path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14" />
+    </Icon>
+  );
+}
+
 export function CloseIcon(props: ComponentProps<"svg"> & { size?: number }) {
   return (
     <Icon {...props}>

@@ -22,6 +22,7 @@ import { useDebounced } from "../../lib/useDebounced";
 import { PeriodPicker } from "../period/PeriodPicker";
 import {
   Banner,
+  HeroBand,
   PageHeader,
   RetryBanner,
   SegmentedControl,
@@ -34,7 +35,7 @@ import {
 } from "../ui";
 import { ExportMenu } from "./ExportMenu";
 import { useReportExport } from "./exportReport";
-import { ReportView } from "./ReportView";
+import { ReportBand, ReportView } from "./ReportView";
 
 const GROUPS: { value: ReportGroup; label: string }[] = [
   { value: "fleet", label: "Fleet" },
@@ -44,16 +45,12 @@ const GROUPS: { value: ReportGroup; label: string }[] = [
 export function ReportsPage() {
   const access = useResource<ReportsAccess>(REPORTS_ACCESS_PATH);
   return (
-    <section>
+    <section className="flex flex-col gap-3.5">
       <PageHeader title="Reports" description="" />
       {access.error && !access.data && (
-        <RetryBanner className="mt-5" onRetry={access.reload}>
-          {access.error}
-        </RetryBanner>
+        <RetryBanner onRetry={access.reload}>{access.error}</RetryBanner>
       )}
-      {!access.data && !access.error && (
-        <Skeleton className="mt-6 h-11 w-2/3" />
-      )}
+      {!access.data && !access.error && <Skeleton className="h-11 w-2/3" />}
       {access.data && <ReportsView access={access.data} />}
     </section>
   );
@@ -103,10 +100,25 @@ function ReportsView({ access }: { access: ReportsAccess }) {
   if (table.data) paging.stepBack(table.data.total);
 
   if (!access.fleet.length && !access.pettyCash.length)
-    return <Banner className="mt-5">No reports are available to you.</Banner>;
+    return <Banner>No reports are available to you.</Banner>;
 
   return (
     <>
+      <HeroBand
+        period={
+          dated ? (
+            <PeriodPicker
+              period={period}
+              businessDate={access.businessDate}
+              firstDayOfWeek={firstDayOfWeek}
+              onChange={setChosenPeriod}
+            />
+          ) : undefined
+        }
+      >
+        <ReportBand table={table.data} />
+      </HeroBand>
+
       <Toolbar>
         {access.fleet.length > 0 && access.pettyCash.length > 0 && (
           <SegmentedControl
@@ -130,14 +142,6 @@ function ReportsView({ access }: { access: ReportsAccess }) {
           value={report?.id ?? ""}
           onChange={(id) => setChosen(id as ReportId)}
         />
-        {dated && (
-          <PeriodPicker
-            period={period}
-            businessDate={access.businessDate}
-            firstDayOfWeek={firstDayOfWeek}
-            onChange={setChosenPeriod}
-          />
-        )}
         {group === "pettycash" && access.holders.length > 1 && (
           <HolderSelect
             holders={access.holders}
@@ -150,6 +154,7 @@ function ReportsView({ access }: { access: ReportsAccess }) {
           aria-label="Search"
           density="compact"
           inline
+          className="max-w-80 flex-[1_1_110px]"
           placeholder="Search the rows"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
@@ -171,11 +176,9 @@ function ReportsView({ access }: { access: ReportsAccess }) {
         )}
       </Toolbar>
 
-      {exporter.error && <Banner className="mt-4">{exporter.error}</Banner>}
+      {exporter.error && <Banner>{exporter.error}</Banner>}
       {table.error && (
-        <RetryBanner className="mt-4" onRetry={table.reload}>
-          {table.error}
-        </RetryBanner>
+        <RetryBanner onRetry={table.reload}>{table.error}</RetryBanner>
       )}
 
       <ReportView

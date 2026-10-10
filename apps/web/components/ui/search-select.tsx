@@ -20,8 +20,9 @@ export type SearchOption = {
 };
 
 const DENSITY = {
-  standard: "h-12 text-base",
-  compact: "h-11 text-[15px]",
+  standard:
+    "py-[9px] text-[14.5px] in-[dialog]:py-[11px] in-[dialog]:text-[15px] max-[600px]:in-[dialog]:text-base",
+  compact: "py-[7px] text-[14px] in-[dialog]:py-[9px]",
 } as const;
 
 const words = (text: string) => text.toLowerCase().split(/\s+/).filter(Boolean);
@@ -159,14 +160,14 @@ export function SearchSelect({
         onBlur={close}
         onKeyDown={onKeyDown}
         className={cn(
-          "rounded-[10px] border border-line bg-surface px-3 pr-9 text-navy placeholder:text-grey/70 focus:border-blue focus:outline-3 focus:outline-offset-1 focus:outline-blue/30 aria-invalid:border-2 aria-invalid:border-red disabled:bg-hover disabled:text-grey",
+          "rounded-[10px] border border-line bg-surface px-3 pr-9 text-ink placeholder:text-slate/70 focus:border-teal focus:outline-3 focus:outline-offset-1 focus:outline-teal/30 aria-invalid:border-clay aria-invalid:bg-clay-wash disabled:bg-paper disabled:text-slate",
           DENSITY[density],
           inline ? "w-48 max-w-full min-w-0" : "w-full",
           className,
         )}
       />
       <ChevronIcon
-        className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-grey"
+        className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-slate"
         aria-hidden="true"
       />
       <Listbox
@@ -207,10 +208,10 @@ function Listbox({
       id={id}
       role="listbox"
       hidden={!open}
-      className="absolute top-full left-0 z-50 mt-1 max-h-60 w-full min-w-44 overflow-y-auto rounded-[10px] border border-card-line bg-surface p-1 shadow-menu"
+      className="absolute top-full left-0 z-50 mt-1.5 max-h-[212px] w-full min-w-44 overflow-y-auto rounded-xl border border-line bg-surface shadow-[0_10px_24px_rgba(4,32,47,.24)] in-[dialog]:static"
     >
       {shown.length === 0 && (
-        <li role="presentation" className="px-3 py-2 text-sm text-grey">
+        <li role="presentation" className="p-3 text-[14.5px] text-slate">
           {emptyText}
         </li>
       )}
@@ -256,7 +257,7 @@ function Option({
       {heading && (
         <li
           role="presentation"
-          className="px-3 pt-2 pb-1 text-[13px] font-bold text-grey"
+          className="px-3 pt-2 pb-1 text-[12px] font-bold tracking-[.07em] text-slate uppercase"
         >
           {heading}
         </li>
@@ -270,8 +271,8 @@ function Option({
         onClick={onPick}
         onMouseMove={onHover}
         className={cn(
-          "cursor-pointer rounded-lg px-3 py-2 text-[15px] aria-selected:font-bold",
-          highlighted && "bg-hover",
+          "cursor-pointer border-b border-divider px-3 py-[9px] text-[14.5px] font-semibold text-ink last:border-b-0 aria-selected:font-bold",
+          highlighted && "bg-teal-wash",
         )}
       >
         {option.label}

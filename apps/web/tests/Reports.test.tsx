@@ -205,8 +205,9 @@ it("shows the headline and the figures as cards", async () => {
   expect(value("Net contribution")).toHaveTextContent("KES 6,000");
   expect(value("Revenue")).toHaveTextContent("KES 15,000");
   expect(value("Worst vehicle")).toHaveTextContent("KES -2,000");
-  expect(value("Worst vehicle")).toHaveClass("text-red");
-  expect(value("Net contribution")).not.toHaveClass("text-red");
+  // On the headline card a loss takes the card's loss colour.
+  expect(value("Worst vehicle")?.parentElement).toHaveClass("neg");
+  expect(value("Net contribution")).not.toHaveClass("neg");
   expect(value("Vehicles")).toHaveTextContent(/^2$/);
   expect(value("Best share")).toHaveTextContent("66.7%");
 });

@@ -2,7 +2,6 @@
 
 import type { ReactNode } from "react";
 
-import type { Period } from "@xcode/shared/periods";
 import {
   PETTY_CASH_STATUS_LABELS,
   PETTY_CASH_STATUSES,
@@ -10,10 +9,8 @@ import {
   type PettyCashStatus,
 } from "@xcode/shared/pettyCash";
 
-import { PeriodPicker } from "../period/PeriodPicker";
 import {
   SearchSelect,
-  Skeleton,
   Spacer,
   TextInput,
   Toolbar,
@@ -30,12 +27,9 @@ const STATUS_OPTIONS: SearchOption[] = [
   })),
 ];
 
-// The period first, then the manager, the status and the search, with the actions at the end.
+// The views first, then the manager, the status and the search, with the actions at the end.
 export function FiltersBar({
-  period,
-  businessDate,
-  firstDayOfWeek,
-  onPeriodChange,
+  views,
   holders,
   holderId,
   onHolderChange,
@@ -45,11 +39,7 @@ export function FiltersBar({
   onSearchChange,
   actions,
 }: {
-  // Null until the page knows the business date.
-  period: Period | null;
-  businessDate: string | null;
-  firstDayOfWeek: number;
-  onPeriodChange: (period: Period) => void;
+  views: ReactNode;
   // Given only to a person who may see every float.
   holders?: PettyCashHolder[];
   holderId: string;
@@ -63,16 +53,7 @@ export function FiltersBar({
 }) {
   return (
     <Toolbar>
-      {period && businessDate ? (
-        <PeriodPicker
-          period={period}
-          businessDate={businessDate}
-          firstDayOfWeek={firstDayOfWeek}
-          onChange={onPeriodChange}
-        />
-      ) : (
-        <Skeleton className="h-11 w-56" />
-      )}
+      {views}
       {holders && (
         <SearchSelect
           aria-label="Manager"
@@ -104,12 +85,13 @@ export function FiltersBar({
         aria-label="Search"
         density="compact"
         inline
+        className="max-w-80 flex-[1_1_110px]"
         placeholder="Search vehicle, item or note"
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
       />
       <Spacer />
-      <div className="flex flex-wrap items-center gap-2">{actions}</div>
+      {actions}
     </Toolbar>
   );
 }

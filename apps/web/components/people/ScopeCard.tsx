@@ -2,7 +2,6 @@ import { plural } from "@xcode/shared/format";
 
 import type { ScopeOptions } from "../../lib/types";
 import {
-  Card,
   CardHeader,
   Choice,
   ChoiceGroup,
@@ -12,6 +11,7 @@ import {
   ListSkeleton,
 } from "../ui";
 import { keptCounts, type PersonForm, scopeGroups } from "./model";
+import { FormSection } from "./PersonCards";
 
 type Props = {
   form: PersonForm;
@@ -112,7 +112,7 @@ function VehicleChoices({
 export function ScopeCard(props: Props) {
   const { form, setField, scopeOptions, selectedRole, editable } = props;
   return (
-    <Card density="form">
+    <FormSection>
       <CardHeader
         title="What they can see"
         description="Every number, list and report is limited to this."
@@ -147,6 +147,6 @@ export function ScopeCard(props: Props) {
         </Hint>
       )}
       {props.error && <ErrorText>{props.error}</ErrorText>}
-    </Card>
+    </FormSection>
   );
 }

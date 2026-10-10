@@ -52,7 +52,7 @@ export const DayCell = memo(function DayCell({
   const className = cn(
     "inline-flex min-h-9 min-w-17 flex-col items-end justify-center rounded-lg px-2 tabular-nums",
     missing && "items-center text-[13px] font-bold",
-    missing && (now ? "text-blue-dark" : TONE_CLASS[meta.tone]),
+    missing && (now ? "text-teal" : TONE_CLASS[meta.tone]),
   );
   if (!clickable)
     return (
@@ -71,7 +71,7 @@ export const DayCell = memo(function DayCell({
         className,
         "hover:bg-hover",
         missing && "border border-dashed",
-        missing && (now ? "border-blue" : "border-red"),
+        missing && (now ? "border-teal" : "border-clay"),
       )}
     >
       {content}

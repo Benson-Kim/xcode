@@ -12,7 +12,7 @@ export function Card({
     <article
       {...props}
       className={cn(
-        "flex min-w-0 flex-col rounded-[14px] border border-card-line bg-surface p-5",
+        "flex min-w-0 flex-col rounded-[18px] border border-line bg-surface px-5 py-[18px]",
         density === "form" ? "gap-3.5" : "gap-2.5",
         className,
       )}
@@ -31,11 +31,11 @@ export function CardHeader({
 }) {
   return (
     <header className="flex flex-col gap-0.5">
-      <h2 id={id} className="m-0 text-base leading-[1.3] font-bold">
+      <h2 id={id} className="m-0 text-[17px] leading-[1.3] font-bold text-ink">
         {title}
       </h2>
       {description && (
-        <p className="m-0 text-[13px] text-grey">{description}</p>
+        <p className="m-0 text-[13px] text-slate">{description}</p>
       )}
     </header>
   );
@@ -59,17 +59,17 @@ export function CardValue({
 }
 
 export function CardNote({ className, ...props }: ComponentProps<"p">) {
-  return <p {...props} className={cn("m-0 text-sm text-grey", className)} />;
+  return <p {...props} className={cn("m-0 text-sm text-slate", className)} />;
 }
 
 export function ProgressBar({ value }: { value: number }) {
   return (
     <div
-      className="h-2 overflow-hidden rounded-full bg-divider"
+      className="h-[7px] overflow-hidden rounded-full bg-paper-2"
       aria-hidden="true"
     >
       <span
-        className="block h-full rounded-full bg-blue"
+        className="block h-full rounded-full bg-teal-mid"
         style={{ width: `${Math.max(0, Math.min(value, 100))}%` }}
       />
     </div>
@@ -95,31 +95,31 @@ export function CardListItem({
   tone?: "bad";
 }) {
   return (
-    <li className="flex justify-between gap-3 border-t border-divider py-2.5">
+    <li className="flex justify-between gap-3 border-t border-divider py-[9px]">
       <span className="flex min-w-0 flex-col">
         {typeof left === "string" ? (
-          <strong className="text-[15px] font-semibold tabular-nums">
+          <strong className="text-[14.5px] font-semibold text-ink tabular-nums">
             {left}
           </strong>
         ) : (
           left
         )}
-        {leftSub && <small className="text-[13px] text-grey">{leftSub}</small>}
+        {leftSub && <small className="text-[13px] text-slate">{leftSub}</small>}
       </span>
       {(right || rightSub) && (
         <span className="flex max-w-[60%] shrink-0 flex-col items-end text-right">
           {right && (
             <strong
               className={cn(
-                "text-[15px] font-semibold tabular-nums",
-                tone === "bad" && "text-red",
+                "text-[14.5px] font-bold tabular-nums",
+                tone === "bad" ? "text-red" : "text-ink",
               )}
             >
               {right}
             </strong>
           )}
           {rightSub && (
-            <small className="text-[13px] text-grey">{rightSub}</small>
+            <small className="text-[13px] text-slate">{rightSub}</small>
           )}
         </span>
       )}
@@ -150,10 +150,15 @@ export function Stat({
   tone?: "bad";
 }) {
   return (
-    <div className="rounded-[10px] border border-divider p-3">
-      <small className="block text-[13px] text-grey">{label}</small>
+    <div className="rounded-xl border border-line bg-surface p-3">
+      <small className="block text-xs font-bold tracking-[.07em] text-slate uppercase">
+        {label}
+      </small>
       <strong
-        className={cn("text-lg tabular-nums", tone === "bad" && "text-red")}
+        className={cn(
+          "text-lg tabular-nums",
+          tone === "bad" ? "text-red" : "text-ink",
+        )}
       >
         {value}
       </strong>

@@ -16,16 +16,16 @@ import { useFormats } from "../../lib/formats";
 import { useSession } from "../../lib/session-context";
 import { useDebounced } from "../../lib/useDebounced";
 import { PeriodPicker } from "../period/PeriodPicker";
+import { BandSkeleton } from "../revenue/RegPlate";
 import {
   Banner,
   Button,
+  bandControl,
+  cn,
+  HeroBand,
   PageHeader,
   Pager,
   RetryBanner,
-  Spacer,
-  StatGridSkeleton,
-  TextInput,
-  Toolbar,
   usePaging,
   useToast,
 } from "../ui";
@@ -112,53 +112,54 @@ export function CentralExpensesPage({
   }
 
   return (
-    <section>
-      <PageHeader title="Central expenses" description="" />
+    <section className="flex flex-col gap-3.5">
+      <PageHeader
+        title="Central expenses"
+        description=""
+        actions={
+          permissions?.canRecord && (
+            <Button tone="primary" onClick={() => setDialog({})}>
+              Record expense
+            </Button>
+          )
+        }
+      />
 
-      {notice && <Banner className="mt-5">{notice}</Banner>}
+      <HeroBand
+        period={
+          period && businessDate ? (
+            <PeriodPicker
+              period={period}
+              businessDate={businessDate}
+              firstDayOfWeek={firstDayOfWeek}
+              onChange={setChosen}
+            />
+          ) : undefined
+        }
+        tools={
+          <>
+            <SourceSelect value={source} onChange={setSource} />
+            <input
+              type="search"
+              aria-label="Search"
+              className={cn(bandControl, "srch")}
+              placeholder="Search vehicle, item or note"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </>
+        }
+      >
+        {figures ? <FigureCards figures={figures} /> : <BandSkeleton />}
+      </HeroBand>
+
+      {notice && <Banner>{notice}</Banner>}
 
       {ledger.error && !known && (
-        <RetryBanner className="mt-5" onRetry={ledger.reload}>
-          {ledger.error}
-        </RetryBanner>
+        <RetryBanner onRetry={ledger.reload}>{ledger.error}</RetryBanner>
       )}
 
-      <div className="mt-5">
-        {figures ? (
-          <FigureCards figures={figures} />
-        ) : (
-          <StatGridSkeleton count={4} />
-        )}
-      </div>
-
-      <Toolbar>
-        {period && businessDate ? (
-          <PeriodPicker
-            period={period}
-            businessDate={businessDate}
-            firstDayOfWeek={firstDayOfWeek}
-            onChange={setChosen}
-          />
-        ) : null}
-        <SourceSelect value={source} onChange={setSource} />
-        <TextInput
-          type="search"
-          aria-label="Search"
-          density="compact"
-          inline
-          placeholder="Search vehicle, item or note"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <Spacer />
-        {permissions?.canRecord && (
-          <Button onClick={() => setDialog({})}>Record expense</Button>
-        )}
-      </Toolbar>
-
-      {ledger.error && known && (
-        <Banner className="mt-4">{ledger.error}</Banner>
-      )}
+      {ledger.error && known && <Banner>{ledger.error}</Banner>}
 
       <LedgerTable
         rows={rows}

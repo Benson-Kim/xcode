@@ -20,12 +20,14 @@ import {
 import { useAppearance } from "../../lib/appearance";
 import { useResource } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
+import { PeriodPicker } from "../period/PeriodPicker";
+import { BandSkeleton } from "../revenue/RegPlate";
 import {
   Banner,
   Button,
+  HeroBand,
   PageHeader,
   Pager,
-  Tabs,
   usePaging,
   useToast,
 } from "../ui";
@@ -39,6 +41,7 @@ import { entryLabel } from "./labels";
 import { RemoveDialog, SendBackDialog } from "./ReasonDialogs";
 import { entryPath, failureMessage, isConflict, sendJson } from "./request";
 import type { EntryActions } from "./RowActions";
+import { ViewPills } from "./ViewPills";
 
 type Tab = "expenses" | "cash";
 
@@ -209,24 +212,50 @@ export function PettyCashPage({
     onRemove: setRemoving,
   };
 
-  const toolbarActions = permissions && (
-    <ToolbarActions
-      permissions={permissions}
-      canApproveDay={permissions.canApproveDay && oneDay}
-      approving={busyId === "day"}
-      onRecord={(kind) => setEntryDialog({ kind })}
-      onApproveDay={() => void approveDay()}
-    />
-  );
+  const holderName = holderId
+    ? known?.holders.find((holder) => holder.id === holderId)?.name
+    : undefined;
 
   return (
-    <section>
-      <PageHeader title="Petty cash" description="" />
+    <section className="flex flex-col gap-3.5">
+      <PageHeader title="Petty cash" description="" srOnlyTitle />
 
-      {notice && <Banner className="mt-5">{notice}</Banner>}
+      <HeroBand
+        variant="eq"
+        label="Cash balance equals opening balance plus cash issued minus expenses minus credit notes"
+        period={
+          period && businessDate ? (
+            <PeriodPicker
+              period={period}
+              businessDate={businessDate}
+              firstDayOfWeek={formats.firstDayOfWeek()}
+              onChange={setChosen}
+            />
+          ) : (
+            <BandSkeleton />
+          )
+        }
+        trailing={
+          <>
+            {permissions && (
+              <RecordButtons
+                permissions={permissions}
+                onRecord={(kind) => setEntryDialog({ kind })}
+              />
+            )}
+          </>
+        }
+      >
+        <FigureCards
+          overview={overview.data}
+          label={holderName ? `Cash balance, ${holderName}` : "Cash balance"}
+        />
+      </HeroBand>
+
+      {notice && <Banner>{notice}</Banner>}
 
       {overview.error && !known && (
-        <div className="mt-5 flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Banner>{overview.error}</Banner>
           <Button tone="outline" onClick={overview.reload}>
             Try again
@@ -234,33 +263,44 @@ export function PettyCashPage({
         </div>
       )}
 
-      <div className="mt-5">
-        <FigureCards overview={overview.data} />
-      </div>
+      <FiltersBar
+        views={
+          <ViewPills
+            id="petty"
+            label="Petty cash"
+            options={TABS}
+            value={tab}
+            onChange={setTab}
+            count={list.data?.total}
+          />
+        }
+        holders={permissions?.canViewAll ? known?.holders : undefined}
+        holderId={holderId}
+        onHolderChange={setHolderId}
+        status={tab === "expenses" ? status : undefined}
+        onStatusChange={setStatus}
+        search={search}
+        onSearchChange={setSearch}
+        actions={
+          permissions?.canApproveDay && oneDay ? (
+            <Button
+              tone="ok"
+              disabled={busyId === "day"}
+              onClick={() => void approveDay()}
+            >
+              Approve day
+            </Button>
+          ) : undefined
+        }
+      />
 
-      <Tabs
-        id="petty"
-        label="Petty cash"
-        options={TABS}
-        value={tab}
-        onChange={setTab}
+      <div
+        role="tabpanel"
+        id="petty-panel"
+        aria-labelledby={`petty-tab-${tab}`}
+        className="flex flex-col gap-3.5"
       >
-        <FiltersBar
-          period={period}
-          businessDate={businessDate}
-          firstDayOfWeek={formats.firstDayOfWeek()}
-          onPeriodChange={setChosen}
-          holders={permissions?.canViewAll ? known?.holders : undefined}
-          holderId={holderId}
-          onHolderChange={setHolderId}
-          status={tab === "expenses" ? status : undefined}
-          onStatusChange={setStatus}
-          search={search}
-          onSearchChange={setSearch}
-          actions={toolbarActions}
-        />
-
-        {list.error && <Banner className="mt-4">{list.error}</Banner>}
+        {list.error && <Banner>{list.error}</Banner>}
 
         {tab === "expenses" ? (
           <EntriesTable
@@ -293,7 +333,7 @@ export function PettyCashPage({
           onPageChange={paging.setPage}
           onPageSizeChange={paging.setPageSize}
         />
-      </Tabs>
+      </div>
 
       {permissions && formDate && businessDate && (
         <EntryDialog
@@ -325,38 +365,29 @@ export function PettyCashPage({
   );
 }
 
-// What this person may record, and approving the day shown.
-function ToolbarActions({
+// What this person may record: the actions on the headline card.
+function RecordButtons({
   permissions,
-  canApproveDay,
-  approving,
   onRecord,
-  onApproveDay,
 }: {
   permissions: PettyCashPermissions;
-  canApproveDay: boolean;
-  approving: boolean;
   onRecord: (kind: PettyCashKind) => void;
-  onApproveDay: () => void;
 }) {
   return (
     <>
-      {permissions.canSpend && (
-        <Button onClick={() => onRecord("expense")}>Expense</Button>
+      {(permissions.canSpend || permissions.canIssue) && (
+        <Button tone="outline" onClick={() => onRecord("credit")}>
+          Credit note
+        </Button>
       )}
       {permissions.canIssue && (
         <Button tone="outline" onClick={() => onRecord("cash")}>
           Cash
         </Button>
       )}
-      {(permissions.canSpend || permissions.canIssue) && (
-        <Button tone="warn" onClick={() => onRecord("credit")}>
-          Credit note
-        </Button>
-      )}
-      {canApproveDay && (
-        <Button tone="ok" disabled={approving} onClick={onApproveDay}>
-          Approve day
+      {permissions.canSpend && (
+        <Button tone="primary" onClick={() => onRecord("expense")}>
+          Expense
         </Button>
       )}
     </>

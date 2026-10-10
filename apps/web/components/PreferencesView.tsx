@@ -13,10 +13,7 @@ import {
   Choice,
   ChoiceGroup,
   Field,
-  FormActions,
-  FormLayout,
   FormSkeleton,
-  Grid2,
   PageHeader,
   SelectInput,
   TextInput,
@@ -50,7 +47,7 @@ export function PreferencesView() {
     return (
       <section>
         <PageHeader title="Your preferences" description={description} />
-        <Banner className="mt-5">{loaded.error}</Banner>
+        <Banner>{loaded.error}</Banner>
       </section>
     );
   if (loaded.loading || !loaded.data)
@@ -93,12 +90,20 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
   }
   return (
     <section>
-      <PageHeader title="Your preferences" description={description} />
-      <FormLayout>
+      <PageHeader
+        title="Your preferences"
+        description={description}
+        actions={
+          <Button tone="primary" disabled={busy} onClick={() => void save()}>
+            Save preferences
+          </Button>
+        }
+      />
+      <div className="flex flex-col gap-3.5">
         {error && <Banner>{error}</Banner>}
         <Card density="form">
           <CardHeader title="Display" />
-          <Grid2>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-x-5 gap-y-4">
             <Field
               id="pref-locale"
               label="Locale override"
@@ -219,7 +224,7 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
                 }
               />
             </Field>
-          </Grid2>
+          </div>
           <ChoiceGroup label="Accessibility">
             <Choice
               label="Reduce motion"
@@ -232,13 +237,8 @@ function PreferencesForm({ initial }: { initial: Preferences }) {
               }
             />
           </ChoiceGroup>
-          <FormActions>
-            <Button tone="ok" disabled={busy} onClick={() => void save()}>
-              Save preferences
-            </Button>
-          </FormActions>
         </Card>
-      </FormLayout>
+      </div>
     </section>
   );
 }

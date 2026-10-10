@@ -13,8 +13,8 @@ import {
   StopReasonCard,
 } from "./recurring/RecurringCards";
 import {
-  RecurringHeader,
   RecurringNotices,
+  recurringHeading,
 } from "./recurring/RecurringNotices";
 import { useAllocations } from "./recurring/useAllocations";
 import { useRecurringActions } from "./recurring/useRecurringActions";
@@ -22,7 +22,7 @@ import { useRecurringFields } from "./recurring/useRecurringFields";
 import { VehicleAllocationCard } from "./recurring/VehicleAllocationCard";
 import { WhatAndWhenCard } from "./recurring/WhatAndWhenCard";
 import type { RecurringItem, VehicleOption } from "./setup/shared";
-import { FormLayout } from "./ui";
+import { Dialog, FormLayout } from "./ui";
 
 type Props = {
   item?: RecurringItem;
@@ -69,10 +69,37 @@ export function RecurringEditor({
   });
   const disabled = !canEdit || status.stopped || actions.busy;
 
+  const heading = recurringHeading(item);
+
   return (
-    <section>
-      <RecurringHeader item={item} />
-      <FormLayout>
+    <Dialog
+      open
+      size="lg"
+      title={heading.title}
+      subtitle={heading.description}
+      onClose={onCancel}
+      footer={
+        <RecurringActions
+          isNew={!item}
+          hasItem={Boolean(item)}
+          canEdit={canEdit}
+          stopped={status.stopped}
+          futureStop={status.futureStop}
+          confirmStop={actions.confirmStop}
+          busy={actions.busy}
+          onSave={() =>
+            void actions.save(
+              recurringInput(item, fields, derived, alloc),
+              recurringRequest(fields, derived, alloc),
+            )
+          }
+          onCancel={onCancel}
+          onStop={() => void actions.stop()}
+          onCancelStop={() => void actions.cancelStop()}
+        />
+      }
+    >
+      <FormLayout className="mt-0">
         <RecurringNotices
           item={item}
           status={status}
@@ -115,25 +142,7 @@ export function RecurringEditor({
             onChange={actions.changeStopReason}
           />
         )}
-        <RecurringActions
-          isNew={!item}
-          hasItem={Boolean(item)}
-          canEdit={canEdit}
-          stopped={status.stopped}
-          futureStop={status.futureStop}
-          confirmStop={actions.confirmStop}
-          busy={actions.busy}
-          onSave={() =>
-            void actions.save(
-              recurringInput(item, fields, derived, alloc),
-              recurringRequest(fields, derived, alloc),
-            )
-          }
-          onCancel={onCancel}
-          onStop={() => void actions.stop()}
-          onCancelStop={() => void actions.cancelStop()}
-        />
       </FormLayout>
-    </section>
+    </Dialog>
   );
 }

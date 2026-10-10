@@ -7,7 +7,8 @@ import type { RevenueVehicle } from "@xcode/shared/revenue";
 import { useFormats } from "../../lib/formats";
 import { ChevronIcon, cn } from "../ui";
 import { DayCell } from "./DayCell";
-import { CELL, DAY_COLUMN } from "./styles";
+import { RegPlate } from "./RegPlate";
+import { CELL, DAY_COLUMN, EDGE } from "./styles";
 import type { OpenDay } from "./useCaptureFlow";
 import { VehicleWeek } from "./VehicleWeek";
 
@@ -44,7 +45,7 @@ export const VehicleRow = memo(function VehicleRow({
               CELL,
               DAY_COLUMN,
               "text-right",
-              day.date === today && "bg-blue-wash",
+              day.date === today && "bg-teal-wash/40",
             )}
           >
             <DayCell
@@ -57,12 +58,14 @@ export const VehicleRow = memo(function VehicleRow({
           </td>
         ))}
         <td className={cn(CELL, "text-right")}>
-          <strong>{formats.formatNumber(vehicle.totalAmount)}</strong>
+          <strong className="font-extrabold text-ink">
+            {formats.formatNumber(vehicle.totalAmount)}
+          </strong>
         </td>
-        <td className={cn(CELL, "text-right")}>
+        <td className={cn(CELL, EDGE, "text-right")}>
           {vehicle.percent !== null && (
             <span
-              className={cn("font-bold", vehicle.percent < 90 && "text-red")}
+              className={cn("font-bold", vehicle.percent < 90 && "text-clay")}
             >
               {percentText(vehicle.percent)}
             </span>
@@ -78,7 +81,7 @@ export const VehicleRow = memo(function VehicleRow({
         >
           <td
             colSpan={10}
-            className="border-b border-divider bg-paper px-3 pt-1 pb-4"
+            className="border-b border-divider bg-paper px-(--gut) pt-1 pb-4"
           >
             <VehicleWeek
               vehicle={vehicle}
@@ -108,6 +111,7 @@ function VehicleLabel({
       scope="row"
       className={cn(
         CELL,
+        EDGE,
         "sticky left-0 z-1 min-w-35 bg-surface text-left font-normal",
       )}
     >
@@ -116,7 +120,7 @@ function VehicleLabel({
         aria-expanded={isOpen}
         aria-controls={isOpen ? `revenue-detail-${vehicle.id}` : undefined}
         onClick={() => onToggle(vehicle.id)}
-        className="inline-flex min-h-8 items-center gap-1.5 text-left font-bold text-blue hover:underline"
+        className="inline-flex min-h-8 items-center gap-1.5 text-left font-bold text-ink"
       >
         <ChevronIcon
           className={cn(
@@ -124,9 +128,9 @@ function VehicleLabel({
             !isOpen && "-rotate-90",
           )}
         />
-        {vehicle.registration}
+        <RegPlate>{vehicle.registration}</RegPlate>
       </button>
-      <small className="block pl-5.5 text-xs text-grey">
+      <small className="block pl-5.5 text-xs font-semibold text-slate">
         {vehicle.companyName}
       </small>
     </th>

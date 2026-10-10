@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import { formatPhone } from "@xcode/shared/format";
 
@@ -6,13 +6,12 @@ import type { Person, Role } from "../../lib/types";
 import {
   Banner,
   Button,
-  Card,
   CardHeader,
+  cn,
   CurrencyInput,
   ErrorSummary,
   Field,
   FormActions,
-  Grid2,
   Note,
   PageHeader,
   SelectInput,
@@ -28,6 +27,40 @@ type FormProps = {
   errors: Errors;
   editable: boolean;
 };
+
+export function FormSection({
+  className,
+  ...props
+}: ComponentProps<"section">) {
+  return (
+    <section
+      {...props}
+      className={cn(
+        "flex min-w-0 flex-col gap-3.5 border-t border-line pt-[22px] first:border-t-0 first:pt-0",
+        className,
+      )}
+    />
+  );
+}
+
+export function FieldGrid({
+  narrow = false,
+  className,
+  ...props
+}: ComponentProps<"div"> & { narrow?: boolean }) {
+  return (
+    <div
+      {...props}
+      className={cn(
+        "grid gap-x-5 gap-y-4",
+        narrow
+          ? "grid-cols-[repeat(auto-fill,minmax(200px,1fr))]"
+          : "grid-cols-[repeat(auto-fit,minmax(200px,1fr))]",
+        className,
+      )}
+    />
+  );
+}
 
 export function PersonHeader({ person }: { person?: Person }) {
   return (
@@ -85,9 +118,9 @@ export function PersonDetailsCard({
   editable,
 }: FormProps) {
   return (
-    <Card density="form">
+    <FormSection>
       <CardHeader title="Details" />
-      <Grid2>
+      <FieldGrid>
         <Field id="person-first" label="First name" error={errors.firstName}>
           <TextInput
             value={form.firstName}
@@ -135,8 +168,8 @@ export function PersonDetailsCard({
             onChange={(event) => setField("email", event.target.value)}
           />
         </Field>
-      </Grid2>
-    </Card>
+      </FieldGrid>
+    </FormSection>
   );
 }
 
@@ -158,12 +191,12 @@ export function PersonRoleCard({
   onChange: (role: string) => void;
 }) {
   return (
-    <Card density="form">
+    <FormSection>
       <CardHeader
         title="Role"
         description="A starting set of permissions. You can change single permissions further down."
       />
-      <Grid2 narrow>
+      <FieldGrid narrow>
         <Field
           id="person-role"
           label="Role"
@@ -192,8 +225,8 @@ export function PersonRoleCard({
             </SelectInput>
           )}
         </Field>
-      </Grid2>
-    </Card>
+      </FieldGrid>
+    </FormSection>
   );
 }
 
@@ -207,12 +240,12 @@ export function ApprovalLimitCard({
   onChange: (value: string) => void;
 }) {
   return (
-    <Card density="form">
+    <FormSection>
       <CardHeader
         title="Approval limit"
         description="The most they can approve in one entry."
       />
-      <Grid2 narrow>
+      <FieldGrid narrow>
         <Field
           id="person-limit"
           label="Limit per entry"
@@ -226,8 +259,8 @@ export function ApprovalLimitCard({
             onChange={(event) => onChange(event.target.value)}
           />
         </Field>
-      </Grid2>
-    </Card>
+      </FieldGrid>
+    </FormSection>
   );
 }
 
@@ -241,7 +274,7 @@ export function RemoveAccessCard({
   onChange: (value: string) => void;
 }) {
   return (
-    <Card density="form">
+    <FormSection>
       <CardHeader
         title="Reason for removing access"
         description="A short reason is required and is kept in the change log."
@@ -258,7 +291,7 @@ export function RemoveAccessCard({
         />
       </Field>
       {error && <Banner>{error}</Banner>}
-    </Card>
+    </FormSection>
   );
 }
 
@@ -312,7 +345,7 @@ function LifecycleButtons({
 export function PersonActions(props: ActionsProps) {
   const { person, editable } = props;
   return (
-    <FormActions>
+    <FormActions className="border-t border-line pt-5">
       {editable && (
         <Button
           tone="ok"

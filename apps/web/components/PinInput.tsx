@@ -58,7 +58,7 @@ export function PinInput({
       {error && (
         <p
           id="pin-help"
-          className="m-0 flex items-start gap-1.5 text-sm text-red"
+          className="m-0 flex items-start gap-1.5 text-[13px] font-semibold text-clay"
         >
           <AlertIcon className="mt-px shrink-0" />
           {PIN_HELP}

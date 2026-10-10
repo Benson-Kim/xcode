@@ -17,13 +17,11 @@ import {
   CellNote,
   DataTable,
   Dialog,
-  ErrorText,
   Field,
-  FormActions,
   Hint,
   PageHeader,
+  RowAction,
   SelectInput,
-  Spacer,
   StatusBadge,
   Tabs,
   Td,
@@ -214,25 +212,9 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
   }
 
   function actions(kind: Kind, entity: ExpenseCategory | ExpenseItem) {
-    if (editing?.id === entity.id)
-      return (
-        <FormActions className="justify-end">
-          <Button
-            tone="ok"
-            disabled={busy}
-            onClick={() => void saveEdit(entity)}
-          >
-            Save
-          </Button>
-          <Button tone="quiet" onClick={() => setEditing(null)}>
-            Cancel
-          </Button>
-        </FormActions>
-      );
     return (
-      <FormActions className="justify-end">
-        <Button
-          tone="outline"
+      <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
+        <RowAction
           disabled={busy}
           aria-label={`Edit ${entity.name}`}
           onClick={() => {
@@ -247,45 +229,26 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
           }}
         >
           Edit
-        </Button>
-        <Button
+        </RowAction>
+        <RowAction
           tone={entity.stoppedOn ? "ok" : "warn"}
           disabled={busy}
           aria-label={`${entity.stoppedOn ? "Turn on" : "Turn off"} ${entity.name}`}
           onClick={() => void toggle(kind, entity)}
         >
           {entity.stoppedOn ? "Turn on" : "Turn off"}
-        </Button>
-      </FormActions>
+        </RowAction>
+      </div>
     );
   }
 
-  function nameEditor(label: string, original: ExpenseCategory | ExpenseItem) {
-    if (!editing) return null;
-    return (
-      <>
-        <TextInput
-          autoFocus
-          density="compact"
-          aria-label={label}
-          maxLength={NAME_LIMIT}
-          value={editing.name}
-          aria-invalid={Boolean(editing.error) || undefined}
-          aria-describedby={editing.error ? "expense-edit-error" : undefined}
-          onChange={(event) =>
-            setEditing({ ...editing, name: event.target.value, error: "" })
-          }
-          onKeyDown={(event) => {
-            if (event.key === "Enter") void saveEdit(original);
-            if (event.key === "Escape") setEditing(null);
-          }}
-        />
-        {editing.error && (
-          <ErrorText id="expense-edit-error">{editing.error}</ErrorText>
-        )}
-      </>
-    );
-  }
+  const editingEntity = editing
+    ? editing.kind === "category"
+      ? sorted.find((category) => category.id === editing.id)
+      : sorted
+          .flatMap((category) => category.items)
+          .find((item) => item.id === editing.id)
+    : undefined;
 
   const statusFilter = (
     <>
@@ -323,12 +286,22 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
       <PageHeader
         title="Expense categories"
         description="Items are what people pick when they record an expense, in petty cash and in other expenses."
+        actions={
+          canManage ? (
+            <Button
+              tone="primary"
+              onClick={() => openAdd(tab === "items" ? "item" : "category")}
+            >
+              {tab === "items" ? "Add item" : "Add category"}
+            </Button>
+          ) : undefined
+        }
       />
       {(categories.error || error) && (
-        <Banner className="mt-5">{streamError(categories) || error}</Banner>
+        <Banner className="mb-3.5">{streamError(categories) || error}</Banner>
       )}
       {!canManage && (
-        <p className="mt-3 mb-0 text-[13px] text-grey">
+        <p className="m-0 mb-3.5 text-[13px] text-grey">
           You can see the categories and items but not change them.
         </p>
       )}
@@ -372,12 +345,6 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
               {!categories.loading && (
                 <Hint>{plural(visibleItems.length, "item", "items")}</Hint>
               )}
-              <Spacer />
-              {canManage && (
-                <Button tone="ok" onClick={() => openAdd("item")}>
-                  Add item
-                </Button>
-              )}
             </Toolbar>
             <DataTable
               columns={[
@@ -396,15 +363,14 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
               {visibleItems.map(({ item, category }) => (
                 <Tr key={item.id}>
                   <Td label="Item">
-                    {editing?.id === item.id ? (
-                      nameEditor("Item name", item)
-                    ) : (
-                      <strong
-                        className={cn(!item.active && "text-grey line-through")}
-                      >
-                        {item.name}
-                      </strong>
-                    )}
+                    <span
+                      className={cn(
+                        "font-semibold text-ink",
+                        !item.active && "text-grey line-through",
+                      )}
+                    >
+                      {item.name}
+                    </span>
                   </Td>
                   <Td label="Category">
                     {category.name}
@@ -429,12 +395,6 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
                   {plural(visibleCategories.length, "category", "categories")}
                 </Hint>
               )}
-              <Spacer />
-              {canManage && (
-                <Button tone="ok" onClick={() => openAdd("category")}>
-                  Add category
-                </Button>
-              )}
             </Toolbar>
             <DataTable
               columns={[
@@ -454,40 +414,17 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
               {visibleCategories.map((category) => (
                 <Tr key={category.id}>
                   <Td label="Category">
-                    {editing?.id === category.id ? (
-                      nameEditor("Category name", category)
-                    ) : (
-                      <strong
-                        className={cn(
-                          !category.active && "text-grey line-through",
-                        )}
-                      >
-                        {category.name}
-                      </strong>
-                    )}
+                    <span
+                      className={cn(
+                        "font-semibold text-ink",
+                        !category.active && "text-grey line-through",
+                      )}
+                    >
+                      {category.name}
+                    </span>
                   </Td>
                   <Td label="Counts as">
-                    {editing?.id === category.id ? (
-                      <SelectInput
-                        density="compact"
-                        aria-label="Counts as"
-                        value={editing.bucket}
-                        onChange={(event) =>
-                          setEditing({
-                            ...editing,
-                            bucket: Number(event.target.value) as ExpenseBucket,
-                          })
-                        }
-                      >
-                        {buckets.map((bucket) => (
-                          <option key={bucket} value={bucket}>
-                            {expenseBucketNames[bucket]}
-                          </option>
-                        ))}
-                      </SelectInput>
-                    ) : (
-                      expenseBucketNames[category.bucket]
-                    )}
+                    {expenseBucketNames[category.bucket]}
                   </Td>
                   <Td label="Items" numeric>
                     {category.items.filter((item) => item.active).length}
@@ -504,9 +441,31 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
         open={Boolean(adding)}
         title={adding?.kind === "category" ? "New category" : "New item"}
         onClose={() => setAdding(null)}
+        footer={
+          <>
+            <Button tone="outline" onClick={() => setAdding(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="expense-add-form"
+              tone="ok"
+              disabled={busy}
+            >
+              Add
+            </Button>
+          </>
+        }
       >
         {adding && (
-          <div className="flex flex-col gap-3.5">
+          <form
+            id="expense-add-form"
+            className="flex flex-col gap-3.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void add();
+            }}
+          >
             <Field id="expense-new-name" label="Name">
               <TextInput
                 autoFocus
@@ -520,9 +479,6 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
                 onChange={(event) =>
                   setAdding({ ...adding, name: event.target.value, error: "" })
                 }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void add();
-                }}
               />
             </Field>
             {adding.kind === "category" ? (
@@ -565,15 +521,79 @@ export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
               </Field>
             )}
             {adding.error && <Banner>{adding.error}</Banner>}
-            <FormActions>
-              <Button tone="ok" disabled={busy} onClick={() => void add()}>
-                Add
-              </Button>
-              <Button tone="quiet" onClick={() => setAdding(null)}>
-                Cancel
-              </Button>
-            </FormActions>
-          </div>
+          </form>
+        )}
+      </Dialog>
+      <Dialog
+        open={Boolean(editing && editingEntity)}
+        title={editing?.kind === "category" ? "Edit category" : "Edit item"}
+        subtitle={editingEntity?.name}
+        onClose={() => setEditing(null)}
+        footer={
+          <>
+            <Button tone="outline" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="expense-edit-form"
+              tone="ok"
+              disabled={busy}
+            >
+              Save
+            </Button>
+          </>
+        }
+      >
+        {editing && editingEntity && (
+          <form
+            id="expense-edit-form"
+            className="flex flex-col gap-3.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveEdit(editingEntity);
+            }}
+          >
+            <Field
+              id="expense-edit-name"
+              label={
+                editing.kind === "category" ? "Category name" : "Item name"
+              }
+              error={editing.error}
+            >
+              <TextInput
+                autoFocus
+                maxLength={NAME_LIMIT}
+                value={editing.name}
+                onChange={(event) =>
+                  setEditing({
+                    ...editing,
+                    name: event.target.value,
+                    error: "",
+                  })
+                }
+              />
+            </Field>
+            {editing.kind === "category" && (
+              <Field id="expense-edit-bucket" label="Counts as">
+                <SelectInput
+                  value={editing.bucket}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      bucket: Number(event.target.value) as ExpenseBucket,
+                    })
+                  }
+                >
+                  {buckets.map((bucket) => (
+                    <option key={bucket} value={bucket}>
+                      {expenseBucketNames[bucket]}
+                    </option>
+                  ))}
+                </SelectInput>
+              </Field>
+            )}
+          </form>
         )}
       </Dialog>
     </section>

@@ -1,7 +1,7 @@
 import { useFormats } from "../../lib/formats";
 import { recurringFrequency } from "../recurringPresentation";
 import type { RecurringItem } from "../setup/shared";
-import { Banner, ErrorSummary, Note, PageHeader } from "../ui";
+import { Banner, ErrorSummary, Note } from "../ui";
 import type { ItemStatus } from "./schedule";
 
 type Props = {
@@ -73,15 +73,11 @@ export function RecurringNotices({
   );
 }
 
-export function RecurringHeader({ item }: { item?: RecurringItem }) {
-  return (
-    <PageHeader
-      title={item ? item.name : "Add scheduled expense or saving"}
-      description={
-        item
-          ? `${recurringFrequency(item)}${item.note ? `. ${item.note}` : ""}`
-          : "It posts to the vehicles you choose on every due date."
-      }
-    />
-  );
+export function recurringHeading(item?: RecurringItem) {
+  return {
+    title: item ? item.name : "Add scheduled expense or saving",
+    description: item
+      ? `${recurringFrequency(item)}${item.note ? `. ${item.note}` : ""}`
+      : "It posts to the vehicles you choose on every due date.",
+  };
 }

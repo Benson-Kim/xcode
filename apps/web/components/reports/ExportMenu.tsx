@@ -10,7 +10,7 @@ import {
 
 import type { ReportExportFormat } from "@xcode/shared/reports";
 
-import { Button, ChevronIcon, useDismiss } from "../ui";
+import { Button, DownloadIcon, useDismiss } from "../ui";
 
 export const EXPORT_FORMATS: {
   format: ReportExportFormat;
@@ -61,8 +61,8 @@ export function ExportMenu({
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
       >
+        <DownloadIcon />
         Export
-        <ChevronIcon />
       </Button>
       {open && (
         <div
@@ -70,7 +70,7 @@ export function ExportMenu({
           role="menu"
           aria-label="Export as"
           onKeyDown={move}
-          className="absolute top-full right-0 z-40 mt-2 min-w-40 rounded-xl border border-card-line bg-surface p-1.5 shadow-menu"
+          className="absolute top-full right-0 z-40 mt-2 flex min-w-[190px] flex-col gap-0.5 rounded-2xl border border-line bg-surface p-2 shadow-[0_18px_44px_rgba(4,32,47,.24)]"
         >
           {EXPORT_FORMATS.map((option, index) => (
             <button
@@ -82,7 +82,7 @@ export function ExportMenu({
                 close(true);
                 onExport(option.format);
               }}
-              className="block min-h-11 w-full rounded-lg px-3 text-left text-[15px] hover:bg-hover"
+              className="block w-full rounded-[9px] px-3 py-[9px] text-left text-[14.5px] font-semibold whitespace-nowrap text-ink hover:bg-paper"
             >
               {option.label}
             </button>

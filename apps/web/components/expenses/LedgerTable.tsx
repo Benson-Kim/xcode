@@ -10,6 +10,7 @@ import {
 import { useAppearance } from "../../lib/appearance";
 import { useFormats } from "../../lib/formats";
 import { unitsFormat } from "../pettycash/labels";
+import { RegPlate } from "../revenue/RegPlate";
 import {
   CellNote,
   DataTable,
@@ -72,6 +73,15 @@ export function LedgerTable({
       emptyMessage={
         filtered ? "Nothing matches." : "No expenses in this period."
       }
+      footer={
+        <Tr>
+          <Td colSpan={5}>
+            {total} {total === 1 ? "expense" : "expenses"}
+          </Td>
+          <Td numeric>{formats.formatNumber(amount)}</Td>
+          <Td colSpan={3} />
+        </Tr>
+      }
     >
       {rows.map((row) => {
         const label = rowLabel(formats, row);
@@ -81,10 +91,10 @@ export function LedgerTable({
               {formats.formatDateOnly(row.date)}
             </Td>
             <Td label="Vehicle">
-              <strong>{row.registration}</strong>
+              <RegPlate>{row.registration}</RegPlate>
             </Td>
             <Td label="Item">
-              {row.itemName}
+              <span className="font-semibold text-ink">{row.itemName}</span>
               {row.categoryName && <CellNote>{row.categoryName}</CellNote>}
               {row.note && <CellNote>{row.note}</CellNote>}
               {row.group && (
@@ -101,14 +111,16 @@ export function LedgerTable({
               {formats.formatNumber(row.unitAmount)}
             </Td>
             <Td label={`Total amount (${currency})`} numeric>
-              <strong>{formats.formatNumber(row.total)}</strong>
+              <strong className="font-bold text-ink">
+                {formats.formatNumber(row.total)}
+              </strong>
             </Td>
             <Td label="Source">
               <PlainTag>{EXPENSE_SOURCE_LABELS[row.source]}</PlainTag>
             </Td>
             <Td label="Recorded by">
               {row.source === "scheduled" ? (
-                <span className="text-grey">Standing order</span>
+                <span className="text-slate">Standing order</span>
               ) : (
                 row.recordedByName
               )}
@@ -117,7 +129,7 @@ export function LedgerTable({
               )}
             </Td>
             <Td>
-              <span className="flex flex-wrap justify-end gap-2">
+              <span className="flex flex-nowrap justify-end gap-0.5">
                 {row.canEdit && (
                   <RowAction
                     aria-label={`Edit ${label}`}
@@ -148,15 +160,6 @@ export function LedgerTable({
           </Tr>
         );
       })}
-      <Tr>
-        <Td colSpan={5} className="font-semibold">
-          {total} {total === 1 ? "expense" : "expenses"}
-        </Td>
-        <Td numeric className="font-bold">
-          {formats.formatNumber(amount)}
-        </Td>
-        <Td colSpan={3} />
-      </Tr>
     </DataTable>
   );
 }

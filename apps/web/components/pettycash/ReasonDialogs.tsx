@@ -12,15 +12,8 @@ import {
 } from "@xcode/shared/pettyCash";
 
 import { useFormats } from "../../lib/formats";
-import {
-  Banner,
-  Button,
-  CardNote,
-  Dialog,
-  Field,
-  FormActions,
-  TextInput,
-} from "../ui";
+import { Banner, Button, CardNote, Dialog, Field, TextInput } from "../ui";
+import { DialogFooter } from "./DialogFooter";
 import { entryLabel } from "./labels";
 import { entryPath, sendJson } from "./request";
 import { useDialogAction } from "./useDialogAction";
@@ -82,14 +75,14 @@ function ReasonForm({
         />
       </Field>
       {error && <Banner>{error}</Banner>}
-      <FormActions>
+      <DialogFooter>
+        <Button tone="outline" onClick={onClose}>
+          Cancel
+        </Button>
         <Button type="submit" tone={tone} disabled={saving}>
           {submitLabel}
         </Button>
-        <Button tone="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-      </FormActions>
+      </DialogFooter>
     </form>
   );
 }

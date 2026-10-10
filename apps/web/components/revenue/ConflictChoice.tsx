@@ -36,15 +36,15 @@ export function ConflictChoice({
           Your access does not include changing the saved record for this day.
         </Hint>
       )}
-      <FormActions>
+      <FormActions className="-mx-[22px] -mb-5 justify-end border-t border-line bg-paper px-[22px] py-3.5 max-[600px]:[&_button]:flex-1 [&_button]:min-w-27">
+        <Button tone="outline" disabled={saving} onClick={onKeep}>
+          Keep saved
+        </Button>
         {current.canEdit && (
           <Button tone="ok" disabled={saving} onClick={onReplace}>
             {saving ? "Saving…" : "Replace with mine"}
           </Button>
         )}
-        <Button tone="outline" disabled={saving} onClick={onKeep}>
-          Keep saved
-        </Button>
       </FormActions>
     </>
   );

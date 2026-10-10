@@ -27,19 +27,18 @@ export function FloatsTable({
   const currency = formats.currencyCode();
   return (
     <>
-      <SubHeading className="mt-6">Floats</SubHeading>
+      <SubHeading>Floats</SubHeading>
       <DataTable
         columns={columns(currency)}
         loading={loading}
         loadingLabel="Loading floats"
         isEmpty={!floats?.length}
         emptyMessage="No floats yet."
-        className="mt-2"
       >
         {floats?.map((float) => (
           <Tr key={float.holderId}>
             <Td label="Manager">
-              <strong>{float.name}</strong>
+              <strong className="font-bold text-ink">{float.name}</strong>
               {!float.active && <CellNote>Not active</CellNote>}
             </Td>
             <Td label={`Cash received (${currency})`} numeric>
@@ -51,7 +50,7 @@ export function FloatsTable({
             <Td
               label={`Cash in hand (${currency})`}
               numeric
-              className={float.balance < 0 ? "text-red" : undefined}
+              className={float.balance < 0 ? "text-clay" : undefined}
             >
               <strong>{formats.formatNumber(float.balance)}</strong>
             </Td>

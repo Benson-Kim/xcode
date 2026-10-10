@@ -20,9 +20,7 @@ import {
   Field,
   FileButton,
   FormActions,
-  FormLayout,
   FormSkeleton,
-  Grid2,
   Hint,
   PageHeader,
   SelectInput,
@@ -145,7 +143,7 @@ export function OrganizationSettingsView() {
     return (
       <section>
         <PageHeader title="Organization settings" />
-        <Banner className="mt-5">{loaded.error}</Banner>
+        <Banner>{loaded.error}</Banner>
       </section>
     );
   if (loaded.loading || !loaded.data)
@@ -314,7 +312,7 @@ function SettingsForm({
         title="Organization settings"
         description="Defaults for everyone in the organization. Each person sets their own display under Your preferences."
       />
-      <FormLayout>
+      <div className="flex flex-col gap-3.5">
         <SettingsCard
           title="Organization details"
           error={errors.organization}
@@ -322,7 +320,7 @@ function SettingsForm({
           busy={busy === "organization"}
           onSave={() => void save("organization")}
         >
-          <Grid2>
+          <FieldGrid>
             <Field id="org-name" label="Organization name">
               <TextInput
                 maxLength={200}
@@ -345,7 +343,7 @@ function SettingsForm({
                 }
               />
             </Field>
-          </Grid2>
+          </FieldGrid>
         </SettingsCard>
 
         <SettingsCard
@@ -356,7 +354,7 @@ function SettingsForm({
           busy={businessDateBusy}
           onSave={() => void saveBusinessDate()}
         >
-          <Grid2 narrow>
+          <FieldGrid narrow>
             <Field
               id="business-date"
               label="Business date"
@@ -389,7 +387,7 @@ function SettingsForm({
                 }
               />
             </Field>
-          </Grid2>
+          </FieldGrid>
           {held && (
             <Button
               tone="outline"
@@ -459,7 +457,7 @@ function SettingsForm({
               </Hint>
             </div>
           </div>
-          <Grid2>
+          <FieldGrid>
             <Field id="brand-display" label="Display name">
               <TextInput
                 value={branding.displayName}
@@ -505,8 +503,8 @@ function SettingsForm({
                 }
               />
             </Field>
-          </Grid2>
-          <Grid2>
+          </FieldGrid>
+          <FieldGrid>
             <Field
               id="brand-primary"
               label="Primary colour"
@@ -540,7 +538,7 @@ function SettingsForm({
                 onChange={(accent) => update("branding", { accent })}
               />
             </Field>
-          </Grid2>
+          </FieldGrid>
           <Hint>
             Colours must stay readable on white: at least 4.5 to 1 contrast.
           </Hint>
@@ -553,7 +551,7 @@ function SettingsForm({
           busy={busy === "localization"}
           onSave={() => void save("localization")}
         >
-          <Grid2>
+          <FieldGrid>
             <Field id="locale" label="Locale" hint="For example en-GB.">
               <TextInput
                 value={localization.locale}
@@ -615,7 +613,7 @@ function SettingsForm({
                 )}
               </SelectInput>
             </Field>
-          </Grid2>
+          </FieldGrid>
           <ChoiceGroup label="Time and overrides">
             <Choice
               label="Use 12-hour time"
@@ -653,7 +651,7 @@ function SettingsForm({
           busy={busy === "securityPolicy"}
           onSave={() => void save("securityPolicy")}
         >
-          <Grid2>
+          <FieldGrid>
             <Field
               id="pin-length"
               label="Shortest new PIN"
@@ -734,10 +732,26 @@ function SettingsForm({
                 }
               />
             </Field>
-          </Grid2>
+          </FieldGrid>
         </SettingsCard>
-      </FormLayout>
+      </div>
     </section>
+  );
+}
+
+function FieldGrid({
+  narrow = false,
+  children,
+}: {
+  narrow?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`grid gap-x-5 gap-y-4 ${narrow ? "grid-cols-[repeat(auto-fill,minmax(200px,1fr))]" : "grid-cols-[repeat(auto-fit,minmax(200px,1fr))]"}`}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -763,7 +777,7 @@ function SettingsCard({
       <CardHeader title={title} description={description} />
       {error && <Banner>{error}</Banner>}
       {children}
-      <FormActions>
+      <FormActions className="border-t border-divider pt-4">
         <Button tone="ok" disabled={busy} onClick={onSave}>
           {action}
         </Button>

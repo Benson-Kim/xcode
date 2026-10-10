@@ -27,12 +27,12 @@ import {
   Dialog,
   ErrorSummary,
   Field,
-  FormActions,
   Grid2,
   SearchSelect,
   TextInput,
 } from "../ui";
 import { AmountInput } from "./AmountInput";
+import { DialogFooter } from "./DialogFooter";
 import { itemOptions } from "./itemOptions";
 import {
   ENTRIES_PATH,
@@ -389,14 +389,14 @@ function EntryForm({
       )}
       <ErrorSummary count={Object.keys(errors).length} />
       {error && <Banner>{error}</Banner>}
-      <FormActions>
+      <DialogFooter>
+        <Button tone="outline" onClick={onClose}>
+          Cancel
+        </Button>
         <Button type="submit" tone="ok" disabled={saving}>
           {entry ? "Save" : "Add"}
         </Button>
-        <Button tone="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-      </FormActions>
+      </DialogFooter>
     </form>
   );
 }

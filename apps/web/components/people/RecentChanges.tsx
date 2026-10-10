@@ -19,7 +19,7 @@ type Props = {
 export function RecentChanges({ loading, data, error }: Props) {
   const { formatDateTime } = useFormats();
   return (
-    <Card className="mt-4">
+    <Card>
       <CardHeader
         title="Recent changes"
         description="The latest setup changes. Every change is in the change log."

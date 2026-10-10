@@ -106,9 +106,14 @@ const MENU = [
   "Organization settings",
 ];
 
-const menuLabels = () =>
+// The menu's entries and group headings, without the button that folds the menu to icons.
+const entries = () =>
   within(screen.getByRole("navigation", { name: "Main" }))
     .getAllByRole("button")
+    .filter((button) => button.getAttribute("aria-label") === null);
+
+const menuLabels = () =>
+  entries()
     .map((button) => button.textContent)
     .filter((label) => label !== "Setup" && label !== "Expenses");
 
@@ -123,7 +128,7 @@ it("groups Expenses and Setup under their own headings, around Reports", async (
   signIn([...PERMISSION_KEYS]);
   const menu = within(screen.getByRole("navigation", { name: "Main" }));
   await menu.findByRole("button", { name: "Organization settings" });
-  const all = menu.getAllByRole("button").map((button) => button.textContent);
+  const all = entries().map((button) => button.textContent);
   expect(all).toEqual([
     "Dashboard",
     "Revenue",

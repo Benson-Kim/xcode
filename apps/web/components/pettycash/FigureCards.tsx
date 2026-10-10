@@ -3,54 +3,53 @@
 import type { PettyCashOverview } from "@xcode/shared/pettyCash";
 
 import { useFormats } from "../../lib/formats";
-import { Figure, StatGridSkeleton } from "../ui";
+import { BandSkeleton } from "../revenue/RegPlate";
+import { BandFigure, BandOp, BandTerm } from "../ui";
 
-export function FigureCards({ overview }: { overview?: PettyCashOverview }) {
+// Cash balance = Opening balance + Cash issued - Expenses - Credit notes, as the terms of the headline card.
+export function FigureCards({
+  overview,
+  label,
+}: {
+  overview?: PettyCashOverview;
+  label: string;
+}) {
   const formats = useFormats();
 
-  if (!overview) return <StatGridSkeleton count={4} />;
+  if (!overview) return <BandSkeleton />;
 
-  const { figures, businessDate, from, to } = overview;
-
-  const day = from === to;
-  const label = day
-    ? from === businessDate
-      ? "Today"
-      : formats.formatDateOnly(from)
-    : formats.formatDateRange(from, to);
+  const { figures, from, to } = overview;
 
   return (
     <div
       role="group"
-      aria-label={day ? "Day figures" : "Period figures"}
-      className="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3.5"
+      aria-label={from === to ? "Day figures" : "Period figures"}
+      className="contents"
     >
-      <Figure
-        label="Opening cash balance"
+      <BandFigure
+        main
+        label={label}
+        value={formats.formatNumber(figures.closingBalance)}
+        negative={figures.closingBalance < 0}
+      />
+      <BandOp>=</BandOp>
+      <BandTerm
+        label="Opening balance"
         value={formats.kes(figures.openingBalance)}
-        tone="plain"
-        bad={figures.openingBalance < 0}
       />
-      <Figure
-        label={`${label}, money out`}
-        value={formats.kes(figures.moneyOut)}
-        tone="out"
-      />
-      <Figure
-        label={`${label}, cash received`}
+      <BandOp>+</BandOp>
+      <BandTerm
+        label="Cash issued"
         value={
           figures.cashReceived < 0
             ? `${formats.kes(figures.cashReceived)} returned`
             : formats.kes(figures.cashReceived)
         }
-        tone="in"
       />
-      <Figure
-        label="Closing cash balance"
-        value={formats.kes(figures.closingBalance)}
-        tone="close"
-        bad={figures.closingBalance < 0}
-      />
+      <BandOp>&minus;</BandOp>
+      <BandTerm label="Expenses" value={formats.kes(figures.expenses)} />
+      <BandOp>&minus;</BandOp>
+      <BandTerm label="Credit notes" value={formats.kes(figures.creditNotes)} />
     </div>
   );
 }

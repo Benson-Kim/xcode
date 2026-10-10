@@ -145,9 +145,13 @@ export function PurchaseFields({
           quantity or unit cost takes it out of that purchase.
         </Note>
       )}
-      <div className="flex flex-wrap justify-between gap-3 rounded-[10px] bg-paper p-3 font-bold">
-        <span>Total amount</span>
-        <output className="tabular-nums">{formats.kes(total ?? 0)}</output>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-linear-to-br from-card-a to-card-b px-4 py-[11px] text-white">
+        <span className="text-xs font-bold tracking-[.06em] text-on-deep uppercase">
+          Total amount
+        </span>
+        <output className="text-[22px] font-extrabold tabular-nums">
+          {formats.kes(total ?? 0)}
+        </output>
       </div>
     </>
   );

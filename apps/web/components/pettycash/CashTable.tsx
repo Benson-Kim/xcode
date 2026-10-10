@@ -55,13 +55,19 @@ export function CashTable({
           return (
             <Tr key={entry.id}>
               <Td label="Manager">
-                <strong>{entry.holderName}</strong>
+                <strong className="font-bold text-ink">
+                  {entry.holderName}
+                </strong>
               </Td>
               <Td label="What">
                 {entry.note || (back ? "Cash returned" : "Cash given")}
               </Td>
               <Td label={`Amount (${currency})`} numeric>
-                <strong className={back ? "text-green" : undefined}>
+                <strong
+                  className={
+                    back ? "font-bold text-clay" : "font-bold text-ink"
+                  }
+                >
                   {back
                     ? `Less ${formats.formatNumber(-entry.total)}`
                     : formats.formatNumber(entry.total)}

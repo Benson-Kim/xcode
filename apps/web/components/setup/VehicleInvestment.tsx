@@ -18,10 +18,10 @@ import {
   DataTable,
   Dialog,
   Field,
-  FormActions,
   Hint,
   ListSkeleton,
   ProgressBar,
+  RowAction,
   Spacer,
   Stat,
   StatGrid,
@@ -247,24 +247,23 @@ export function VehicleInvestmentTab({
                 />
               </Td>
               <Td>
-                <FormActions className="justify-end">
-                  <Button
+                <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
+                  <RowAction
                     tone="ok"
                     disabled={busy}
                     onClick={() => void saveEdit()}
                   >
                     Save
-                  </Button>
-                  <Button
-                    tone="quiet"
+                  </RowAction>
+                  <RowAction
                     onClick={() => {
                       setEditing(null);
                       setError("");
                     }}
                   >
                     Cancel
-                  </Button>
-                </FormActions>
+                  </RowAction>
+                </div>
               </Td>
             </Tr>
           ) : (
@@ -273,16 +272,17 @@ export function VehicleInvestmentTab({
                 {formatDateOnly(entry.date)}
               </Td>
               <Td label="What it was">
-                <strong>{entry.description}</strong>
+                <span className="font-semibold text-ink">
+                  {entry.description}
+                </span>
               </Td>
               <Td label="Amount" numeric>
                 {kes(entry.amount)}
               </Td>
               {canManage && (
                 <Td>
-                  <FormActions className="justify-end">
-                    <Button
-                      tone="outline"
+                  <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
+                    <RowAction
                       disabled={busy}
                       aria-label={`Edit ${entry.description}`}
                       onClick={() => {
@@ -297,9 +297,9 @@ export function VehicleInvestmentTab({
                       }}
                     >
                       Edit
-                    </Button>
-                    <Button
-                      tone="danger"
+                    </RowAction>
+                    <RowAction
+                      tone="bad"
                       disabled={busy}
                       aria-label={`${confirmRemove === entry.id ? "Tap again to remove" : "Remove"} ${entry.description}`}
                       onClick={() => void remove(entry.id)}
@@ -307,8 +307,8 @@ export function VehicleInvestmentTab({
                       {confirmRemove === entry.id
                         ? "Tap again to remove"
                         : "Remove"}
-                    </Button>
-                  </FormActions>
+                    </RowAction>
+                  </div>
                 </Td>
               )}
             </Tr>
@@ -318,11 +318,33 @@ export function VehicleInvestmentTab({
       <Dialog
         open={Boolean(adding)}
         title="Add investment"
+        subtitle={vehicle.registration}
         onClose={() => setAdding(null)}
+        footer={
+          <>
+            <Button tone="outline" onClick={() => setAdding(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="investment-add-form"
+              tone="ok"
+              disabled={busy}
+            >
+              Add
+            </Button>
+          </>
+        }
       >
         {adding && (
-          <div className="flex flex-col gap-3.5">
-            <Hint>{vehicle.registration}</Hint>
+          <form
+            id="investment-add-form"
+            className="flex flex-col gap-3.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void add();
+            }}
+          >
             <Field id="investment-description" label="What it was">
               <TextInput
                 autoFocus
@@ -352,15 +374,7 @@ export function VehicleInvestmentTab({
               />
             </Field>
             {addError && <Banner>{addError}</Banner>}
-            <FormActions>
-              <Button tone="ok" disabled={busy} onClick={() => void add()}>
-                Add
-              </Button>
-              <Button tone="quiet" onClick={() => setAdding(null)}>
-                Cancel
-              </Button>
-            </FormActions>
-          </div>
+          </form>
         )}
       </Dialog>
     </div>
