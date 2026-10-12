@@ -8,6 +8,7 @@ public static class ReportEndpoints
     {
         services.AddScoped<IReportRepository, Auth.Infrastructure.Reports.ReportRepository>();
         services.AddScoped<ReportUseCases>();
+        services.AddScoped<ScreenExports>();
         services.AddSingleton<IReportPdf, Auth.Infrastructure.Reports.ReportPdf>();
         return services;
     }
@@ -43,4 +44,11 @@ public static class ReportEndpoints
             .Produces(StatusCodes.Status200OK, contentType: ReportWorkbook.ContentType, additionalContentTypes: "application/pdf")
             .WithName("ExportReport");
     }
+
+    // A screen's export: an Excel or PDF file, written to the change log like a report's.
+    public static RouteHandlerBuilder ProducesExport(this RouteHandlerBuilder builder, string name) =>
+        builder.Produces(StatusCodes.Status200OK, contentType: ReportWorkbook.ContentType, additionalContentTypes: "application/pdf")
+            .WithName(name);
+
+    public static IResult AsFile(this ReportExport file) => Results.File(file.Content, file.ContentType, file.FileName);
 }

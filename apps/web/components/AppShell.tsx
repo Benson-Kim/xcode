@@ -1186,13 +1186,13 @@ function AccessDialog({
     <Dialog open={open} title="Your access" onClose={onClose}>
       <dl className="m-0 mb-2 grid gap-2">
         <div className="flex flex-col">
-          <dt className="text-[13px] text-grey">Role</dt>
+          <dt className="flab">Role</dt>
           <dd className="m-0 font-semibold">
             {session?.role || "Not assigned"}
           </dd>
         </div>
         <div className="flex flex-col">
-          <dt className="text-[13px] text-grey">Can see</dt>
+          <dt className="flab">Can see</dt>
           <dd className="m-0 font-semibold">
             {scope.loading ? (
               <Skeleton className="mt-1 h-5 w-40" />

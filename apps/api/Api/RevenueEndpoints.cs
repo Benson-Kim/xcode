@@ -1,4 +1,5 @@
 using System.Globalization;
+using Auth.Application.Reports;
 using Auth.Application.Revenue;
 using Microsoft.EntityFrameworkCore;
 
@@ -39,6 +40,11 @@ public static class RevenueEndpoints
                 useCases.Week(weekStart, companyId, vehicleId, page, pageSize, ct))
             .Produces<RevenueWeekDto>()
             .WithName("GetRevenueWeek");
+
+        group.MapGet("/export", async (ScreenExports exports, CancellationToken ct, DateOnly? weekStart = null, Guid? companyId = null,
+                    string? format = null) =>
+                (await exports.Revenue(weekStart, companyId, format, ct)).AsFile())
+            .ProducesExport("ExportRevenueWeek");
 
         group.MapGet("/dashboard", (RevenueUseCases useCases, CancellationToken ct, string period = "week", Guid? companyId = null) =>
                 useCases.Dashboard(period, companyId, ct))

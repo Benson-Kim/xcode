@@ -2,8 +2,12 @@
 
 import { useRef, useState } from "react";
 
+import { revenueExportPath } from "@xcode/shared/reports";
+
 import { useFormats } from "../lib/formats";
 import { useSession } from "../lib/session-context";
+import { ExportMenu } from "./reports/ExportMenu";
+import { useReportExport } from "./reports/exportReport";
 import { CaptureDialog } from "./revenue/CaptureDialog";
 import { captureDayFor, weekStartFor } from "./revenue/fleetDay";
 import { FleetDayDialog } from "./revenue/FleetDayDialog";
@@ -45,6 +49,7 @@ export function RevenuePage() {
   });
   // The day Capture revenue is open on, or null while it is closed.
   const [capturing, setCapturing] = useState<string | null>(null);
+  const exporter = useReportExport();
 
   if (!canView) {
     return (
@@ -77,10 +82,31 @@ export function RevenuePage() {
         shown={grid.shown}
         data={data}
         companyId={grid.companyId}
+        exportMenu={
+          can("reports.export") && (
+            <ExportMenu
+              disabled={exporter.exporting || !data}
+              onExport={(format) =>
+                data &&
+                void exporter.run(
+                  revenueExportPath({
+                    weekStart: data.weekStart,
+                    companyId: grid.companyId || undefined,
+                    format,
+                  }),
+                  "Revenue",
+                  { from: data.weekStart, to: data.weekThrough },
+                  format,
+                )
+              }
+            />
+          )
+        }
         onWeek={grid.setWeekStart}
         onCompany={grid.setCompanyId}
       />
 
+      {exporter.error && <Banner>{exporter.error}</Banner>}
       {week.error && <Banner>{week.error}</Banner>}
 
       {!data ? (

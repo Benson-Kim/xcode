@@ -91,6 +91,7 @@ public sealed class FleetPostings(AuthDb db) : IFleetPostings
         var items = await db.Set<RecurringItem>().AsNoTracking()
             .Where(i => i.Versions.Any(v => v.Allocations.Any(a => ids.Contains(a.VehicleId))))
             .Include(i => i.Versions).ThenInclude(v => v.Allocations.Where(a => ids.Contains(a.VehicleId)))
+            .Include(i => i.Pauses)
             .ToListAsync(ct);
         var scheduled = items
             .SelectMany(item => item.DueBetween(low, high).SelectMany(due => due.Version.Allocations

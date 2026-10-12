@@ -5,6 +5,7 @@ import { Fragment, type ReactNode } from "react";
 import type { PettyCashEntry } from "@xcode/shared/pettyCash";
 
 import { useFormats } from "../../lib/formats";
+import { longDay } from "./labels";
 
 export type DayGroup = {
   date: string;
@@ -43,7 +44,7 @@ export function DayRow({
     <tr className="grp" data-day={date}>
       <td colSpan={span}>
         <div>
-          <span>{formats.formatWeekdayDate(date)}</span>
+          <span>{longDay(formats, date)}</span>
           <span>{note}</span>
         </div>
       </td>

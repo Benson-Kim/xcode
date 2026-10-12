@@ -30,11 +30,6 @@ const DENSITY = {
 
 const words = (text: string) => text.toLowerCase().split(/\s+/).filter(Boolean);
 
-// A dropdown that can be searched, as the design's item search (comboHtml): a combobox (.inp) over a listbox
-// (.combolist) that opens in the flow of the form, each option (.copt) with its group in small type beside it.
-// In a toolbar (`inline`) the list floats under the input instead. Typing narrows the options, the arrow keys move
-// through them (the highlighted one is aria-selected), Enter or Tab takes it, Escape closes. A click or a tap takes
-// an option too.
 // The options whose group and label hold every word typed, in any order.
 function useMatching(options: readonly SearchOption[], query: string | null) {
   return useMemo(() => {
@@ -47,6 +42,11 @@ function useMatching(options: readonly SearchOption[], query: string | null) {
   }, [options, query]);
 }
 
+// A dropdown that can be searched, as the design's item search (comboHtml): a combobox (.inp) over a listbox
+// (.combolist), each option (.copt) with its group in small type beside it. The list floats over the rows and fields
+// below it, so a dropdown in a table row or a form never pushes them down or gets clipped. Typing narrows the
+// options, the arrow keys move through them (the highlighted one is aria-selected), Enter or Tab takes it, Escape
+// closes. A click or a tap takes an option too.
 export function SearchSelect({
   options,
   value,
@@ -86,7 +86,7 @@ export function SearchSelect({
 
   const optionId = (index: number) => `${listId}-${index}`;
   const activeId = open && shown[active] ? optionId(active) : undefined;
-  useAnchoredPosition(open && inline, box, list, { gap: 0, matchWidth: true });
+  useAnchoredPosition(open, box, list, { gap: 6, matchWidth: true });
 
   function show() {
     setQuery(null);
@@ -191,7 +191,6 @@ export function SearchSelect({
       />
       <Listbox
         listRef={list}
-        floating={inline}
         id={listId}
         open={open}
         shown={shown}
@@ -206,7 +205,6 @@ export function SearchSelect({
 
 function Listbox({
   listRef,
-  floating,
   id,
   open,
   shown,
@@ -216,7 +214,6 @@ function Listbox({
   onHover,
 }: {
   listRef: RefObject<HTMLDivElement | null>;
-  floating: boolean;
   id: string;
   open: boolean;
   shown: readonly SearchOption[];
@@ -231,7 +228,7 @@ function Listbox({
       id={id}
       role="listbox"
       hidden={!open}
-      className={cn("combolist", floating && "z-50 min-w-44")}
+      className="combolist fixed min-w-44"
     >
       {shown.length === 0 && (
         <div role="presentation" className="cnone">

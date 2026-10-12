@@ -14,6 +14,9 @@ public sealed class RecurringItem : IOrganizationEntity
      public Guid OrganizationId { get; private set; }
      public DateOnly? StoppedFrom { get; private set; }
      public List<RecurringVersion> Versions { get; private set; } = [];
+     public List<RecurringPause> Pauses { get; private set; } = [];
+     // The day the pause in force began, or null while the item runs.
+     public DateOnly? PausedFrom => Pauses.FirstOrDefault(p => p.Open)?.From;
      public RecurringItem(Guid organizationId, RecurringDefinition definition)
      {
           if (organizationId == Guid.Empty)
@@ -61,9 +64,30 @@ public sealed class RecurringItem : IOrganizationEntity
           StoppedFrom = null;
           return true;
      }
+     // A pause skips every run from today until the item is resumed; unlike a stop it can be undone, and a resumed
+     // item runs again from the day it is resumed. The runs it skipped are never made up.
+     public bool Pause(DateOnly today)
+     {
+          if (StoppedFrom is not null && StoppedFrom <= today)
+               throw new ArgumentException("The item is already stopped.");
+          if (PausedFrom is not null) return false;
+          Pauses.Add(new(OrganizationId, Id, today));
+          return true;
+     }
+     public bool Resume(DateOnly today)
+     {
+          var open = Pauses.FirstOrDefault(p => p.Open);
+          if (open is null) return false;
+          if (StoppedFrom is not null && StoppedFrom <= today)
+               throw new ArgumentException("The item is already stopped.");
+          open.End(today < open.From ? open.From : today);
+          return true;
+     }
+     public bool PausedOn(DateOnly date) => Pauses.Any(p => p.Covers(date));
      public RecurringVersion? DueOn(DateOnly date)
      {
           if (StoppedFrom is not null && date >= StoppedFrom) return null;
+          if (PausedOn(date)) return null;
           var version = Versions.Where(v => v.EffectiveFrom <= date)
               .OrderByDescending(v => v.Revision).FirstOrDefault();
           return version is not null && date >= version.Start && (version.End is null || date <= version.End)
@@ -73,7 +97,9 @@ public sealed class RecurringItem : IOrganizationEntity
      // each day. A version is in charge from its EffectiveFrom until a higher revision takes effect, so each version's
      // due dates are stepped within [max(from, EffectiveFrom, Start), min(through, End, next EffectiveFrom − 1, StoppedFrom − 1)].
      // O(R log R + due dates), against O(D·R log R) for calling DueOn on each of D days. Dates come out per version.
-     public IEnumerable<(DateOnly Date, RecurringVersion Version)> DueBetween(DateOnly from, DateOnly through)
+     public IEnumerable<(DateOnly Date, RecurringVersion Version)> DueBetween(DateOnly from, DateOnly through) =>
+          Pauses.Count == 0 ? Scheduled(from, through) : Scheduled(from, through).Where(due => !PausedOn(due.Date));
+     private IEnumerable<(DateOnly Date, RecurringVersion Version)> Scheduled(DateOnly from, DateOnly through)
      {
           var end = StoppedFrom is { } stopped && stopped <= through ? stopped.DayNumber - 1 : through.DayNumber;
           var supersededFrom = int.MaxValue;

@@ -6,7 +6,6 @@ import type { RevenueWeek } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
 import { cn } from "../ui";
-import { DAY_COLUMN } from "./styles";
 import type { OpenDay } from "./useCaptureFlow";
 import type { useGridRows } from "./useGridRows";
 import { VehicleRow } from "./VehicleRow";
@@ -42,8 +41,7 @@ export function WeekGrid({
   onOpenDay: OpenDay;
 }) {
   const formats = useFormats();
-  const { vehicles, expanded, windowed, rowIndex, rowCount, rows, toggle } =
-    grid;
+  const { vehicles, windowed, rowIndex, rowCount, rows } = grid;
   return (
     <div id="revT" ref={gridRef} tabIndex={-1}>
       <div className="tbl">
@@ -73,15 +71,12 @@ export function WeekGrid({
                     <VehicleRow
                       key={item.id}
                       vehicle={item}
-                      isOpen={expanded.has(item.id)}
-                      days={days}
                       today={today}
                       canCapture={canCapture}
                       rowIndex={
                         windowed ? rowIndex[rows.start + offset] : undefined
                       }
                       measure={rows.measure}
-                      onToggle={toggle}
                       onOpenDay={onOpenDay}
                     />
                   ))}
@@ -120,7 +115,7 @@ function GridHead({
             key={date}
             scope="col"
             aria-current={date === today ? "date" : undefined}
-            className={cn("r", date === today && "today", DAY_COLUMN)}
+            className={cn("r", date === today && "today")}
           >
             {`${shortName} ${dayOfMonth}`}
             {date === today && <span className="sr-only">, today</span>}
@@ -148,7 +143,7 @@ function GridTotals({
       <tr aria-rowindex={rowIndex}>
         <td>{`${data.vehicles.length} vehicle${data.vehicles.length === 1 ? "" : "s"}`}</td>
         {(data.dayTotals ?? []).map(({ date, amount }) => (
-          <td key={date} className={cn("r", DAY_COLUMN)}>
+          <td key={date} className="r">
             {amount ? formats.formatNumber(amount) : ""}
           </td>
         ))}

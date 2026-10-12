@@ -23,6 +23,9 @@ public interface ISetupRepository
     Task<string> Currency(CancellationToken ct);
     Task<Page<RecurringDto>> Recurring(SetupActor actor, RecurringFilter filter, int page, int pageSize, CancellationToken ct);
     Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct);
+    // Null when the item is not in the actor's scope.
+    Task<RecurringRunsDto?> RecurringRuns(SetupActor actor, Guid id, int count, CancellationToken ct);
+    Task<RecurringSummaryDto> RecurringSummary(SetupActor actor, CancellationToken ct);
     // Contract C6 for a vehicle already found in the actor's scope: figures over its active days from `from` through `through`.
     Task<VehicleReport> Report(SetupActor actor, FleetVehicle vehicle, DateOnly from, DateOnly through, CancellationToken ct);
     Task<HistoryPage> History(SetupActor actor, HistoryFilter filter, int page, int pageSize, long? before, bool includeTotal, CancellationToken ct);

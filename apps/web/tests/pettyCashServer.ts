@@ -154,6 +154,8 @@ export const DAY_FIGURES = {
   creditNotes: 500,
   moneyOut: 4000,
   closingBalance: 13000,
+  waiting: 3500,
+  waitingCount: 1,
 };
 export const WEEK_FIGURES = {
   openingBalance: 9000,
@@ -162,6 +164,8 @@ export const WEEK_FIGURES = {
   creditNotes: 2000,
   moneyOut: 16000,
   closingBalance: 14000,
+  waiting: 9000,
+  waitingCount: 3,
 };
 
 // The first day of the week is Monday, as in the appearance fixture.

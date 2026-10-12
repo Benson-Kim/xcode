@@ -56,7 +56,7 @@ public sealed class PettyCashTests : IDisposable
 
         var overview = await Overview(clerk, w.Today);
         Assert.Equal(("day", w.Today, w.Today), (overview.Period, overview.From, overview.To));
-        Assert.Equal(new PettyCashFiguresDto(0m, 10000m, 3000m, 0m, 3000m, 7000m), overview.Figures);
+        Assert.Equal(new PettyCashFiguresDto(0m, 10000m, 3000m, 0m, 3000m, 7000m, 3000m, 1), overview.Figures);
         var mine = Assert.Single(overview.Floats);
         Assert.Equal((w.Clerk, 10000m, 3000m, 3000m, 1, 7000m, (DateOnly?)w.Today),
             (mine.HolderId, mine.CashReceived, mine.Expenses, mine.Waiting, mine.WaitingCount, mine.Balance, mine.LastCashOn));
@@ -151,7 +151,7 @@ public sealed class PettyCashTests : IDisposable
 
         var week = await Overview(clerk, w.Today, period: "week");
         Assert.Equal(("week", w.Today, monday, monday.AddDays(6)), (week.Period, week.Date, week.From, week.To));
-        Assert.Equal(new PettyCashFiguresDto(10000m, 2000m, 1500m, 0m, 1500m, 10500m), week.Figures);
+        Assert.Equal(new PettyCashFiguresDto(10000m, 2000m, 1500m, 0m, 1500m, 10500m, 1500m, 2), week.Figures);
         Assert.Equal(10500m, week.Floats.Single().Balance);
         // A day inside the week asks for the same week.
         Assert.Equal(monday, (await Overview(clerk, monday.AddDays(1), period: "week")).From);
@@ -159,7 +159,7 @@ public sealed class PettyCashTests : IDisposable
         await SetFirstDayOfWeek(app, DayOfWeek.Saturday);
         var fromSaturday = await Overview(clerk, w.Today, period: "week");
         Assert.Equal((monday.AddDays(-2), monday.AddDays(4)), (fromSaturday.From, fromSaturday.To));
-        Assert.Equal(new PettyCashFiguresDto(0m, 12000m, 1500m, 0m, 1500m, 10500m), fromSaturday.Figures);
+        Assert.Equal(new PettyCashFiguresDto(0m, 12000m, 1500m, 0m, 1500m, 10500m, 1500m, 2), fromSaturday.Figures);
 
         await AssertBadRequest(await clerk.GetAsync($"/setup/pettycash/overview?period=month"), "Choose a day or a week.");
     }
@@ -179,7 +179,7 @@ public sealed class PettyCashTests : IDisposable
 
         var range = (await clerk.GetFromJsonAsync<PettyCashOverviewDto>(Range(w.Today.AddDays(-6), w.Today.AddDays(-4))))!;
         Assert.Equal(("range", w.Today.AddDays(-4), w.Today.AddDays(-6), w.Today.AddDays(-4)), (range.Period, range.Date, range.From, range.To));
-        Assert.Equal(new PettyCashFiguresDto(10000m, 2000m, 1700m, 0m, 1700m, 10300m), range.Figures);
+        Assert.Equal(new PettyCashFiguresDto(10000m, 2000m, 1700m, 0m, 1700m, 10300m, 1700m, 2), range.Figures);
         Assert.Equal(10000m, range.Floats.Single().Balance);
 
         // A period running past today ends where the entries do; one day is a day; date and period are then ignored.
@@ -386,14 +386,14 @@ public sealed class PettyCashTests : IDisposable
     }
 
     [Fact]
-    public async Task CreditNotesNeedAPayeeAndAReasonAndBelongToNoVehicle()
+    public async Task CreditNotesNeedAReasonAndBelongToNoVehicle()
     {
         var (w, owner) = await Arrange();
         using var clerk = await app.SignIn(Clerk);
         await Saved(await Post(owner, Cash(w.Today, w.Clerk, 10000m)));
 
-        await AssertBadRequest(await Post(clerk, Credit(w.Today, 500m, null, "Advance")), "Say who was paid.");
         await AssertBadRequest(await Post(clerk, Credit(w.Today, 500m, "Grace Wanjiku", " ")), "Say why the money was paid.");
+        await AssertBadRequest(await Post(clerk, Credit(w.Today, 500m, new string('x', 81), "Advance")), "The payee must be at most 80 characters.");
         await AssertBadRequest(await Post(clerk, new { kind = "credit", date = w.Today, vehicleId = w.Vehicle, payee = "Grace", note = "Advance", unitAmount = 500m }),
             "A credit note is not recorded against a vehicle.");
 
@@ -410,6 +410,11 @@ public sealed class PettyCashTests : IDisposable
 
         // The payee paying it back is a negative credit note.
         Assert.Equal(10000m, (await Saved(await Post(clerk, Credit(w.Today, -500m, "Grace Wanjiku", "Repaid the advance")))).Balance);
+
+        // The reason alone is enough: the payee is optional.
+        var unnamed = await Saved(await Post(clerk, Credit(w.Today, 200m, " ", "Paid the loader")));
+        Assert.Equal(9800m, unnamed.Balance);
+        Assert.Null((await Entries(clerk, "kind=credit&q=loader")).Items.Single().Payee);
     }
 
     [Fact]
@@ -470,6 +475,77 @@ public sealed class PettyCashTests : IDisposable
         Assert.Contains((false, 700m, "waiting"), statuses);
 
         await AssertForbidden(await clerk.PostAsJsonAsync("/setup/pettycash/approve-day", new { date = w.Today }), null);
+    }
+
+    // "Approve all" over a period: every day from the first to the last, still within what the person may approve.
+    [Fact]
+    public async Task ApprovingAPeriodApprovesEveryDayInIt()
+    {
+        var (w, owner) = await Arrange();
+        await Grant(app, Admin, "pettycash.approve_day");
+        using var clerk = await app.SignIn(Clerk);
+        using var admin = await app.SignIn(Admin);
+        await Saved(await Post(owner, Cash(w.Today.AddDays(-5), w.Clerk, 20000m)));
+        await Saved(await Post(clerk, Expense(w.Today.AddDays(-3), w.Vehicle, w.Item, 700m)));
+        await Saved(await Post(clerk, Expense(w.Today.AddDays(-1), w.Vehicle, w.Item, 1000m)));
+        await Saved(await Post(clerk, Expense(w.Today.AddDays(-1), w.Vehicle, w.Item, 6000m)));
+        await Saved(await Post(clerk, Expense(w.Today, w.Vehicle, w.Item, 300m)));
+
+        var shown = (await admin.GetFromJsonAsync<PettyCashOverviewDto>(
+            $"/setup/pettycash/overview?from={w.Today.AddDays(-3):yyyy-MM-dd}&to={w.Today.AddDays(-1):yyyy-MM-dd}"))!;
+        Assert.Equal((7700m, 3), (shown.Figures.Waiting, shown.Figures.WaitingCount));
+
+        using var response = await admin.PostAsJsonAsync("/setup/pettycash/approve-day",
+            new { date = w.Today.AddDays(-3), to = w.Today.AddDays(-1), holderId = w.Clerk });
+        Assert.Equal(new PettyCashDayApproved(2, 1700m, 1), await response.Content.ReadFromJsonAsync<PettyCashDayApproved>());
+        var statuses = (await Entries(clerk, "kind=expense")).Items.ToDictionary(x => x.Total, x => x.Status);
+        Assert.Equal(("approved", "approved", "waiting", "waiting"), (statuses[700m], statuses[1000m], statuses[6000m], statuses[300m]));
+
+        await AssertBadRequest(await admin.PostAsJsonAsync("/setup/pettycash/approve-day", new { date = w.Today.AddDays(-1), to = w.Today.AddDays(-3) }),
+            "The first date cannot be after the last date.");
+    }
+
+    // Approving the entries ticked in the list: all of them or none, each at the version the approver saw.
+    [Fact]
+    public async Task ApprovingTickedEntriesApprovesAllOfThemOrNone()
+    {
+        var (w, owner) = await Arrange();
+        using var clerk = await app.SignIn(Clerk);
+        using var admin = await app.SignIn(Admin);
+        await Saved(await Post(owner, Cash(w.Today.AddDays(-1), w.Clerk, 20000m)));
+        var tyres = await Saved(await Post(clerk, Expense(w.Today, w.Vehicle, w.Item, 1000m)));
+        var credit = await Saved(await Post(clerk, Credit(w.Today, 400m, null, "Paid the loader")));
+        var big = await Saved(await Post(clerk, Expense(w.Today, w.Vehicle, w.Item, 6000m)));
+        var left = await Saved(await Post(clerk, Expense(w.Today, w.Vehicle, w.Item, 300m)));
+        object Ticked(params PettyCashSaved[] entries) => new { entries = entries.Select(e => new { id = e.Id, version = e.Version }) };
+        Task<HttpResponseMessage> ApproveTicked(HttpClient client, params PettyCashSaved[] entries) =>
+            client.PostAsJsonAsync("/setup/pettycash/approve", Ticked(entries));
+        async Task<string[]> Statuses() => [.. (await Entries(clerk, "kind=expense,credit")).Items.OrderBy(x => x.Total).Select(x => x.Status ?? "")];
+
+        // One above the approver's limit stops the lot.
+        await AssertForbidden(await ApproveTicked(admin, tyres, big), "This entry is above your approval limit.");
+        Assert.Equal(["waiting", "waiting", "waiting", "waiting"], await Statuses());
+
+        // One changed since it was shown is a conflict, and nothing is approved.
+        var edited = await Saved(await clerk.PutAsJsonAsync($"/setup/pettycash/entries/{left.Id}",
+            Expense(w.Today, w.Vehicle, w.Item, 350m, version: left.Version)));
+        using (var conflict = await ApproveTicked(admin, tyres, left))
+            Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        Assert.Equal(["waiting", "waiting", "waiting", "waiting"], await Statuses());
+
+        using (var response = await ApproveTicked(admin, tyres, credit, edited))
+            Assert.Equal(new PettyCashDayApproved(3, 1750m, 0), await response.Content.ReadFromJsonAsync<PettyCashDayApproved>());
+        Assert.Equal(["approved", "approved", "approved", "waiting"], await Statuses());
+        // Asking again skips what is already approved.
+        using (var again = await ApproveTicked(admin, tyres))
+            Assert.Equal(new PettyCashDayApproved(0, 0m, 1), await again.Content.ReadFromJsonAsync<PettyCashDayApproved>());
+
+        await AssertBadRequest(await admin.PostAsJsonAsync("/setup/pettycash/approve", new { entries = Array.Empty<object>() }),
+            "Choose the entries to approve.");
+        // Nobody approves their own float, and approving needs the right to.
+        await AssertForbidden(await ApproveTicked(clerk, big), null);
+        using (var missing = await admin.PostAsJsonAsync("/setup/pettycash/approve", new { entries = new[] { new { id = Guid.NewGuid(), version = 1L } } }))
+            Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 
     [Fact]

@@ -4,12 +4,12 @@ import { useId, useState, type FormEvent } from "react";
 
 import {
   PETTY_CASH_NOTE_LIMIT,
-  PETTY_CASH_PAYEE_LIMIT,
   PETTY_CASH_UNITS_ERROR,
   parsePettyCashAmount,
   parsePettyCashUnits,
   pettyCashTotal,
   type PettyCashEntry,
+  type PettyCashFloat,
   type PettyCashHolder,
   type PettyCashKind,
   type PettyCashOptions,
@@ -23,7 +23,6 @@ import { useFormats } from "../../lib/formats";
 import {
   Banner,
   Button,
-  Choice,
   ErrorSummary,
   Field,
   SearchSelect,
@@ -31,7 +30,9 @@ import {
 } from "../ui";
 import { AmountInput } from "./AmountInput";
 import { DialogFooter, FormDialog } from "./DialogFooter";
+import { HolderField } from "./HolderField";
 import { itemOptions } from "./itemOptions";
+import { longDay } from "./labels";
 import {
   ENTRIES_PATH,
   entryPath,
@@ -45,14 +46,7 @@ export type EntryDialogState = { kind: PettyCashKind; entry?: PettyCashEntry };
 
 type Errors = Partial<
   Record<
-    | "date"
-    | "units"
-    | "amount"
-    | "vehicle"
-    | "item"
-    | "payee"
-    | "note"
-    | "holder",
+    "date" | "units" | "amount" | "vehicle" | "item" | "note" | "holder",
     string
   >
 >;
@@ -71,6 +65,7 @@ export function EntryDialog({
   businessDate,
   permissions,
   holderId,
+  floats,
   onSaved,
   onConflict,
   onClose,
@@ -81,13 +76,23 @@ export function EntryDialog({
   permissions: PettyCashPermissions;
   // The manager the list is filtered to, offered first when cash is given.
   holderId: string;
+  // The floats the page already knows, which say what cash a manager holds.
+  floats?: PettyCashFloat[];
   onSaved: (message: string) => void;
   onConflict: (message: string) => void;
   onClose: () => void;
 }) {
+  const formats = useFormats();
   const title = state ? TITLES[state.kind][state.entry ? 1 : 0] : "";
+  const short = state !== null && state.kind !== "expense";
   return (
-    <FormDialog open={Boolean(state)} title={title} onClose={onClose}>
+    <FormDialog
+      open={Boolean(state)}
+      title={title}
+      size={short ? "sm" : undefined}
+      subtitle={short ? longDay(formats, state.entry?.date ?? date) : undefined}
+      onClose={onClose}
+    >
       {state && (
         <EntryForm
           kind={state.kind}
@@ -96,6 +101,7 @@ export function EntryDialog({
           businessDate={businessDate}
           permissions={permissions}
           holderId={holderId}
+          floats={floats}
           onSaved={onSaved}
           onConflict={onConflict}
           onClose={onClose}
@@ -112,6 +118,7 @@ function EntryForm({
   businessDate,
   permissions,
   holderId,
+  floats,
   onSaved,
   onConflict,
   onClose,
@@ -122,6 +129,7 @@ function EntryForm({
   businessDate: string;
   permissions: PettyCashPermissions;
   holderId: string;
+  floats?: PettyCashFloat[];
   onSaved: (message: string) => void;
   onConflict: (message: string) => void;
   onClose: () => void;
@@ -134,11 +142,7 @@ function EntryForm({
   const [amount, setAmount] = useState(entry ? String(entry.unitAmount) : "");
   const [vehicleId, setVehicleId] = useState(entry?.vehicleId ?? "");
   const [itemId, setItemId] = useState(entry?.expenseItemId ?? "");
-  const [payee, setPayee] = useState(entry?.payee ?? "");
   const [note, setNote] = useState(entry?.note ?? "");
-  const [reimbursable, setReimbursable] = useState(
-    entry?.reimbursable ?? false,
-  );
   const [holder, setHolder] = useState(
     entry?.holderId ??
       (kind === "cash" ? holderId : (permissions.holderId ?? "")),
@@ -200,24 +204,21 @@ function EntryForm({
       : null;
   const pickHolder =
     kind === "cash" || (kind === "credit" && permissions.canIssue);
-  const noteLabel = kind === "credit" ? "Reason" : "Note";
 
   function submit(event: FormEvent) {
     event.preventDefault();
     const found: Errors = {};
-    if (!DATE_SHAPE.test(date)) found.date = "Enter the date.";
-    else if (date > businessDate)
-      found.date = "The date cannot be after today.";
     if (!parsed.ok) found.amount = parsed.error;
     if (kind === "expense") {
+      if (!DATE_SHAPE.test(date)) found.date = "Enter the date.";
+      else if (date > businessDate)
+        found.date = "The date cannot be after today.";
       if (count === null) found.units = PETTY_CASH_UNITS_ERROR;
       if (!vehicleId) found.vehicle = "Choose the vehicle.";
       if (!itemId) found.item = "Choose what it was for.";
     }
-    if (kind === "credit") {
-      if (!payee.trim()) found.payee = "Enter who was paid.";
-      if (!note.trim()) found.note = "Say why the money was paid out.";
-    }
+    if (kind === "credit" && !note.trim())
+      found.note = "Say why the money was paid out.";
     if (pickHolder && !holder) found.holder = "Choose the manager.";
     setErrors(found);
     if (!parsed.ok || Object.keys(found).length) return;
@@ -227,12 +228,15 @@ function EntryForm({
       kind,
       date,
       unitAmount: parsed.amount,
-      note: note.trim() || null,
+      note: kind === "cash" ? (entry?.note ?? null) : note.trim() || null,
     };
     if (kind === "expense")
       Object.assign(body, { vehicleId, expenseItemId: itemId, units: count });
-    if (kind === "credit")
-      Object.assign(body, { payee: payee.trim(), reimbursable });
+    if (kind === "credit" && entry)
+      Object.assign(body, {
+        payee: entry.payee,
+        reimbursable: entry.reimbursable,
+      });
     if (pickHolder) body.holderId = holder;
 
     void run(async () => {
@@ -253,7 +257,7 @@ function EntryForm({
       }
       if (kind === "credit")
         return onSaved(
-          `Credit note of ${formats.kes(parsed.amount)} to ${payee.trim()} recorded.${waits}`,
+          `Credit note of ${formats.kes(parsed.amount)} recorded.${waits}`,
         );
       const registration =
         vehicleChoices.find((vehicle) => vehicle.id === vehicleId)
@@ -264,10 +268,7 @@ function EntryForm({
     });
   }
 
-  const amountHint =
-    kind === "expense"
-      ? "Use a minus sign for a refund."
-      : "Use a minus sign for money coming back.";
+  const amountHint = "Use a minus sign for a refund.";
 
   return (
     <form
@@ -331,68 +332,55 @@ function EntryForm({
       ) : (
         <>
           {pickHolder && (
-            <Field id="pc-holder" label="Manager" error={errors.holder}>
-              <SearchSelect
-                options={holderChoices.map((candidate) => ({
-                  value: candidate.id,
-                  label: `${candidate.name}${candidate.active ? "" : " (not active)"}`,
-                }))}
-                value={holder}
-                placeholder="Choose manager"
-                onChange={setHolder}
-              />
-            </Field>
-          )}
-          {kind === "credit" && (
-            <Field id="pc-payee" label="Paid to" error={errors.payee}>
-              <TextInput
-                maxLength={PETTY_CASH_PAYEE_LIMIT}
-                autoFocus
-                value={payee}
-                onChange={(event) => setPayee(event.target.value)}
-              />
-            </Field>
+            <HolderField
+              holders={holderChoices}
+              value={holder}
+              error={errors.holder}
+              floats={floats}
+              autoFocus={!holder}
+              onChange={setHolder}
+            />
           )}
           <Field
             id="pc-amount"
             label={`Amount, ${formats.currencyCode()}`}
-            hint={amountHint}
             error={errors.amount}
           >
             <AmountInput
-              autoFocus={kind === "cash" && !pickHolder}
+              autoFocus={!pickHolder || Boolean(holder)}
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
           </Field>
+          {kind === "credit" && (
+            <Field id="pc-note" label="Reason" error={errors.note}>
+              <TextInput
+                maxLength={PETTY_CASH_NOTE_LIMIT}
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+              />
+            </Field>
+          )}
         </>
       )}
-      <Field id="pc-date" label="Date" error={errors.date}>
-        <TextInput
-          type="date"
-          max={businessDate}
-          value={date}
-          onChange={(event) => setDate(event.target.value)}
-        />
-      </Field>
-      <Field
-        id="pc-note"
-        label={noteLabel}
-        error={errors.note}
-        hint={kind === "credit" ? "Why the money was paid out." : "Optional."}
-      >
-        <TextInput
-          maxLength={PETTY_CASH_NOTE_LIMIT}
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-        />
-      </Field>
-      {kind === "credit" && (
-        <Choice
-          label="The payee should pay this back"
-          checked={reimbursable}
-          onChange={(event) => setReimbursable(event.target.checked)}
-        />
+      {kind === "expense" && (
+        <>
+          <Field id="pc-date" label="Date" error={errors.date}>
+            <TextInput
+              type="date"
+              max={businessDate}
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+            />
+          </Field>
+          <Field id="pc-note" label="Note" hint="Optional.">
+            <TextInput
+              maxLength={PETTY_CASH_NOTE_LIMIT}
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+            />
+          </Field>
+        </>
       )}
       <ErrorSummary count={Object.keys(errors).length} />
       {error && <Banner>{error}</Banner>}

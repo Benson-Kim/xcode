@@ -2864,3 +2864,8 @@ dialog {
 .head .acts {
   margin-left: auto;
 }
+
+/* The week grid's vehicle cell is a row header: it takes the row's hover like the design's first cell. */
+.grid tbody tr:hover > th:first-child {
+  background: var(--paper);
+}

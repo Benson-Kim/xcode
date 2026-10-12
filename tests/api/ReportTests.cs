@@ -306,6 +306,82 @@ public sealed class ReportTests : IDisposable
         Assert.False((await w.Owner.GetFromJsonAsync<ReportsAccessDto>("/setup/reports"))!.CanExport);
     }
 
+    // Revenue, Central expenses and Petty cash export what each screen lists for the same filters, through the report
+    // file writer and the change log, under reports.export.
+    [Fact]
+    public async Task ScreensExportWhatTheyList()
+    {
+        var w = await Arrange();
+        await Records(app, w.A, new DateOnly(2026, 3, 30), new DateOnly(2026, 3, 30), 1500m);
+        await Garage(w.A, Today);
+        await Records(app, w.C, new DateOnly(2026, 3, 30), Today, 1000m);
+
+        var revenue = await Sheet(await w.Owner.GetAsync($"/setup/revenue/export?weekStart=2026-03-30&companyId={w.CompanyA}&format=xlsx"));
+        Assert.Equal(("Revenue", "XCODE  ·  30 Mar 2026 to 5 Apr 2026  ·  Report Fleet"), (revenue("A1"), revenue("A2")));
+        Assert.Equal(["Vehicle", "PSV company", "Mon 30", "Tue 31", "Wed 1", "Week total"], new[] { "A8", "B8", "C8", "D8", "E8", "J8" }.Select(revenue));
+        // An amount, the reason there was none, "Missing" for a past day with nothing, and nothing for days to come.
+        Assert.Equal(["KDA 482M", "1500", "Garage", "", "1500"], new[] { "A9", "C9", "D9", "E9", "J9" }.Select(revenue));
+        Assert.Equal(["KDB 111A", "Missing", "Missing"], new[] { "A10", "C10", "D10" }.Select(revenue));
+        Assert.Equal(("2 rows", "1500"), (revenue("A11"), revenue("C11")));
+
+        await Central(w.Owner, w.Tyres, new DateOnly(2026, 3, 12), 2, 450m, (w.A, 450m), (w.B, 450m));
+        var expenses = await Sheet(await w.Owner.GetAsync("/setup/expenses/export?from=2026-03-01&to=2026-03-31&q=kdb&format=xlsx"));
+        Assert.Equal(("Central expenses", "XCODE  ·  1 Mar 2026 to 31 Mar 2026  ·  Search: kdb"), (expenses("A1"), expenses("A2")));
+        Assert.Equal(["KDB 111A", "Tyres", "450", "Central", "Antony Maina"], new[] { "B9", "C9", "G9", "H9", "I9" }.Select(expenses));
+        Assert.Equal("1 row", expenses("A10"));
+
+        await ScopeToCompany(app, Clerk, w.CompanyA);
+        await Grant(app, Clerk, "pettycash.spend");
+        using var clerk = await app.SignIn(Clerk);
+        Guid clerkId = default;
+        await app.WithDb(async db => clerkId = (await db.Users.SingleAsync(x => x.Email == Clerk)).Id);
+        await Petty(w.Owner, new { kind = "cash", date = Today, holderId = clerkId, unitAmount = 5000m });
+        await PettyExpense(clerk, w.B, w.Tyres, Today, 700m);
+        await Petty(clerk, new { kind = "credit", date = Today, unitAmount = 300m, note = "Paid the loader" });
+        const string Day = "from=2026-03-31&to=2026-03-31";
+        var cash = await Sheet(await w.Owner.GetAsync($"/setup/pettycash/export?{Day}&view=cash&holderId={clerkId}&format=xlsx"));
+        Assert.Equal("Petty cash, cash received", cash("A1"));
+        Assert.Equal(["Date", "Type", "Manager", "Reason", "In", "Out"], new[] { "A8", "B8", "C8", "D8", "E8", "F8" }.Select(cash));
+        var rows = new[] { 9, 10 }.Select(r => (cash($"B{r}"), cash($"D{r}"), cash($"E{r}"), cash($"F{r}"))).ToList();
+        Assert.Contains(("Cash issued", "", "5000", ""), rows);
+        Assert.Contains(("Credit note, waiting", "Paid the loader", "", "300"), rows);
+        var spent = await Sheet(await w.Owner.GetAsync($"/setup/pettycash/export?{Day}&view=expenses&status=waiting&format=xlsx"));
+        Assert.Equal(("Petty cash, expenses", "KDB 111A", "700", "Waiting"), (spent("A1"), spent("B9"), spent("F9"), spent("H9")));
+        Assert.Equal("1 row", spent("A10"));
+
+        using var pdf = await w.Owner.GetAsync("/setup/revenue/export?weekStart=2026-03-30&format=pdf");
+        Assert.Equal("application/pdf", pdf.Content.Headers.ContentType!.MediaType);
+
+        string[] reasons = [];
+        await app.WithDb(async db => reasons = await db.Set<OrganizationSettingsVersion>().IgnoreQueryFilters()
+            .Where(v => v.Section == "reports").OrderBy(v => v.Version).Select(v => v.Reason).ToArrayAsync());
+        Assert.Equal(["Exported Revenue for 30 Mar 2026 to 5 Apr 2026 to Excel",
+            "Exported Central expenses for 1 Mar 2026 to 31 Mar 2026, searched for \"kdb\" to Excel",
+            "Exported Petty cash, cash received for 31 Mar 2026 to Excel", "Exported Petty cash, expenses for 31 Mar 2026 to Excel",
+            "Exported Revenue for 30 Mar 2026 to 5 Apr 2026 to PDF"], reasons);
+
+        await Deny(app, Owner, "reports.export");
+        Assert.Equal(HttpStatusCode.Forbidden, (await w.Owner.GetAsync("/setup/revenue/export?weekStart=2026-03-30")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await w.Owner.GetAsync($"/setup/expenses/export?{March}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await clerk.GetAsync($"/setup/pettycash/export?{Day}")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await clerk.GetAsync($"/setup/pettycash/export?{Day}&view=floats")).StatusCode);
+    }
+
+    // The cells of an exported workbook's sheet by reference ("A1"); a cell with no value reads as "".
+    private static async Task<Func<string, string?>> Sheet(HttpResponseMessage response)
+    {
+        using (response)
+        {
+            Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+            using var zip = new ZipArchive(new MemoryStream(await response.Content.ReadAsByteArrayAsync()));
+            var sheet = System.Xml.Linq.XDocument.Load(zip.GetEntry("xl/worksheets/sheet1.xml")!.Open());
+            System.Xml.Linq.XNamespace main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+            var cells = sheet.Descendants(main + "c").ToDictionary(c => (string)c.Attribute("r")!,
+                c => (string?)c.Element(main + "v") ?? string.Concat(c.Descendants(main + "t").Select(t => t.Value)));
+            return reference => cells.GetValueOrDefault(reference);
+        }
+    }
+
     // A4 landscape with Figtree and Fraunces embedded; a long table runs onto more pages, each with its header row.
     [Fact]
     public async Task ExportIsAPresentablePdfAcrossAsManyPagesAsTheRowsNeed()

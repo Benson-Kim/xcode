@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { percentText } from "@xcode/shared/format";
 import type { RevenueWeek } from "@xcode/shared/revenue";
 
@@ -22,6 +24,7 @@ export function WeekToolbar({
   shown,
   data,
   companyId,
+  exportMenu,
   onWeek,
   onCompany,
 }: {
@@ -29,6 +32,7 @@ export function WeekToolbar({
   shown: RevenueWeek | undefined;
   data: RevenueWeek | undefined;
   companyId: string;
+  exportMenu?: ReactNode;
   onWeek: (weekStart: string) => void;
   onCompany: (companyId: string) => void;
 }) {
@@ -61,8 +65,8 @@ export function WeekToolbar({
       </button>
     </div>
   );
-  const tools =
-    // While a filter is set, All companies stays one choice away even when this week lists a single company.
+  // While a filter is set, All companies stays one choice away even when this week lists a single company.
+  const companies =
     shown && (shown.companies.length > 1 || companyId) ? (
       <select
         aria-label="Company"
@@ -77,6 +81,13 @@ export function WeekToolbar({
           </option>
         ))}
       </select>
+    ) : undefined;
+  const tools =
+    companies || exportMenu ? (
+      <>
+        {companies}
+        {exportMenu}
+      </>
     ) : undefined;
   return (
     <HeroBand period={period} tools={tools}>

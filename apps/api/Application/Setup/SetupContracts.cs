@@ -83,10 +83,22 @@ public sealed record StopRecurring(bool Confirmed, string Reason);
 // viewer's share, and only someone who can see every vehicle on it may change it.
 // Amount is always the sum of Allocations, retired vehicles included; ActiveAmount is the part that still posts.
 // ExpenseItemName is the item's current name; Name is the name saved on this version.
+// PausedFrom: paused since that day, so it does not run until resumed. For a saving, LastRun is the last day it ran on
+// or before today, LastRunVehicles the vehicles it saved for that day, and Balance all it has set aside on the viewer's
+// vehicles, as the reports count it.
 public sealed record RecurringDto(Guid Id, Guid VersionId, int Revision, string Name, RecurringKind Kind,
     decimal Amount, RecurrenceFrequency Frequency, int? Day, bool LastDay, DateOnly Start, DateOnly? End, DateOnly? StoppedFrom,
     IReadOnlyList<AllocationDto> Allocations, bool Partial = false, Guid? ExpenseItemId = null, string? ExpenseItemName = null,
-    ExpenseBucket? Bucket = null, string? Note = null, int? Month = null, decimal ActiveAmount = 0);
+    ExpenseBucket? Bucket = null, string? Note = null, int? Month = null, decimal ActiveAmount = 0, DateOnly? PausedFrom = null,
+    DateOnly? LastRun = null, int LastRunVehicles = 0, decimal? Balance = null);
+public sealed record RecurringRunShareDto(Guid VehicleId, string Registration, decimal Amount);
+public sealed record RecurringRunDto(DateOnly Date, decimal Amount, IReadOnlyList<RecurringRunShareDto> Shares);
+// One scheduled item's last runs on the viewer's vehicles, newest first; Total and RunCount cover every run to date.
+public sealed record RecurringRunsDto(Guid Id, string Name, RecurringKind Kind, DateOnly Start, decimal Total, int RunCount,
+    IReadOnlyList<RecurringRunDto> Runs);
+// The month holding the business date, on the viewer's vehicles: what scheduled expenses post in it (days still to come
+// included), what savings set aside in it so far, and all savings have set aside to date.
+public sealed record RecurringSummaryDto(DateOnly From, DateOnly To, decimal CostsDue, decimal Saved, decimal SavingsBalance);
 public sealed record AllocationDto(Guid VehicleId, decimal Amount, string? Registration, bool Active = true);
 // What a recurring-item editor needs to pick vehicles, without the vehicle-management view.
 public sealed record VehicleOption(Guid Id, Guid CompanyId, string CompanyName, string Registration, bool Active = true);

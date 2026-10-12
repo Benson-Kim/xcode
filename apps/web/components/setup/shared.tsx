@@ -57,6 +57,13 @@ export type RecurringItem = {
   start: string;
   end?: string | null;
   stoppedFrom?: string | null;
+  // Paused since that day: it does not run until resumed.
+  pausedFrom?: string | null;
+  // Savings only: the last day it ran, the vehicles it saved for that day, and all it has set aside on the viewer's
+  // vehicles.
+  lastRun?: string | null;
+  lastRunVehicles?: number;
+  balance?: number | null;
   allocations: {
     vehicleId: string;
     amount: number;
@@ -70,6 +77,31 @@ export type RecurringItem = {
   bucket?: ExpenseBucket | null;
   note?: string | null;
   month?: number | null;
+};
+
+// GET setup/recurring/summary: the business date's month, with what scheduled expenses post in it, what savings set
+// aside in it so far and the savings balance to date.
+export type RecurringSummary = {
+  from: string;
+  to: string;
+  costsDue: number;
+  saved: number;
+  savingsBalance: number;
+};
+
+// GET setup/recurring/{id}/runs: the last ten run dates, newest first; total and runCount cover every run to date.
+export type RecurringRuns = {
+  id: string;
+  name: string;
+  kind: number;
+  start: string;
+  total: number;
+  runCount: number;
+  runs: {
+    date: string;
+    amount: number;
+    shares: { vehicleId: string; registration: string; amount: number }[];
+  }[];
 };
 
 // One due date of a scheduled item on a vehicle. A cost carries its bucket; a saving has none.

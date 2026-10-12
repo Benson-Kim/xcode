@@ -15,6 +15,7 @@ import { useFormats } from "../../lib/formats";
 import { RegPlate } from "../revenue/RegPlate";
 import { Banner, Button, Field, TextInput } from "../ui";
 import { DialogFooter, FormDialog } from "./DialogFooter";
+import { longDay } from "./labels";
 import { entryPath, sendJson } from "./request";
 import { useDialogAction } from "./useDialogAction";
 
@@ -126,7 +127,7 @@ function EntryContext({ entry }: { entry: PettyCashEntry }) {
 function useEntrySubtitle(entry: PettyCashEntry | null) {
   const formats = useFormats();
   return entry
-    ? `${entry.holderName} · ${formats.formatWeekdayDate(entry.date)}`
+    ? `${entry.holderName} · ${longDay(formats, entry.date)}`
     : undefined;
 }
 

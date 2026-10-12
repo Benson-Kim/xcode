@@ -1,4 +1,5 @@
 using Auth.Application.PettyCash;
+using Auth.Application.Reports;
 using Auth.Application.Setup;
 using Microsoft.EntityFrameworkCore;
 
@@ -84,5 +85,15 @@ public static class PettyCashEndpoints
                 Results.Ok(await useCases.ApproveDay(input, ct)))
             .Produces<PettyCashDayApproved>()
             .WithName("ApprovePettyCashDay");
+
+        group.MapGet("/export", async (ScreenExports exports, CancellationToken ct, DateOnly? from = null, DateOnly? to = null,
+                    Guid? holderId = null, string? view = null, string? status = null, string? q = null, string? format = null) =>
+                (await exports.PettyCash(from, to, holderId, view, status, q, format, ct)).AsFile())
+            .ProducesExport("ExportPettyCash");
+
+        group.MapPost("/approve", async (ApprovePettyCashEntries input, PettyCashUseCases useCases, CancellationToken ct) =>
+                Results.Ok(await useCases.ApproveEntries(input, ct)))
+            .Produces<PettyCashDayApproved>()
+            .WithName("ApprovePettyCashEntries");
     }
 }

@@ -142,14 +142,18 @@ public sealed class PettyCashRepository(AuthDb db, IUnitOfWork unitOfWork, Setti
     public Task<PettyCashEntry?> Entry(SetupActor actor, Guid id, CancellationToken ct) =>
         Visible(actor).SingleOrDefaultAsync(e => e.Id == id, ct);
 
+    public async Task<IReadOnlyList<PettyCashEntry>> Entries(SetupActor actor, IReadOnlyCollection<Guid> ids, CancellationToken ct) =>
+        await Visible(actor).Where(e => ids.Contains(e.Id)).ToListAsync(ct);
+
     public Task<PettyCashEntry?> AnyEntry(Guid id, CancellationToken ct) =>
         db.Set<PettyCashEntry>().SingleOrDefaultAsync(e => e.Id == id, ct);
 
-    public async Task<IReadOnlyList<PettyCashEntry>> Waiting(SetupActor actor, IReadOnlyCollection<Guid> holderIds, DateOnly? date, bool track,
-        CancellationToken ct)
+    public async Task<IReadOnlyList<PettyCashEntry>> Waiting(SetupActor actor, IReadOnlyCollection<Guid> holderIds, DateOnly? from,
+        DateOnly? through, bool track, CancellationToken ct)
     {
         var query = Visible(actor).Where(e => e.Status == PettyCashStatus.Waiting && holderIds.Contains(e.HolderId));
-        if (date is { } day) query = query.Where(e => e.Date == day);
+        if (from is { } first) query = query.Where(e => e.Date >= first);
+        if (through is { } last) query = query.Where(e => e.Date <= last);
         if (!track) query = query.AsNoTracking();
         return await query.OrderBy(e => e.Date).ThenBy(e => e.Id).ToListAsync(ct);
     }

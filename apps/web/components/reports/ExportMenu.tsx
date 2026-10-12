@@ -7,10 +7,17 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 
 import type { ReportExportFormat } from "@xcode/shared/reports";
 
-import { Button, DownloadIcon, useAnchoredPosition, useDismiss } from "../ui";
+import {
+  Button,
+  DownloadIcon,
+  popLayer,
+  useAnchoredPosition,
+  useDismiss,
+} from "../ui";
 
 export const EXPORT_FORMATS: {
   format: ReportExportFormat;
@@ -29,17 +36,18 @@ export function ExportMenu({
   disabled: boolean;
   onExport: (format: ReportExportFormat) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [layer, setLayer] = useState<HTMLElement | null>(null);
+  const open = layer !== null;
   const wrapper = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const menuId = useId();
 
   const close = useCallback((returnFocus: boolean) => {
-    setOpen(false);
+    setLayer(null);
     if (returnFocus) trigger.current?.focus();
   }, []);
-  useDismiss(open, wrapper, close);
+  useDismiss(open, wrapper, close, menu);
   useAnchoredPosition(open, trigger, menu, { align: "end" });
 
   function move(event: KeyboardEvent<HTMLDivElement>) {
@@ -62,38 +70,42 @@ export function ExportMenu({
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
+        onClick={(event) =>
+          setLayer(open ? null : popLayer(event.currentTarget))
+        }
       >
         <DownloadIcon />
         Export
       </Button>
-      {open && (
-        <div
-          ref={menu}
-          id={menuId}
-          role="menu"
-          aria-label="Export as"
-          onKeyDown={move}
-          className="pop"
-        >
-          <div className="plist">
-            {EXPORT_FORMATS.map((option, index) => (
-              <button
-                key={option.format}
-                type="button"
-                role="menuitem"
-                autoFocus={index === 0}
-                onClick={() => {
-                  close(true);
-                  onExport(option.format);
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {layer &&
+        createPortal(
+          <div
+            ref={menu}
+            id={menuId}
+            role="menu"
+            aria-label="Export as"
+            onKeyDown={move}
+            className="pop"
+          >
+            <div className="plist">
+              {EXPORT_FORMATS.map((option, index) => (
+                <button
+                  key={option.format}
+                  type="button"
+                  role="menuitem"
+                  autoFocus={index === 0}
+                  onClick={() => {
+                    close(true);
+                    onExport(option.format);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>,
+          layer,
+        )}
     </div>
   );
 }

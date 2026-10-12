@@ -81,7 +81,7 @@ export function FiltersBar({
         type="search"
         aria-label="Search"
         className="srch"
-        placeholder="Search vehicle, item or note"
+        placeholder="Search"
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
       />

@@ -12,6 +12,7 @@ import {
   BUSINESS_DATE,
   cash,
   credit,
+  DAY_FIGURES,
   expense,
   json,
   overviewOf,
@@ -47,11 +48,18 @@ async function openDialog(name: string, opener: string) {
 const showCash = async () =>
   fireEvent.click(await screen.findByRole("tab", { name: "Cash received" }));
 
+// Takes a manager in the dialog's select once the choices have loaded.
+async function chooseManager(dialog: HTMLElement, name: string) {
+  const select = within(dialog).getByLabelText("Manager");
+  await within(select).findByRole("option", { name });
+  choose(select, name);
+}
+
 // The live total of an expense, under its amounts.
 const totalOf = (dialog: HTMLElement) =>
   within(dialog).getByText("Total amount").nextSibling;
 
-it("shows the four day figures from the overview and the day's expenses and credit notes, but no cash rows", async () => {
+it("shows the four day figures from the overview and the day's expenses, with no credit note or cash rows", async () => {
   const fetcher = servePettyCash({ entries: [expense(), credit(), cash()] });
   renderInApp(<PettyCashPage />);
 
@@ -68,18 +76,19 @@ it("shows the four day figures from the overview and the day's expenses and cred
   const tyres = await screen.findByRole("row", { name: /KDA 482M/ });
   expect(within(tyres).getByText("Tyres")).toBeInTheDocument();
   expect(within(tyres).getByText("Waiting")).toBeInTheDocument();
-  const note = screen.getByRole("row", { name: /Mama Njeri/ });
-  expect(within(note).getByText("Credit note")).toBeInTheDocument();
   expect(
-    within(note).getByText("Refund for a double charge"),
-  ).toBeInTheDocument();
-  expect(screen.queryByText("Cash given")).not.toBeInTheDocument();
+    screen.queryByRole("row", { name: /Refund for a double charge/ }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(screen.getByRole("tabpanel")).queryByText("Cash issued"),
+  ).not.toBeInTheDocument();
 
   expect(paths(fetcher)[0]).toBe("/api/setup/pettycash/overview");
   const read = entryReads(fetcher)[0];
   expect(read).toContain(`from=${BUSINESS_DATE}`);
   expect(read).toContain(`to=${BUSINESS_DATE}`);
-  expect(read).toContain("kind=expense%2Ccredit");
+  expect(read).toContain("kind=expense");
+  expect(read).not.toContain("credit");
 });
 
 it("writes a balance below zero with its minus sign, KES -750, in red", async () => {
@@ -275,7 +284,26 @@ it("will not delete an entry without a reason", async () => {
   ]);
 });
 
-it("needs a payee and a reason on a credit note, takes a negative amount and refuses zero", async () => {
+it("opens the credit note on the day it is recorded, with a manager, an amount and a reason only", async () => {
+  servePettyCash();
+  renderInApp(<PettyCashPage />);
+  await showCash();
+  const dialog = await openDialog("Credit note", "Credit note");
+  expect(within(dialog).getByText("Wednesday 30 Sep 2026")).toBeInTheDocument();
+  expect(within(dialog).getByLabelText("Amount, KES")).toBeInTheDocument();
+  expect(within(dialog).getByLabelText("Reason")).toBeInTheDocument();
+  expect(within(dialog).queryByLabelText("Paid to")).not.toBeInTheDocument();
+  expect(within(dialog).queryByLabelText("Date")).not.toBeInTheDocument();
+  expect(within(dialog).queryByLabelText("Note")).not.toBeInTheDocument();
+  expect(
+    within(dialog).queryByLabelText("The payee should pay this back"),
+  ).not.toBeInTheDocument();
+  expect(
+    within(dialog).queryByText(/Use a minus sign/),
+  ).not.toBeInTheDocument();
+});
+
+it("needs a reason on a credit note, takes a negative amount, refuses zero and sends no payee", async () => {
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
   await showCash();
@@ -285,19 +313,13 @@ it("needs a payee and a reason on a credit note, takes a negative amount and ref
 
   add();
   expect(
-    await within(dialog).findByText("Enter who was paid."),
-  ).toBeInTheDocument();
-  expect(
-    within(dialog).getByText("Say why the money was paid out."),
+    await within(dialog).findByText("Say why the money was paid out."),
   ).toBeInTheDocument();
   expect(
     within(dialog).getAllByText(PETTY_CASH_AMOUNT_ERROR).length,
   ).toBeGreaterThan(0);
   expect(writes(fetcher)).toEqual([]);
 
-  fireEvent.change(within(dialog).getByLabelText("Paid to"), {
-    target: { value: "Mama Njeri" },
-  });
   fireEvent.change(within(dialog).getByLabelText("Reason"), {
     target: { value: "Double charge" },
   });
@@ -316,7 +338,7 @@ it("needs a payee and a reason on a credit note, takes a negative amount and ref
   add();
   expect(
     await screen.findByText(
-      "Credit note of KES -500 to Mama Njeri recorded. It waits for approval.",
+      "Credit note of KES -500 recorded. It waits for approval.",
     ),
   ).toBeInTheDocument();
   const [save] = writes(fetcher);
@@ -327,44 +349,97 @@ it("needs a payee and a reason on a credit note, takes a negative amount and ref
     kind: "credit",
     date: BUSINESS_DATE,
     unitAmount: -500,
-    payee: "Mama Njeri",
     note: "Double charge",
-    reimbursable: false,
   });
 });
 
-it("lets an issuer pick the float for a credit note and sends it", async () => {
+it("lets an issuer pick the float for a credit note, shows the cash it holds and sends it", async () => {
+  const [grace] = overviewOf(permissionsOf()).floats;
   const fetcher = servePettyCash({
     permissions: permissionsOf({
       canSpend: false,
       canIssue: true,
       holderId: null,
     }),
+    answer: (path) =>
+      path === "/api/setup/pettycash/overview?holderId=h2"
+        ? json(
+            overviewOf(permissionsOf({ canIssue: true }), BUSINESS_DATE, {
+              floats: [
+                {
+                  ...grace,
+                  holderId: "h2",
+                  name: "Peter Otieno",
+                  balance: 3800,
+                },
+              ],
+            }),
+          )
+        : undefined,
   });
   renderInApp(<PettyCashPage />);
   await showCash();
   const dialog = await openDialog("Credit note", "Credit note");
-  await offered(within(dialog).getByLabelText("Manager"), "Peter Otieno");
-  pick(within(dialog).getByLabelText("Manager"), "Peter Otieno");
-  fireEvent.change(within(dialog).getByLabelText("Paid to"), {
-    target: { value: "Fuel station" },
-  });
+  await chooseManager(dialog, "Grace Wanjiru");
+  expect(
+    await within(dialog).findByText("Cash on hand 12,500"),
+  ).toBeInTheDocument();
+
+  await chooseManager(dialog, "Peter Otieno");
+  expect(
+    await within(dialog).findByText("Cash on hand 3,800"),
+  ).toBeInTheDocument();
+  expect(paths(fetcher)).toContain("/api/setup/pettycash/overview?holderId=h2");
   fireEvent.change(within(dialog).getByLabelText("Reason"), {
     target: { value: "Fuel" },
   });
   fireEvent.change(within(dialog).getByLabelText("Amount, KES"), {
     target: { value: "1,200.50" },
   });
-  fireEvent.click(
-    within(dialog).getByLabelText("The payee should pay this back"),
-  );
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
-  await screen.findByText(
-    /Credit note of KES 1,200.50 to Fuel station recorded/,
-  );
-  expect(writes(fetcher)[0].body).toMatchObject({
+  await screen.findByText(/Credit note of KES 1,200.50 recorded/);
+  expect(writes(fetcher)[0].body).toEqual({
+    id: expect.stringMatching(UUID),
+    kind: "credit",
     holderId: "h2",
+    date: BUSINESS_DATE,
     unitAmount: 1200.5,
+    note: "Fuel",
+  });
+});
+
+it("keeps the payee and the pay-back flag of an old credit note when it is edited", async () => {
+  const fetcher = servePettyCash({
+    entries: [credit({ canEdit: true, version: 5, reimbursable: true })],
+    permissions: permissionsOf({ canIssue: true }),
+  });
+  renderInApp(<PettyCashPage />);
+  await showCash();
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Edit credit note to Mama Njeri, KES 800",
+    }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Edit credit note",
+  });
+  expect(within(dialog).queryByLabelText("Paid to")).not.toBeInTheDocument();
+  expect(within(dialog).getByLabelText("Reason")).toHaveValue(
+    "Refund for a double charge",
+  );
+  fireEvent.change(within(dialog).getByLabelText("Amount, KES"), {
+    target: { value: "900" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  await screen.findByText("Saved. It waits for approval.");
+  expect(writes(fetcher)[0].body).toEqual({
+    version: 5,
+    kind: "credit",
+    holderId: "h1",
+    date: BUSINESS_DATE,
+    unitAmount: 900,
+    note: "Refund for a double charge",
+    payee: "Mama Njeri",
     reimbursable: true,
   });
 });
@@ -527,9 +602,6 @@ it.each([0, -300])(
 
     await showCash();
     const note = await openDialog("Credit note", "Credit note");
-    fireEvent.change(within(note).getByLabelText("Paid to"), {
-      target: { value: "Mama Njeri" },
-    });
     fireEvent.change(within(note).getByLabelText("Reason"), {
       target: { value: "Double charge" },
     });
@@ -537,7 +609,7 @@ it.each([0, -300])(
       target: { value: "800" },
     });
     fireEvent.click(within(note).getByRole("button", { name: "Save" }));
-    await screen.findByText(/Credit note of KES 800 to Mama Njeri recorded/);
+    await screen.findByText(/Credit note of KES 800 recorded/);
     expect(writes(fetcher).map((write) => write.body.kind)).toEqual([
       "expense",
       "credit",
@@ -765,7 +837,7 @@ it("opens on the business date, with the same period picker as Central expenses 
   ).not.toBeInTheDocument();
 });
 
-it("shows several days: asks for the figures and entries of the span, labels them and drops Approve day", async () => {
+it("shows several days: asks for the figures and entries of the span, labels them and turns Approve day into Approve all", async () => {
   const fetcher = servePettyCash({
     permissions: permissionsOf({ canApproveDay: true, canApproveItem: true }),
     entries: [
@@ -777,9 +849,11 @@ it("shows several days: asks for the figures and entries of the span, labels the
   renderInApp(<PettyCashPage />);
   await screen.findByRole("row", { name: /KDB 100X/ });
   expect(
-    screen.getByRole("button", { name: "Approve day" }),
+    screen.getByRole("button", { name: "Approve day, KES 3,500" }),
   ).toBeInTheDocument();
-  expect(screen.queryByText("Wed 30 Sep 2026", { selector: "td" })).toBeNull();
+  expect(
+    screen.queryByText("Wednesday 30 Sep 2026", { selector: "td" }),
+  ).toBeNull();
 
   await choosePreset("This week");
   const figures = await screen.findByRole("group", {
@@ -801,7 +875,8 @@ it("shows several days: asks for the figures and entries of the span, labels the
         (path) =>
           path.includes("from=2026-09-28") &&
           path.includes("to=2026-10-04") &&
-          path.includes("kind=expense%2Ccredit"),
+          path.includes("kind=expense") &&
+          !path.includes("credit"),
       ),
     ).toBe(true),
   );
@@ -813,7 +888,10 @@ it("shows several days: asks for the figures and entries of the span, labels the
     screen.queryByRole("row", { name: /KDC 200Y/ }),
   ).not.toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Approve day" }),
+    await screen.findByRole("button", { name: "Approve all, KES 9,000" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /^Approve day/ }),
   ).not.toBeInTheDocument();
   expect(
     screen.queryByRole("columnheader", { name: "Date" }),
@@ -851,9 +929,9 @@ it("groups the entries of several days under a row for each day with that day's 
     "2026-09-28",
     "2026-09-30",
   ]);
-  expect(days[0]).toHaveTextContent("Mon 28 Sep 2026");
+  expect(days[0]).toHaveTextContent("Monday 28 Sep 2026");
   expect(days[0]).toHaveTextContent("4,500");
-  expect(days[1]).toHaveTextContent("Wed 30 Sep 2026");
+  expect(days[1]).toHaveTextContent("Wednesday 30 Sep 2026");
   expect(days[1]).toHaveTextContent("2,000");
   const rows = [...document.querySelectorAll("tbody tr")].map((row) =>
     row.getAttribute("data-day") ? "day" : "entry",
@@ -864,7 +942,7 @@ it("groups the entries of several days under a row for each day with that day's 
   ).toBeInTheDocument();
 });
 
-it("groups cash received by day too, and lists floats as numbers", async () => {
+it("groups cash received by day too, with what the day netted", async () => {
   servePettyCash({
     entries: [
       cash({ id: "k1", date: "2026-09-29", total: 5000 }),
@@ -884,7 +962,7 @@ it("groups cash received by day too, and lists floats as numbers", async () => {
     if (!found) throw new Error("no day row yet");
     return found;
   });
-  expect(day).toHaveTextContent("Tue 29 Sep 2026");
+  expect(day).toHaveTextContent("Tuesday 29 Sep 2026");
   expect(day).toHaveTextContent("4,700");
 });
 
@@ -1033,7 +1111,7 @@ it("keeps Record spending, Credit note, Issue cash and Approve day to the permis
   });
   const first = renderInApp(<PettyCashPage />);
   expect(
-    await screen.findByRole("button", { name: "Approve day" }),
+    await screen.findByRole("button", { name: /^Approve day/ }),
   ).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "Record spending" }),
@@ -1056,7 +1134,7 @@ it("keeps Record spending, Credit note, Issue cash and Approve day to the permis
     await screen.findByRole("button", { name: "Record spending" }),
   ).toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Approve day" }),
+    screen.queryByRole("button", { name: /^Approve day/ }),
   ).not.toBeInTheDocument();
   await showCash();
   expect(
@@ -1066,7 +1144,7 @@ it("keeps Record spending, Credit note, Issue cash and Approve day to the permis
     screen.getByRole("button", { name: "Issue cash" }),
   ).toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Approve day" }),
+    screen.queryByRole("button", { name: /^Approve/ }),
   ).not.toBeInTheDocument();
 });
 
@@ -1088,7 +1166,9 @@ it("approves a day for the chosen manager and reports what was left", async () =
     await screen.findByRole("combobox", { name: "Manager" }),
     "Peter Otieno",
   );
-  fireEvent.click(screen.getByRole("button", { name: "Approve day" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Approve these, KES 3,500" }),
+  );
   expect(
     await screen.findByText(
       "Approved 2 entries, KES 6,000. 1 entry was left for someone else to approve.",
@@ -1103,13 +1183,14 @@ it("approves a day for the chosen manager and reports what was left", async () =
   ]);
 });
 
-it("lists cash on the Cash received tab with the floats, and moves between tabs with the arrow keys", async () => {
+it("lists cash and credit notes on the Cash received tab, and moves between tabs with the arrow keys", async () => {
   const fetcher = servePettyCash({
     permissions: permissionsOf({ canIssue: true }),
     entries: [
       expense(),
       cash({ canEdit: true, canRemove: true }),
       cash({ id: "k2", total: -300, unitAmount: -300, note: "Returned" }),
+      credit({ status: "approved" }),
     ],
   });
   renderInApp(<PettyCashPage />);
@@ -1125,23 +1206,26 @@ it("lists cash on the Cash received tab with the floats, and moves between tabs 
     "aria-labelledby",
     tab.id,
   );
-  expect(await screen.findByText("Cash given")).toBeInTheDocument();
+  const panel = screen.getByRole("tabpanel");
+  expect(await within(panel).findByText("Cash issued")).toBeInTheDocument();
+  expect(screen.getByText("Cash taken back")).toBeInTheDocument();
   expect(screen.getByText("Returned")).toBeInTheDocument();
-  expect(screen.getByText("Less 300")).toBeInTheDocument();
   expect(screen.queryByText("KDA 482M")).not.toBeInTheDocument();
   expect(
     screen.getByRole("button", {
       name: "Edit cash for Grace Wanjiru, KES 5,000",
     }),
   ).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Floats" })).toBeInTheDocument();
-  const floats = screen
-    .getByRole("columnheader", { name: "Cash in hand" })
-    .closest("table")!;
-  expect(within(floats).getByText("12,500")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Floats" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("columnheader", { name: "Cash in hand" }),
+  ).not.toBeInTheDocument();
   expect(
     entryReads(fetcher).some(
-      (path) => path.includes("kind=cash") && !path.includes("expense"),
+      (path) =>
+        path.includes("kind=cash%2Ccredit") && !path.includes("expense"),
     ),
   ).toBe(true);
 
@@ -1199,7 +1283,7 @@ it("puts the toolbar buttons in the design's order", async () => {
     }),
   });
   renderInApp(<PettyCashPage />);
-  await screen.findByRole("button", { name: "Approve day" });
+  await screen.findByRole("button", { name: "Approve day, KES 3,500" });
   const names = () =>
     screen
       .getAllByRole("button")
@@ -1209,13 +1293,13 @@ it("puts the toolbar buttons in the design's order", async () => {
           "Record spending",
           "Issue cash",
           "Credit note",
-          "Approve day",
+          "Approve day, KES 3,500",
         ].includes(name ?? ""),
       );
-  // The actions on the headline card follow the view and end with the main one, then Approve day on the bar.
-  expect(names()).toEqual(["Record spending", "Approve day"]);
+  // The actions on the headline card follow the view and end with the main one, then Approve day on the bar of the Expenses view.
+  expect(names()).toEqual(["Record spending", "Approve day, KES 3,500"]);
   await showCash();
-  expect(names()).toEqual(["Credit note", "Issue cash", "Approve day"]);
+  expect(names()).toEqual(["Credit note", "Issue cash"]);
 });
 
 it("gives cash to a chosen manager, and takes it back with a minus sign", async () => {
@@ -1229,14 +1313,19 @@ it("gives cash to a chosen manager, and takes it back with a minus sign", async 
   renderInApp(<PettyCashPage />);
   await showCash();
   const dialog = await openDialog("Issue cash", "Issue cash");
-  await offered(within(dialog).getByLabelText("Manager"), "Peter Otieno");
+  expect(within(dialog).getByText("Wednesday 30 Sep 2026")).toBeInTheDocument();
+  expect(within(dialog).queryByLabelText("Date")).not.toBeInTheDocument();
+  expect(within(dialog).queryByLabelText("Note")).not.toBeInTheDocument();
+  await within(within(dialog).getByLabelText("Manager")).findByRole("option", {
+    name: "Peter Otieno",
+  });
   fireEvent.click(within(dialog).getByRole("button", { name: "Issue cash" }));
   expect(
     await within(dialog).findByText("Choose the manager."),
   ).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([]);
 
-  pick(within(dialog).getByLabelText("Manager"), "Peter Otieno");
+  await chooseManager(dialog, "Peter Otieno");
   fireEvent.change(within(dialog).getByLabelText("Amount, KES"), {
     target: { value: "-300" },
   });
@@ -1290,4 +1379,316 @@ it("pages the entries on the server, 25 to a page, and goes back to page 1 when 
     expect(entryReads(fetcher).at(-1)).toContain("page=1&pageSize=100"),
   );
   expect(entryReads(fetcher).at(-1)).toContain("status=waiting");
+});
+
+const tickable = (
+  id: string,
+  registration: string,
+  total: number,
+  version = 3,
+) =>
+  expense({
+    id,
+    registration,
+    total,
+    unitAmount: total,
+    version,
+    canReview: true,
+  });
+
+it("ticks two waiting expenses and approves exactly those with their versions", async () => {
+  const fetcher = servePettyCash({
+    permissions: REVIEWER,
+    entries: [
+      tickable("e1", "KDA 482M", 3500, 3),
+      tickable("e2", "KDB 100X", 1500, 5),
+      expense({
+        id: "e3",
+        registration: "KDC 200Y",
+        total: 9000,
+        unitAmount: 9000,
+        aboveLimit: true,
+      }),
+      expense({ id: "e4", registration: "KDD 300Z", status: "approved" }),
+    ],
+    answer: (path, init) =>
+      init?.method === "POST" && path === "/api/setup/pettycash/approve"
+        ? json({ approved: 2, total: 5000, skipped: 0 })
+        : undefined,
+  });
+  renderInApp(<PettyCashPage />);
+  await screen.findByRole("row", { name: /KDA 482M/ });
+  expect(
+    screen.getByRole("columnheader", { name: "Select" }),
+  ).toBeInTheDocument();
+  expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: /^Approve \d/ })).toBeNull();
+
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Select KDA 482M, KES 3,500" }),
+  );
+  expect(
+    screen.getByRole("button", { name: "Approve 1, KES 3,500" }),
+  ).toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Select KDB 100X, KES 1,500" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Approve 2, KES 5,000" }),
+  );
+
+  expect(
+    await screen.findByText("Approved 2 entries, KES 5,000."),
+  ).toBeInTheDocument();
+  expect(writes(fetcher)).toEqual([
+    {
+      path: "/api/setup/pettycash/approve",
+      method: "POST",
+      body: {
+        entries: [
+          { id: "e1", version: 3 },
+          { id: "e2", version: 5 },
+        ],
+      },
+    },
+  ]);
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: /^Approve \d/ }),
+    ).not.toBeInTheDocument(),
+  );
+  for (const box of screen.getAllByRole("checkbox"))
+    expect(box).not.toBeChecked();
+});
+
+it("offers no checkboxes to someone who cannot approve entries", async () => {
+  servePettyCash({ entries: [expense({ canReview: false })] });
+  renderInApp(<PettyCashPage />);
+  await screen.findByRole("row", { name: /KDA 482M/ });
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("columnheader", { name: "Select" }),
+  ).not.toBeInTheDocument();
+});
+
+it("clears the ticks when the list changes", async () => {
+  servePettyCash({
+    permissions: REVIEWER,
+    entries: [tickable("e1", "KDA 482M", 3500)],
+  });
+  renderInApp(<PettyCashPage />);
+  const box = await screen.findByRole("checkbox", {
+    name: "Select KDA 482M, KES 3,500",
+  });
+  fireEvent.click(box);
+  expect(box).toBeChecked();
+
+  choose(screen.getByRole("combobox", { name: "Show" }), "Waiting");
+  await waitFor(() =>
+    expect(
+      screen.getByRole("checkbox", { name: "Select KDA 482M, KES 3,500" }),
+    ).not.toBeChecked(),
+  );
+  expect(
+    screen.queryByRole("button", { name: /^Approve \d/ }),
+  ).not.toBeInTheDocument();
+});
+
+it("approves every day of a period at once, naming what waits", async () => {
+  const fetcher = servePettyCash({
+    permissions: permissionsOf({ canApproveDay: true }),
+    answer: (path, init) =>
+      init?.method === "POST" && path === "/api/setup/pettycash/approve-day"
+        ? json({ approved: 3, total: 9000, skipped: 0 })
+        : undefined,
+  });
+  renderInApp(<PettyCashPage />);
+  await choosePreset("This week");
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Approve all, KES 9,000" }),
+  );
+  expect(
+    await screen.findByText("Approved 3 entries, KES 9,000."),
+  ).toBeInTheDocument();
+  expect(writes(fetcher)).toEqual([
+    {
+      path: "/api/setup/pettycash/approve-day",
+      method: "POST",
+      body: { date: "2026-09-28", to: "2026-10-04" },
+    },
+  ]);
+});
+
+it("reads the amount waiting from the figures and disables the button when nothing waits", async () => {
+  const approver = permissionsOf({ canApproveDay: true });
+  servePettyCash({
+    permissions: approver,
+    answer: (path) =>
+      path === "/api/setup/pettycash/overview"
+        ? json(
+            overviewOf(approver, BUSINESS_DATE, {
+              figures: { ...DAY_FIGURES, waiting: 0, waitingCount: 0 },
+            }),
+          )
+        : undefined,
+  });
+  renderInApp(<PettyCashPage />);
+  expect(
+    await screen.findByRole("button", { name: "Approve day" }),
+  ).toBeDisabled();
+});
+
+it("lists a credit note on Cash received with its type, who, why and money out, and the net below", async () => {
+  servePettyCash({
+    permissions: REVIEWER,
+    entries: [
+      cash({ id: "k1", total: 5000, unitAmount: 5000 }),
+      cash({ id: "k2", total: -300, unitAmount: -300, note: "Returned" }),
+      credit({ canReview: true, reimbursable: true }),
+      credit({
+        id: "c2",
+        payee: null,
+        note: "Fuel",
+        total: -200,
+        unitAmount: -200,
+        status: "sentBack",
+        sentBackNote: "Attach the receipt",
+      }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  await showCash();
+  const note = await screen.findByRole("row", {
+    name: /Refund for a double charge/,
+  });
+  const cells = within(note).getAllByRole("cell");
+  expect(cells[0]).toHaveTextContent("Credit note");
+  expect(cells[0]).toHaveTextContent("Waiting for approval");
+  expect(within(cells[0]).getByText("Credit note")).toHaveClass("chip", "bad");
+  expect(cells[1]).toHaveTextContent("Grace Wanjiru");
+  expect(cells[2]).toHaveTextContent("Refund for a double charge");
+  expect(cells[2]).toHaveTextContent("Paid to Mama Njeri");
+  expect(cells[2]).toHaveTextContent("To be paid back");
+  expect(cells[3]).toHaveTextContent(/^$/);
+  expect(cells[4]).toHaveTextContent(/^800$/);
+  expect(cells[4]).toHaveClass("r", "tot", "neg");
+  expect(
+    within(note).getByRole("button", {
+      name: "Approve credit note to Mama Njeri, KES 800",
+    }),
+  ).toBeInTheDocument();
+
+  const back = screen.getByRole("row", { name: /Returned/ });
+  expect(within(back).getAllByRole("cell")[0]).toHaveTextContent(
+    "Cash taken back",
+  );
+  expect(within(back).getAllByRole("cell")[4]).toHaveTextContent(/^300$/);
+
+  const repaid = screen.getByRole("row", { name: /Fuel/ });
+  const repaidCells = within(repaid).getAllByRole("cell");
+  expect(repaidCells[0]).toHaveTextContent("Sent back: Attach the receipt");
+  expect(repaidCells[3]).toHaveTextContent(/^200$/);
+  expect(repaidCells[4]).toHaveTextContent(/^$/);
+
+  expect(
+    screen.getAllByRole("columnheader").map((header) => header.textContent),
+  ).toEqual(["Type", "Manager", "Reason", "In", "Out", "Actions"]);
+  const footer = screen.getByText("Net cash received").closest("tr")!;
+  expect(footer).toHaveTextContent("Net cash received4,100");
+});
+
+it("leaves out the Actions column of Cash received when no row has an action", async () => {
+  servePettyCash({ entries: [cash()] });
+  renderInApp(<PettyCashPage />);
+  await showCash();
+  await within(screen.getByRole("tabpanel")).findByText("Cash issued");
+  expect(
+    screen.getAllByRole("columnheader").map((header) => header.textContent),
+  ).toEqual(["Type", "Manager", "Reason", "In", "Out"]);
+});
+
+it("says no cash moved when there is none, and that nothing matches when searching", async () => {
+  servePettyCash();
+  renderInApp(<PettyCashPage />);
+  await showCash();
+  expect(await screen.findByText("No cash moved.")).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), {
+    target: { value: "nobody" },
+  });
+  expect(await screen.findByText("Nothing matches.")).toBeInTheDocument();
+});
+
+it("counts both tabs, the other one from a request for a single entry with the same filters", async () => {
+  const fetcher = servePettyCash({
+    entries: [
+      expense(),
+      expense({ id: "e2", registration: "KDB 100X" }),
+      cash(),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  const expenses = await screen.findByRole("tab", { name: "Expenses" });
+  const received = screen.getByRole("tab", { name: "Cash received" });
+  await waitFor(() => {
+    expect(expenses).toHaveTextContent("Expenses2");
+    expect(received).toHaveTextContent("Cash received1");
+  });
+  expect(
+    entryReads(fetcher).some(
+      (path) =>
+        path.includes("pageSize=1") && path.includes("kind=cash%2Ccredit"),
+    ),
+  ).toBe(true);
+
+  await showCash();
+  await waitFor(() => {
+    expect(expenses).toHaveTextContent("Expenses2");
+    expect(received).toHaveTextContent("Cash received1");
+  });
+  expect(
+    entryReads(fetcher).some(
+      (path) => path.includes("pageSize=1&") && path.includes("kind=expense"),
+    ),
+  ).toBe(true);
+});
+
+it("exports the view shown, for the period and manager, to someone with reports.export", async () => {
+  URL.createObjectURL = vi.fn(() => "blob:petty");
+  URL.revokeObjectURL = vi.fn();
+  const saved: string[] = [];
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+  const fetcher = servePettyCash({ entries: [expense(), cash()] });
+  const exported: string[] = [];
+  vi.stubGlobal("fetch", (input: RequestInfo, init?: RequestInit) => {
+    if (String(input).includes("/export?")) {
+      exported.push(String(input));
+      return Promise.resolve(new Response("file", { status: 200 }));
+    }
+    return fetcher(input, init);
+  });
+  renderInApp(<PettyCashPage />, { permissions: ["reports.export"] });
+
+  fireEvent.click(await screen.findByRole("tab", { name: "Cash received" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Export" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Excel" }));
+
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(exported).toEqual([
+    "/api/setup/pettycash/export?from=2026-09-30&to=2026-09-30&view=cash&format=xlsx",
+  ]);
+  expect(saved[0]).toBe("Petty cash, cash received 30 Sep 2026.xlsx");
+  click.mockRestore();
+});
+
+it("offers no Export without reports.export", async () => {
+  servePettyCash({ entries: [expense()] });
+  renderInApp(<PettyCashPage />);
+  await screen.findByRole("row", { name: /KDA 482M/ });
+  expect(
+    screen.queryByRole("button", { name: "Export" }),
+  ).not.toBeInTheDocument();
 });

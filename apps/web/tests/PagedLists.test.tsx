@@ -139,6 +139,16 @@ it("pages Scheduled expenses and savings on the server", async () => {
   }));
   api.on("setup/recurring*", paged(items));
   api.on("setup/recurring/vehicle-options", [200, []]);
+  api.on("setup/recurring/summary", [
+    200,
+    {
+      from: "2026-10-01",
+      to: "2026-10-31",
+      costsDue: 0,
+      saved: 0,
+      savingsBalance: 0,
+    },
+  ]);
   renderInApp(
     <RecurringPage canManage />,
     { permissions: ["commitments.view", "commitments.manage"] },

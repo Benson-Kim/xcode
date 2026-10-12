@@ -798,3 +798,43 @@ it("searches the item by typing, and takes the source from its list", async () =
     expect(ledgerReads(api).at(-1)).toContain("source=pettycash"),
   );
 });
+
+it("exports the ledger as listed, with its source and search, to someone with reports.export", async () => {
+  URL.createObjectURL = vi.fn(() => "blob:ledger");
+  URL.revokeObjectURL = vi.fn();
+  const saved: string[] = [];
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+  const api = serveExpenses();
+  api.on("setup/expenses/export*", [200, {}]);
+  renderPage(api, ["expenses.view", "reports.export"]);
+  await screen.findByRole("row", { name: /Tyres/ });
+  choose(screen.getByLabelText("Source"), "Petty cash");
+  changeTo(screen.getByLabelText("Search"), "diesel");
+  await waitFor(() => expect(ledgerReads(api).at(-1)).toContain("q=diesel"));
+
+  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "PDF" }));
+
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(
+    api.calls
+      .map((call) => call.path)
+      .filter((path) => path.startsWith("setup/expenses/export")),
+  ).toEqual([
+    `setup/expenses/export?${WEEK}&source=pettycash&q=diesel&format=pdf`,
+  ]);
+  expect(saved[0]).toBe("Central expenses 5-11 Oct 2026.pdf");
+  click.mockRestore();
+});
+
+it("offers no Export without reports.export", async () => {
+  renderPage();
+  await screen.findByRole("row", { name: /Tyres/ });
+  expect(
+    screen.queryByRole("button", { name: "Export" }),
+  ).not.toBeInTheDocument();
+});

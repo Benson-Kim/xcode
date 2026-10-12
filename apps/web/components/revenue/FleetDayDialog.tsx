@@ -38,6 +38,8 @@ const REASON_OPTIONS = REVENUE_REASONS.map((reason) => ({
 }));
 // The comparison column gives way first on a phone.
 const LAST_WEEK = "max-[600px]:hidden";
+// The reason picker and its note are the size of the revenue box beside them (.cell.wide).
+const CELL_SIZE = "rounded-lg py-1.5 pl-2 pr-7 text-[13px]";
 
 // Capture revenue (design v2.28, openCapture): one day for every vehicle, the same day last week beside each, and
 // one save for the rows that changed.
@@ -325,15 +327,16 @@ function DayRow({
       </td>
       <td>
         {cell.canEdit && canChooseReason ? (
-          <div className="flex min-w-36 flex-col gap-1.5">
+          <div className="flex w-[120px] flex-col gap-1.5">
             <SearchSelect
               density="compact"
               options={REASON_OPTIONS}
               value={entry.reason}
-              placeholder="Choose reason"
+              placeholder="Reason"
               disabled={Boolean(entry.amount.trim())}
               aria-label={`No revenue reason, ${registration}`}
               onChange={(value) => onReason(value as RevenueReason | "")}
+              className={CELL_SIZE}
             />
             {entry.reason === "Other" && (
               <TextInput
@@ -343,6 +346,7 @@ function DayRow({
                 aria-label={`What happened, ${registration}`}
                 value={entry.note}
                 onChange={(event) => onNote(event.target.value)}
+                className={CELL_SIZE}
               />
             )}
           </div>

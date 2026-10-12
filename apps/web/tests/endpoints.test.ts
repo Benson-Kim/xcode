@@ -161,6 +161,20 @@ describe("recurring endpoints", () => {
     });
   });
 
+  it("pauses and resumes with a bodyless POST", async () => {
+    await recurringApi.pause("r1");
+    expect(lastCall()).toMatchObject({
+      method: "POST",
+      path: "setup/recurring/r1/pause",
+    });
+    expect(lastInit().body).toBeUndefined();
+    await recurringApi.resume("r1");
+    expect(lastCall()).toMatchObject({
+      method: "POST",
+      path: "setup/recurring/r1/resume",
+    });
+  });
+
   it("restores with an empty JSON body", async () => {
     await recurringApi.restore("r1");
     expect(lastCall()).toMatchObject({

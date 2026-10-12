@@ -35,4 +35,8 @@ export const recurringApi = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  pause: (id: string) =>
+    apiRequest(`${recurringPath(id)}/pause`, { method: "POST" }),
+  resume: (id: string) =>
+    apiRequest(`${recurringPath(id)}/resume`, { method: "POST" }),
 };

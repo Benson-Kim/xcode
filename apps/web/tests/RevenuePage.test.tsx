@@ -18,8 +18,8 @@ import { RevenuePage } from "../components/RevenuePage";
 import { useFormats } from "../lib/formats";
 import { renderInApp } from "./renderInApp";
 
-// Render counters: every part of the grid reads the formatter once per render, and each day cell (and each day of
-// an open week detail) asks once whether it opens capture.
+// Render counters: every part of the grid reads the formatter once per render, and each day cell asks once whether it
+// opens capture.
 vi.mock("../lib/formats", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/formats")>();
   return { ...actual, useFormats: vi.fn(actual.useFormats) };
@@ -432,52 +432,6 @@ it("keeps the company control, with All companies, for as long as a filter is se
       screen.queryByRole("combobox", { name: "Company" }),
     ).not.toBeInTheDocument(),
   );
-});
-
-it("shows a vehicle's week detail with expected, actual, difference and a bar for each recorded day", async () => {
-  serveWeek(() =>
-    week([
-      vehicle(
-        "vehicle-1",
-        "KDA 482M",
-        { [DATES[0]]: recorded(850), [DATES[1]]: recorded(1350) },
-        { totalAmount: 2200, totalExpected: 2000, percent: 110 },
-      ),
-    ]),
-  );
-  renderInApp(<RevenuePage />, { permissions: CLERK });
-
-  const toggle = await screen.findByRole("button", { name: "KDA 482M" });
-  expect(toggle).toHaveAttribute("aria-expanded", "false");
-  fireEvent.click(toggle);
-  expect(toggle).toHaveAttribute("aria-expanded", "true");
-
-  const detail = screen.getByRole("table", { name: "KDA 482M week detail" });
-  for (const name of ["Day", "Expected", "Revenue", "Difference"])
-    expect(
-      within(detail).getByRole("columnheader", { name }),
-    ).toBeInTheDocument();
-  expect(
-    within(within(detail).getByRole("row", { name: /Mon 28/ })).getByText(
-      "KES 150 below",
-    ),
-  ).toBeInTheDocument();
-  expect(
-    within(within(detail).getByRole("row", { name: /Tue 29/ })).getByText(
-      "KES 350 above",
-    ),
-  ).toBeInTheDocument();
-  expect(
-    within(within(detail).getByRole("row", { name: /Wed 30/ })).getByText(
-      "Not yet",
-    ),
-  ).toBeInTheDocument();
-  expect(
-    within(within(detail).getByRole("row", { name: /To date/ })).getByText(
-      "KES 200 above",
-    ),
-  ).toBeInTheDocument();
-  expect(detail.querySelectorAll("[data-bar]")).toHaveLength(2);
 });
 
 it("opens the day that was tapped even when the vehicle has an earlier gap, mentions the gap and saves without it", async () => {
@@ -1300,16 +1254,9 @@ it("renders only the rows near the screen for a large fleet, numbered for screen
   expect(totals).toHaveAttribute("aria-rowindex", "202");
   expect(within(totals).getByText("39,900")).toBeInTheDocument();
 
-  // Opening a row's detail adds a row to the count, and moves every row after it down one.
-  fireEvent.click(
-    within(rowOf(grid, "KDA 001A")!).getByRole("button", { name: "KDA 001A" }),
-  );
-  expect(grid).toHaveAttribute("aria-rowcount", "203");
-  expect(rowOf(grid, "KDA 002A")).toHaveAttribute("aria-rowindex", "5");
-
   scrollGridTo(-150 * 57);
   await waitFor(() =>
-    expect(rowOf(grid, "KDA 150A")).toHaveAttribute("aria-rowindex", "153"),
+    expect(rowOf(grid, "KDA 150A")).toHaveAttribute("aria-rowindex", "152"),
   );
   expect(rowOf(grid, "KDA 000A")).toBeNull();
   expect(rendered().length).toBeLessThan(60);
@@ -1338,7 +1285,7 @@ it("gives focus back to the day that opened capture after the grid scrolled it a
   );
 });
 
-it("re-renders no vehicle row when capture opens or another row's detail opens", async () => {
+it("re-renders no vehicle row when capture opens", async () => {
   serveWeek(() => week(fleetOf(40)));
   renderInApp(<RevenuePage />, { permissions: CLERK });
 
@@ -1362,14 +1309,37 @@ it("re-renders no vehicle row when capture opens or another row's detail opens",
   // The page and the capture form render; no row does.
   expect(vi.mocked(useFormats).mock.calls.length).toBeLessThan(40);
   expect(vi.mocked(canOpen)).not.toHaveBeenCalled();
+});
 
-  // The opened row renders again with its week detail, which asks for its recorded and missing days; none of the
-  // row's seven day cells renders again.
-  fireEvent.click(
-    within(rowOf(grid, "KDA 005A")!).getByRole("button", { name: "KDA 005A" }),
-  );
+it("exports the week shown to someone with reports.export, and offers it to no one else", async () => {
+  URL.createObjectURL = vi.fn(() => "blob:week");
+  URL.revokeObjectURL = vi.fn();
+  const saved: string[] = [];
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+  const fetcher = serveWeek(() => week([vehicle("vehicle-1", "KDA 482M")]));
+  const { unmount } = renderInApp(<RevenuePage />, {
+    permissions: [...CLERK, "reports.export"],
+  });
+  await screen.findByRole("table", { name: /Revenue by vehicle and day/ });
+
+  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Excel" }));
+
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(gets(fetcher, "/api/setup/revenue/export")).toEqual([
+    "/api/setup/revenue/export?weekStart=2026-09-28&format=xlsx",
+  ]);
+  expect(saved[0]).toBe("Revenue 28 Sep-4 Oct 2026.xlsx");
+  click.mockRestore();
+  unmount();
+
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+  await screen.findByRole("table", { name: /Revenue by vehicle and day/ });
   expect(
-    within(grid).getByRole("table", { name: "KDA 005A week detail" }),
-  ).toBeInTheDocument();
-  expect(vi.mocked(canOpen).mock.calls.length).toBeLessThan(7);
+    screen.queryByRole("button", { name: "Export" }),
+  ).not.toBeInTheDocument();
 });

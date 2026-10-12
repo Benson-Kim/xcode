@@ -140,3 +140,30 @@ export const reportExportPath = (
   report: ReportId,
   query: ReportExportQuery,
 ) => withQuery(`setup/reports/${group}/${report}/export`, query);
+
+// The Revenue, Central expenses and Petty cash screens as a file: what the screen lists for the same filters, every
+// row rather than one page. Each needs reports.export as well as the screen's own access.
+export const revenueExportPath = (query: {
+  weekStart: string;
+  companyId?: string;
+  format: ReportExportFormat;
+}) => withQuery("setup/revenue/export", query);
+
+export const expenseExportPath = (query: {
+  from: string;
+  to: string;
+  source?: string;
+  q?: string;
+  format: ReportExportFormat;
+}) => withQuery("setup/expenses/export", query);
+
+// view: the Expenses tab ("expenses", which status narrows) or Cash received ("cash").
+export const pettyCashExportPath = (query: {
+  from: string;
+  to: string;
+  holderId?: string;
+  view: "expenses" | "cash";
+  status?: string;
+  q?: string;
+  format: ReportExportFormat;
+}) => withQuery("setup/pettycash/export", query);

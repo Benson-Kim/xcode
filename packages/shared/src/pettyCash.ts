@@ -84,6 +84,9 @@ export interface PettyCashFigures {
   creditNotes: number;
   moneyOut: number;
   closingBalance: number;
+  // Expenses and credit notes in the period still waiting for approval.
+  waiting: number;
+  waitingCount: number;
 }
 
 // One float to date. balance = cashReceived - creditNotes - expenses, whatever their approval status.
@@ -245,9 +248,17 @@ export interface RemovePettyCashEntry {
   reason: string;
 }
 
+// POST /approve-day. to approves every day from date through to ("Approve all" over a period).
 export interface ApprovePettyCashDay {
   date: string;
   holderId?: string | null;
+  to?: string | null;
+}
+
+// POST /approve: the entries ticked in the list, each at the version shown. All are approved or none: one changed
+// since is a conflict (409); one already approved is skipped.
+export interface ApprovePettyCashEntries {
+  entries: { id: string; version: number }[];
 }
 
 // skipped counts the waiting entries of that day this person could not approve (own, above limit, out of scope).

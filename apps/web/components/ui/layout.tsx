@@ -162,18 +162,28 @@ export function BandStats({
   );
 }
 
-// A term and an operator of the petty cash sum (HeroBand variant "eq").
+// A term of the petty cash sum (HeroBand variant "eq"), with the operator before it kept on the same line when the
+// sum wraps on a narrow screen.
 export function BandTerm({
   label,
   value,
+  op,
 }: {
   label: ReactNode;
   value: ReactNode;
+  op?: ReactNode;
 }) {
-  return (
+  const term = (
     <div className="t">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+  if (op === undefined) return term;
+  return (
+    <div className="flex items-end gap-2">
+      <BandOp>{op}</BandOp>
+      {term}
     </div>
   );
 }
