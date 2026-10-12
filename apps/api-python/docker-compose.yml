@@ -1,0 +1,33 @@
+# Local dependencies only. The API itself runs from the virtualenv (docs/08-operability.md).
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      # The superuser is used for initdb only; db/roles/010_roles.sql creates
+      # xcode_owner, xcode_api_executor, xcode_app, xcode_operator and xcode_readonly as
+      # non-superuser roles, so the application never connects as a superuser.
+      POSTGRES_DB: xcode
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - xcode-pgdata:/var/lib/postgresql
+      # Runs db/roles/*.sql on first start to create the roles and grants.
+      - ./db/roles:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d xcode"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mailpit:
+    # Optional SMTP sink with a web inbox at http://localhost:8025. Start with: docker compose --profile mail up
+    image: axllent/mailpit
+    profiles: ["mail"]
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  xcode-pgdata:

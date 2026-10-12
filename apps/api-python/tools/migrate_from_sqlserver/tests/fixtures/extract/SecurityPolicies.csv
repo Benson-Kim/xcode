@@ -1,0 +1,2 @@
+"OrganizationId","PasswordMinLength","PasswordComplexity","PasswordHistory","PinLength","LockoutThreshold","LockoutMinutes","AccessTokenMinutes","RefreshTokenDays","IdleUnlockSeconds","AllowPinSignIn"
+"0ECF6013-8997-5654-A1B2-C30AC8BD5636","12","1","5","4","5","15","20","30","300","1"

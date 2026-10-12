@@ -1,0 +1,198 @@
+{
+  "format": 1,
+  "tool": "fixture",
+  "extracted_at": "2026-10-12T18:00:00.123456+00:00",
+  "source": {
+    "database": "XCodeFixture",
+    "server_version": "16.0.1000.6",
+    "server": "fixture",
+    "snapshot": "SNAPSHOT isolation",
+    "latest_migration": "20261010194310_RecurringPauses"
+  },
+  "tables": {
+    "Users": {
+      "file": "Users.csv",
+      "rows": 5,
+      "sha256": "277e997aa2acedea826b3f5bcf5fff9cb68e4cac9774f5074dca7791f59c4703"
+    },
+    "Organizations": {
+      "file": "Organizations.csv",
+      "rows": 1,
+      "sha256": "5e70bd25a620feea70b5ac90fab2b5bbcdc39e603bed1656cc51090d46cf36be"
+    },
+    "Memberships": {
+      "file": "Memberships.csv",
+      "rows": 5,
+      "sha256": "fb6382bbc0d1234da0f4102747986e218d86567a0f408dd3b523be2691801816"
+    },
+    "Localizations": {
+      "file": "Localizations.csv",
+      "rows": 1,
+      "sha256": "5d650efeded65659943e74c428043f086e274f6cf8da92a0a05826b4e92f975d"
+    },
+    "Brandings": {
+      "file": "Brandings.csv",
+      "rows": 1,
+      "sha256": "ff1d779346c592955d466b14cea2bfb150d6c4eedecd1c34c210679b2a344f7d"
+    },
+    "Logos": {
+      "file": "Logos.csv",
+      "rows": 1,
+      "sha256": "4fffd91bbf5aa6137783ab4ef689781cf9d5775879d952042599baa4d0d7cbcf"
+    },
+    "SecurityPolicies": {
+      "file": "SecurityPolicies.csv",
+      "rows": 1,
+      "sha256": "6d5bcd08465e99bf1c143056c4df1e4efac1c297bff0cc309b444944ff41d4bf"
+    },
+    "Roles": {
+      "file": "Roles.csv",
+      "rows": 4,
+      "sha256": "ad5046f29b932778c039bf03a754255c41e995ba05d1ca19045f26c8d5f2158a"
+    },
+    "PersonRoles": {
+      "file": "PersonRoles.csv",
+      "rows": 5,
+      "sha256": "81acd2c3a75f92891a93574de3a9837f4b2e813b1390fbb203418a6c5ad25e8c"
+    },
+    "PermissionOverrides": {
+      "file": "PermissionOverrides.csv",
+      "rows": 5,
+      "sha256": "afff4fef4f57cda1cd185cb47f631768feb0165e4a3bc52a794016e6afc07b8d"
+    },
+    "UserPreferences": {
+      "file": "UserPreferences.csv",
+      "rows": 2,
+      "sha256": "198c264eb7b59138dd3da6384fc380cb71898fd2ca0f5a3ad99c6e19194f85a6"
+    },
+    "PsvCompany": {
+      "file": "PsvCompany.csv",
+      "rows": 2,
+      "sha256": "863c4fe79ce9bd8ad98ee9ed10d804758fec0b38387ce4b2f23cbc25966e2c84"
+    },
+    "FleetVehicle": {
+      "file": "FleetVehicle.csv",
+      "rows": 3,
+      "sha256": "cbbf2b26108f98c610e2e88fa95475e50af6ee6e1024a1e5280ce86dff592098"
+    },
+    "ExpenseCategory": {
+      "file": "ExpenseCategory.csv",
+      "rows": 3,
+      "sha256": "54815c985cf320b36d0d9501634dbaa5ba64691a3224d262a326d1a81444627c"
+    },
+    "ExpenseItem": {
+      "file": "ExpenseItem.csv",
+      "rows": 3,
+      "sha256": "231dfefdb41dc960a32c7f816038e811429a31d805caeb5e08ecd6c085eb2f7b"
+    },
+    "VehicleTarget": {
+      "file": "VehicleTarget.csv",
+      "rows": 5,
+      "sha256": "4a8a3f8a8523d17a2223d5fab0bf22d9b11ac3cfe303c5fdc68404534b5d2528"
+    },
+    "VehicleAwayPeriod": {
+      "file": "VehicleAwayPeriod.csv",
+      "rows": 2,
+      "sha256": "09c6d6d1f1678389afada9ca43c51d5081725860d53951c0415710e5f8eba713"
+    },
+    "VehicleInvestment": {
+      "file": "VehicleInvestment.csv",
+      "rows": 1,
+      "sha256": "35b13f0ca8bc8e4b343c8f2ee6f9d0b13ce9035f51d154d376607fafbd1934e0"
+    },
+    "SetupDataScopes": {
+      "file": "SetupDataScopes.csv",
+      "rows": 2,
+      "sha256": "00598c87b4b44389b557dbc9baffd22019d6b3be027e5df451a66a6b37c92ebb"
+    },
+    "SetupCompanyScopes": {
+      "file": "SetupCompanyScopes.csv",
+      "rows": 1,
+      "sha256": "7a8f386b7cb6f69795f40bf08760ba8f26834aedec430a7ab2eb97f5c025e4b8"
+    },
+    "SetupVehicleScopes": {
+      "file": "SetupVehicleScopes.csv",
+      "rows": 1,
+      "sha256": "313568616e36a353631a9f151500578b42ebab495ca51ed551fb1f3593b81f08"
+    },
+    "RecurringItem": {
+      "file": "RecurringItem.csv",
+      "rows": 4,
+      "sha256": "defc0626b4efb5a6a766def4b8a8b63ff6615972dc7dcd3d2d9b42daec451f2b"
+    },
+    "RecurringVersion": {
+      "file": "RecurringVersion.csv",
+      "rows": 4,
+      "sha256": "92a701d4351e5332b893e70de9dbb90d369cc178a037daaf8744486aa9649bbf"
+    },
+    "RecurringAllocation": {
+      "file": "RecurringAllocation.csv",
+      "rows": 6,
+      "sha256": "ec72edb2a38079699081293ce322361d1e162db8c1abf6dfd3aa1c917c44218c"
+    },
+    "RevenueRecords": {
+      "file": "RevenueRecords.csv",
+      "rows": 14,
+      "sha256": "b5c488e0b5cb03bf9edd630118f0c094440ffb4d1c4df90ae312a6c9c4fb74c0"
+    },
+    "PettyCashEntries": {
+      "file": "PettyCashEntries.csv",
+      "rows": 5,
+      "sha256": "54fdc8bdc4b06d22d029e063b04682fe06bdb0ae4e4630be816e83e973abac71"
+    },
+    "CentralExpenses": {
+      "file": "CentralExpenses.csv",
+      "rows": 0,
+      "sha256": "76e0bf092a6d4de21b6c9db47a654ba12131afe80843d9f999d0b9fec4a7f46d"
+    },
+    "RecurringPause": {
+      "file": "RecurringPause.csv",
+      "rows": 0,
+      "sha256": "d56678c43dba6e59c12fef0e1ab37255eb618b9e8d867e8f615a3edbe0bcabe5"
+    },
+    "OrganizationSettingsVersion": {
+      "file": "OrganizationSettingsVersion.csv",
+      "rows": 4,
+      "sha256": "3063442633ca106a95db3a494d241da118460492dae6126347af652222dcbd14"
+    },
+    "AuditEvents": {
+      "file": "AuditEvents.csv",
+      "rows": 3,
+      "sha256": "5d60489a668ea52da85e831f5dbfa99220a8d29f23d7073c778bf9410e41643c"
+    },
+    "TrustedDevices": {
+      "file": "TrustedDevices.csv",
+      "rows": 4,
+      "sha256": "35a91fb3557090d12a13845bebb3ced57916632b3dd08e37fc27d54c7fdf8a7a"
+    },
+    "RefreshTokens": {
+      "file": "RefreshTokens.csv",
+      "rows": 4,
+      "sha256": "c799b8aae854877cd4795d0cc9aff8b0aba1fd34d40a379517cf73eec79ed56d"
+    },
+    "VerificationCodes": {
+      "rows": 2,
+      "copied": false
+    },
+    "RolePermissions": {
+      "rows": 0,
+      "copied": false
+    },
+    "RecurringKindLookup": {
+      "rows": 2,
+      "copied": false
+    },
+    "RecurrenceFrequencyLookup": {
+      "rows": 4,
+      "copied": false
+    },
+    "ExpenseBucketLookup": {
+      "rows": 3,
+      "copied": false
+    },
+    "__EFMigrationsHistory": {
+      "rows": 31,
+      "copied": false
+    }
+  }
+}

@@ -1,0 +1,12 @@
+# Development and test dependencies for xcode-api. Install after requirements.txt.
+-r requirements.txt
+
+pytest>=8.3
+pytest-asyncio>=1.3        # async tests; asyncio_mode = "auto" in pyproject.toml
+pytest-xdist>=3.6          # parallel test runs; each test owns a database cloned from a template
+httpx>=0.28                # ASGI test client (httpx.ASGITransport) for HTTP contract tests
+testcontainers[postgres]>=4.8  # throwaway PostgreSQL 18 for tests when XCODE_TEST_DATABASE_URL is unset
+ruff>=0.16                 # lint + format (includes the flake8-bandit "S" rules; no separate bandit)
+mypy>=1.20                 # strict typing of src/
+pip-audit>=2.9             # dependency vulnerability audit in CI
+uv>=0.8                    # lock file generation (`uv pip compile`)

@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xcode-api"
+version = "0.1.0"
+description = "xcode revenue-management API (PostgreSQL routines, FastAPI)"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "Proprietary" }
+dynamic = ["dependencies"]
+
+[project.scripts]
+xcode-api = "xcode_api.cli.main:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+# Dev and test dependencies are installed with `pip install -r requirements-dev.txt`
+# (that file includes requirements.txt via `-r`); setuptools dynamic requirement parsing
+# does not understand `-r` includes, so they are not exposed as an extra here.
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "S", "ASYNC", "RUF", "PL", "T20", "ERA"]
+ignore = ["PLR0913", "PLR2004"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert (S101), use dummy secrets (S105/S106), run admin SQL with test-internal
+# identifiers (S608), import testcontainers only when present (PLC0415), and have long
+# fixtures and helpers (PLR0915, PLR0917).
+"tests/**" = ["S101", "S105", "S106", "S608", "PLC0415", "PLR0915", "PLR0917"]
+# CLI commands print to stdout as their primary output.
+"src/xcode_api/cli/commands/*" = ["T201"]
+# The client sentences stay whole on one line each, so a sentence can be found by grep.
+"src/xcode_api/http/messages.py" = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["xcode_api"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+files = ["src"]
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "structure: database structure tests that connect as xcode_owner",
+    "slow: tests that take more than a few seconds (timing, PBKDF2 at full iterations)",
+]

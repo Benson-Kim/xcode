@@ -1,0 +1,4 @@
+"OrganizationId","Id","ActorId","Action","Entity","Before","After","OccuredAt","CorrelationId"
+"0ECF6013-8997-5654-A1B2-C30AC8BD5636","00DD0177-9BEC-5BC3-B534-1EFD82EE26C4","58300061-9A8D-523C-8A8D-8561CF8279F7","settings.update","Person",,"{""a"":1,""a"":2}","2026-09-02 02:00:00.0000000","req-audit:2"
+"0ECF6013-8997-5654-A1B2-C30AC8BD5636","029222F5-174E-5253-86DC-85270EE5ED69","58300061-9A8D-523C-8A8D-8561CF8279F7","people.update","Person","{""role"":""Revenue clerk""}","{""role"":""Fleet manager""}","2026-09-02 01:00:00.0000000","req-audit:1"
+"0ECF6013-8997-5654-A1B2-C30AC8BD5636","42189806-ED1F-5FF5-BEFD-AA5185766581","58300061-9A8D-523C-8A8D-8561CF8279F7","vehicle.create","Person",,"{""registration"":""KBX 123A""}","2026-09-02 03:00:00.0000000","req-audit:3"

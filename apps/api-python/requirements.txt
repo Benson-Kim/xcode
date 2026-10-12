@@ -1,0 +1,15 @@
+# Runtime dependencies for xcode-api (Python 3.13+).
+# Floors are deliberate; the exact lock lives in requirements.lock.txt, produced by
+# `uv pip compile --universal --python-version 3.13 requirements.txt -o requirements.lock.txt`
+# (one lock for every platform; the CI lint job recompiles it and fails on a diff).
+# Every entry has a reason; do not add a package without one.
+
+fastapi>=0.136          # HTTP framework: routing, dependency injection, OpenAPI document
+uvicorn[standard]>=0.47 # ASGI server (uvloop + httptools on Linux, websockets unused)
+pydantic>=2.13          # request/response contracts, strict validation
+pydantic-settings>=2.14 # XCODE_* environment settings with fail-fast validation
+psycopg[binary,pool]>=3.3  # PostgreSQL driver (async) + psycopg_pool.AsyncConnectionPool
+PyJWT>=2.13             # HS256 access tokens (2.13.0 carries the 2026 security fixes)
+structlog>=26.1         # structured JSON logging with request-scoped context
+aiosmtplib>=5.1         # async SMTP for verification codes (production mail backend)
+prometheus-client>=0.21 # /metrics exposition when XCODE_METRICS_ENABLED (docs/08-operability.md section 5)

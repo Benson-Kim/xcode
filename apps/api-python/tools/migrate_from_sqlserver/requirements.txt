@@ -1,0 +1,8 @@
+# Runtime dependencies of migrate_from_sqlserver (Python 3.13+), separate from the API's.
+# The exact lock is requirements.lock.txt, produced by
+# `uv pip compile --universal --python-version 3.13 --generate-hashes requirements.txt -o requirements.lock.txt`
+# (hashed: pip refuses any other file than the one locked).
+# Every entry has a reason; do not add a package without one.
+
+pyodbc>=5.2             # SQL Server through Microsoft's ODBC Driver 17 or 18 (extract only); TLS with certificate checks
+psycopg[binary]>=3.3    # PostgreSQL as xcode_owner: COPY in and out, the verification queries

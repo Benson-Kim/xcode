@@ -1,0 +1,6 @@
+"Id","Email","PhoneNumber","PinHash","Status","SecurityVersion","FailedAttempts","PausedUntil","UntrustedFailedAttempts","Version"
+"0EC51AB8-F154-5EE9-BCAD-31BD6C2F39C1","clerk@example.com","0711000002","xA3HKwIo5YUNixc/+GGkig==.toVIL1YYXpGip/dft3HuljIL/KZdlvkm14WjySfaUGY=","0","1","2","2026-10-12 18:10:00.1234560","0","4"
+"5447C449-433E-5E4A-95F6-52791550967A","manager@example.com","+254711000003","buSkac1OkQU4R/XT/LYdvA==.kqyaDX9fTydapNS0e9n/zUkV2tjUNnimxKXOqbxGTL4=","0","1","5","2026-10-11 18:00:00.1234560","12","4"
+"58300061-9A8D-523C-8A8D-8561CF8279F7","Owner@Example.com","+254711000001","TBApaX7jWHFdOhSirdgXxA==.OACLFoCaOfnuVLFp+83zD+IHAB9hwEizZiZWQ/RDQzI=","0","3","0",,"0","4"
+"B538B5A1-007B-5F24-8775-294B2ACB03EF","leaver@example.com","+254711000005","7TgEFqtDeF9QfBYiqx3spA==.FAK1UBHu6Ii2YPkbChzn90+09WFoWLl1RMXciKtYoS0=","1","1","0",,"0","4"
+"B88C0E69-B250-5D75-AF45-70B3F91DCFF1","admin@example.com","+254711000004",,"0","1","0",,"0","4"
