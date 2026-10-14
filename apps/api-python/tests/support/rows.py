@@ -44,6 +44,10 @@ class OrganizationRows:
     device: UUID
     token: UUID
     entry: UUID
+    central: UUID
+    pause: UUID
+    saving: UUID
+    saving_version: UUID
 
     def params(self) -> dict[str, UUID]:
         return asdict(self)
@@ -272,6 +276,57 @@ def _seed(conn: Conn, slug: str) -> OrganizationRows:
         "VALUES (%(org)s, %(user)s, 2, DATE '2026-02-02', %(vehicle)s, %(item)s, 450, 2, "
         "%(user)s, now(), %(user)s, now(), %(user)s, now(), %(user)s, now(), 'Recorded twice.') "
         "RETURNING id",
+        p,
+    )
+    p["central"] = _one(
+        conn,
+        "WITH n AS (SELECT gen_random_uuid() AS id) INSERT INTO expenses.entries (organization_id, "
+        "id, entry_date, vehicle_id, expense_item_id, units, unit_amount, note, group_id, "
+        "group_size, group_total, group_units, group_unit_amount, recorded_by, recorded_at, "
+        "updated_by, updated_at, removed_by, removed_at, removal_reason) SELECT %(org)s, n.id, "
+        "DATE '2026-02-02', %(vehicle)s, %(item)s, 2, 250, 'Front tyres', n.id, 1, 500, 2, 250, "
+        "%(user)s, now(), %(user)s, now(), %(user)s, now(), 'Recorded twice.' FROM n RETURNING id",
+        p,
+    )
+    p["pause"] = _one(
+        conn,
+        "INSERT INTO setup.recurring_pauses (organization_id, item_id, paused_from, "
+        "paused_through) VALUES (%(org)s, %(recurring)s, DATE '2026-03-01', "
+        "DATE '2026-03-10') RETURNING id",
+        p,
+    )
+    p["saving"] = _one(
+        conn,
+        "INSERT INTO setup.recurring_items (organization_id) VALUES (%(org)s) RETURNING id",
+        p,
+    )
+    p["saving_version"] = _one(
+        conn,
+        "INSERT INTO setup.recurring_versions (organization_id, item_id, revision, "
+        "effective_from, name, kind, amount, frequency, day, last_day, month, start_on, "
+        "condition_min, condition_days) VALUES (%(org)s, %(saving)s, 1, DATE '2026-01-01', "
+        "'Tyre fund', 2, 100, 3, 1, false, NULL, DATE '2026-01-01', 2000, 7) RETURNING id",
+        p,
+    )
+    conn.execute(
+        "INSERT INTO setup.recurring_allocations (organization_id, version_id, vehicle_id, "
+        "amount) VALUES (%(org)s, %(saving_version)s, %(vehicle)s, 100)",
+        p,
+    )
+    conn.execute(
+        "INSERT INTO setup.saving_openings (organization_id, item_id, opened_on) "
+        "VALUES (%(org)s, %(saving)s, DATE '2026-01-15')",
+        p,
+    )
+    conn.execute(
+        "INSERT INTO setup.saving_opening_amounts (organization_id, item_id, vehicle_id, amount) "
+        "VALUES (%(org)s, %(saving)s, %(vehicle)s, 500)",
+        p,
+    )
+    conn.execute(
+        "INSERT INTO setup.saving_runs (organization_id, item_id, run_on, vehicle_id, version_id, "
+        "amount, state, revenue, decided_at) VALUES (%(org)s, %(saving)s, DATE '2026-02-01', "
+        "%(vehicle)s, %(saving_version)s, 100, 1, 2500, now())",
         p,
     )
     p["change_log_id"] = _one(

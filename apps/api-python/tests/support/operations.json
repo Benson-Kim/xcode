@@ -681,7 +681,7 @@
   "path": "/setup/expenses/ledger",
   "operationId": "GetExpenseLedger",
   "tag": "Central expenses",
-  "planned": true
+  "planned": false
  },
  {
   "id": "E02",
@@ -690,7 +690,7 @@
   "path": "/setup/expenses/export",
   "operationId": "ExportExpenseLedger",
   "tag": "Central expenses",
-  "planned": true
+  "planned": false
  },
  {
   "id": "E03",
@@ -699,7 +699,7 @@
   "path": "/setup/expenses/options",
   "operationId": "GetExpenseOptions",
   "tag": "Central expenses",
-  "planned": true
+  "planned": false
  },
  {
   "id": "E04",
@@ -708,7 +708,7 @@
   "path": "/setup/expenses/entries",
   "operationId": "RecordExpense",
   "tag": "Central expenses",
-  "planned": true
+  "planned": false
  },
  {
   "id": "E05",
@@ -717,7 +717,7 @@
   "path": "/setup/expenses/entries/{id}",
   "operationId": "ChangeExpense",
   "tag": "Central expenses",
-  "planned": true
+  "planned": false
  },
  {
   "id": "E06",
@@ -726,7 +726,7 @@
   "path": "/setup/expenses/entries/{id}/remove",
   "operationId": "RemoveExpense",
   "tag": "Central expenses",
-  "planned": true
+  "planned": false
  },
  {
   "id": "G01",
@@ -735,7 +735,7 @@
   "path": "/setup/reports",
   "operationId": "GetReportsAccess",
   "tag": "Reports",
-  "planned": true
+  "planned": false
  },
  {
   "id": "G02",
@@ -744,7 +744,7 @@
   "path": "/setup/reports/fleet/{report}",
   "operationId": "GetFleetReport",
   "tag": "Reports",
-  "planned": true
+  "planned": false
  },
  {
   "id": "G03",
@@ -753,7 +753,7 @@
   "path": "/setup/reports/pettycash/{report}",
   "operationId": "GetPettyCashReport",
   "tag": "Reports",
-  "planned": true
+  "planned": false
  },
  {
   "id": "G04",
@@ -762,7 +762,7 @@
   "path": "/setup/reports/{group}/{report}/export",
   "operationId": "ExportReport",
   "tag": "Reports",
-  "planned": true
+  "planned": false
  },
  {
   "id": "D01",
@@ -771,7 +771,7 @@
   "path": "/setup/revenue/day",
   "operationId": "GetRevenueDay",
   "tag": "Revenue",
-  "planned": true
+  "planned": false
  },
  {
   "id": "D02",
@@ -780,7 +780,7 @@
   "path": "/setup/revenue/day/{date}",
   "operationId": "SaveRevenueDay",
   "tag": "Revenue",
-  "planned": true
+  "planned": false
  },
  {
   "id": "X02",
@@ -789,7 +789,7 @@
   "path": "/setup/revenue/export",
   "operationId": "ExportRevenueWeek",
   "tag": "Revenue",
-  "planned": true
+  "planned": false
  },
  {
   "id": "X03",
@@ -798,7 +798,7 @@
   "path": "/setup/pettycash/export",
   "operationId": "ExportPettyCash",
   "tag": "Petty cash",
-  "planned": true
+  "planned": false
  },
  {
   "id": "S53",
@@ -807,7 +807,7 @@
   "path": "/setup/recurring/summary",
   "operationId": "GetSetupRecurringSummary",
   "tag": "Setup",
-  "planned": true
+  "planned": false
  },
  {
   "id": "S54",
@@ -816,7 +816,7 @@
   "path": "/setup/recurring/{id}/runs",
   "operationId": "GetSetupRecurringRuns",
   "tag": "Setup",
-  "planned": true
+  "planned": false
  },
  {
   "id": "S55",
@@ -825,7 +825,7 @@
   "path": "/setup/recurring/{id}/pause",
   "operationId": "PauseSetupRecurring",
   "tag": "Setup",
-  "planned": true
+  "planned": false
  },
  {
   "id": "S56",
@@ -834,6 +834,6 @@
   "path": "/setup/recurring/{id}/resume",
   "operationId": "ResumeSetupRecurring",
   "tag": "Setup",
-  "planned": true
+  "planned": false
  }
 ]

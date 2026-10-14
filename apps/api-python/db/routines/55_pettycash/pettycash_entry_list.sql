@@ -1,7 +1,7 @@
 -- api.pettycash_entry_list(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_from date, p_to date, p_holder_id uuid, p_kinds text[], p_statuses text[], p_q text, p_page integer, p_page_size integer, p_now timestamptz) RETURNS jsonb
 -- Purpose: one page of the entries the actor may see (PettyCashEntryDto with the actor's flags), of one float when p_holder_id is given, dated p_from..p_to (either end open), of the kinds and status words asked (empty or null = all; cash and credit notes have no status), whose note, payee, holder name, registration or item name holds p_q (literally, ignoring case); by date, kind, id; {total, items}.
 -- Callers: PettyCashRoutines.list_entries; ListPettyCashEntries (GET /setup/pettycash/entries).
--- Reads: pettycash.entries, tenancy.memberships, setup.fleet_vehicles, setup.expense_items, and what tenancy.business_date, tenancy.effective_permissions, tenancy.earliest_writable, setup.visible_vehicles, pettycash.visible_holders and pettycash.entry_document read. Writes: nothing.
+-- Reads: tenancy.memberships, and what tenancy.business_date, tenancy.effective_permissions, tenancy.earliest_writable, setup.visible_vehicles, pettycash.visible_holders, pettycash.entry_matches and pettycash.entry_document read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.require_any_permission, XC422 page_out_of_range via tenancy.check_page, XC422 history_dates_order, XC422 history_text_length, XC422 pettycash_kind_invalid, XC422 pettycash_status_invalid, XC404 not_found, XC422 time_zone_invalid via tenancy.business_date.
 -- Tests: tests/db/test_pettycash_routines.py, tests/api/test_petty_cash.py.
 
@@ -27,7 +27,6 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
   v_text text := tenancy.trim_text(p_q);
-  v_pattern text;
   v_kinds smallint[];
   v_permissions text[];
   v_view_all boolean;
@@ -72,28 +71,12 @@ BEGIN
   FROM tenancy.memberships AS m
   WHERE m.organization_id = p_organization_id AND m.user_id = p_actor_id;
   v_vehicles := ARRAY(SELECT visible.id FROM setup.visible_vehicles() AS visible (id));
-  v_pattern := '%' || replace(replace(replace(v_text, '\', '\\'), '%', '\%'), '_', '\_') || '%';
 
   WITH matches AS MATERIALIZED (
-    SELECT e
-    FROM pettycash.entries AS e
-    JOIN tenancy.memberships AS h ON h.organization_id = e.organization_id AND h.user_id = e.holder_id
-    LEFT JOIN setup.fleet_vehicles AS f ON f.organization_id = e.organization_id AND f.id = e.vehicle_id
-    LEFT JOIN setup.expense_items AS i ON i.organization_id = e.organization_id AND i.id = e.expense_item_id
-    WHERE e.organization_id = p_organization_id
-      AND pettycash.entry_visible(e, v_view_all, v_vehicles)
-      AND (p_holder_id IS NULL OR e.holder_id = p_holder_id)
-      AND (p_from IS NULL OR e.entry_date >= p_from)
-      AND (p_to IS NULL OR e.entry_date <= p_to)
-      AND (cardinality(v_kinds) = 0 OR e.kind = ANY (v_kinds))
-      AND (coalesce(cardinality(p_statuses), 0) = 0
-           OR pettycash.status_word(e.status, e.sent_back_note) = ANY (p_statuses))
-      AND (v_text IS NULL
-           OR e.note ILIKE v_pattern
-           OR e.payee ILIKE v_pattern
-           OR btrim(h.first_name || ' ' || h.last_name) ILIKE v_pattern
-           OR f.registration ILIKE v_pattern
-           OR i.name ILIKE v_pattern)
+    SELECT m AS e
+    FROM pettycash.entry_matches(
+           p_holder_id, p_from, p_to, v_kinds, p_statuses, v_text, v_view_all, v_vehicles
+         ) AS m
   )
   SELECT (SELECT count(*)::integer FROM matches),
          (

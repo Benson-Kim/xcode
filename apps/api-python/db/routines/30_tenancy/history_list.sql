@@ -112,6 +112,8 @@ BEGIN
                 AND NOT a.vehicle_id = ANY (v_vehicles)
             )
             WHEN c.section = 'expenses' THEN true
+            WHEN c.section = 'centralexpenses' THEN c.vehicle_id = ANY (v_vehicles)
+            WHEN c.section = 'reports' THEN v_all
             ELSE false
           END
   )

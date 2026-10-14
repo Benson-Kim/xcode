@@ -7,4 +7,4 @@ differs from this constant.
 
 from __future__ import annotations
 
-EXPECTED_CONTRACT_VERSION = 5
+EXPECTED_CONTRACT_VERSION = 6

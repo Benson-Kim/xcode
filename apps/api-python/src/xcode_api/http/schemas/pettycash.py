@@ -16,13 +16,15 @@ from pydantic import Field
 from ...domain.pettycash import EntryKind, EntryState, OverviewPeriod
 from ...domain.setup import ExpenseBucket
 from .common import Amount, ApiModel, Instant, Money
+from .expenses import ExpenseAllocationBody
 
 Version = Annotated[int | None, Field(ge=-(2**63), le=2**63 - 1)]
 
 
 class SavePettyCashEntry(ApiModel):
     """``id`` is the client's id for a new entry (sending it again replays the first save);
-    ``units`` absent is one; ``version`` is the version the client saw (updates only)."""
+    ``units`` absent is one; ``version`` is the version the client saw (updates only);
+    ``allocations`` share an expense between vehicles (creates only)."""
 
     kind: str | None = None
     entry_date: date | None = Field(default=None, alias="date")
@@ -36,6 +38,7 @@ class SavePettyCashEntry(ApiModel):
     note: str | None = None
     reimbursable: bool = False
     version: Version = None
+    allocations: list[ExpenseAllocationBody] | None = None
 
 
 class ReviewPettyCashEntry(ApiModel):
@@ -156,6 +159,14 @@ class PettyCashOverviewDto(ApiModel):
     floats: list[PettyCashFloatDto]
 
 
+class PettyCashGroupDto(ApiModel):
+    id: UUID
+    size: int
+    total: Money
+    units: Amount
+    unit_amount: Money
+
+
 class PettyCashEntryDto(ApiModel):
     """One entry; also the ``current`` member of a 409."""
 
@@ -192,6 +203,7 @@ class PettyCashEntryDto(ApiModel):
     can_send_back: bool
     can_reject: bool
     can_reopen: bool
+    group: PettyCashGroupDto | None = None
 
 
 class PettyCashVehicleOptionDto(ApiModel):
@@ -200,6 +212,7 @@ class PettyCashVehicleOptionDto(ApiModel):
     company_name: str
     registration: str
     active: bool
+    fleet_number: str | None = None
 
 
 class PettyCashItemOptionDto(ApiModel):

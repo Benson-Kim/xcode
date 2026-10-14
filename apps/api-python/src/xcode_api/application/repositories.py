@@ -16,6 +16,17 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
+from ..domain.expenses import (
+    ExpenseChange,
+    ExpenseLedger,
+    ExpenseLedgerQuery,
+    ExpenseOptions,
+    ExpenseOptionsQuery,
+    ExpensePurchase,
+    ExpenseRecorded,
+    ExpenseRemoval,
+    ExpenseSaved,
+)
 from ..domain.identity import (
     AccountLookup,
     AccountState,
@@ -66,11 +77,25 @@ from ..domain.pettycash import (
     PettyCashSaved,
     PettyCashUpdate,
 )
+from ..domain.reports import (
+    ExpenseExportQuery,
+    PettyCashExportQuery,
+    ReportDocument,
+    ReportExportQuery,
+    ReportQuery,
+    ReportsAccess,
+    ReportTable,
+    RevenueExportQuery,
+)
 from ..domain.revenue import (
     CaptureResult,
     RevenueCapture,
     RevenueDashboard,
     RevenueDashboardQuery,
+    RevenueDay,
+    RevenueDayQuery,
+    RevenueDayResult,
+    RevenueDaySave,
     RevenueWeek,
     RevenueWeekQuery,
 )
@@ -93,7 +118,11 @@ from ..domain.setup import (
     MainCategorySave,
     RecurringCancelStop,
     RecurringListQuery,
+    RecurringMonth,
     RecurringPage,
+    RecurringPause,
+    RecurringRuns,
+    RecurringRunsQuery,
     RecurringSave,
     RecurringStop,
     SetupPageQuery,
@@ -491,6 +520,22 @@ class SetupRepository(Protocol):
         """``api.setup_recurring_cancel_stop``: only a stop that is not yet in effect."""
         ...
 
+    async def pause_recurring(self, command: RecurringPause) -> WriteResult:
+        """``api.setup_recurring_pause``: from the business date; already paused is unchanged."""
+        ...
+
+    async def resume_recurring(self, command: RecurringPause) -> WriteResult:
+        """``api.setup_recurring_resume``: the open pause ends the day before today."""
+        ...
+
+    async def recurring_runs(self, query: RecurringRunsQuery) -> RecurringRuns:
+        """``api.setup_recurring_runs``: the item's last ten run dates on visible vehicles."""
+        ...
+
+    async def recurring_month(self, context: TenantContext) -> RecurringMonth:
+        """``api.setup_recurring_summary``: this month's figures on visible vehicles."""
+        ...
+
     async def list_expense_categories(self, query: SetupPageQuery) -> ExpenseCategoryPage:
         """``api.setup_expense_category_list``: categories by name with their items."""
         ...
@@ -576,6 +621,14 @@ class RevenueRepository(Protocol):
         """``api.revenue_capture``: created, updated, or an identical entry replayed."""
         ...
 
+    async def day(self, query: RevenueDayQuery) -> RevenueDay:
+        """``api.revenue_day_get``: one day of the visible fleet for capture."""
+        ...
+
+    async def save_day(self, command: RevenueDaySave) -> RevenueDayResult:
+        """``api.revenue_day_save``: every row through the capture's steps, all or none."""
+        ...
+
 
 @runtime_checkable
 class PettyCashRepository(Protocol):
@@ -641,4 +694,69 @@ class PettyCashRepository(Protocol):
 
     async def approve_entries(self, command: PettyCashEntriesApproval) -> PettyCashApproved:
         """``api.pettycash_entries_approve``: the ticked entries, all or none."""
+        ...
+
+
+@runtime_checkable
+class ExpensesRepository(Protocol):
+    """Central expenses (``api.expenses_*``): the ledger, the form's options, and the record,
+    change and remove of purchases and their rows; every rule is the routines'."""
+
+    async def ledger(self, query: ExpenseLedgerQuery) -> ExpenseLedger:
+        """``api.expenses_ledger_get``: one page of the ledger with its figures."""
+        ...
+
+    async def options(self, query: ExpenseOptionsQuery) -> ExpenseOptions:
+        """``api.expenses_options_get``: vehicles and items in use on a date."""
+        ...
+
+    async def record(self, command: ExpensePurchase) -> ExpenseRecorded:
+        """``api.expenses_entry_create``: one row per vehicle, or the rows a retried purchase
+        already made."""
+        ...
+
+    async def change(self, command: ExpenseChange) -> ExpenseSaved:
+        """``api.expenses_entry_update``: an identical line answers the row as it is."""
+        ...
+
+    async def remove(self, command: ExpenseRemoval) -> ExpenseSaved:
+        """``api.expenses_entry_remove``: soft, with a typed reason."""
+        ...
+
+
+@runtime_checkable
+class ReportsRepository(Protocol):
+    """The report and export routines (``docs/05-routines.md`` 11.4): the catalogue, one page
+    of a report, and every export, the three screen exports included. Each export reads its
+    rows and writes its change-log row in one transaction and answers the document a file is
+    built from; refusals arrive as the typed domain refusals with the routine's code."""
+
+    async def access(self, context: TenantContext) -> ReportsAccess:
+        """``api.report_catalog_get`` (``reports.view``): the reports the caller may open."""
+        ...
+
+    async def report(self, query: ReportQuery) -> ReportTable:
+        """``api.report_get`` (``reports.view``; investment ``reports.investment``; petty cash
+        ``pettycash.reports``): one page of the rows matching the search, with the whole
+        report's headline, figures and footer."""
+        ...
+
+    async def export_report(self, query: ReportExportQuery) -> ReportDocument:
+        """``api.report_export_get`` (``reports.export`` and the report's gate): every matching
+        row, capped at 10,000, with its audit row written."""
+        ...
+
+    async def export_revenue(self, query: RevenueExportQuery) -> ReportDocument:
+        """``api.revenue_export_get`` (``revenue.export`` and ``revenue.view``): the week grid as
+        the screen lists it."""
+        ...
+
+    async def export_expenses(self, query: ExpenseExportQuery) -> ReportDocument:
+        """``api.expenses_export_get`` (``expenses.export`` and ``expenses.view``): the ledger's
+        matching rows."""
+        ...
+
+    async def export_pettycash(self, query: PettyCashExportQuery) -> ReportDocument:
+        """``api.pettycash_export_get`` (``pettycash.export`` and ``pettycash.view``): the
+        entries the Petty cash page lists, the expenses or the cash received."""
         ...

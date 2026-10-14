@@ -707,7 +707,7 @@ def test_the_subjects_and_the_snapshot(executor: Conn, owner_conn: Conn, yard: Y
     assert snapshot["RecordedAt"].startswith("2026-10-09T07:00:00")
 
 
-def test_the_vehicle_postings_are_the_approved_expenses_in_the_window(
+def test_the_fleet_postings_hold_the_approved_expenses_in_the_window(
     executor: Conn, owner_conn: Conn, yard: Yard
 ) -> None:
     """One cost per approved, non-removed expense, the bucket of the item's category."""
@@ -721,11 +721,12 @@ def test_the_vehicle_postings_are_the_approved_expenses_in_the_window(
     add_entry(owner_conn, yard, EXPENSE, yard.clerk, 5, status=APPROVED, vehicle=yard.kab)
     with inside(executor, yard.owner):
         rows = executor.execute(
-            "SELECT * FROM pettycash.vehicle_postings(%s, daterange(%s, %s))",
-            (yard.kaa, TODAY - timedelta(days=3), TODAY + timedelta(days=1)),
+            "SELECT id, version_id, day, name, kind, amount, bucket, holder_id"
+            " FROM setup.fleet_postings(ARRAY[%s]::uuid[], %s, %s, %s) WHERE source = 2",
+            (yard.kaa, TODAY - timedelta(days=3), TODAY, TODAY),
         ).fetchall()
     assert [tuple(r.values()) for r in rows] == [
-        (approved, approved, TODAY, "Tyres", 1, Decimal("120.00"), 3)
+        (approved, approved, TODAY, "Tyres", 1, Decimal("120.00"), 3, yard.clerk.id)
     ]
 
 
@@ -754,3 +755,45 @@ def test_an_entry_of_another_organization_is_never_read(
             executor, "SELECT pettycash.visible_entry(%s, true, '{}'::uuid[], false)", (entry,)
         )
         assert (sqlstate, code) == ("XC404", "not_found")
+
+
+def test_the_report_entries_are_the_set_form_of_entry_visible_and_member_name(
+    executor: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    """``reports.pettycash_entries`` joins what ``pettycash.entry_visible`` and
+    ``pettycash.member_name`` answer one row at a time: the same entries for every float,
+    scope and right, with the same names."""
+    add_entry(owner_conn, yard, EXPENSE, yard.clerk, 120, status=APPROVED, reviewed_by=yard.admin)
+    add_entry(owner_conn, yard, EXPENSE, yard.clerk, 60, vehicle=yard.kab, recorded_by=yard.admin)
+    add_entry(owner_conn, yard, EXPENSE, yard.admin, 30, vehicle=yard.kab)
+    add_entry(owner_conn, yard, EXPENSE, yard.admin, 20, removed=True)
+    add_entry(owner_conn, yard, CASH, yard.clerk, 500, recorded_by=yard.owner)
+    add_entry(owner_conn, yard, CREDIT, yard.admin, 40)
+    holders = [yard.clerk.id, yard.admin.id, yard.owner.id]
+    names = (
+        "coalesce(pettycash.member_name(e.holder_id), '') AS holder, "
+        "coalesce(pettycash.member_name(e.recorded_by), '') AS recorder, "
+        "pettycash.member_name(e.reviewed_by) AS reviewer"
+    )
+    for who in (yard.owner, yard.clerk, yard.admin):
+        with inside(executor, who):
+            for view_all, vehicles in (
+                (True, "ARRAY(SELECT setup.visible_vehicles())"),
+                (False, "ARRAY(SELECT setup.visible_vehicles())"),
+                (True, f"ARRAY['{yard.kaa}']::uuid[]"),
+            ):
+                one_by_one = executor.execute(
+                    f"SELECT e.id, {names} FROM pettycash.entries AS e "
+                    "WHERE e.holder_id = ANY (%s) "
+                    f"AND pettycash.entry_visible(e, %s, {vehicles}) ORDER BY e.id",
+                    (holders, view_all),
+                ).fetchall()
+                as_set = executor.execute(
+                    "SELECT id, holder_name, recorded_by_name, reviewed_by_name "
+                    f"FROM reports.pettycash_entries(%s, %s, {vehicles}) ORDER BY id",
+                    (holders, view_all),
+                ).fetchall()
+                assert [tuple(r.values()) for r in as_set] == [
+                    tuple(r.values()) for r in one_by_one
+                ]
+                assert one_by_one or not view_all

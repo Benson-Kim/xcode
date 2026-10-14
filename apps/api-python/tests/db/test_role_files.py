@@ -23,7 +23,7 @@ SELECT n.nspname || '.' || c.relname AS relation,
 FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 CROSS JOIN LATERAL aclexplode(c.relacl) AS a
-WHERE n.nspname IN ('identity', 'tenancy', 'setup', 'revenue', 'pettycash', 'ops')
+WHERE n.nspname IN ('identity', 'tenancy', 'setup', 'revenue', 'pettycash', 'expenses', 'ops')
   AND a.grantee <> c.relowner
 ORDER BY 1, 2, 3
 """

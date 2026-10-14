@@ -67,7 +67,7 @@ its tests decide, the inventory is corrected, and this document follows.
 | `Retry-After` | on 429 (seconds to the window end) and on 503 from a transient failure (`1`). Additions to the .NET contract; no client reads them |
 | `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` | on every response; no `Server` header (`docs/12-security.md`) |
 | Device or client identity headers | none; the device id travels in the body (`deviceId`) and in the `device` claim |
-| `Content-Encoding`, `Vary: Accept-Encoding` | gzip for `/setup/**` answers above 1 KiB when the client accepts it (the .NET API also offered Brotli; gzip is what the phone sends); never on `/auth/**` (byte-for-byte rule) or health |
+| `Content-Encoding`, `Vary: Accept-Encoding` | gzip for `/setup/**` answers above 1 KiB when the client accepts it (the .NET API also offered Brotli; gzip is what the phone sends), except spreadsheets (already a zip); `Vary: Accept-Encoding` on every `/setup/**` answer, compressed or not; never on `/auth/**` (byte-for-byte rule, and no compression oracle over tokens) or health (`http/middleware.py` `SetupCompressionMiddleware`, `tests/api/test_compression.py`) |
 
 ### 1.5 Middleware order
 
@@ -182,11 +182,12 @@ any header, no credentials, no exposed headers. No current client is a browser o
 | Route | Behaviour |
 |---|---|
 | `GET /health/live` | 200 `Healthy` (`text/plain`), no database call |
-| `GET /health/ready` | 200 `Healthy` when `SELECT 1` succeeds within 10 s as `xcode_app` and the contract version matches; else 503 `Unhealthy` |
+| `GET /health/ready` | 200 `Healthy` once the startup checks have passed (`docs/08-operability.md` section 6) and while `SELECT 1` succeeds within 10 s as `xcode_app`, the contract version matches and, with `XCODE_RATE_LIMIT_BACKEND=postgres`, the shared limiter answers (its own window `health:ready`); else 503 `Unhealthy`, the reason only in the log line `health.ready.failed` |
 | `GET /health` | 200 `{"status":"ok"}` (legacy JSON), no database call |
 
 None is authenticated, rate limited or checked against `XCODE_ALLOWED_HOSTS` (probes call by
-address); all carry `X-Request-ID`.
+address); all carry `X-Request-ID`. `GET /metrics` (Prometheus text, only with
+`XCODE_METRICS_ENABLED`) follows the same three rules; the proxy never forwards it.
 
 ### 1.11 OpenAPI
 
@@ -200,7 +201,12 @@ with `application/json` content referencing `#/components/schemas/AuthResponse` 
 `scheme: bearer`, `bearerFormat: JWT`. Every secured operation documents 401. Tags:
 `Setup`, `Organization` (settings, logo, appearance, preferences), `Revenue`, `Petty cash`
 (section 2.11); the .NET API also tags `Central expenses` and `Reports` (drift register rows
-1 and 2); auth routes untagged. Operation ids are the `operationId` column of section 2.
+1 and 2); auth routes untagged and without an `operationId`, as the .NET document had none.
+Operation ids are the `operationId` column of section 2, held for the tests in
+`tests/support/operations.json` (rows of routes not built yet are marked `planned`). No
+operation documents FastAPI's validation 422 (a refused request is 400, section 1.6), and the
+`HTTPValidationError` schemas are dropped (`http/openapi.py`). `xcode-api openapi` prints the
+same document without a database.
 
 ### 1.12 Accepted deviations from the .NET wire
 
@@ -416,9 +422,10 @@ as section 2.12 states.
 | ID | Route | Budget |
 |---|---|---|
 | H01 | `GET /health/live` | 0 |
-| H02 | `GET /health/ready` | 1 |
+| H02 | `GET /health/ready` | 1 (2 with `XCODE_RATE_LIMIT_BACKEND=postgres`: the limiter probe) |
 | H03 | `GET /health` | 0 |
-| X01 | `GET /openapi/v1.json` (development and testing only) | 0 |
+| X01 | `GET /openapi/v1.json` (development and testing by default; production only with `XCODE_OPENAPI_ENABLED=true`) | 0 |
+| M01 | `GET /metrics` (only with `XCODE_METRICS_ENABLED=true`) | 0 |
 
 ### 2.11 Petty cash (`docs/inventory/inventory-petty-cash.md` sections 4 and 6; `docs/15-design-v2-3.md` B19; tag `Petty cash`)
 
@@ -646,6 +653,13 @@ document. Bodies keep .NET's property order; what Python adds is appended at the
   writers, so .NET's `This expense was changed by another save.` answer has no counterpart (a two-connection
   test proves the stale writer gets `expense_version_conflict`).
 - `{id}` is a `uuid` convertor (404 empty body otherwise, as every `/setup` route).
+- Built 2026-10-13 (E01, E03 to E06; E02 is the reports build's): E04 answers `{ids, total}` with the rows in the
+  order sent (a retried purchase: its rows by id and the first one's stored purchase total, whatever the body says);
+  `allocations` amounts are read exactly (a third decimal gets `expense_allocation_amount`, not a binding error); E05
+  answers an identical line with the row as it is; `current` on the 409 is the row as the ledger lists it now for
+  the caller, `null` when the ledger cannot list it (outside its vehicle's days). The `source` filter takes the
+  three words in any case, blank meaning all. A row's `group` is present when its purchase still has more than one
+  row as bought (a detached row has none); a petty-cash row's `group` counts its parts now.
 
 #### 2.13.2 Reports (router `http/routers/reports.py`, tag `Reports`)
 
@@ -679,7 +693,8 @@ document. Bodies keep .NET's property order; what Python adds is appended at the
 - D02 body `{rows: [{vehicleId, amount, reason, note, version}]}`; each row runs R03's steps of `docs/05` 10.5 (the
   threshold, the rights, the back-dating limit as of the request), never .NET's older step list. A 400 names the
   vehicle (`KDA 103A: {sentence}`); a 409 is `revenue_day_conflict` with `current` and `vehicleId`; a 403 keeps its
-  sentence. `{date}` that is not a date is 404, as R03.
+  sentence. `{date}` that is not a date is the framework's 400 naming `path.date`, as R03 (built 2026-10-13; the
+  design said 404, which R03 never answered).
 - These routes must be declared before R03's `/{vehicleId}/{date}` (FastAPI matches in order; `day` and `export` are
   not uuids, so the convertor already keeps them apart, and the order makes it explicit).
 
@@ -707,6 +722,13 @@ document. Bodies keep .NET's property order; what Python adds is appended at the
   `group {id, size, total, units, unitAmount}` (`docs/05` 11.6).
 - P03's vehicles add `fleetNumber` after `active`, as S03 and S25 do (DN-B10-3; the gap was found by the verify of 07b D3 on
   2026-10-12 and is taken by the 08b build).
+- Built 2026-10-13: P05 with two or more `allocations` saves one waiting entry per vehicle, the first under the
+  entry id sent (or a new one), which is also the purchase's `group.id`; its answer is that first entry's; a retry
+  with the same id answers it as `replayed`. One allocation is a plain entry on that vehicle. Cash or a credit note
+  with allocations is refused with that kind's shape sentence. P06 refuses moving a part onto a vehicle its
+  purchase already has (`expense_purchase_has_vehicle`) and takes a part out of its group on a new item, units or
+  amount. `group` is the last member of an entry (null for an entry alone); `fleetNumber` the last of a vehicle
+  option.
 
 #### 2.13.5 Files
 
@@ -725,29 +747,10 @@ document. Bodies keep .NET's property order; what Python adds is appended at the
 Moved into section 3 by the build session with the routine that raises each (as 2.12.5 explains). (p) marks a sentence
 from the v2.3 prototype; the others are .NET's, except the four marked (new), decided here.
 
+The reports-and-exports rows (`report_*`, `export_*`, `pettycash_export_view_invalid`) moved to section 3 on 2026-10-13 (stream R of the build).
+
 | Code | Status | Sentence |
 |---|---|---|
-| `expense_vehicles_invalid` | 400 | `Choose 1-50 distinct vehicles.` |
-| `expense_allocation_amount` | 400 | `Each vehicle's amount must be other than zero, with at most two decimals.` |
-| `expense_allocation_sign` | 400 | `Each vehicle's amount must have the same sign as the total.` |
-| `expense_allocation_sum` | 400 | `The vehicle amounts must add up to the total.` |
-| `expense_date_future` | 400 | `An expense cannot be recorded for a future date.` |
-| `expense_date_too_old` | 400 | `Choose a date in the last ten years.` |
-| `expense_vehicle_not_yours` | 400 | `Choose one of your vehicles.` |
-| `expense_vehicle_inactive` | 400 | `{registration} was not in the fleet on that day.` |
-| `expense_item_not_in_use` | 400 | `Choose an item that is in use.` |
-| `expense_version_required` | 400 | `Send the version of the expense you opened.` |
-| `expense_purchase_has_vehicle` | 400 | `This purchase already has a row for {registration}.` |
-| `expense_change_other` | 403 | `Changing someone else's expense needs the permission "Edit an expense".` |
-| `expense_change_earlier_day` | 403 | `Changing an expense from an earlier day needs the permission "Edit an expense".` |
-| `expense_change_date` | 403 | `Changing the date of an expense needs the permission "Edit an expense".` |
-| `expense_version_conflict` | 409 | title `This expense has changed.`, `This expense was changed after you opened it. Check it and save again.`, `current` |
-| `expense_saved_by_other` | 409 | title `This expense has changed.`, `This expense was already saved by someone else. Reload and try again.` |
-| `expense_period_required` | 400 | `Choose the first and the last date.` |
-| `expense_period_order` | 400 | `The first date cannot be after the last date.` |
-| `expense_period_length` | 400 | `Choose a period of at most 367 days.` |
-| `expense_source_invalid` | 400 | `Choose central, petty cash or scheduled.` |
-| `expense_search_length` | 400 | `Search for 200 characters or fewer.` |
 | `report_period_both` | 400 | `Choose the first and last day.` |
 | `report_period_order` | 400 | `The first date cannot be after the last date.` |
 | `report_period_length` | 400 | `Choose at most 367 days.` |
@@ -758,18 +761,8 @@ from the v2.3 prototype; the others are .NET's, except the four marked (new), de
 | `export_format_invalid` | 400 | `Choose Excel (xlsx) or PDF.` |
 | `export_too_many_rows` | 400 | `There are {count} rows to export, more than 10,000. Choose a shorter period or search.` (`count` with thousands separators) |
 | `pettycash_export_view_invalid` | 400 | `Choose the expenses or the cash received.` |
-| `revenue_day_date_range` | 400 | `Choose a day from the last ten years up to today.` |
-| `revenue_day_rows_required` | 400 | `Enter the revenue or a no-earnings reason for at least one vehicle.` |
-| `revenue_day_rows_limit` | 400 | `Save at most 500 vehicles at once.` |
-| `revenue_day_vehicle_repeated` | 400 | `Each vehicle can be in the day only once.` |
-| `revenue_day_conflict` | 409 | title `This day already has a different record.`, `{registration} was changed after you opened the day. Check its current record and save again.`, `current`, `vehicleId` |
-| `recurring_condition_on_cost` | 400 | `Only a saving has a revenue rule.` (new) |
-| `recurring_condition_min` | 400 | `Enter the revenue target.` (p) |
-| `recurring_condition_days` | 400 | `Measure the revenue over 1, 7 or 30 days.` (new) |
-| `recurring_opening_on_cost` | 400 | `Only a saving has an opening balance.` (new) |
-| `recurring_opening_future` | 400 | `The opening balance date is after today.` (p) |
-| `recurring_opening_vehicle` | 400 | `An opening balance is for a vehicle of the saving.` (new) |
-| `recurring_savings_end` | 400 | `A saving has no end date.` (new) |
+
+The day-capture and saving-model rows were moved to section 3 on 2026-10-13 (stream C of the build). The `expense_*` rows moved to section 3 (block "Central expenses") on 2026-10-13, with the routines that raise them.
 
 Retired with the saving model: `recurring_savings_frequency` (savings run daily, weekly, monthly or yearly). Pause and
 resume reuse `recurring_already_stopped`. The rule of the day save's 400s (`{registration}: ` before the sentence when
@@ -910,7 +903,6 @@ Scheduled items (`inv 2.6`):
 | `recurring_allocations_count` | 400 | `Choose 1-500 distinct vehicles.` |
 | `recurring_allocation_sum` | 400 | `Vehicle shares must equal the total exactly.` |
 | `recurring_daily_retired` | 400 | `Daily schedules are no longer offered. Choose weekly, monthly or yearly.` |
-| `recurring_savings_frequency` | 400 | `Savings are set aside weekly or monthly.` |
 | `recurring_cost_needs_item` | 400 | `Choose the expense item this cost is for.` |
 | `recurring_start_required` | 400 | `Start date is required.` |
 | `recurring_start_too_early` | 400 | `A schedule can start no earlier than the first of the current month.` |
@@ -921,6 +913,13 @@ Scheduled items (`inv 2.6`):
 | `recurring_stop_later_pending` | 400 | `This item is already due to stop on a later date. Cancel that stop first.` |
 | `recurring_already_stopped` | 400 | `The item is already stopped.` |
 | `recurring_stop_in_effect` | 400 | `This item has already stopped. Add a new scheduled item instead.` |
+| `recurring_condition_on_cost` | 400 | `Only a saving has a revenue rule.` |
+| `recurring_condition_min` | 400 | `Enter the revenue target.` |
+| `recurring_condition_days` | 400 | `Measure the revenue over 1, 7 or 30 days.` |
+| `recurring_opening_on_cost` | 400 | `Only a saving has an opening balance.` |
+| `recurring_opening_future` | 400 | `The opening balance date is after today.` |
+| `recurring_opening_vehicle` | 400 | `An opening balance is for a vehicle of the saving.` |
+| `recurring_savings_end` | 400 | `A saving has no end date.` |
 
 Change log, expense catalog, investment (`inv 2.7` to `inv 2.9`):
 
@@ -958,6 +957,11 @@ Revenue (`inv 2.10`):
 | `revenue_search_length` | 400 | `Search for 40 characters or fewer.` |
 | `revenue_settings_invalid` | 400 | `The low-day threshold must be 0 or more and the amber band 0 to 100 per cent.` |
 | `dashboard_period_invalid` | 400 | `Period must be today, week or month.` |
+| `revenue_day_date_range` | 400 | `Choose a day from the last ten years up to today.` |
+| `revenue_day_rows_required` | 400 | `Enter the revenue or a no-earnings reason for at least one vehicle.` |
+| `revenue_day_rows_limit` | 400 | `Save at most 500 vehicles at once.` |
+| `revenue_day_vehicle_repeated` | 400 | `Each vehicle can be in the day only once.` |
+| `revenue_day_conflict` | 409 | title `This day already has a different record.`, detail `{registration} was changed after you opened the day. Check its current record and save again.`, `current` and `vehicle_id` from `DETAIL`; any 400 of a row is `{registration}: ` before its sentence (`vehicle_registration` in `DETAIL`) |
 
 Organization, logo, preferences (`inv 2.11`):
 
@@ -1060,6 +1064,59 @@ Petty cash (`inventory-petty-cash.md` sections 2.3, 2.4, 4.3; `docs/15-design-v2
 
 Petty cash reuses `page_out_of_range`, `history_dates_order`, `history_text_length` and
 `reason_length` (same sentences).
+
+Reports and exports (`inventory-expenses-reports.md` section 2.3; `docs/05-routines.md` 11.4):
+
+| Code | Status | Sentence |
+|---|---|---|
+| `report_period_both` | 400 | `Choose the first and last day.` |
+| `report_period_order` | 400 | `The first date cannot be after the last date.` |
+| `report_period_length` | 400 | `Choose at most 367 days.` |
+| `report_period_future` | 400 | `Choose a period that starts on or before today.` |
+| `report_search_length` | 400 | `Search for 200 characters or fewer.` |
+| `report_investment_permission` | 403 | `The investment report needs the permission "See the investment report".` |
+| `report_pettycash_permission` | 403 | `Petty cash reports need the permission "View petty cash reports".` |
+| `export_format_invalid` | 400 | `Choose Excel (xlsx) or PDF.` |
+| `export_too_many_rows` | 400 | `There are {count} rows to export, more than 10,000. Choose a shorter period or search.` (`count` with thousands separators) |
+| `pettycash_export_view_invalid` | 400 | `Choose the expenses or the cash received.` |
+
+The reports reuse `page_out_of_range` and `not_found` (an unknown report, a float outside the
+person's view); the petty-cash export reuses the overview's and list's codes (`pettycash_range_*`,
+`history_dates_order`, `pettycash_too_old`, `pettycash_status_invalid`, `history_text_length`),
+the expenses export the ledger's (`expense_period_*`, `expense_source_invalid`,
+`expense_search_length`) and the revenue export the week's (`revenue_week_range`).
+
+Central expenses (`inventory-expenses-reports.md` section 2.1; `docs/05-routines.md` 11.2). A
+central expense's line is checked as a petty-cash expense line, so its line refusals are the
+`pettycash_line_*` codes above; a shared petty-cash purchase uses the `expense_vehicles_invalid`
+and `expense_allocation_*` codes, and a part moved onto a vehicle its purchase already has
+`expense_purchase_has_vehicle`.
+
+| Code | Status | Sentence |
+|---|---|---|
+| `expense_vehicles_invalid` | 400 | `Choose 1-50 distinct vehicles.` |
+| `expense_allocation_amount` | 400 | `Each vehicle's amount must be other than zero, with at most two decimals.` |
+| `expense_allocation_sign` | 400 | `Each vehicle's amount must have the same sign as the total.` |
+| `expense_allocation_sum` | 400 | `The vehicle amounts must add up to the total.` |
+| `expense_date_future` | 400 | `An expense cannot be recorded for a future date.` |
+| `expense_date_too_old` | 400 | `Choose a date in the last ten years.` |
+| `expense_vehicle_not_yours` | 400 | `Choose one of your vehicles.` |
+| `expense_vehicle_inactive` | 400 | `{registration} was not in the fleet on that day.` |
+| `expense_item_not_in_use` | 400 | `Choose an item that is in use.` |
+| `expense_version_required` | 400 | `Send the version of the expense you opened.` |
+| `expense_purchase_has_vehicle` | 400 | `This purchase already has a row for {registration}.` |
+| `expense_change_other` | 403 | `Changing someone else's expense needs the permission "Edit an expense".` |
+| `expense_change_earlier_day` | 403 | `Changing an expense from an earlier day needs the permission "Edit an expense".` |
+| `expense_change_date` | 403 | `Changing the date of an expense needs the permission "Edit an expense".` |
+| `expense_version_conflict` | 409 | title `This expense has changed.`, detail `This expense was changed after you opened it. Check it and save again.`, `current` from `DETAIL` (the row as the ledger lists it, or `null`) |
+| `expense_saved_by_other` | 409 | title `This expense has changed.`, detail `This expense was already saved by someone else. Reload and try again.` |
+| `expense_period_required` | 400 | `Choose the first and the last date.` |
+| `expense_period_order` | 400 | `The first date cannot be after the last date.` |
+| `expense_period_length` | 400 | `Choose a period of at most 367 days.` |
+| `expense_source_invalid` | 400 | `Choose central, petty cash or scheduled.` |
+| `expense_search_length` | 400 | `Search for 200 characters or fewer.` |
+
+Central expenses reuse `page_out_of_range` and `reason_length` (the remove's reason is required).
 
 Dates in sentences are `yyyy-MM-dd` except the change-log reasons, which use `d MMM yyyy`
 (`docs/05-routines.md` section 6).

@@ -18,6 +18,7 @@ from ..domain.errors import DomainRefusal, SessionInvalid
 from .messages import INVALID_TITLE, message_for
 from .responses import JsonResponse
 from .schemas.common import ApiModel
+from .schemas.expenses import ExpenseLedgerRowDto
 from .schemas.pettycash import PettyCashEntryDto
 from .schemas.revenue import RevenueCellDto
 
@@ -43,8 +44,10 @@ _EMPTY_BODY_STATUSES = frozenset({404, 405, 415})
 # Refusal members that hold a contract model, written as that model is in a 200 answer.
 _EXTENSION_MODELS: Mapping[tuple[str, str], type[ApiModel]] = {
     ("revenue_version_conflict", "current"): RevenueCellDto,
+    ("revenue_day_conflict", "current"): RevenueCellDto,
     ("pettycash_entry_changed", "current"): PettyCashEntryDto,
     ("pettycash_already_saved", "current"): PettyCashEntryDto,
+    ("expense_version_conflict", "current"): ExpenseLedgerRowDto,
 }
 
 
@@ -106,7 +109,7 @@ async def domain_refusal_handler(request: Request, exc: Exception) -> Response:
     try:
         if message is None:
             raise KeyError(exc.code)
-        detail = message.sentence(parameters)
+        detail = prefixed_detail(message.status, message.sentence(parameters), parameters)
         extensions = {
             to_camel(key): _extension(exc.code, key, parameters.get(key))
             for key in message.extensions
@@ -129,6 +132,15 @@ async def domain_refusal_handler(request: Request, exc: Exception) -> Response:
         trace_id=trace_id_of(request),
         **extensions,
     )
+
+
+def prefixed_detail(status: int, sentence: str | None, parameters: Mapping[str, Any]) -> str | None:
+    """A day save's refused row: a 400 whose detail names ``vehicle_registration`` reads
+    ``{registration}: {sentence}``; any other refusal keeps its sentence."""
+    registration = parameters.get("vehicle_registration")
+    if status != 400 or sentence is None or not isinstance(registration, str):
+        return sentence
+    return f"{registration}: {sentence}"
 
 
 def _extension(code: str, key: str, value: Any) -> Any:

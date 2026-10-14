@@ -13,8 +13,12 @@ from starlette.responses import Response
 from ...application.caller import Caller
 from ...application.setup.cancel_recurring_stop import CancelRecurringStopCommand
 from ...application.setup.create_recurring import CreateRecurringCommand
+from ...application.setup.get_recurring_runs import GetRecurringRunsQuery
+from ...application.setup.get_recurring_summary import GetRecurringSummaryQuery
 from ...application.setup.list_recurring import ListRecurringQuery
 from ...application.setup.list_vehicle_options import ListVehicleOptionsQuery
+from ...application.setup.pause_recurring import PauseRecurringCommand
+from ...application.setup.resume_recurring import ResumeRecurringCommand
 from ...application.setup.revise_recurring import ReviseRecurringCommand
 from ...application.setup.stop_recurring import StopRecurringCommand
 from ...container import Container
@@ -23,7 +27,14 @@ from ..responses import respond
 from ..routing import SetupRoute
 from ..schemas.access import IdResponse
 from ..schemas.common import Page, problem_responses
-from ..schemas.setup import RecurringDto, RecurringVehicleOption, SaveRecurring, StopRecurring
+from ..schemas.setup import (
+    RecurringDto,
+    RecurringRunsDto,
+    RecurringSummaryDto,
+    RecurringVehicleOption,
+    SaveRecurring,
+    StopRecurring,
+)
 
 CallerDep = Annotated[Caller, Depends(current_caller)]
 ContainerDep = Annotated[Container, Depends(container)]
@@ -62,6 +73,17 @@ async def list_recurring(
             total=items.total,
         )
     )
+
+
+@router.get(
+    "/recurring/summary",
+    operation_id="GetSetupRecurringSummary",
+    response_model=RecurringSummaryDto,
+    responses=problem_responses(403),
+)
+async def get_recurring_summary(caller: CallerDep, c: ContainerDep) -> Response:
+    summary = await c.get_recurring_summary.execute(GetRecurringSummaryQuery(caller))
+    return respond(RecurringSummaryDto.from_record(summary))
 
 
 @router.get(
@@ -126,4 +148,37 @@ async def stop_recurring(
 )
 async def cancel_recurring_stop(item_id: ItemId, caller: CallerDep, c: ContainerDep) -> Response:
     result = await c.cancel_recurring_stop.execute(CancelRecurringStopCommand(caller, item_id))
+    return respond(IdResponse(id=result.id))
+
+
+@router.get(
+    "/recurring/{id:uuid}/runs",
+    operation_id="GetSetupRecurringRuns",
+    response_model=RecurringRunsDto,
+    responses=problem_responses(403, 404),
+)
+async def get_recurring_runs(item_id: ItemId, caller: CallerDep, c: ContainerDep) -> Response:
+    runs = await c.get_recurring_runs.execute(GetRecurringRunsQuery(caller, item_id))
+    return respond(RecurringRunsDto.from_record(runs))
+
+
+@router.post(
+    "/recurring/{id:uuid}/pause",
+    operation_id="PauseSetupRecurring",
+    response_model=IdResponse,
+    responses=problem_responses(400, 403, 404),
+)
+async def pause_recurring(item_id: ItemId, caller: CallerDep, c: ContainerDep) -> Response:
+    result = await c.pause_recurring.execute(PauseRecurringCommand(caller, item_id))
+    return respond(IdResponse(id=result.id))
+
+
+@router.post(
+    "/recurring/{id:uuid}/resume",
+    operation_id="ResumeSetupRecurring",
+    response_model=IdResponse,
+    responses=problem_responses(400, 403, 404),
+)
+async def resume_recurring(item_id: ItemId, caller: CallerDep, c: ContainerDep) -> Response:
+    result = await c.resume_recurring.execute(ResumeRecurringCommand(caller, item_id))
     return respond(IdResponse(id=result.id))

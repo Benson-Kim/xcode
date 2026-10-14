@@ -66,7 +66,7 @@ BEGIN
       PERFORM api.pettycash_entry_create(
         p_owner_id, p_organization_id, p_request_id, NULL::uuid, v_event.action, p_day,
         v_event.amount, v_manager_id, NULL::uuid, NULL::uuid, v_event.units, NULL::text,
-        v_event.note, false, p_at
+        v_event.note, false, NULL::jsonb, p_at
       );
     ELSIF v_event.action = 'expense' THEN
       SELECT f.id INTO v_vehicle_id
@@ -79,7 +79,7 @@ BEGIN
       PERFORM api.pettycash_entry_create(
         v_manager_id, p_organization_id, p_request_id, NULL::uuid, 'expense', p_day,
         v_event.amount, NULL::uuid, v_vehicle_id, v_item_id, v_event.units, NULL::text,
-        v_event.note, false, p_at
+        v_event.note, false, NULL::jsonb, p_at
       );
     ELSE
       SELECT e.* INTO v_entry

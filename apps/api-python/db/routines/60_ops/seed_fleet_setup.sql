@@ -75,7 +75,7 @@ BEGIN
           SELECT jsonb_agg(jsonb_build_object('vehicle_id', s #>> '{}', 'amount', v_event.share))
           FROM jsonb_array_elements(v_shares) AS s
         ),
-        v_item_id, NULL, v_event.month, NULL, p_at
+        v_item_id, NULL, v_event.month, NULL, NULL, NULL, p_at
       );
       SET CONSTRAINTS setup.check_allocation_sum DEFERRED;
     END LOOP;

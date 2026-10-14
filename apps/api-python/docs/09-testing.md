@@ -74,7 +74,7 @@ Carried over from the repository's CLAUDE.md and made specific for this project:
 | Routine | `tests/db/test_<area>_routines.py` | `xcode_app` | per routine: happy path, each `XC` error with its `MESSAGE` code, tenant isolation (actor from another organization), version bump and `XC409`, idempotent replay, pagination clamp |
 | Migration runner | `tests/db/test_migrate.py` | `xcode_owner` | fresh apply, idempotent re-run, checksum drift refused, concurrent runners serialized, `down` then `up`, routine ownership fix-up |
 | HTTP contract | `tests/api/test_<feature>.py` | app role via the app | status codes, exact bodies and headers from `docs/06-http-contract.md`, auth and permission refusals, enumeration uniformity, statement budgets, OpenAPI document assertions |
-| Operability | `tests/api/test_operability.py` | | health routes, request id propagation, JSON logs with request id outside development, problem details carry `requestId` and never `exception`, graceful mail drain, startup refusals (production without key/host/from/url; dev flags outside development) |
+| Operability | `tests/api/test_operability.py` | | health routes, request id propagation, JSON logs with request id outside development, problem details carry `requestId` and never `exception`, graceful mail drain, the startup order (contract version, the unassigned-user warning, readiness only after the checks, no DDL, no owner or operator URL read outside development, the worker-thread cap); the startup refusals through `serve` are `tests/unit/test_production_startup.py`, the settings matrix `tests/unit/test_settings.py` |
 
 ## 4. Crosswalk from the .NET suite
 
@@ -116,7 +116,7 @@ Mechanical substitutions that apply to every row and are not repeated:
 | `RevenueDashboardCacheTests` (13) | not ported: the design has no dashboard cache (`docs/05-routines.md` section 7); the "fresh figures after a change" rows become freshness tests in `tests/db/test_revenue_routines.py` | if a cache table is added later, its invalidation tests come with it |
 | `InvestmentTests` (5), `RecurringCrudTests` (4), `ScheduledItemRulesTests` (9), `DomainRuleTests` (20), `DueDateGeneratorTests` (2), `ExpenseCatalogTests` (6) | `tests/api/test_setup_*.py`; `tests/db/test_setup_*_routines.py`, `test_setup_helpers.py` | domain-rule tests move to routine tests (the rules live in SQL); the seeded property test of `DomainRuleTests` (`Random(20260930)`, 400 runs) is kept as a `hypothesis`-free loop against `setup.target_on` |
 | `ListFilterTests` (3) | vehicles by company: `tests/db/test_setup_vehicle_routines.py` and `tests/api/test_setup_vehicles.py` `test_the_company_filter_counts_and_pages_its_matches_only`; scheduled items by kind, company and status, running ones first: `tests/db/test_setup_recurring_routines.py` `test_the_list_filters_by_kind_company_and_status_with_running_items_first` (and the scope and refusal tests beside it), `tests/api/test_setup_recurring.py` the test of the same name | `PeopleFilterByRoleAndWhereTheyAreWithSigningIn` is not built yet (drift register row 8: 08b D6 or a `verify.md` run on `prompt:05`) |
-| `ForwardedClientTests` (3), `CompressionTests` (3), `OperabilityTests` (12), `ProductionStartupTests` (4), `OpenApiTests` (2), `ArchitectureTests` (1), `PermissionKeysTests` (6) | `tests/api/test_http_plumbing.py`, `test_compression.py`, `test_operability.py`, `test_openapi.py`; `tests/unit/test_layers.py`; `tests/db/test_enum_parity.py` plus `tests/unit/test_permission_keys.py` (the catalogue, `Permission`, `CellStatus` and the shared `PERMISSION_KEYS` and `REVENUE_STATUSES` lists read from the repository root; `ARefusalNamesAKeyTheCatalogDoesNotLabel` has no counterpart: refusal sentences are fixed strings in `http/messages.py`) | Brotli rows become gzip-only (prompt 09); startup messages name the `XCODE_*` settings; the EF-specific operability tests (`AuthTransactionsWorkWithRetryStrategy`, `TestingEnvironmentDoesNotAutoMigrate`) become the gateway retry test and the "startup runs no DDL" test |
+| `ForwardedClientTests` (3), `CompressionTests` (3), `OperabilityTests` (12), `ProductionStartupTests` (4), `OpenApiTests` (2), `ArchitectureTests` (1), `PermissionKeysTests` (6) | `tests/api/test_http_plumbing.py`, `test_compression.py`, `test_operability.py`, `test_openapi.py`, `test_metrics.py`; `tests/unit/test_production_startup.py` (the four production refusals and the safety switches through `serve`), `tests/unit/test_layers.py`; `tests/db/test_enum_parity.py` plus `tests/unit/test_permission_keys.py` (the catalogue, `Permission`, `CellStatus` and the shared `PERMISSION_KEYS` and `REVENUE_STATUSES` lists read from the repository root; `ARefusalNamesAKeyTheCatalogDoesNotLabel` has no counterpart: refusal sentences are fixed strings in `http/messages.py`) | Brotli rows become gzip-only (prompt 09); startup messages name the `XCODE_*` settings; the EF-specific operability tests (`AuthTransactionsWorkWithRetryStrategy`, `TestingEnvironmentDoesNotAutoMigrate`) become the gateway retry test and the "startup runs no DDL" test |
 | `MigrationSnapshotTests` (5), `SetupMigrationSnapshotTests` (1), `SqlServerTests` (2), `DemoSeedTests` (3) | `tests/db/test_migrate.py`, `test_schema_structure.py`; `tests/db/test_ops_routines.py` (seed twice) | snapshot and `sp_rename` script tests have no counterpart; `db verify` and the structure tests replace them; the policy clamp data fix is a data-migration check |
 | `PettyCashTests` (21 since 9276c51) | `tests/api/test_petty_cash.py`, `tests/db/test_pettycash_routines.py` and `test_pettycash_helpers.py` (prompt 08) | per `docs/inventory/inventory-petty-cash.md` section 5 |
 
@@ -217,6 +217,35 @@ the Python test asserts the notes' answer and its name says so.
 | `VehicleReportTests` (the parts changed in 9276c51) | `tests/api/test_setup_vehicles.py`, `tests/db/test_setup_vehicle_routines.py` | `CentralExpensesReachTheReportUnderTheirBucketAndOneReadCoversAnyNumberOfThem`: central postings with `source` `central`, one statement however many; every posting source through `setup.fleet_postings` |
 | `PettyCashTests` (the working tree's two new methods) | prompt 08's modules (drift row 7) | shared purchases add `tests/db/test_pettycash_routines.py::test_a_shared_purchase_is_one_entry_per_vehicle_and_recounts` |
 | none (released clients) | `tests/api/test_contract_released_clients.py`: raw-JSON rows for the ledger and options, the reports catalogue and one report per group, the scheduled-items summary | the property names, kinds and order the web reads (`docs/06` 2.13) |
+
+Built 2026-10-13, central expenses and shared purchases (the test names as written):
+- `CentralExpenseTests`: `tests/api/test_expenses.py` (19 test functions; the scenarios as
+  `test_one_vehicle_records_one_row_and_its_log`, `test_even_and_uneven_splits_keep_the_purchase_on_every_row`,
+  `test_a_retried_purchase_answers_its_rows_and_a_stolen_id_is_a_conflict`,
+  `test_a_change_replays_an_identical_line_and_a_stale_one_is_a_409_with_the_row`,
+  `test_a_new_item_units_or_amount_takes_a_row_out_of_its_group_and_keeps_the_key`,
+  `test_removing_needs_a_reason_and_takes_the_row_out_of_the_ledger_and_the_report`,
+  `test_recording_alone_changes_only_its_own_rows_of_the_day`, `test_the_ledger_lists_three_sources_newest_first_and_never_savings`,
+  `test_source_and_search_narrow_the_rows_not_the_figures_and_pages_are_cut`,
+  `test_a_scoped_person_sees_nothing_outside_their_vehicles_change_log_included`; the read budget as
+  `test_the_ledger_reads_with_two_statements_however_many_rows` (5, 150 and 300 rows) and
+  `test_every_route_keeps_the_statement_budget_of_two`). The rules: `tests/db/test_expense_routines.py` (61 tests), with
+  the race as `test_two_connections_recording_one_purchase_make_one_set_of_rows`, the stale writer as
+  `test_the_stale_writer_on_a_second_connection_gets_the_version_conflict_with_current`, the back-dating limit as
+  `test_a_central_expense_before_the_limit_is_refused_on_record_change_and_remove`, the scoped figures as
+  `test_the_ledger_figures_of_a_scoped_viewer_leave_out_hidden_vehicles` and the page-only ledger (the page's rows built
+  alone) as `test_every_page_is_the_ledger_rows_helper_cut_in_the_ledgers_order` (62 tests since).
+- `CentralExpenseDomainTests`: `test_one_vehicle_takes_the_purchase_as_typed_and_its_id`,
+  `test_a_split_never_loses_or_invents_a_cent`, `test_fifty_vehicles_share_one_purchase_and_fifty_one_are_refused`,
+  `test_the_purchase_checks_run_in_their_order`, `test_a_purchase_amount_sent_as_a_json_number_is_read_exactly` and
+  `test_a_new_item_units_or_amount_leaves_the_group_and_a_new_date_vehicle_or_note_keeps_it`.
+- Shared purchases: `tests/db/test_pettycash_routines.py::test_a_shared_purchase_is_one_entry_per_vehicle_and_recounts`
+  and `::test_a_shared_purchase_follows_the_purchase_rules_and_only_an_expense_takes_one`; on the wire
+  `tests/api/test_petty_cash.py::test_a_shared_expense_is_one_entry_per_vehicle_on_the_wire` and
+  `::test_a_shared_expense_follows_the_purchase_rules_and_only_an_expense_takes_one`.
+- History: `tests/db/test_history_routines.py::test_central_expense_and_export_rows_follow_the_scope`. Parity:
+  `tests/db/test_fakes_match_routines.py::test_the_expenses_fake_answers_as_the_routines_do`. Released clients:
+  `tests/api/test_contract_released_clients.py::test_the_expense_ledger_and_options_read_as_the_web_does`.
 
 ## 5. Commands
 

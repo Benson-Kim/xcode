@@ -27,8 +27,8 @@ from .schema_spec import (
     TableKind,
 )
 
-DATA_SCHEMAS = ("identity", "tenancy", "setup", "revenue", "pettycash", "ops")
-ALL_SCHEMAS = (*DATA_SCHEMAS, "api")
+DATA_SCHEMAS = ("identity", "tenancy", "setup", "revenue", "pettycash", "expenses", "ops")
+ALL_SCHEMAS = (*DATA_SCHEMAS, "reports", "api")
 
 # Secret-ish column names forbidden unless the name ends in _hash or _digest. The code
 # tables' ``code`` key is an enumeration integer, not a secret, and is exempt by table.
@@ -56,7 +56,7 @@ DYNAMIC_SQL_ALLOW_LIST: frozenset[str] = frozenset()
 TENANT_GUARD_ALLOW_LIST: frozenset[str] = frozenset()
 
 # Schemas xcode_readonly may never enter; it reads code tables in tenancy, setup, revenue.
-_READONLY_CLOSED_SCHEMAS = ("identity", "ops", "api", "pettycash")
+_READONLY_CLOSED_SCHEMAS = ("identity", "ops", "api", "pettycash", "expenses", "reports")
 
 _CONSTRAINED_ROLES = ("xcode_app", "xcode_operator", "xcode_readonly")
 

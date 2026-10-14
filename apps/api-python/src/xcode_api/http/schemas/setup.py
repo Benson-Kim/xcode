@@ -19,7 +19,10 @@ from pydantic import Field
 
 from ...domain.setup import (
     InvestmentDetails,
+    OpeningAmount,
     RecurringDefinition,
+    SavingCondition,
+    SavingOpening,
     Share,
     VehicleDetails,
 )
@@ -180,6 +183,22 @@ class AllocationDto(ApiModel):
     active: bool
 
 
+class RunStatesDto(ApiModel):
+    saved: int
+    skipped: int
+    held: int
+
+
+class RevenueRuleDto(ApiModel):
+    min: Money
+    days: int
+
+
+class OpeningSummaryDto(ApiModel):
+    opened_on: date = Field(alias="date")
+    total: Money
+
+
 class RecurringDto(ApiModel):
     id: UUID
     version_id: UUID
@@ -201,6 +220,54 @@ class RecurringDto(ApiModel):
     note: str | None
     month: int | None
     active_amount: Money
+    paused_from: date | None
+    last_run: date | None
+    last_run_vehicles: int
+    balance: Money | None
+    last_run_states: RunStatesDto | None
+    condition: RevenueRuleDto | None
+    opening: OpeningSummaryDto | None
+    next_run: date | None
+
+
+class RecurringRunShareDto(ApiModel):
+    vehicle_id: UUID
+    registration: str
+    amount: Money
+    state: str
+    revenue: Money | None
+
+
+class RecurringRunDto(ApiModel):
+    run_on: date = Field(alias="date")
+    amount: Money
+    shares: list[RecurringRunShareDto]
+
+
+class RecurringRunsDto(ApiModel):
+    """``GET /setup/recurring/{id}/runs``."""
+
+    id: UUID
+    name: str
+    kind: int
+    start: date
+    total: Money
+    run_count: int
+    runs: list[RecurringRunDto]
+
+
+class RecurringSummaryDto(ApiModel):
+    """``GET /setup/recurring/summary``: a figure of a kind the caller cannot view is null."""
+
+    from_date: date = Field(alias="from")
+    to_date: date = Field(alias="to")
+    costs_due: Money | None
+    saved: Money | None
+    savings_balance: Money | None
+    running_costs: int | None
+    paused_costs: int | None
+    running_savings: int | None
+    paused_savings: int | None
 
 
 class RecurringVehicleOption(ApiModel):
@@ -219,9 +286,25 @@ class ShareRequest(ApiModel):
     amount: Amount | None = None
 
 
+class ConditionRequest(ApiModel):
+    min: Amount | None = None
+    days: Int32 | None = None
+
+
+class OpeningAmountRequest(ApiModel):
+    vehicle_id: UUID | None = None
+    amount: Amount | None = None
+
+
+class OpeningRequest(ApiModel):
+    opened_on: date | None = Field(default=None, alias="date")
+    amounts: list[OpeningAmountRequest] = Field(default_factory=list)
+
+
 class SaveRecurring(ApiModel):
     """``POST /setup/recurring`` and ``PUT /setup/recurring/{id}``; a ``category`` the older
-    web still sends is ignored."""
+    web still sends is ignored. A saving's ``condition`` and ``opening``: an ``opening`` absent
+    from a revise keeps the stored one, null removes it."""
 
     name: str | None = None
     kind: Int32 = 0
@@ -236,6 +319,8 @@ class SaveRecurring(ApiModel):
     expense_item_id: UUID | None = None
     note: str | None = None
     month: Int32 | None = None
+    condition: ConditionRequest | None = None
+    opening: OpeningRequest | None = None
 
     def definition(self) -> RecurringDefinition:
         return RecurringDefinition(
@@ -251,6 +336,16 @@ class SaveRecurring(ApiModel):
             expense_item_id=self.expense_item_id,
             note=self.note,
             month=self.month,
+            condition=None
+            if self.condition is None
+            else SavingCondition(self.condition.min, self.condition.days),
+            opening=None
+            if self.opening is None
+            else SavingOpening(
+                self.opening.opened_on,
+                tuple(OpeningAmount(a.vehicle_id, a.amount) for a in self.opening.amounts),
+            ),
+            keep_opening="opening" not in self.model_fields_set,
         )
 
 

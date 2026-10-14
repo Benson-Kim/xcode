@@ -247,3 +247,73 @@ class CaptureResult:
     id: UUID
     version: int
     outcome: CaptureOutcome
+
+
+@dataclass(frozen=True, slots=True)
+class LastWeek:
+    """The record seven days earlier: its amount and reason label."""
+
+    amount: Decimal | None
+    reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RevenueDayVehicle:
+    id: UUID
+    company_id: UUID
+    registration: str
+    fleet_number: str | None
+    day: RevenueCell
+    last_week: LastWeek | None
+
+
+@dataclass(frozen=True, slots=True)
+class RevenueDay:
+    """One day of the fleet for capture: at most 500 vehicles, ``truncated`` when more were in
+    the fleet that day."""
+
+    business_date: date
+    date: date
+    vehicles: tuple[RevenueDayVehicle, ...]
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RevenueDayQuery:
+    """``day`` null is the business date."""
+
+    context: TenantContext
+    day: date | None
+    company_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class RevenueDayRow:
+    """One vehicle of a day save as the client sent it; checked by the routine."""
+
+    vehicle_id: UUID | None
+    amount: Decimal | None
+    reason: str | None
+    note: str | None
+    version: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class RevenueDaySave:
+    context: TenantContext
+    day: date
+    rows: tuple[RevenueDayRow, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RevenueDaySaved:
+    vehicle_id: UUID
+    id: UUID
+    version: int
+
+
+@dataclass(frozen=True, slots=True)
+class RevenueDayResult:
+    """Each saved row in the order sent."""
+
+    rows: tuple[RevenueDaySaved, ...]

@@ -772,11 +772,11 @@ TABLES: tuple[Table, ...] = (
             text("Action", "action"),
             text("Entity", "entity"),
             jsonb("Before", "before"),
-            jsonb("After", "after"),
+            _col("After", "after", "text", kind="jsonb"),
             instant("OccuredAt", "occurred_at"),
             text("CorrelationId", "request_id"),
         ),
-        convert=("audit_ids", "json_keys"),
+        convert=("audit_reason_text", "audit_ids", "json_keys"),
     ),
     Table(
         32,

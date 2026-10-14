@@ -1,7 +1,9 @@
-"""The OpenAPI document, auth half (``docs/06-http-contract.md`` section 1.11): the sign-in
-operation documents 202 and 423 with ``AuthResponse`` and no security, the two bearer
-operations carry ``Bearer`` and document 401, the scheme is ``http``/``bearer``/``JWT``, and
-auth routes are untagged."""
+"""The OpenAPI document (``docs/06-http-contract.md`` section 1.11): the sign-in operation
+documents 202 and 423 with ``AuthResponse`` and no security, the bearer operations carry
+``Bearer`` and document 401, the scheme is ``http``/``bearer``/``JWT``, auth routes are
+untagged and carry no ``operationId``, every operation of the section 2 catalogue has its id
+and its .NET tag, no framework 422 is documented, the CLI prints the same document, and the
+route is absent when disabled."""
 
 from __future__ import annotations
 
@@ -347,3 +349,62 @@ def test_the_cli_document_passes_the_same_assertions(
     for row in OPERATIONS:
         if not row["planned"]:
             assert operations[(row["method"], row["path"])]["operationId"] == row["operationId"]
+
+
+# --- the routes the app serves equal the routes docs/06 section 2 lists -------------------
+
+_CONTRACT_ROUTE = re.compile(r"`(GET|POST|PUT|DELETE|PATCH) (/[^`?\s]*)")
+
+
+def _without_converters(path: str) -> str:
+    return re.sub(r"\{(\w+):\w+\}", r"{\1}", path)
+
+
+def _contract_routes() -> set[tuple[str, str]]:
+    routes: set[tuple[str, str]] = set()
+    in_catalogue = False
+    for line in DOCS.read_text("utf-8").replace("\r", "").split("\n"):
+        if line.startswith("## "):
+            in_catalogue = line.startswith("## 2.")
+        elif in_catalogue and line.startswith("|"):
+            routes |= {
+                (method, _without_converters(path))
+                for method, path in _CONTRACT_ROUTE.findall(line)
+            }
+    return routes
+
+
+def _served_routes(app: Any) -> set[tuple[str, str]]:
+    """Every method and path the app answers, hidden from the document or not."""
+    served: set[tuple[str, str]] = set()
+    pending = list(app.router.routes)
+    while pending:
+        route = pending.pop()
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            pending.extend(included.routes)
+            continue
+        for method in getattr(route, "methods", None) or ():
+            if method != "HEAD":
+                served.add((method, _without_converters(route.path)))
+    return served
+
+
+def test_every_served_route_is_in_the_contract_and_every_contract_route_is_served(
+    make_settings: Callable[..., Settings],
+    ops: FakeOpsRepository,
+    make_container: Callable[[Settings, FakeOpsRepository], Container],
+) -> None:
+    settings = make_settings(metrics_enabled=True)
+    app = create_app(settings, make_container(settings, ops))
+    contract = _contract_routes()
+    served = _served_routes(app)
+    assert len(served) > 100
+    assert served - contract == set()
+    assert contract - served == set()
+
+    async def hidden() -> None:
+        return None
+
+    app.add_api_route("/auth/debug", hidden, include_in_schema=False)
+    assert _served_routes(app) - contract == {("GET", "/auth/debug")}

@@ -913,3 +913,31 @@ def test_total_counts_only_what_the_viewer_may_see(
     page = _history(app_conn, ledger.company_viewer, size=1)
     assert page["total"] == 8 + 3
     assert len(page["items"]) == 1
+
+
+def test_central_expense_and_export_rows_follow_the_scope(
+    app_conn: Conn, owner_conn: Conn, owner: Member, office: Member
+) -> None:
+    """A central-expense row is seen with its vehicle (the petty-cash rule); an export row only
+    by a viewer who sees every company; the section filter takes both."""
+    north = add_company(owner_conn, owner.org, "North")
+    south = add_company(owner_conn, owner.org, "South")
+    seen_vehicle = add_vehicle(owner_conn, owner.org, north, "KDA 103A")
+    hidden_vehicle = add_vehicle(owner_conn, owner.org, south, "KDB 204B")
+    set_scope(owner_conn, owner, owner.org, all_companies=True)
+    set_scope(owner_conn, office, owner.org, companies=[north])
+    set_override(owner_conn, office, "audit.view")
+    for vehicle, reason in (
+        (seen_vehicle, "Recorded central expense on KDA 103A for 9 Oct 2026: Tyres, KES 4,000"),
+        (hidden_vehicle, "Recorded central expense on KDB 204B for 9 Oct 2026: Tyres, KES 300"),
+    ):
+        seed_change(
+            owner_conn, owner.org, owner.id, "centralexpenses", uuid4(), reason, vehicle=vehicle
+        )
+    seed_change(owner_conn, owner.org, owner.id, "reports", uuid4(), "Exported Net by vehicle")
+    assert _reasons(_history(app_conn, office, section="centralexpenses")) == [
+        "Recorded central expense on KDA 103A for 9 Oct 2026: Tyres, KES 4,000"
+    ]
+    assert _reasons(_history(app_conn, office, section="reports")) == []
+    assert len(_reasons(_history(app_conn, owner, section="centralexpenses"))) == 2
+    assert _reasons(_history(app_conn, owner, section="reports")) == ["Exported Net by vehicle"]

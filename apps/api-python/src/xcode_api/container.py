@@ -2,11 +2,12 @@
 
 ``build_container`` builds the real routine gateways from the pool by default; tests and the
 ``openapi`` command substitute ``ops``, ``identity``, ``tenancy``, ``setup``, ``revenue``,
-``pettycash`` (and any other port) through the keyword arguments.
+``pettycash``, ``expenses`` (and any other port) through the keyword arguments.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,6 +43,12 @@ from .application.auth.sign_out import SignOut
 from .application.auth.start_sign_in import StartSignIn
 from .application.auth.verify_code import VerifyCode
 from .application.auth.verify_device import VerifyDevice
+from .application.expenses.change_expense import ChangeExpense
+from .application.expenses.export_ledger import ExportExpenseLedger
+from .application.expenses.get_ledger import GetExpenseLedger
+from .application.expenses.get_options import GetExpenseOptions
+from .application.expenses.record_expense import RecordExpense
+from .application.expenses.remove_expense import RemoveExpense
 from .application.ops.check_readiness import CheckReadiness
 from .application.organization.delete_organization_logo import DeleteOrganizationLogo
 from .application.organization.get_appearance import GetAppearance
@@ -55,6 +62,7 @@ from .application.pettycash.approve_day import ApprovePettyCashDay
 from .application.pettycash.approve_entries import ApprovePettyCashEntries
 from .application.pettycash.approve_entry import ApprovePettyCashEntry
 from .application.pettycash.create_entry import CreatePettyCashEntry
+from .application.pettycash.export_entries import ExportPettyCashEntries
 from .application.pettycash.get_dashboard import GetPettyCashDashboard
 from .application.pettycash.get_options import GetPettyCashOptions
 from .application.pettycash.get_overview import GetPettyCashOverview
@@ -64,18 +72,34 @@ from .application.pettycash.remove_entry import RemovePettyCashEntry
 from .application.pettycash.reopen_entry import ReopenPettyCashEntry
 from .application.pettycash.send_back_entry import SendBackPettyCashEntry
 from .application.pettycash.update_entry import UpdatePettyCashEntry
-from .application.ports import Clock, Mailer, PinHasher, RateLimiter, SecretSource, TokenIssuer
+from .application.ports import (
+    Clock,
+    Mailer,
+    PinHasher,
+    RateLimiter,
+    ReportFileWriter,
+    SecretSource,
+    TokenIssuer,
+)
+from .application.reports.export_report import ExportReport
+from .application.reports.get_report import GetReport
+from .application.reports.get_reports_access import GetReportsAccess
 from .application.repositories import (
+    ExpensesRepository,
     IdentityRepository,
     OpsRepository,
     PettyCashRepository,
+    ReportsRepository,
     RevenueRepository,
     SetupRepository,
     TenancyRepository,
 )
 from .application.revenue.capture_revenue import CaptureRevenue
+from .application.revenue.export_week import ExportRevenueWeek
 from .application.revenue.get_dashboard import GetRevenueDashboard
+from .application.revenue.get_day import GetRevenueDay
 from .application.revenue.get_week import GetRevenueWeek
+from .application.revenue.save_day import SaveRevenueDay
 from .application.setup.archive_company import ArchiveCompany
 from .application.setup.cancel_recurring_stop import CancelRecurringStop
 from .application.setup.create_company import CreateCompany
@@ -87,6 +111,8 @@ from .application.setup.create_recurring import CreateRecurring
 from .application.setup.create_vehicle import CreateVehicle
 from .application.setup.delete_investment import DeleteInvestment
 from .application.setup.get_investment import GetInvestment
+from .application.setup.get_recurring_runs import GetRecurringRuns
+from .application.setup.get_recurring_summary import GetRecurringSummary
 from .application.setup.get_vehicle_report import GetVehicleReport
 from .application.setup.list_companies import ListCompanies
 from .application.setup.list_company_options import ListCompanyOptions
@@ -97,12 +123,14 @@ from .application.setup.list_recurring import ListRecurring
 from .application.setup.list_target_sets import ListTargetSets
 from .application.setup.list_vehicle_options import ListVehicleOptions
 from .application.setup.list_vehicles import ListVehicles
+from .application.setup.pause_recurring import PauseRecurring
 from .application.setup.remove_target_set import RemoveTargetSet
 from .application.setup.rename_company import RenameCompany
 from .application.setup.rename_expense_item import RenameExpenseItem
 from .application.setup.rename_expense_main_category import RenameExpenseMainCategory
 from .application.setup.restore_company import RestoreCompany
 from .application.setup.restore_vehicle import RestoreVehicle
+from .application.setup.resume_recurring import ResumeRecurring
 from .application.setup.retire_vehicle import RetireVehicle
 from .application.setup.revise_recurring import ReviseRecurring
 from .application.setup.save_target_set import SaveTargetSet
@@ -113,13 +141,18 @@ from .application.setup.update_expense_category import UpdateExpenseCategory
 from .application.setup.update_investment import UpdateInvestment
 from .application.setup.update_vehicle import UpdateVehicle
 from .db.contract import EXPECTED_CONTRACT_VERSION
+from .db.routines.expenses import ExpensesRoutines
 from .db.routines.identity import IdentityRoutines
 from .db.routines.ops import OpsRoutines
 from .db.routines.pettycash import PettyCashRoutines
+from .db.routines.reports import ReportsRoutines
 from .db.routines.revenue import RevenueRoutines
 from .db.routines.setup import SetupRoutines
 from .db.routines.tenancy import TenancyRoutines
+from .domain.reports import ExportFormat
 from .infra.clock import SystemClock
+from .infra.exports.pdf import ReportLabAdapter
+from .infra.exports.xlsx import XlsxWriterAdapter
 from .infra.mail import LogMailer, MailQueue, SmtpMailer, VerificationMailer
 from .infra.rate_limit import MemoryRateLimiter, PostgresRateLimiter
 from .security.device_tokens import RandomDeviceTokens
@@ -201,6 +234,10 @@ class Container:
     revise_recurring: ReviseRecurring
     stop_recurring: StopRecurring
     cancel_recurring_stop: CancelRecurringStop
+    pause_recurring: PauseRecurring
+    resume_recurring: ResumeRecurring
+    get_recurring_runs: GetRecurringRuns
+    get_recurring_summary: GetRecurringSummary
     list_expense_categories: ListExpenseCategories
     list_expense_item_options: ListExpenseItemOptions
     create_expense_category: CreateExpenseCategory
@@ -220,6 +257,8 @@ class Container:
     get_revenue_week: GetRevenueWeek
     get_revenue_dashboard: GetRevenueDashboard
     capture_revenue: CaptureRevenue
+    get_revenue_day: GetRevenueDay
+    save_revenue_day: SaveRevenueDay
     pettycash: PettyCashRepository
     get_pettycash_overview: GetPettyCashOverview
     list_pettycash_entries: ListPettyCashEntries
@@ -234,6 +273,20 @@ class Container:
     remove_pettycash_entry: RemovePettyCashEntry
     approve_pettycash_day: ApprovePettyCashDay
     approve_pettycash_entries: ApprovePettyCashEntries
+    expenses: ExpensesRepository
+    get_expense_ledger: GetExpenseLedger
+    get_expense_options: GetExpenseOptions
+    record_expense: RecordExpense
+    change_expense: ChangeExpense
+    remove_expense: RemoveExpense
+    reports: ReportsRepository
+    export_writers: Mapping[ExportFormat, ReportFileWriter]
+    get_reports_access: GetReportsAccess
+    get_report: GetReport
+    export_report: ExportReport
+    export_revenue_week: ExportRevenueWeek
+    export_expense_ledger: ExportExpenseLedger
+    export_pettycash_entries: ExportPettyCashEntries
 
 
 def build_container(
@@ -246,6 +299,9 @@ def build_container(
     setup: SetupRepository | None = None,
     revenue: RevenueRepository | None = None,
     pettycash: PettyCashRepository | None = None,
+    expenses: ExpensesRepository | None = None,
+    reports: ReportsRepository | None = None,
+    export_writers: Mapping[ExportFormat, ReportFileWriter] | None = None,
     clock: Clock | None = None,
     mailer: Mailer | None = None,
     rate_limiter: RateLimiter | None = None,
@@ -271,6 +327,15 @@ def build_container(
         setup = setup or SetupRoutines(pool)
         revenue = revenue or RevenueRoutines(pool)
         pettycash = pettycash or PettyCashRoutines(pool)
+    if expenses is None:
+        if pool is None:
+            raise ValueError("build_container needs a pool or the expenses port")
+        expenses = ExpensesRoutines(pool)
+    if reports is None:
+        if pool is None:
+            raise ValueError("build_container needs a pool or the reports port")
+        reports = ReportsRoutines(pool)
+    export_writers = export_writers or _default_export_writers()
     clock = clock or SystemClock()
     mailer = mailer or _default_mailer(settings)
     mail_queue = MailQueue(mailer)
@@ -423,6 +488,10 @@ def build_container(
         revise_recurring=ReviseRecurring(setup, clock),
         stop_recurring=StopRecurring(setup, clock),
         cancel_recurring_stop=CancelRecurringStop(setup, clock),
+        pause_recurring=PauseRecurring(setup, clock),
+        resume_recurring=ResumeRecurring(setup, clock),
+        get_recurring_runs=GetRecurringRuns(setup, clock),
+        get_recurring_summary=GetRecurringSummary(setup, clock),
         list_expense_categories=ListExpenseCategories(setup, clock),
         list_expense_item_options=ListExpenseItemOptions(setup, clock),
         create_expense_category=CreateExpenseCategory(setup, clock),
@@ -442,6 +511,8 @@ def build_container(
         get_revenue_week=GetRevenueWeek(revenue, clock),
         get_revenue_dashboard=GetRevenueDashboard(revenue, clock),
         capture_revenue=CaptureRevenue(revenue, clock),
+        get_revenue_day=GetRevenueDay(revenue, clock),
+        save_revenue_day=SaveRevenueDay(revenue, clock),
         pettycash=pettycash,
         get_pettycash_overview=GetPettyCashOverview(pettycash, clock),
         list_pettycash_entries=ListPettyCashEntries(pettycash, clock),
@@ -456,7 +527,25 @@ def build_container(
         remove_pettycash_entry=RemovePettyCashEntry(pettycash, clock),
         approve_pettycash_day=ApprovePettyCashDay(pettycash, clock),
         approve_pettycash_entries=ApprovePettyCashEntries(pettycash, clock),
+        expenses=expenses,
+        get_expense_ledger=GetExpenseLedger(expenses, clock),
+        get_expense_options=GetExpenseOptions(expenses, clock),
+        record_expense=RecordExpense(expenses, clock),
+        change_expense=ChangeExpense(expenses, clock),
+        remove_expense=RemoveExpense(expenses, clock),
+        reports=reports,
+        export_writers=export_writers,
+        get_reports_access=GetReportsAccess(reports, clock),
+        get_report=GetReport(reports, clock),
+        export_report=ExportReport(reports, export_writers, clock),
+        export_revenue_week=ExportRevenueWeek(reports, export_writers, clock),
+        export_expense_ledger=ExportExpenseLedger(reports, export_writers, clock),
+        export_pettycash_entries=ExportPettyCashEntries(reports, export_writers, clock),
     )
+
+
+def _default_export_writers() -> Mapping[ExportFormat, ReportFileWriter]:
+    return {ExportFormat.XLSX: XlsxWriterAdapter(), ExportFormat.PDF: ReportLabAdapter()}
 
 
 def _default_mailer(settings: Settings) -> Mailer:

@@ -1,9 +1,9 @@
 -- api.setup_vehicle_update(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_vehicle_id uuid, p_company_id uuid, p_registration text, p_fleet_number text, p_joined_on date, p_initial_investment numeric, p_reason text, p_now timestamptz) RETURNS api.write_result
--- Purpose: move a visible vehicle in the fleet to another company in use, change its join date (never past a day it has revenue for), its fleet number (new to the company it ends in) or its initial investment (0 or null clears it); targets change only through api.setup_target_set_save, except that a join date before the first set copies the first set to it; nothing changed answers unchanged.
+-- Purpose: move a visible vehicle in the fleet to another company in use, change its join date (never past a day it has revenue for), its fleet number (new to the company it ends in) or its initial investment (0 or null clears it); targets change only through api.setup_target_set_save, except that a join date before the first set copies the first set to it; a new join date decides the saving runs the moved days complete; nothing changed answers unchanged.
 -- Callers: SetupRoutines.update_vehicle; UpdateVehicle (PUT /setup/vehicles/{id}).
--- Reads: setup.fleet_vehicles, setup.psv_companies, setup.vehicle_target_sets, revenue.records, and what tenancy.business_date, tenancy.settings_document, setup.company_visible, setup.vehicle_visible read. Writes: setup.fleet_vehicles, setup.vehicle_target_sets, and through setup.record_setup_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
+-- Reads: setup.fleet_vehicles, setup.psv_companies, setup.vehicle_target_sets, revenue.records, and what tenancy.business_date, tenancy.settings_document, setup.company_visible, setup.vehicle_visible read. Writes: setup.fleet_vehicles, setup.vehicle_target_sets, setup.saving_runs through setup.decide_saving_runs, and through setup.record_setup_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 reason_length via tenancy.check_typed_reason, XC422 vehicle_registration_format via setup.registration_normalize, XC422 vehicle_fleet_required via setup.fleet_number, XC422 vehicle_fleet_length via setup.fleet_number, XC422 money_invalid via tenancy.check_money, XC422 time_zone_invalid via tenancy.business_date, XC422 vehicle_joined_future, XC404 not_found, XC422 vehicle_company_inactive, XC422 vehicle_retired_edit, XC422 vehicle_registration_change, XC422 vehicle_join_after_revenue, XC422 vehicle_fleet_taken.
--- Tests: tests/db/test_setup_vehicle_routines.py, tests/api/test_setup_vehicles.py.
+-- Tests: tests/db/test_setup_vehicle_routines.py, tests/db/test_recurring_pause_routines.py, tests/api/test_setup_vehicles.py.
 -- A unique_violation from a concurrent save of the same fleet number in the company surfaces as unique_conflict.
 
 CREATE OR REPLACE FUNCTION api.setup_vehicle_update(
@@ -148,6 +148,11 @@ BEGIN
 
   v_automatic := array_to_string(v_parts, '; ');
   v_automatic := upper(left(v_automatic, 1)) || substr(v_automatic, 2);
+  IF v_vehicle.joined_on <> p_joined_on THEN
+    PERFORM setup.decide_saving_runs(
+      p_vehicle_id, least(v_vehicle.joined_on, p_joined_on), greatest(v_vehicle.joined_on, p_joined_on), p_now
+    );
+  END IF;
   v_version := setup.record_setup_change(
     'vehicles', p_vehicle_id, p_vehicle_id, v_before, setup.vehicle_snapshot(p_vehicle_id),
     tenancy.compose_reason(v_automatic, v_reason), p_now

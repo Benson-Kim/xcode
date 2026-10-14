@@ -2,10 +2,11 @@
 
 Status: in conversion. `docs/` holds the complete specification and the agent prompts
 (`docs/prompts/`, in order) for converting the .NET API to Python with business rules in
-PostgreSQL routines. Prompts 00 to 05 are implemented (bootstrap, PostgreSQL foundation,
-schema, identity and tenancy routines, auth, access, people, history and organization
-settings); 06 (setup) is in progress and the rest follow prompt by prompt. The status per
-prompt and the .NET drift register are in `docs/prompts/README.md`. When the
+PostgreSQL routines. Prompts 00 to 08 and 07b are implemented (bootstrap, PostgreSQL
+foundation, schema, identity and tenancy, auth, access and people, setup, revenue, the design
+notes v2.29 to v2.33, petty cash); 08b (expenses and reports), 09 (operability) and 10 (data
+migration) are being built. The status per prompt and the .NET drift register are in
+`docs/prompts/README.md`; the operator's procedures are `deploy/runbook.md`. When the
 conversion is accepted the folder is renamed to `apps/api` and the .NET project retired.
 
 ## Reading order
@@ -46,6 +47,7 @@ docker compose up -d postgres          # PostgreSQL 18 with roles from db/roles
 cp .env.example .env
 pip install -e . -r requirements-dev.txt
 xcode-api db migrate                   # as xcode_owner (XCODE_MIGRATION_DATABASE_URL)
+xcode-api seed-demo                    # development only, as xcode_operator (db/seeds/README.md)
 xcode-api serve                        # as xcode_app (XCODE_DATABASE_URL), port 5000
 pytest -n auto
 ```

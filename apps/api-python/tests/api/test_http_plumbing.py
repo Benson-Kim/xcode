@@ -16,9 +16,11 @@ from xcode_api.main import create_app
 from xcode_api.settings import Settings
 
 from ..support.fakes import (
+    FakeExpensesRepository,
     FakeIdentityRepository,
     FakeOpsRepository,
     FakePettyCashRepository,
+    FakeReportsRepository,
     FakeRevenueRepository,
     FakeSetupRepository,
     FakeTenancyRepository,
@@ -39,6 +41,8 @@ def _app_with_probe(settings: Settings, ops: FakeOpsRepository):
         setup=FakeSetupRepository(),
         revenue=FakeRevenueRepository(),
         pettycash=FakePettyCashRepository(),
+        expenses=FakeExpensesRepository(),
+        reports=FakeReportsRepository(),
     )
     app = create_app(settings, container)
     router = APIRouter()
@@ -260,6 +264,8 @@ async def test_readiness_unhealthy_when_database_down(
             setup=FakeSetupRepository(),
             revenue=FakeRevenueRepository(),
             pettycash=FakePettyCashRepository(),
+            expenses=FakeExpensesRepository(),
+            reports=FakeReportsRepository(),
         ),
     )
     async for c in _client(app):
@@ -280,6 +286,8 @@ async def test_readiness_unhealthy_when_the_contract_version_moved(settings: Set
             setup=FakeSetupRepository(),
             revenue=FakeRevenueRepository(),
             pettycash=FakePettyCashRepository(),
+            expenses=FakeExpensesRepository(),
+            reports=FakeReportsRepository(),
         ),
     )
     # No lifespan: startup itself refuses this database; the probe must still answer 503.
@@ -332,6 +340,8 @@ async def test_openapi_absent_when_disabled(
             setup=FakeSetupRepository(),
             revenue=FakeRevenueRepository(),
             pettycash=FakePettyCashRepository(),
+            expenses=FakeExpensesRepository(),
+            reports=FakeReportsRepository(),
         ),
     )
     async for c in _client(app):

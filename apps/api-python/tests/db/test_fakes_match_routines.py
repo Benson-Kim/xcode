@@ -13,14 +13,18 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from xcode_api.application.repositories import (
+    ExpensesRepository,
     IdentityRepository,
     PettyCashRepository,
+    ReportsRepository,
     RevenueRepository,
     SetupRepository,
     TenancyRepository,
 )
+from xcode_api.db.routines.expenses import ExpensesRoutines
 from xcode_api.db.routines.identity import IdentityRoutines
 from xcode_api.db.routines.pettycash import PettyCashRoutines
+from xcode_api.db.routines.reports import ReportsRoutines
 from xcode_api.db.routines.revenue import RevenueRoutines
 from xcode_api.db.routines.setup import SetupRoutines
 from xcode_api.db.routines.tenancy import TenancyRoutines
@@ -34,9 +38,15 @@ from ..support.auth_cases import (
     World,
     standard,
 )
+from ..support.expenses_cases import CASES as EXPENSES_CASES
+from ..support.expenses_cases import ExpensesCase
+from ..support.expenses_cases import database_world as expenses_database_world
+from ..support.expenses_cases import fake_world as expenses_fake_world
 from ..support.fakes import (
+    FakeExpensesRepository,
     FakeIdentityRepository,
     FakePettyCashRepository,
+    FakeReportsRepository,
     FakeRevenueRepository,
     FakeSetupRepository,
     FakeTenancyRepository,
@@ -45,6 +55,10 @@ from ..support.pettycash_cases import CASES as PETTYCASH_CASES
 from ..support.pettycash_cases import PettyCashCase
 from ..support.pettycash_cases import database_world as pettycash_database_world
 from ..support.pettycash_cases import fake_world as pettycash_fake_world
+from ..support.reports_cases import CASES as REPORTS_CASES
+from ..support.reports_cases import ReportsCase
+from ..support.reports_cases import database_world as reports_database_world
+from ..support.reports_cases import fake_world as reports_fake_world
 from ..support.revenue_cases import CASES as REVENUE_CASES
 from ..support.revenue_cases import RevenueCase
 from ..support.revenue_cases import database_world as revenue_database_world
@@ -186,4 +200,56 @@ async def test_the_pettycash_fake_answers_as_the_routines_do(
     details = [step for step in routines.seen if isinstance(step, tuple) and step[0] == "detail"]
     assert any("current" in step[1] for step in details)
     assert any("balance_after" in step[1] for step in details)
+    assert normalised(fake.seen) == normalised(routines.seen)
+
+
+# --- central expenses: purchases, changes, removals, the ledger and the options -----------
+
+
+def test_the_expenses_fake_is_an_expenses_repository() -> None:
+    assert isinstance(FakeExpensesRepository(), ExpensesRepository)
+
+
+@pytest.mark.parametrize("case", EXPENSES_CASES, ids=lambda case: case.name)
+async def test_the_expenses_fake_answers_as_the_routines_do(
+    case: ExpensesCase, pool: AsyncConnectionPool[object], operator_conn: Conn
+) -> None:
+    routines = expenses_database_world(
+        ExpensesRoutines(pool),
+        PettyCashRoutines(pool),
+        SetupRoutines(pool),
+        TenancyRoutines(pool),
+        operator_conn,
+    )
+    await case.run(routines)
+    fake = expenses_fake_world()
+    await case.run(fake)
+    details = [step for step in routines.seen if isinstance(step, tuple) and step[0] == "detail"]
+    assert any(step[1].get("current") for step in details)
+    assert any("registration" in step[1] for step in details)
+    assert normalised(fake.seen) == normalised(routines.seen)
+
+
+# --- reports: the catalogue, net by vehicle, capture gaps, an export's audit row ------------
+
+
+def test_the_reports_fake_is_a_reports_repository() -> None:
+    assert isinstance(FakeReportsRepository(), ReportsRepository)
+
+
+@pytest.mark.parametrize("case", REPORTS_CASES, ids=lambda case: case.name)
+async def test_the_reports_fake_answers_as_the_routines_do(
+    case: ReportsCase, pool: AsyncConnectionPool[object], operator_conn: Conn
+) -> None:
+    routines = reports_database_world(
+        ReportsRoutines(pool),
+        RevenueRoutines(pool),
+        SetupRoutines(pool),
+        TenancyRoutines(pool),
+        operator_conn,
+    )
+    await case.run(routines)
+    fake = reports_fake_world()
+    await case.run(fake)
+    assert any(step[0] == "refused" for step in routines.seen if isinstance(step, tuple))
     assert normalised(fake.seen) == normalised(routines.seen)

@@ -1,6 +1,6 @@
 # Runtime dependencies for xcode-api (Python 3.13+).
 # Floors are deliberate; the exact lock lives in requirements.lock.txt, produced by
-# `uv pip compile --universal --python-version 3.13 requirements.txt -o requirements.lock.txt`
+# `uv pip compile --universal --python-version 3.13 --generate-hashes requirements.txt -o requirements.lock.txt`
 # (one lock for every platform; the CI lint job recompiles it and fails on a diff).
 # Every entry has a reason; do not add a package without one.
 
@@ -13,3 +13,5 @@ PyJWT>=2.13             # HS256 access tokens (2.13.0 carries the 2026 security 
 structlog>=26.1         # structured JSON logging with request-scoped context
 aiosmtplib>=5.1         # async SMTP for verification codes (production mail backend)
 prometheus-client>=0.21 # /metrics exposition when XCODE_METRICS_ENABLED (docs/08-operability.md section 5)
+XlsxWriter>=3.2         # Excel exports of reports and screens, built in process (docs/02-stack.md ADR-16)
+reportlab>=4.4          # PDF exports with the embedded brand fonts (ADR-16; brings pillow and charset-normalizer)

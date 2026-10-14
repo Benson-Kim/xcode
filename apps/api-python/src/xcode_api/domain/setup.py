@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from enum import IntEnum, StrEnum
 from uuid import UUID
 
 from .tenancy import TenantContext
@@ -26,7 +27,7 @@ class RecurringKind(CodedEnum):
 
 
 class RecurrenceFrequency(CodedEnum):
-    """``DAILY`` is legacy: readable, refused on save."""
+    """``DAILY`` is refused for a new cost; a saving may run daily."""
 
     DAILY = 1
     WEEKLY = 2
@@ -60,6 +61,32 @@ _BUCKET_LABELS = {
     ExpenseBucket.RECURRING_CHARGES: "recurring charges",
     ExpenseBucket.LOAN_REPAYMENTS: "loan repayments",
 }
+
+
+class SavingRunState(CodedEnum):
+    """A decided run of a saving with a revenue rule; an undecided one has no row."""
+
+    SAVED = 1
+    SKIPPED = 2
+
+    @property
+    def label(self) -> str:
+        return "Saved" if self is SavingRunState.SAVED else "Skipped"
+
+
+class ConditionDays(IntEnum):
+    """The days a saving's revenue rule measures: the run's day, its week or its month."""
+
+    DAY = 1
+    WEEK = 7
+    MONTH = 30
+
+
+class RunState(StrEnum):
+    POSTED = "posted"
+    SAVED = "saved"
+    SKIPPED = "skipped"
+    HELD = "held"
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,12 +411,95 @@ class RecurringSummary:
     note: str | None
     month: int | None
     active_amount: Decimal
+    paused_from: date | None
+    last_run: date | None
+    last_run_vehicles: int
+    balance: Decimal | None
+    last_run_states: RunStates | None
+    condition: RevenueRule | None
+    opening: OpeningSummary | None
+    next_run: date | None
+
+
+@dataclass(frozen=True, slots=True)
+class RunStates:
+    """The shares of a saving's last run date by state."""
+
+    saved: int
+    skipped: int
+    held: int
+
+
+@dataclass(frozen=True, slots=True)
+class RevenueRule:
+    """A saving's run is set aside only when the vehicle's revenue over ``days`` days reaches
+    ``min``."""
+
+    min: Decimal
+    days: int
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningSummary:
+    """A saving's opening balance on the caller's vehicles."""
+
+    date: date
+    total: Decimal
 
 
 @dataclass(frozen=True, slots=True)
 class RecurringPage:
     items: tuple[RecurringSummary, ...]
     total: int
+
+
+@dataclass(frozen=True, slots=True)
+class RecurringRunShare:
+    """A vehicle's share of one run: ``revenue`` is the decided figure, the window so far for
+    a held share, None without a revenue rule."""
+
+    vehicle_id: UUID
+    registration: str
+    amount: Decimal
+    state: RunState
+    revenue: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
+class RecurringRun:
+    date: date
+    amount: Decimal
+    shares: tuple[RecurringRunShare, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RecurringRuns:
+    """An item's runs on the caller's vehicles: the last ten run dates, newest first;
+    ``total`` and the amounts count posted and saved shares only."""
+
+    id: UUID
+    name: str
+    kind: RecurringKind
+    start: date
+    total: Decimal
+    run_count: int
+    runs: tuple[RecurringRun, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RecurringMonth:
+    """The month holding the business date on the caller's vehicles; a figure of a kind the
+    caller cannot view is None."""
+
+    from_date: date
+    to_date: date
+    costs_due: Decimal | None
+    saved: Decimal | None
+    savings_balance: Decimal | None
+    running_costs: int | None
+    paused_costs: int | None
+    running_savings: int | None
+    paused_savings: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -587,9 +697,33 @@ class Share:
 
 
 @dataclass(frozen=True, slots=True)
+class SavingCondition:
+    """A saving's revenue rule as sent: set aside a run only when the revenue over ``days``
+    days reaches ``min``; checked by the routine."""
+
+    min: Decimal | None
+    days: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningAmount:
+    vehicle_id: UUID | None
+    amount: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
+class SavingOpening:
+    """A saving's balance before its first run, per share vehicle, as at ``date``."""
+
+    date: date | None
+    amounts: tuple[OpeningAmount, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RecurringDefinition:
     """What a scheduled item save sends; ``kind``, ``frequency`` and ``month`` are the wire
-    integers, checked by the routine."""
+    integers, checked by the routine. ``keep_opening`` (a revise that sent no opening) keeps
+    the stored opening; otherwise ``opening`` replaces it, None removing it."""
 
     name: str | None
     kind: int
@@ -603,6 +737,9 @@ class RecurringDefinition:
     expense_item_id: UUID | None
     note: str | None
     month: int | None
+    condition: SavingCondition | None = None
+    opening: SavingOpening | None = None
+    keep_opening: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -613,6 +750,20 @@ class RecurringSave:
     item_id: UUID | None
     definition: RecurringDefinition
     reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RecurringPause:
+    """A pause or a resume of an item, as of the business date."""
+
+    context: TenantContext
+    item_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class RecurringRunsQuery:
+    context: TenantContext
+    item_id: UUID
 
 
 @dataclass(frozen=True, slots=True)

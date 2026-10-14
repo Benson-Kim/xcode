@@ -269,6 +269,8 @@ class Definition:
     note: str | None = None
     month: int | None = None
     reason: str | None = None
+    condition: Jsonb | None = None
+    opening: Jsonb | None = None
 
     def args(self) -> list[Any]:
         return [
@@ -284,6 +286,8 @@ class Definition:
             self.expense_item_id,
             self.note,
             self.month,
+            self.condition,
+            self.opening,
             self.reason,
         ]
 

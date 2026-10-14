@@ -15,6 +15,7 @@ from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID
 
+from .expenses import ExpenseAllocation
 from .setup import ExpenseBucket
 from .tenancy import TenantContext
 from .values import CodedEnum
@@ -210,6 +211,19 @@ class PettyCashEntry:
     can_send_back: bool
     can_reject: bool
     can_reopen: bool
+    group: PettyCashGroup | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PettyCashGroup:
+    """The shared purchase an expense is part of: ``size`` counts its parts not removed and
+    not rejected now; the rest is the purchase as bought."""
+
+    id: UUID
+    size: int
+    total: Decimal
+    units: Decimal
+    unit_amount: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +239,7 @@ class PettyCashVehicleOption:
     company_name: str
     registration: str
     active: bool
+    fleet_number: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,11 +371,13 @@ class PettyCashLine:
 @dataclass(frozen=True, slots=True)
 class PettyCashCreate:
     """``id`` is the client's id for the entry (null to let the server choose); sending it
-    again replays the first save."""
+    again replays the first save. An expense bought for several vehicles carries
+    ``allocations``: one entry per vehicle, the first one under ``id``."""
 
     context: TenantContext
     id: UUID | None
     line: PettyCashLine
+    allocations: tuple[ExpenseAllocation, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

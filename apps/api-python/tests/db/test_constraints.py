@@ -25,7 +25,7 @@ pytestmark = pytest.mark.structure
 
 Conn = psycopg.Connection[dict[str, Any]]
 
-SCHEMAS = ["identity", "tenancy", "setup", "revenue", "pettycash"]
+SCHEMAS = ["identity", "tenancy", "setup", "revenue", "pettycash", "expenses"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +114,12 @@ _MAIN = "UPDATE setup.expense_main_categories SET {} WHERE id = %(main_category)
 _VERSION = "UPDATE setup.recurring_versions SET {} WHERE id = %(version)s"
 _RECORD = "UPDATE revenue.records SET {} WHERE id = %(record)s"
 _ENTRY = "UPDATE pettycash.entries SET {} WHERE id = %(entry)s"
+_CENTRAL = "UPDATE expenses.entries SET {} WHERE id = %(central)s"
+_SAVING = "UPDATE setup.recurring_versions SET {} WHERE id = %(saving_version)s"
+_PAUSE = "UPDATE setup.recurring_pauses SET {} WHERE id = %(pause)s"
+_OPENING = "UPDATE setup.saving_opening_amounts SET {} WHERE item_id = %(saving)s"
+_RUN = "UPDATE setup.saving_runs SET {} WHERE item_id = %(saving)s"
+_GROUP = "group_id = gen_random_uuid(), group_total = {}, group_units = {}, group_unit_amount = {}"
 _NO_EXPENSE = (
     "status = NULL, vehicle_id = NULL, expense_item_id = NULL, reviewed_by = NULL, "
     "reviewed_at = NULL"
@@ -345,6 +351,35 @@ CHECK_CASES = [
     ),
     Case("ck_entries_review", _set(_ENTRY, "reviewed_at = NULL")),
     Case("ck_entries_removal", _set(_ENTRY, "removed_at = NULL")),
+    Case("ck_entries_group", _set(_ENTRY, "group_id = gen_random_uuid()")),
+    Case("ck_entries_group", _set(_ENTRY, _CASH + ", " + _GROUP.format(900, 2, 450))),
+    Case("ck_entries_group_total", _set(_ENTRY, _GROUP.format(0, 2, 450))),
+    Case("ck_entries_group_units", _set(_ENTRY, _GROUP.format(900, 0, 450))),
+    Case("ck_entries_group_unit_amount", _set(_ENTRY, _GROUP.format(900, 2, 0))),
+    Case("ck_entries_units", _set(_CENTRAL, "group_size = 2, units = -1")),
+    Case("ck_entries_total", _set(_CENTRAL, "group_size = 2, units = 0.001, unit_amount = 0.01")),
+    Case("ck_entries_note", _set(_CENTRAL, "note = ' Front tyres'")),
+    Case("ck_entries_note", _set(_CENTRAL, "note = ''")),
+    Case("ck_entries_group_size", _set(_CENTRAL, "group_size = 51")),
+    Case("ck_entries_group_size", _set(_CENTRAL, "group_size = 0")),
+    Case("ck_entries_group_total", _set(_CENTRAL, "group_size = 2, group_total = 0")),
+    Case("ck_entries_group_units", _set(_CENTRAL, "group_size = 2, group_units = 0")),
+    Case("ck_entries_group_unit_amount", _set(_CENTRAL, "group_size = 2, group_unit_amount = 0")),
+    Case("ck_entries_group", _set(_CENTRAL, "group_total = 501")),
+    Case("ck_entries_group", _set(_CENTRAL, "units = 3")),
+    Case("ck_entries_removal", _set(_CENTRAL, "removed_at = NULL")),
+    Case("ck_entries_removal", _set(_CENTRAL, "removal_reason = NULL")),
+    Case("ck_entries_removal_reason", _set(_CENTRAL, "removal_reason = repeat('r', 501)")),
+    Case("ck_entries_version", _set(_CENTRAL, "version = 0")),
+    Case("ck_recurring_pauses_through", _set(_PAUSE, "paused_through = DATE '2026-02-27'")),
+    Case("ck_recurring_versions_condition_min", _set(_SAVING, "condition_min = 0")),
+    Case("ck_recurring_versions_condition_days", _set(_SAVING, "condition_days = 2")),
+    Case("ck_recurring_versions_condition", _set(_SAVING, "condition_days = NULL")),
+    Case(
+        "ck_recurring_versions_condition", _set(_VERSION, "condition_min = 1, condition_days = 1")
+    ),
+    Case("ck_saving_opening_amounts_amount", _set(_OPENING, "amount = 0")),
+    Case("ck_saving_runs_amount", _set(_RUN, "amount = 0")),
 ]
 
 
@@ -611,6 +646,52 @@ UNIQUE_CASES = [
         "unit_amount, recorded_by, recorded_at, updated_by, updated_at) VALUES (%(org)s, "
         "%(entry)s, %(user)s, 1, DATE '2026-02-02', 100, %(user)s, now(), %(user)s, now())",
     ),
+    Case(
+        "uq_entries_group_vehicle",
+        "INSERT INTO pettycash.entries (organization_id, holder_id, kind, entry_date, vehicle_id, "
+        "expense_item_id, unit_amount, status, recorded_by, recorded_at, updated_by, updated_at, "
+        "group_id, group_total, group_units, group_unit_amount) SELECT %(org)s, %(user)s, 2, "
+        "DATE '2026-02-02', %(vehicle)s, %(item)s, 450, 1, %(user)s, now(), %(user)s, now(), "
+        "g.id, 900, 2, 450 FROM (VALUES (1), (2)) v(n), (SELECT gen_random_uuid() AS id) g",
+    ),
+    Case(
+        "uq_entries_group_vehicle",
+        "INSERT INTO expenses.entries (organization_id, id, entry_date, vehicle_id, "
+        "expense_item_id, units, unit_amount, group_id, group_size, group_total, group_units, "
+        "group_unit_amount, recorded_by, recorded_at, updated_by, updated_at) SELECT "
+        "organization_id, gen_random_uuid(), entry_date, vehicle_id, expense_item_id, units, "
+        "unit_amount, group_id, group_size, group_total, group_units, group_unit_amount, "
+        "recorded_by, recorded_at, updated_by, updated_at FROM expenses.entries "
+        "WHERE id = %(central)s",
+    ),
+    Case(
+        "pk_entries",
+        "INSERT INTO expenses.entries (organization_id, id, entry_date, vehicle_id, "
+        "expense_item_id, units, unit_amount, group_id, group_size, group_total, group_units, "
+        "group_unit_amount, recorded_by, recorded_at, updated_by, updated_at) SELECT "
+        "organization_id, id, entry_date, %(vehicle2)s, expense_item_id, units, unit_amount, "
+        "gen_random_uuid(), group_size, group_total, group_units, group_unit_amount, "
+        "recorded_by, recorded_at, updated_by, updated_at FROM expenses.entries "
+        "WHERE id = %(central)s",
+    ),
+    Case(
+        "uq_recurring_pauses_open",
+        "INSERT INTO setup.recurring_pauses (organization_id, item_id, paused_from) VALUES "
+        "(%(org)s, %(recurring)s, DATE '2026-04-01'), (%(org)s, %(recurring)s, DATE '2026-05-01')",
+    ),
+    Case(
+        "uq_saving_run_states_name",
+        "INSERT INTO setup.saving_run_states VALUES (9, 'saved', 'Saved')",
+    ),
+    Case(
+        "pk_saving_runs",
+        "INSERT INTO setup.saving_runs SELECT * FROM setup.saving_runs WHERE item_id = %(saving)s",
+    ),
+    Case(
+        "pk_saving_opening_amounts",
+        "INSERT INTO setup.saving_opening_amounts SELECT * FROM setup.saving_opening_amounts "
+        "WHERE item_id = %(saving)s",
+    ),
 ]
 
 
@@ -683,7 +764,38 @@ def test_away_periods_cannot_overlap(seeded: Seeded) -> None:
         seeded.params(),
     )
     assert (exc.sqlstate, exc.diag.constraint_name) == ("23P01", "ex_vehicle_away_periods_overlap")
-    assert _constraint_names(seeded.conn, "x") == {"ex_vehicle_away_periods_overlap"}
+    assert _constraint_names(seeded.conn, "x") == {
+        "ex_vehicle_away_periods_overlap",
+        "ex_recurring_pauses_overlap",
+    }
+
+
+def test_pauses_of_an_item_cannot_overlap(seeded: Seeded) -> None:
+    insert = (
+        "INSERT INTO setup.recurring_pauses (organization_id, item_id, paused_from, "
+        "paused_through) VALUES (%(org)s, %(recurring)s, {}, {})"
+    )
+    for start, through in (
+        ("DATE '2026-03-10'", "DATE '2026-03-20'"),
+        ("DATE '2026-02-01'", "NULL"),
+        ("DATE '2026-03-05'", "DATE '2026-03-05'"),
+    ):
+        exc = _failure(seeded.conn, insert.format(start, through), seeded.params())
+        assert (exc.sqlstate, exc.diag.constraint_name) == ("23P01", "ex_recurring_pauses_overlap")
+    assert (
+        _passes(
+            seeded,
+            [
+                insert.format("DATE '2026-03-11'", "NULL"),
+                insert.format("DATE '2026-02-27'", "DATE '2026-02-28'"),
+                insert.format("DATE '2026-03-05'", "DATE '2026-03-04'"),
+                insert.format("DATE '2026-03-01'", "DATE '2026-02-28'"),
+                "INSERT INTO setup.recurring_pauses (organization_id, item_id, paused_from) "
+                "VALUES (%(org)s, %(saving)s, DATE '2026-03-05')",
+            ],
+        )
+        == []
+    )
 
 
 def test_adjacent_and_other_vehicles_away_periods_pass(seeded: Seeded) -> None:
@@ -772,6 +884,7 @@ REFERENCE_CASES = [
     Case("fk_records_reason", _set(_RECORD, "amount = NULL, reason = 9")),
     Case("fk_entries_kind", "DELETE FROM pettycash.kinds WHERE code = 2"),
     Case("fk_entries_status", "DELETE FROM pettycash.statuses WHERE code = 2"),
+    Case("fk_saving_runs_state", "DELETE FROM setup.saving_run_states WHERE code = 1"),
 ]
 
 
@@ -818,7 +931,7 @@ def test_composite_foreign_keys_refuse_another_organizations_rows(seeded: Seeded
     row: the composite key (A, B's id) does not exist, so the row cannot cross tenants."""
     conn, mismatches = seeded.conn, []
     composite = [fk for fk in _foreign_keys(conn) if _is_composite(fk)]
-    assert len(composite) == 33
+    assert len(composite) == 45
     for fk in composite:
         columns = fk["source_columns"][1:]
         target_columns = fk["target_columns"][1:]

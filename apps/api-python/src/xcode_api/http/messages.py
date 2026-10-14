@@ -210,7 +210,6 @@ MESSAGES: Mapping[str, Message] = MappingProxyType(
         "recurring_daily_retired": _invalid(
             "Daily schedules are no longer offered. Choose weekly, monthly or yearly."
         ),
-        "recurring_savings_frequency": _invalid("Savings are set aside weekly or monthly."),
         "recurring_cost_needs_item": _invalid("Choose the expense item this cost is for."),
         "recurring_start_required": _invalid("Start date is required."),
         "recurring_start_too_early": _invalid(
@@ -233,6 +232,13 @@ MESSAGES: Mapping[str, Message] = MappingProxyType(
         "recurring_stop_in_effect": _invalid(
             "This item has already stopped. Add a new scheduled item instead."
         ),
+        "recurring_condition_on_cost": _invalid("Only a saving has a revenue rule."),
+        "recurring_condition_min": _invalid("Enter the revenue target."),
+        "recurring_condition_days": _invalid("Measure the revenue over 1, 7 or 30 days."),
+        "recurring_opening_on_cost": _invalid("Only a saving has an opening balance."),
+        "recurring_opening_future": _invalid("The opening balance date is after today."),
+        "recurring_opening_vehicle": _invalid("An opening balance is for a vehicle of the saving."),
+        "recurring_savings_end": _invalid("A saving has no end date."),
         # Change log, expense catalog, investment
         "history_dates_order": _invalid("The first date cannot be after the last date."),
         "history_text_length": _invalid("Search for 200 characters or fewer."),
@@ -291,6 +297,19 @@ MESSAGES: Mapping[str, Message] = MappingProxyType(
             "The low-day threshold must be 0 or more and the amber band 0 to 100 per cent."
         ),
         "dashboard_period_invalid": _invalid("Period must be today, week or month."),
+        "revenue_day_date_range": _invalid("Choose a day from the last ten years up to today."),
+        "revenue_day_rows_required": _invalid(
+            "Enter the revenue or a no-earnings reason for at least one vehicle."
+        ),
+        "revenue_day_rows_limit": _invalid("Save at most 500 vehicles at once."),
+        "revenue_day_vehicle_repeated": _invalid("Each vehicle can be in the day only once."),
+        "revenue_day_conflict": Message(
+            409,
+            "This day already has a different record.",
+            "{registration} was changed after you opened the day. "
+            "Check its current record and save again.",
+            ("current", "vehicle_id"),
+        ),
         # Organization, logo, preferences
         "organization_name_slug": _plain(
             400,
@@ -452,6 +471,66 @@ MESSAGES: Mapping[str, Message] = MappingProxyType(
         "pettycash_concurrent_save": Message(
             409, "This entry was changed by another save.", "Reload and try again."
         ),
+        # Central expenses
+        "expense_vehicles_invalid": _invalid("Choose 1-50 distinct vehicles."),
+        "expense_allocation_amount": _invalid(
+            "Each vehicle's amount must be other than zero, with at most two decimals.",
+        ),
+        "expense_allocation_sign": _invalid(
+            "Each vehicle's amount must have the same sign as the total.",
+        ),
+        "expense_allocation_sum": _invalid("The vehicle amounts must add up to the total."),
+        "expense_date_future": _invalid("An expense cannot be recorded for a future date."),
+        "expense_date_too_old": _invalid("Choose a date in the last ten years."),
+        "expense_vehicle_not_yours": _invalid("Choose one of your vehicles."),
+        "expense_vehicle_inactive": _invalid("{registration} was not in the fleet on that day."),
+        "expense_item_not_in_use": _invalid("Choose an item that is in use."),
+        "expense_version_required": _invalid("Send the version of the expense you opened."),
+        "expense_purchase_has_vehicle": _invalid(
+            "This purchase already has a row for {registration}.",
+        ),
+        "expense_change_other": _forbidden(
+            'Changing someone else\'s expense needs the permission "Edit an expense".',
+        ),
+        "expense_change_earlier_day": _forbidden(
+            'Changing an expense from an earlier day needs the permission "Edit an expense".',
+        ),
+        "expense_change_date": _forbidden(
+            'Changing the date of an expense needs the permission "Edit an expense".',
+        ),
+        "expense_version_conflict": Message(
+            409,
+            "This expense has changed.",
+            "This expense was changed after you opened it. Check it and save again.",
+            ("current",),
+        ),
+        "expense_saved_by_other": Message(
+            409,
+            "This expense has changed.",
+            "This expense was already saved by someone else. Reload and try again.",
+        ),
+        "expense_period_required": _invalid("Choose the first and the last date."),
+        "expense_period_order": _invalid("The first date cannot be after the last date."),
+        "expense_period_length": _invalid("Choose a period of at most 367 days."),
+        "expense_source_invalid": _invalid("Choose central, petty cash or scheduled."),
+        "expense_search_length": _invalid("Search for 200 characters or fewer."),
+        # Reports and exports
+        "report_period_both": _invalid("Choose the first and last day."),
+        "report_period_order": _invalid("The first date cannot be after the last date."),
+        "report_period_length": _invalid("Choose at most 367 days."),
+        "report_period_future": _invalid("Choose a period that starts on or before today."),
+        "report_search_length": _invalid("Search for 200 characters or fewer."),
+        "report_investment_permission": _forbidden(
+            'The investment report needs the permission "See the investment report".',
+        ),
+        "report_pettycash_permission": _forbidden(
+            'Petty cash reports need the permission "View petty cash reports".',
+        ),
+        "export_format_invalid": _invalid("Choose Excel (xlsx) or PDF."),
+        "export_too_many_rows": _invalid(
+            "There are {count} rows to export, more than 10,000. Choose a shorter period or search.",
+        ),
+        "pettycash_export_view_invalid": _invalid("Choose the expenses or the cash received."),
     }
 )
 

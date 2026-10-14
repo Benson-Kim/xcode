@@ -75,4 +75,6 @@ Until these are measured, the defaults of those questions stand: the database do
 a host where the roles cannot exist (40); the server must run the lifespan (41); one API
 process with its threads counted (the event loop, the default executor of at most `cpu + 4`
 threads, the PIN pool's 2, the mail queue task, the pool's workers) (43); a separate cPanel
-account for the API and its database (44); signed releases (45).
+account for the API and its database (44); signed releases (45); `serve` on a loopback port
+the host firewall keeps to the proxy's account, `/metrics` off, and no Unix socket until
+`serve` can bind one and trusts its peer as the proxy (86).

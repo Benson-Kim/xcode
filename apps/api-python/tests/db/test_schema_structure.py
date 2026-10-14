@@ -49,17 +49,17 @@ def test_schema_check_passes_on_the_migrated_schema(owner_conn: Conn, name: str)
 def test_every_declared_table_exists(owner_conn: Conn) -> None:
     rows = owner_conn.execute(
         "SELECT schemaname || '.' || tablename AS qualified FROM pg_tables "
-        "WHERE schemaname IN ('identity', 'tenancy', 'setup', 'revenue', 'pettycash')"
+        "WHERE schemaname IN ('identity', 'tenancy', 'setup', 'revenue', 'pettycash', 'expenses')"
     ).fetchall()
     assert {r["qualified"] for r in rows} == {t.qualified for t in TABLES}
-    assert len(TABLES) == 45
+    assert len(TABLES) == 51
 
 
 def test_tenant_tables_are_exactly_those_with_an_organization(owner_conn: Conn) -> None:
     rows = owner_conn.execute(
         "SELECT table_schema || '.' || table_name AS qualified FROM information_schema.columns "
         "WHERE column_name = 'organization_id' "
-        "AND table_schema IN ('identity', 'tenancy', 'setup', 'revenue', 'pettycash')"
+        "AND table_schema IN ('identity', 'tenancy', 'setup', 'revenue', 'pettycash', 'expenses')"
     ).fetchall()
     with_column = {r["qualified"] for r in rows}
     declared = {t.qualified for t in TABLES if t.tenant}

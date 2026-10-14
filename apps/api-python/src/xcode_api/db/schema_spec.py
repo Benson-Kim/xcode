@@ -18,7 +18,13 @@ from ..domain.identity import (
 )
 from ..domain.pettycash import PettyCashKind, PettyCashStatus
 from ..domain.revenue import NoEarningsReason
-from ..domain.setup import ExpenseBucket, RecurrenceFrequency, RecurringKind
+from ..domain.setup import (
+    ConditionDays,
+    ExpenseBucket,
+    RecurrenceFrequency,
+    RecurringKind,
+    SavingRunState,
+)
 from ..domain.tenancy import (
     BackLimitMode,
     ChangeLogSection,
@@ -155,10 +161,16 @@ TABLES: tuple[TableSpec, ...] = (
     _org("pettycash", "entries", "IU", "id"),
     _code("pettycash", "kinds"),
     _code("pettycash", "statuses"),
+    _org("expenses", "entries", "IU", "id"),
+    _org("setup", "recurring_pauses", "IU", "id"),
+    _org("setup", "saving_openings", "IUD", "item_id"),
+    _org("setup", "saving_opening_amounts", "IUD", "item_id", "vehicle_id"),
+    _org("setup", "saving_runs", "I", "item_id", "run_on", "vehicle_id"),
+    _code("setup", "saving_run_states"),
 )
 
 # Schemas whose every table must be declared in TABLES (ops belongs to the runner).
-SPECIFIED_SCHEMAS = ("identity", "tenancy", "setup", "revenue", "pettycash")
+SPECIFIED_SCHEMAS = ("identity", "tenancy", "setup", "revenue", "pettycash", "expenses")
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +252,28 @@ INDEXES: tuple[IndexSpec, ...] = (
         where="removed_at IS NULL",
     ),
     IndexSpec("pettycash.entries", "organization_id, expense_item_id"),
+    IndexSpec("pettycash.entries", "organization_id, group_id, vehicle_id", unique=True),
+    IndexSpec("expenses.entries", "organization_id, entry_date", where="removed_at IS NULL"),
+    IndexSpec(
+        "expenses.entries",
+        "organization_id, vehicle_id, entry_date",
+        where="removed_at IS NULL",
+    ),
+    IndexSpec("expenses.entries", "organization_id, expense_item_id"),
+    IndexSpec("expenses.entries", "organization_id, group_id, vehicle_id", unique=True),
+    IndexSpec(
+        "setup.recurring_pauses",
+        "organization_id, item_id",
+        unique=True,
+        where="paused_through IS NULL",
+    ),
+    IndexSpec(
+        "setup.recurring_pauses",
+        "organization_id, item_id, daterange(paused_from, (paused_through + 1), '[)'::text)",
+        method="gist",
+    ),
+    IndexSpec("setup.saving_run_states", "name", unique=True),
+    IndexSpec("setup.saving_runs", "organization_id, vehicle_id, run_on"),
 )
 
 # Code tables and the domain enum whose members (value, lower-case name, label) they hold.
@@ -250,6 +284,7 @@ CODE_TABLE_ENUMS: dict[str, type[CodedEnum]] = {
     "revenue.no_earnings_reasons": NoEarningsReason,
     "pettycash.kinds": PettyCashKind,
     "pettycash.statuses": PettyCashStatus,
+    "setup.saving_run_states": SavingRunState,
 }
 
 # CHECK (column IN (...)) constraints and the domain enum whose values they list.
@@ -267,4 +302,5 @@ CHECK_LIST_ENUMS: dict[str, type[Enum]] = {
     "tenancy.memberships.ck_memberships_back_limit_mode": BackLimitMode,
     "tenancy.permissions.ck_permissions_section": PermissionSection,
     "tenancy.change_log.ck_change_log_section": ChangeLogSection,
+    "setup.recurring_versions.ck_recurring_versions_condition_days": ConditionDays,
 }

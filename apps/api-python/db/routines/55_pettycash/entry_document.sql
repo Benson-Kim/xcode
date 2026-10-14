@@ -1,7 +1,7 @@
 -- pettycash.entry_document(p_entry pettycash.entries, p_permissions text[], p_limit numeric, p_earliest date) RETURNS jsonb
--- Purpose: one entry as the list and the 409 current member serve it (PettyCashEntryDto with snake_case keys): kind and status words, the holder's, reviewer's and recorder's names ("" for a missing holder or recorder, NULL for a missing reviewer), registration, item name and its category's bucket (expenses only), and the actor's flags of pettycash.flags.
+-- Purpose: one entry as the list and the 409 current member serve it (PettyCashEntryDto with snake_case keys): kind and status words, the holder's, reviewer's and recorder's names ("" for a missing holder or recorder, NULL for a missing reviewer), registration, item name and its category's bucket (expenses only), the actor's flags of pettycash.flags, and the shared purchase it is part of (group: its id, its parts not removed and not rejected counted now, the total, units and unit amount as bought; NULL for an entry alone).
 -- Callers: pettycash.check_version, api.pettycash_entry_list, api.pettycash_entries_approve.
--- Reads: setup.fleet_vehicles, setup.expense_items, setup.expense_categories, pettycash.kinds, and what pettycash.member_name reads. Writes: nothing.
+-- Reads: pettycash.entries, setup.fleet_vehicles, setup.expense_items, setup.expense_categories, pettycash.kinds, and what pettycash.member_name reads. Writes: nothing.
 -- Raises: none.
 -- Tests: tests/db/test_pettycash_helpers.py, tests/db/test_pettycash_routines.py.
 
@@ -67,7 +67,23 @@ BEGIN
     'reopen_reason', p_entry.reopen_reason,
     'can_send_back', v_flags -> 'can_send_back',
     'can_reject', v_flags -> 'can_reject',
-    'can_reopen', v_flags -> 'can_reopen'
+    'can_reopen', v_flags -> 'can_reopen',
+    'group', CASE
+      WHEN p_entry.group_id IS NOT NULL THEN jsonb_build_object(
+        'id', p_entry.group_id,
+        'size', (
+          SELECT count(*)
+          FROM pettycash.entries AS g
+          WHERE g.organization_id = p_entry.organization_id
+            AND g.group_id = p_entry.group_id
+            AND g.removed_at IS NULL
+            AND g.status IS DISTINCT FROM 4
+        ),
+        'total', p_entry.group_total,
+        'units', p_entry.group_units,
+        'unit_amount', p_entry.group_unit_amount
+      )
+    END
   );
 END;
 $$;

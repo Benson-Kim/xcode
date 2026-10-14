@@ -547,3 +547,83 @@ def test_low_days_are_judged_by_their_amount_against_the_threshold(
     assert _week(executor, yard, kda)["below_threshold_days"] == 3
     assert _week(executor, yard, kda, threshold=4001)["below_threshold_days"] == 4
     assert _week(executor, yard, kda, threshold=0)["below_threshold_days"] == 1
+
+
+def test_the_report_figures_sum_the_day_series_inside_each_vehicle_s_window(
+    executor: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    rng = random.Random(20261014)  # noqa: S311 - a seeded sample, not a secret
+    org = yard.owner.org
+    vehicles = []
+    for n in range(12):
+        joined = date(2026, 8, 1) + timedelta(days=rng.randrange(40))
+        left = joined + timedelta(days=rng.randrange(5, 60)) if n % 3 == 0 else None
+        vehicle = add_vehicle(
+            owner_conn,
+            org,
+            yard.north,
+            f"KD{chr(65 + n)} {200 + n}B",
+            joined_on=joined,
+            left_on=left,
+        )
+        effective = joined
+        for revision in range(1, rng.randrange(2, 5)):
+            add_target(owner_conn, org, vehicle, revision, effective, rng.randrange(700, 9000))
+            effective += timedelta(days=rng.choice((0, 3, 11)))
+        start = joined + timedelta(days=rng.randrange(1, 10))
+        add_away(owner_conn, org, vehicle, start, start + timedelta(days=rng.randrange(1, 6)))
+        _record(owner_conn, yard, vehicle, start, 700)
+        for offset in rng.sample(range(75), 20):
+            day = date(2026, 8, 1) + timedelta(days=offset)
+            if day != start:
+                if offset % 4 == 0:
+                    add_record(
+                        owner_conn, org, vehicle, day, None, recorder=yard.owner.id, reason=1
+                    )
+                else:
+                    _record(owner_conn, yard, vehicle, day, rng.randrange(100, 9000))
+        vehicles.append(vehicle)
+    span = (date(2026, 7, 25), date(2026, 10, 20), TODAY)
+    with _as(executor, yard.owner):
+        figures = {
+            r["vehicle_id"]: (
+                r["revenue"],
+                r["target"],
+                r["captured"],
+                r["no_revenue"],
+                r["missing"],
+                r["missing_days"],
+            )
+            for r in executor.execute(
+                "SELECT * FROM reports.vehicle_figures(%s, %s, %s, %s)", (vehicles, *span)
+            ).fetchall()
+        }
+        summed = {
+            r["vehicle_id"]: (
+                r["revenue"],
+                r["target"],
+                r["captured"],
+                r["no_revenue"],
+                r["missing"],
+                r["missing_days"],
+            )
+            for r in executor.execute(
+                "SELECT d.vehicle_id, coalesce(sum(d.amount), 0) AS revenue, "
+                "coalesce(sum(d.target) FILTER (WHERE d.counted), 0) AS target, "
+                "count(*) FILTER (WHERE d.record_id IS NOT NULL AND d.amount IS NOT NULL) "
+                "AS captured, "
+                "count(*) FILTER (WHERE d.record_id IS NOT NULL AND d.amount IS NULL) "
+                "AS no_revenue, "
+                "count(*) FILTER (WHERE d.counted AND d.record_id IS NULL) AS missing, "
+                "coalesce(array_agg(d.day ORDER BY d.day) "
+                "FILTER (WHERE d.counted AND d.record_id IS NULL), '{}') AS missing_days "
+                "FROM revenue.vehicle_days(%s, %s, %s, %s) AS d "
+                "WHERE setup.report_window(d.vehicle_id, %s, %s, %s) @> d.day "
+                "GROUP BY d.vehicle_id",
+                (vehicles, *span, *span),
+            ).fetchall()
+        }
+    assert len(figures) == 12
+    assert figures == summed
+    assert sum(f[3] for f in figures.values()) > 0
+    assert sum(f[4] for f in figures.values()) > 0

@@ -43,6 +43,7 @@ SAMPLES = {
     "earliest": "2026-10-01",
     "currency": "KES",
     "threshold": "4,000",
+    "count": "10,001",
 }
 
 
@@ -222,3 +223,41 @@ async def test_a_code_the_catalogue_lacks_is_a_500_without_detail() -> None:
     assert "detail" not in body
     response = await _get(RuleViolation(code="time_zone_invalid"))
     assert response.status_code == 500
+
+
+async def test_a_day_rows_400_names_its_vehicle_and_a_403_keeps_its_sentence() -> None:
+    response = await _get(
+        RuleViolation(code="revenue_future_date", detail={"vehicle_registration": "KDA 103A"})
+    )
+    body = json.loads(response.content)
+    assert (response.status_code, body["detail"]) == (
+        400,
+        "KDA 103A: Revenue cannot be recorded for a future date.",
+    )
+    assert "vehicleRegistration" not in body
+    response = await _get(
+        Forbidden(code="revenue_capture_permission", detail={"vehicle_registration": "KDA 103A"})
+    )
+    assert json.loads(response.content)["detail"] == (
+        'Recording a day that has no record yet needs the permission "Capture revenue".'
+    )
+
+
+async def test_a_day_conflict_names_the_vehicle_and_carries_its_cell() -> None:
+    vehicle = "0b5e2a4e-6f3c-4c55-9a46-8d0f4a2b7e11"
+    response = await _get(
+        Conflict(
+            code="revenue_day_conflict",
+            detail={"vehicle_id": vehicle, "registration": "KDA 482M", "current": _STORED_CELL},
+        )
+    )
+    body = json.loads(response.content)
+    assert (response.status_code, body["title"]) == (
+        409,
+        "This day already has a different record.",
+    )
+    assert body["detail"] == (
+        "KDA 482M was changed after you opened the day. Check its current record and save again."
+    )
+    assert body["vehicleId"] == vehicle
+    assert body["current"]["date"] == "2026-10-05"

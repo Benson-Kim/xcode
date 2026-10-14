@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import socket
+import subprocess
+import sys
 import threading
+import time
 
 import anyio.to_thread
 import httpx
@@ -267,3 +272,68 @@ async def test_concurrent_requests_start_no_more_worker_threads_than_the_cap(
     assert anyio.to_thread.current_default_thread_limiter().total_tokens == (
         main_module.WORKER_THREADS
     )
+
+
+SERVE = "import sys; from xcode_api.cli.main import main; sys.exit(main(sys.argv[1:]))"
+
+
+def _serve(app_url: str) -> tuple[subprocess.Popen[str], int]:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = int(probe.getsockname()[1])
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("XCODE_") or name.startswith("XCODE_TEST_")
+    }
+    environment |= {
+        "XCODE_ENV": "testing",
+        "XCODE_DATABASE_URL": app_url,
+        "XCODE_MAIL_BACKEND": "log",
+        "XCODE_LOG_FORMAT": "console",
+    }
+    process = subprocess.Popen(  # noqa: S603 - the interpreter running the tests, a fixed script
+        [sys.executable, "-c", SERVE, "serve", "--host", "127.0.0.1", "--port", str(port)],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    return process, port
+
+
+@pytest.mark.slow
+def test_serve_runs_the_startup_checks_under_uvicorn(app_url: str) -> None:
+    process, port = _serve(app_url)
+    ready = None
+    try:
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline and process.poll() is None:
+            try:
+                ready = httpx.get(f"http://127.0.0.1:{port}/health/ready", timeout=2)
+                break
+            except httpx.TransportError:
+                time.sleep(0.25)
+    finally:
+        process.terminate()
+        output, _ = process.communicate(timeout=30)
+    assert ready is not None, output
+    assert (ready.status_code, ready.text) == (200, "Healthy"), output
+    assert "startup.contract_version_ok" in output
+
+
+@pytest.mark.slow
+def test_serve_exits_1_when_the_contract_version_differs(owner_url: str, app_url: str) -> None:
+    with psycopg.connect(owner_url, autocommit=True) as owner:
+        owner.execute(
+            "CREATE OR REPLACE FUNCTION api.meta_contract_version() RETURNS integer "
+            "LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp "
+            "AS $$ SELECT 9999 $$"
+        )
+    process, _ = _serve(app_url)
+    try:
+        output, _ = process.communicate(timeout=90)
+    finally:
+        process.kill()
+    assert process.returncode == 1, output
+    assert "startup.contract_version_mismatch" in output

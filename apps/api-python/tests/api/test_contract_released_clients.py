@@ -716,12 +716,15 @@ async def test_a_recurring_cost_from_the_develop_web_is_refused_with_a_reason(
 async def test_a_daily_item_from_the_develop_web_is_refused_with_a_reason(
     api: AuthApi, owner: Member
 ) -> None:
-    vehicle_id, _ = await _fleet(api, owner)
-    body = _scheduled(vehicle_id, name="Crew lunch", kind=2, frequency=1, day=None)
+    """A daily cost; since the saving model (B18) a saving may run daily."""
+    vehicle_id, item_id = await _fleet(api, owner)
+    body = _scheduled(vehicle_id, name="Crew lunch", frequency=1, day=None, expenseItemId=item_id)
     del body["category"]
     response = await api.client.post("/setup/recurring", json=body, headers=owner.headers)
     assert response.status_code == 400
-    problem(response)
+    assert problem(response)["detail"] == (
+        "Daily schedules are no longer offered. Choose weekly, monthly or yearly."
+    )
 
 
 async def test_people_and_access_read_as_the_develop_web_does(api: AuthApi, owner: Member) -> None:
@@ -1019,3 +1022,254 @@ async def test_what_a_v211_phone_can_no_longer_save_answers_with_a_sentence(
     assert problem(changed)["detail"] == (
         'Changing revenue already saved needs the permission "Change revenue already saved".'
     )
+
+
+async def test_the_day_and_the_scheduled_summary_read_as_the_v23_web_does(
+    api: AuthApi, owner: Member
+) -> None:
+    """``packages/shared/src/revenue.ts`` (``RevenueDay``) and the web's scheduled-item page
+    (``apps/web/components/setup/shared.tsx``): the names and JSON kinds they read."""
+    vehicle_id, _ = await _fleet(api, owner)
+    day = ok(await api.client.get("/setup/revenue/day", headers=owner.headers))
+    for name, *kinds in (
+        ("date", "str"),
+        ("businessDate", "str"),
+        ("vehicles", "arr"),
+        ("truncated", "bool"),
+    ):
+        has(day, name, *kinds)
+    [row] = day["vehicles"]
+    assert has(row, "id", "str") == vehicle_id
+    for name in ("companyId", "registration"):
+        has(row, name, "str")
+    has(row, "lastWeek", "obj", "null")
+    for name, *kinds in _CELL:
+        has(has(row, "day", "obj"), name, *kinds)
+    summary = ok(await api.client.get("/setup/recurring/summary", headers=owner.headers))
+    for name in ("from", "to"):
+        has(summary, name, "str")
+    for name in ("costsDue", "saved", "savingsBalance"):
+        has(summary, name, "num")
+    for name in ("runningCosts", "pausedCosts", "runningSavings", "pausedSavings"):
+        has(summary, name, "num", "null")
+    created = ok(
+        await api.client.post(
+            "/setup/recurring",
+            json={
+                "name": "Owner savings",
+                "kind": 2,
+                "amount": 500,
+                "frequency": 3,
+                "day": 1,
+                "allocations": [{"vehicleId": vehicle_id, "amount": 500}],
+                "condition": {"min": 5000, "days": 7},
+                "opening": {
+                    "date": "2026-10-01",
+                    "amounts": [{"vehicleId": vehicle_id, "amount": 900}],
+                },
+            },
+            headers=owner.headers,
+        )
+    )
+    page = ok(await api.client.get("/setup/recurring?page=1&pageSize=25", headers=owner.headers))
+    [item] = [i for i in has(page, "items", "arr") if i["id"] == created["id"]]
+    for name, *kinds in (
+        ("pausedFrom", "str", "null"),
+        ("lastRun", "str", "null"),
+        ("lastRunVehicles", "num"),
+        ("balance", "num", "null"),
+        ("nextRun", "str", "null"),
+    ):
+        has(item, name, *kinds)
+    for name in ("saved", "skipped", "held"):
+        has(has(item, "lastRunStates", "obj"), name, "num")
+    for name in ("min", "days"):
+        has(has(item, "condition", "obj"), name, "num")
+    opening = has(item, "opening", "obj")
+    has(opening, "date", "str")
+    has(opening, "total", "num")
+
+
+# --- central expenses (packages/shared/src/expenses.ts) --------------------------------------
+
+_LEDGER_ROW = (
+    ("id", ("str",)),
+    ("source", ("str",)),
+    ("date", ("str",)),
+    ("vehicleId", ("str",)),
+    ("registration", ("str",)),
+    ("expenseItemId", ("str", "null")),
+    ("itemName", ("str",)),
+    ("categoryName", ("str", "null")),
+    ("bucket", ("num",)),
+    ("units", ("num",)),
+    ("unitAmount", ("num",)),
+    ("total", ("num",)),
+    ("note", ("str", "null")),
+    ("recordedByName", ("str", "null")),
+    ("holderName", ("str", "null")),
+    ("scheduleId", ("str", "null")),
+    ("group", ("obj", "null")),
+    ("version", ("num", "null")),
+    ("canEdit", ("bool",)),
+    ("canRemove", ("bool",)),
+)
+
+
+async def test_the_expense_ledger_and_options_read_as_the_web_does(
+    api: AuthApi, owner: Member
+) -> None:
+    vehicle_id, item_id = await _fleet(api, owner)
+    recorded = ok(
+        await api.client.post(
+            "/setup/expenses/entries",
+            json={
+                "date": "2026-10-07",
+                "expenseItemId": item_id,
+                "units": 1,
+                "unitAmount": 4000,
+                "allocations": [{"vehicleId": vehicle_id, "amount": 4000}],
+            },
+            headers=owner.headers,
+        )
+    )
+    assert [type(i) for i in has(recorded, "ids", "arr")] == [str]
+    has(recorded, "total", "num")
+    ledger = ok(
+        await api.client.get(
+            "/setup/expenses/ledger?from=2026-10-01&to=2026-10-07&page=1&pageSize=100",
+            headers=owner.headers,
+        )
+    )
+    names = ["businessDate", "from", "to", "permissions", "figures", "items", "pageNumber"]
+    assert list(ledger)[: len(names) + 3] == [*names, "pageSize", "total", "amount"]
+    for name in ("businessDate", "from", "to"):
+        has(ledger, name, "str")
+    for name in ("canRecord", "canCorrect"):
+        has(has(ledger, "permissions", "obj"), name, "bool")
+    figures = has(ledger, "figures", "obj")
+    for name in ("total", "central", "pettyCash", "scheduled"):
+        has(figures, name, "num")
+    for name in ("pageNumber", "pageSize", "total", "amount"):
+        has(ledger, name, "num")
+    (row,) = has(ledger, "items", "arr")
+    assert list(row)[: len(_LEDGER_ROW)] == [name for name, _ in _LEDGER_ROW]
+    for name, kinds in _LEDGER_ROW:
+        has(row, name, *kinds)
+    assert (row["source"], row["bucket"], row["total"]) == ("central", 2, 4000)
+    saved = ok(
+        await api.client.put(
+            f"/setup/expenses/entries/{row['id']}",
+            json={
+                "date": row["date"],
+                "vehicleId": row["vehicleId"],
+                "expenseItemId": row["expenseItemId"],
+                "units": 1,
+                "unitAmount": 4500,
+                "note": None,
+                "version": row["version"],
+            },
+            headers=owner.headers,
+        )
+    )
+    assert (has(saved, "id", "str"), has(saved, "version", "num")) == (row["id"], 2)
+    options = ok(
+        await api.client.get("/setup/expenses/options?date=2026-10-07", headers=owner.headers)
+    )
+    (vehicle,) = has(options, "vehicles", "arr")
+    for name in ("id", "companyId", "companyName", "registration"):
+        has(vehicle, name, "str")
+    has(vehicle, "active", "bool")
+    (item,) = has(options, "items", "arr")
+    for name in ("id", "name", "categoryId", "categoryName"):
+        has(item, name, "str")
+    has(item, "bucket", "num")
+
+
+# --- Phase1ReportContractTests (the catalogue, Net by vehicle, the cash book) -------------
+
+_TABLE = (
+    ("group", "str"),
+    ("report", "str"),
+    ("title", "str"),
+    ("from", "str", "null"),
+    ("to", "str", "null"),
+    ("businessDate", "str"),
+    ("headline", "obj"),
+    ("figures", "arr"),
+    ("columns", "arr"),
+    ("rows", "arr"),
+    ("pageNumber", "num"),
+    ("pageSize", "num"),
+    ("total", "num"),
+    ("totals", "arr"),
+)
+
+
+def _table(response: httpx.Response) -> dict[str, Any]:
+    assert response.status_code == 200, response.text
+    table: dict[str, Any] = json.loads(response.content)
+    for name, *kinds in _TABLE:
+        has(table, name, *kinds)
+    for figure in (table["headline"], *table["figures"]):
+        has(figure, "label", "str")
+        has(figure, "value", "num")
+        has(figure, "kind", "str")
+    for column in table["columns"]:
+        has(column, "key", "str")
+        has(column, "label", "str")
+        has(column, "kind", "str")
+        has(column, "sum", "bool")
+    for row in table["rows"]:
+        assert isinstance(row, list) and len(row) == len(table["columns"])
+        assert all(cell is None or isinstance(cell, str | int | float) for cell in row)
+    assert len(table["totals"]) == len(table["columns"])
+    return table
+
+
+async def test_the_report_catalogue_keeps_the_keys_the_web_reads(
+    api: AuthApi, owner: Member
+) -> None:
+    _phone_vehicle(api, owner)
+    _sees_every_company(api, owner)
+    response = await api.client.get("/setup/reports", headers=owner.headers)
+    assert response.status_code == 200, response.text
+    access = json.loads(response.content)
+    has(access, "businessDate", "str")
+    has(access, "firstDayOfWeek", "num")
+    assert "net" in has(access, "fleet", "arr")
+    assert "cashBook" in has(access, "pettyCash", "arr")
+    for holder in has(access, "holders", "arr"):
+        for name, *kinds in (("id", "str"), ("name", "str"), ("active", "bool")):
+            has(holder, name, *kinds)
+    has(access, "canExport", "bool")
+
+
+async def test_net_by_vehicle_and_the_cash_book_read_as_the_web_does(
+    api: AuthApi, owner: Member
+) -> None:
+    _phone_vehicle(api, owner)
+    _sees_every_company(api, owner)
+    period = "from=2026-10-01&to=2026-10-07"
+    net = _table(await api.client.get(f"/setup/reports/fleet/net?{period}", headers=owner.headers))
+    assert (net["group"], net["report"]) == ("fleet", "net")
+    assert [c["key"] for c in net["columns"]][:3] == ["vehicle", "company", "revenue"]
+    assert [c["key"] for c in net["columns"]][-3:] == ["moneyOut", "net", "saved"]
+    [row] = net["rows"]
+    assert row[0] == "KDP 482M"
+    book = _table(
+        await api.client.get(f"/setup/reports/pettycash/cashBook?{period}", headers=owner.headers)
+    )
+    assert (book["group"], book["report"]) == ("pettycash", "cashBook")
+    assert [c["key"] for c in book["columns"]] == [
+        "date",
+        "opening",
+        "cash",
+        "expenses",
+        "credits",
+        "closing",
+        "waiting",
+    ]
+    refused = await api.client.get(f"/setup/reports/fleet/nothing?{period}", headers=owner.headers)
+    assert refused.status_code == 404
+    problem(refused)

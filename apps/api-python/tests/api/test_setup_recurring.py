@@ -55,6 +55,14 @@ RECURRING_KEYS = [
     "note",
     "month",
     "activeAmount",
+    "pausedFrom",
+    "lastRun",
+    "lastRunVehicles",
+    "balance",
+    "lastRunStates",
+    "condition",
+    "opening",
+    "nextRun",
 ]
 ALLOCATION_KEYS = ["vehicleId", "amount", "registration", "active"]
 OPTION_KEYS = ["id", "companyId", "companyName", "registration", "active", "fleetNumber"]
@@ -293,6 +301,14 @@ async def test_the_list_is_in_wire_order_with_allocations(
         "note": "Stage fees",
         "month": None,
         "activeAmount": 1200,
+        "pausedFrom": None,
+        "lastRun": None,
+        "lastRunVehicles": 0,
+        "balance": None,
+        "lastRunStates": None,
+        "condition": None,
+        "opening": None,
+        "nextRun": "2026-10-09",
     }
     assert [list(a) for a in cost_row["allocations"]] == [ALLOCATION_KEYS] * 2
     assert (savings_row["id"], savings_row["name"], savings_row["kind"]) == (
@@ -575,11 +591,13 @@ async def test_a_cost_is_named_after_its_expense_item_and_logged_with_its_snapsh
     assert (entry["reason"], entry["before"]) == ("Scheduled expense, Parking", "null")
     assert entry["actorName"] == "Jane Doe"
     assert entry["after"] == (
-        f'{{"Id":"{created["id"]}","StoppedFrom":null,"Versions":[{{"Id":"{listed["versionId"]}",'
+        f'{{"Id":"{created["id"]}","StoppedFrom":null,"PausedFrom":null,"Pauses":[],'
+        f'"Versions":[{{"Id":"{listed["versionId"]}",'
         '"Revision":1,"EffectiveFrom":"2026-10-01","Name":"Parking","Kind":1,"Amount":1200,'
         '"Frequency":2,"Day":5,"LastDay":false,"Month":null,"Start":"2026-10-01","End":null,'
         f'"ExpenseItemId":"{fleet.parking}","Bucket":2,"Note":"Stage fees",'
-        f'"Allocations":[{{"VehicleId":"{fleet.kda}","Amount":1200}}]}}]}}'
+        f'"Allocations":[{{"VehicleId":"{fleet.kda}","Amount":1200}}],'
+        '"ConditionMin":null,"ConditionDays":null}],"Opening":null}'
     )
 
 
@@ -651,16 +669,16 @@ async def test_the_save_is_refused_with_the_sentence_of_the_first_failing_step(
             "Daily schedules are no longer offered. Choose weekly, monthly or yearly.",
         ),
         (
-            saving(fleet, frequency=4, day=10, month=3),
-            "Savings are set aside weekly or monthly.",
+            saving(fleet, frequency=4, day=10, month=3, end="2026-12-31"),
+            "A saving has no end date.",
         ),
         (
             cost(fleet, expenseItemId=None),
             "Choose the expense item this cost is for.",
         ),
-        (saving(fleet, start=None), "Start date is required."),
+        (cost(fleet, start=None), "Start date is required."),
         (
-            saving(fleet, start="2026-09-30"),
+            cost(fleet, start="2026-09-30"),
             "A schedule can start no earlier than the first of the current month.",
         ),
     ]
@@ -863,15 +881,15 @@ async def test_a_running_item_keeps_its_start_date(
 async def test_a_pending_item_can_move_its_start_but_not_before_the_month(
     api: AuthApi, owner: Member, fleet: Fleet
 ) -> None:
-    pending = await create(api, owner, saving(fleet, start="2026-10-20"))
+    pending = await create(api, owner, cost(fleet, start="2026-10-20"))
     path = f"/setup/recurring/{pending}"
     problem(
-        await api.client.put(path, json=saving(fleet, start="2026-09-20"), headers=owner.headers),
+        await api.client.put(path, json=cost(fleet, start="2026-09-20"), headers=owner.headers),
         400,
         INVALID,
         "A schedule can start no earlier than the first of the current month.",
     )
-    assert await revise(api, owner, pending, saving(fleet, start="2026-10-12")) == {"id": pending}
+    assert await revise(api, owner, pending, cost(fleet, start="2026-10-12")) == {"id": pending}
     assert (await row(api, owner, pending))["start"] == "2026-10-12"
 
 

@@ -6,6 +6,10 @@ the host's; fill them in during the rehearsal and keep the filled copy with the 
 Commands are shown for PowerShell on the migration host; every connection string comes from
 the environment, never from a command line.
 
+**The night that will run is part E**: the production data is in the legacy PostgreSQL
+database (`docs/10` section 7), and nothing is imported from SQL Server (question 99, decided
+13 October 2026). Parts A to D are the SQL Server procedure, kept for reference.
+
 ## A. Decisions to take before the night
 
 Each box is a decision in `docs/13-open-questions.md`; tick it with the owner's answer.
@@ -75,14 +79,16 @@ Each box is a decision in `docs/13-open-questions.md`; tick it with the owner's 
 
    ```
    $env:XCODE_ENV = "production"
-   $env:XCODE_MIGRATION_DATABASE_URL = "<owner URL of the production target>"
+   $env:XCODE_MIGRATION_DATABASE_URL = "<owner URL of the production target>?sslmode=verify-full"
    $env:XCODE_OPERATOR = "<your name>"
    xcode-api db status
    xcode-api db verify
    ```
 
    Expected: `pending: none`, `routine drift: none`, `migration checksum drift: none`, every
-   verify line `ok`, exit 0. Stop here if not.
+   verify line `ok`, exit 0. Stop here if not. With `XCODE_ENV=production` the tool refuses a
+   remote target without `sslmode=verify-full` and a SQL Server string that is unencrypted or
+   trusts any certificate.
 
 1. **Freeze the .NET API.** Writes stop; clients get 503.
    - IIS / ASP.NET Core Module: copy `app_offline.htm` into the site root `<site-root>`.
@@ -215,3 +221,170 @@ to SQL Server (`docs/10` section 5.6): the freeze window is the safety.
    - Re-enter the exported changes through the .NET API, or record them for the owner.
 3. **After step 13 with the retention period running.** The same as case 2. Restoring
    `cutover.bak` is the fallback only if the database was changed after it was set read-only.
+
+## E. The legacy database (docs/10 section 7): rehearsal and the night
+
+The production data is the PostgreSQL database of the older, single-organization application
+(alembic `d8e1a4f9c220`, a managed cluster). The tool reads a restored, read-only copy of a
+`pg_dump` of it, never the cluster itself. The owner's letter of 14 October 2026
+(`docs/reports/XCODE-Migration-Decisions.pdf`, untracked: it names people with their e-mails
+and numbers) holds the decisions and the people.
+
+### E.1 Decisions
+
+From the letter (`docs/13-open-questions.md` 90 to 98) and the user (99):
+
+- [x] **Q90** Every legacy user moves, each with a number: the letter gives the missing one and
+      the e-mail every person signs in with (new for five of the seven).
+- [x] **Q91** The author of every old entry, including all cash received, is the Administrator
+      the letter names (`--migrated-by`).
+- [x] **Q92** A day entered twice keeps the first entry; revenue moves at 27,312,770 over
+      3,522 days.
+- [x] **Q93** A day saved as 0 moves as no revenue, reason Other, note `0 in the old system`.
+- [x] **Q94** The uncommitted petty-cash expenses move waiting for approval (1,182; the
+      1,183rd is the expense of Q95).
+- [x] **Q95** The 30,000 expense without a vehicle is held back and listed; the float reads
+      −589,557 until it is added.
+- [x] **Q96** The 179 deductions on items without a category (1,031,025) are held back and
+      listed until the owner decides how to treat them.
+- [x] **Q97** Provisions and budgets are left out; the report lists the provision balance
+      and the 32 budgets.
+- [x] **Q98** Rights by the table of `docs/10` 7.4; no back-dating limits; roles as the letter
+      lists them (one Manager 101 moves up to Owner; the default petty-cash manager stays a
+      Fleet manager and holds the one float).
+- [x] **Q99** Nothing is imported from SQL Server (the user, 13 October 2026).
+- [ ] **Q100** Petty-cash entries that repeat another of the same day exactly (16 on the dump
+      of 13 October) move as they are and are listed "please confirm" (the default): the
+      owner deletes a confirmed double in the old application before the night's dump, or in
+      the new one after the move.
+- [ ] Retention of the dump, the restored copy and the work directory (default, as Q13: 30
+      days, then destroyed), and of the old application's database (frozen, read-only).
+- [ ] Code delivery works on the night: everyone signs in afresh with number, code and a new
+      PIN, so SMS or e-mail must reach every person (`docs/08-operability.md`).
+- [ ] The freeze window, its announcement to staff, and who decides a rollback.
+
+### E.2 The people file
+
+Write `people.csv` on the migration host (never in the repository, a ticket or a chat), from
+the letter's user table, one row per legacy user:
+
+```
+legacy_email,email,phone,role
+<e-mail in the old application>,<e-mail to sign in with>,<number>,<Owner | Fleet manager | empty>
+```
+
+The legacy e-mail is the one the old application holds (`SELECT email FROM users` on the
+restored copy). `role` is `Owner` for the Manager 101 the letter moves up and empty for
+everyone else (Administrators become Owners, the others Fleet managers). Keep the file with
+the work directory on the encrypted disk and destroy them together.
+
+### E.3 Rehearsal (days before, on copies only)
+
+1. `pg_dump` the production database as on the night (E.4 step 2) and note its time.
+2. Restore it into a scratch PostgreSQL cluster of the migration host and mark it read-only:
+
+   ```
+   createdb -h <scratch-host> -p <scratch-port> -U postgres legacy_copy
+   pg_restore -h <scratch-host> -p <scratch-port> -U postgres -d legacy_copy --no-owner --no-acl <dump>
+   psql -h <scratch-host> -p <scratch-port> -U postgres -d postgres -c "ALTER DATABASE legacy_copy SET default_transaction_read_only = on"
+   ```
+
+3. Provision an empty target as part B step 2 (`db/roles`, `xcode-api db migrate`,
+   `xcode-api db verify`).
+4. Run E.4 steps 4 to 8 with `--dry-run` only, and write down the run times.
+5. Compare with the figures of `docs/10` 7.5 (the dump of 13 October 2026): 3,522 revenue
+   days, 27,312,770; vehicle costs 29,352,017 (25,456,717 central + 3,895,300 approved petty
+   cash); petty cash 195 cash received (6,788,630), 1,196 approved (3,895,300), 1,182 waiting
+   (3,362,187), 6 credit notes (120,700); float −589,557; 7 people; 180 refused rows. A later
+   dump differs by the entries made since: explain every difference before the night.
+6. Give the owner `exceptions.csv` of the rehearsal (rows by kind on the dump of 13 October:
+   180 held back, 3 left out, 5 double entries dropped, 16 possible doubles moved, 5
+   petty-cash balance days).
+
+### E.4 The night
+
+0. **Preconditions.** The Python API is deployed against the empty, migrated production
+   target and is not reachable by clients; `xcode-api db status` and `xcode-api db verify`
+   pass as in part C step 0. `people.csv` is on the host.
+1. **Freeze the old application.** Put it in maintenance (stop its service or show its
+   maintenance page) so nobody writes. Check on the production cluster that no session of
+   the application's user is left:
+
+   ```
+   SELECT usename, application_name, state FROM pg_stat_activity WHERE datname = '<database>';
+   ```
+
+2. **Dump production** (a read-only operation on the cluster):
+
+   ```
+   $env:PGPASSWORD = "<from the password manager>"
+   pg_dump --format=custom --no-owner --no-acl -h <cluster-host> -p <port> -U <user> -d <database> -f <work>\xcode_<instant>.dump
+   Remove-Item Env:PGPASSWORD
+   ```
+
+   Expected: exit 0. Note the dump's size and time.
+3. **Restore** it into the scratch cluster and mark it read-only, as E.3 step 2.
+4. **Extract.**
+
+   ```
+   $env:XCODE_MIGRATION_LEGACY_URL = "postgresql://postgres@<scratch-host>:<scratch-port>/legacy_copy"
+   $env:XCODE_MIGRATION_DATABASE_URL = "<owner URL of the production target>?sslmode=verify-full"
+   $env:XCODE_ENV = "production"
+   $env:XCODE_OPERATOR = "<your name>"
+   cd apps/api-python/tools/migrate_from_sqlserver
+   python -m migrate_from_sqlserver extract --source legacy --output <work>\extract
+   ```
+
+   Expected: `extracted <N> rows into <work>\extract at <instant>`. A refusal (a database
+   that answers a write, another alembic version, a soft-deleted row) stops here.
+5. **Transform.**
+
+   ```
+   python -m migrate_from_sqlserver transform --input <work>\extract --output <work>\run --migrated-by <e-mail> --people <work>\people.csv --organization-name "<name>" --organization-slug <slug> [--fleet-numbers <list.csv>]
+   ```
+
+   Expected: `transformed into <work>\run: <r> refused, ...`; `<r>` is 180 or the rehearsal's
+   count plus what the owner accepted since.
+6. **Report.** `python -m migrate_from_sqlserver report --input <work>\run`. Read the
+   LEGACY TABLES section (every file: rows = loaded + dropped + refused + replaced), every
+   REFUSED line, and give the owner `<work>\run\exceptions.csv`.
+7. **Dry run.** `python -m migrate_from_sqlserver load --dry-run --input <work>\run --accept-rejected <r>`.
+   Expected: every verification `[ok  ]`, `RESULT: every verification passed; nothing was
+   written (dry run)`, exit 0.
+8. **Apply.** `python -m migrate_from_sqlserver load --apply --input <work>\run --accept-rejected <r>`.
+   Expected: `RESULT: committed; every verification passed`, exit 0, and
+   `xcode-api db verify (after the commit)` `[ok  ]`. Exit 1 means nothing was written.
+9. **Start the Python API** with a new signing key (nobody has a session or a trusted device
+   to keep) and check `/health/ready`. Smoke test: the `--migrated-by` person signs in with
+   number, code and a new PIN, opens the revenue week, the vehicle report of the last full
+   month (its costs equal the report's postings check), the petty-cash screen (float
+   −589,557 on the dump of 13 October) and the people list.
+10. **Switch the clients** to the new API (web `API_URL`, the mobile build's API host) as in
+    part C step 12, and keep the old application in maintenance.
+11. **Freeze the old database for good**: leave the old application stopped, keep the dump and
+    the managed database read-only (`ALTER DATABASE <database> SET default_transaction_read_only = on`)
+    for the retention period.
+
+### E.5 The owner's first steps (docs/10 7.6)
+
+1. Everyone signs in afresh: number, a code, then a new PIN.
+2. Set each vehicle's target (no vehicle has one; 619 vehicle-days show as Missing days).
+3. Fleet numbers, if wanted (none move unless `--fleet-numbers` gave them).
+4. File the expense categories under main categories (they show "Not set").
+5. Approve the 1,182 petty-cash expenses waiting for approval, after checking the possible
+   doubles of the exceptions list.
+6. Re-enter the provision (KDU574T, 2,000) as a saving opening, and decide the held-back rows
+   of the exceptions list (the 30,000 expense, the 179 deductions).
+7. Set back-dating limits per person (none move).
+
+### E.6 Rollback
+
+There is no copy back into the old database: the freeze window is the safety.
+
+1. **Before the clients switch (step 10).** Stop the Python API, take the old application out
+   of maintenance; nothing was written there. Keep or drop the new target; run the night again
+   later.
+2. **After the switch.** Writes since the switch exist only in the new system: put the Python
+   API in maintenance, list what changed since the switch (`tenancy.change_log`,
+   `ops.operator_actions`, the entries recorded after `<switch instant>`), take the old
+   application out of maintenance and re-enter those writes there by hand.

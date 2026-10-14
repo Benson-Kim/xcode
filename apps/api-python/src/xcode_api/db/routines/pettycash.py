@@ -31,6 +31,7 @@ from ...domain.pettycash import (
 from ...domain.tenancy import TenantContext
 from ..session import call
 from ..types import document
+from .expenses import allocations_argument
 
 
 def _tenant(context: TenantContext) -> tuple[Any, ...]:
@@ -115,6 +116,7 @@ class PettyCashRoutines:
             *_tenant(command.context),
             command.id,
             *_line(command.line),
+            allocations_argument(command.allocations),
             command.context.now,
         )
 

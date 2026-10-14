@@ -144,7 +144,7 @@ def line(
 def create(
     app: Conn, who: Member, *fields: Any, entry_id: UUID | None = None, now: datetime = T0
 ) -> Any:
-    return read(app, "pettycash_entry_create", who, entry_id, *fields, now=now)
+    return read(app, "pettycash_entry_create", who, entry_id, *fields, None, now=now)
 
 
 def create_refused(
@@ -156,7 +156,9 @@ def create_refused(
     *,
     entry_id: UUID | None = None,
 ) -> dict[str, Any]:
-    return detail(refuses(app, "pettycash_entry_create", who, [entry_id, *fields], sqlstate, code))
+    return detail(
+        refuses(app, "pettycash_entry_create", who, [entry_id, *fields, None], sqlstate, code)
+    )
 
 
 def expense(
@@ -607,7 +609,7 @@ def test_the_holder_rules_answer_after_the_line_and_before_the_date(
         app_conn,
         "pettycash_entry_create",
         nobody,
-        [None, *line("cash", TODAY, 10)],
+        [None, *line("cash", TODAY, 10), None],
         "XC403",
         "permission_missing",
     )
@@ -769,7 +771,7 @@ def test_two_creates_under_one_new_id_race_to_one_entry(
     fields = line("credit", TODAY, 50, holder=yard.clerk.id)
     second_actor = yard.owner if same_actor else yard.admin
     set_override(owner_conn, yard.admin, "pettycash.credit")
-    sql = "SELECT api.pettycash_entry_create(" + ", ".join(["%s"] * 15) + ") AS r"
+    sql = "SELECT api.pettycash_entry_create(" + ", ".join(["%s"] * 16) + ") AS r"
     with (
         psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as first,
         psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as second,
@@ -777,7 +779,7 @@ def test_two_creates_under_one_new_id_race_to_one_entry(
         outcome: list[Any] = []
 
         def late() -> None:
-            args = (second_actor.id, yard.org, REQUEST, entry_id, *fields, at(1))
+            args = (second_actor.id, yard.org, REQUEST, entry_id, *fields, None, at(1))
             try:
                 outcome.append(second.execute(sql, args).fetchone())
             except psycopg.Error as error:
@@ -785,7 +787,7 @@ def test_two_creates_under_one_new_id_race_to_one_entry(
 
         with first.transaction():
             made = first.execute(
-                sql, (yard.owner.id, yard.org, REQUEST, entry_id, *fields, at(0))
+                sql, (yard.owner.id, yard.org, REQUEST, entry_id, *fields, None, at(0))
             ).fetchone()
             worker = threading.Thread(target=late)
             worker.start()
@@ -823,17 +825,18 @@ def test_two_saves_on_one_float_run_one_after_the_other(
     set_override(owner_conn, yard.owner, "pettycash.issue_negative", False)
     with psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as setup:
         setup.execute(
-            "SELECT api.pettycash_entry_create(" + ", ".join(["%s"] * 15) + ")",
+            "SELECT api.pettycash_entry_create(" + ", ".join(["%s"] * 16) + ")",
             (
                 yard.owner.id,
                 yard.org,
                 REQUEST,
                 None,
                 *line("cash", TODAY, 1000, holder=yard.clerk.id),
+                None,
                 at(0),
             ),
         )
-    sql = "SELECT api.pettycash_entry_create(" + ", ".join(["%s"] * 15) + ") AS r"
+    sql = "SELECT api.pettycash_entry_create(" + ", ".join(["%s"] * 16) + ") AS r"
     with (
         psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as first,
         psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as second,
@@ -844,7 +847,7 @@ def test_two_saves_on_one_float_run_one_after_the_other(
             try:
                 outcome.append(
                     second.execute(
-                        sql, (yard.owner.id, yard.org, REQUEST, None, *cash_line, at(2))
+                        sql, (yard.owner.id, yard.org, REQUEST, None, *cash_line, None, at(2))
                     ).fetchone()
                 )
             except psycopg.Error as error:
@@ -852,7 +855,7 @@ def test_two_saves_on_one_float_run_one_after_the_other(
 
         with first.transaction():
             made = first.execute(
-                sql, (yard.owner.id, yard.org, REQUEST, None, *cash_line, at(1))
+                sql, (yard.owner.id, yard.org, REQUEST, None, *cash_line, None, at(1))
             ).fetchone()
             worker = threading.Thread(target=late)
             worker.start()
@@ -916,7 +919,7 @@ def test_an_expense_waits_for_a_change_of_its_vehicle_or_item_and_then_reads_it(
         ),
     }[change]
     fields = line("expense", TODAY, 300, vehicle=yard.kaa, item=yard.tyres)
-    sql = "SELECT api.pettycash_entry_create(" + ", ".join(["%s"] * 15) + ") AS r"
+    sql = "SELECT api.pettycash_entry_create(" + ", ".join(["%s"] * 16) + ") AS r"
     with (
         psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as first,
         psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as second,
@@ -927,7 +930,7 @@ def test_an_expense_waits_for_a_change_of_its_vehicle_or_item_and_then_reads_it(
             try:
                 outcome.append(
                     second.execute(
-                        sql, (yard.clerk.id, yard.org, REQUEST, None, *fields, at(2))
+                        sql, (yard.clerk.id, yard.org, REQUEST, None, *fields, None, at(2))
                     ).fetchone()
                 )
             except psycopg.Error as error:
@@ -957,7 +960,7 @@ def test_a_create_a_change_and_a_vehicle_write_on_one_float_never_deadlock(
     change, a retirement of their vehicle arrives, and when the float is released the three
     finish one after another, none torn down as a deadlock."""
     spent = expense(app_conn, yard, 100, on=day(-2))
-    create_sql = "SELECT api.pettycash_entry_create(" + ", ".join(["%s"] * 15) + ") AS r"
+    create_sql = "SELECT api.pettycash_entry_create(" + ", ".join(["%s"] * 16) + ") AS r"
     update_sql = "SELECT api.pettycash_entry_update(" + ", ".join(["%s"] * 16) + ") AS r"
     retire_sql = "SELECT api.setup_vehicle_retire(%s, %s, %s, %s, %s, NULL, %s) AS r"
     changed = line("expense", day(-3), 130, vehicle=yard.kaa, item=yard.tyres)
@@ -984,7 +987,7 @@ def test_a_create_a_change_and_a_vehicle_write_on_one_float_never_deadlock(
             )
             held = owner_conn.info.backend_pid
             change_args = (yard.clerk.id, yard.org, REQUEST, UUID(spent["id"]), *changed, 1, at(1))
-            create_args = (yard.clerk.id, yard.org, REQUEST, None, *added, at(2))
+            create_args = (yard.clerk.id, yard.org, REQUEST, None, *added, None, at(2))
             for name, conn, sql, args, ahead in (
                 ("change", changing, update_sql, change_args, held),
                 ("create", creating, create_sql, create_args, changing.info.backend_pid),
@@ -2047,7 +2050,7 @@ def test_a_holder_sees_only_their_own_float_and_a_scoped_viewer_only_what_they_m
         app_conn,
         "pettycash_entry_create",
         yard.owner,
-        [None, *line("cash", TODAY, 10, holder=yard.clerk.id)],
+        [None, *line("cash", TODAY, 10, holder=yard.clerk.id), None],
         "XC422",
         "pettycash_holder_not_holder",
     )
@@ -2346,3 +2349,168 @@ def test_a_scoped_viewer_sees_petty_cash_history_only_for_their_vehicles(
     assert seen(yard.admin) == [
         "Recorded Wanjiru Kamau's petty cash spending on KAA 501A for 9 Oct 2026"
     ]
+
+
+def shared(
+    app: Conn,
+    yard: Yard,
+    units: Any,
+    amount: Any,
+    parts: list[tuple[UUID, Any]],
+    *,
+    entry_id: UUID | None = None,
+    kind: str = "expense",
+    who: Member | None = None,
+) -> Any:
+    fields = line(kind, TODAY, amount, item=yard.tyres if kind == "expense" else None, units=units)
+    allocations = Jsonb([{"vehicle_id": str(v), "amount": str(a)} for v, a in parts])
+    return read(app, "pettycash_entry_create", who or yard.owner, entry_id, *fields, allocations)
+
+
+def test_a_shared_purchase_is_one_entry_per_vehicle_and_recounts(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    """One waiting entry per vehicle with the purchase as bought, the first under the purchase
+    id; a retry answers it; the size counts the parts not removed and not rejected; a new
+    item, units or amount takes a part out while a rejected part keeps its group; a part
+    cannot move onto a vehicle its purchase already has."""
+    kac = add_vehicle(owner_conn, yard.org, yard.petty, "KAC 503C", joined_on=day(-30))
+    purchase = uuid4()
+    made = shared(
+        app_conn, yard, 3, 50, [(yard.kaa, 50), (yard.kab, 50), (kac, 50)], entry_id=purchase
+    )
+    assert (made["id"], made["outcome"], made["status"], num(made["balance"])) == (
+        str(purchase),
+        "created",
+        "waiting",
+        -150,
+    )
+    rows = owner_conn.execute(
+        "SELECT * FROM pettycash.entries WHERE group_id = %s ORDER BY vehicle_id = %s DESC",
+        (purchase, yard.kaa),
+    ).fetchall()
+    assert len(rows) == 3
+    assert {(r["units"], r["unit_amount"], r["status"]) for r in rows} == {(1, 50, 1)}
+    assert {(r["group_total"], r["group_units"], r["group_unit_amount"]) for r in rows} == {
+        (150, 3, 50)
+    }
+    assert rows[0]["id"] == purchase
+    assert len(change_rows(owner_conn, yard.org, "pettycash")) == 3
+    again = shared(app_conn, yard, 1, 9, [(yard.kaa, 9)], entry_id=purchase)
+    assert (again["id"], again["outcome"]) == (str(purchase), "replayed")
+
+    def groups() -> dict[str, Any]:
+        listing = entries(app_conn, yard.owner)
+        return {item["id"]: item["group"] for item in listing["items"] if item["group"]}
+
+    seen = groups()
+    assert len(seen) == 3
+    assert {(g["id"], g["size"], num(g["total"]), num(g["units"])) for g in seen.values()} == {
+        (str(purchase), 3, 150, 3)
+    }
+    by_vehicle = {r["vehicle_id"]: r for r in rows}
+    second = {"id": str(by_vehicle[yard.kab]["id"]), "version": 1}
+    third = {"id": str(by_vehicle[kac]["id"]), "version": 1}
+    decide(app_conn, "reject", yard.admin, second, "Not ours")
+    assert {g["size"] for g in groups().values()} == {2}
+    decide(app_conn, "remove", yard.owner, third, "Bought twice")
+    assert {g["size"] for g in groups().values()} == {1}
+    moved = line("expense", TODAY, 50, vehicle=yard.kab, item=yard.tyres)
+    error = refuses(
+        app_conn,
+        "pettycash_entry_update",
+        yard.owner,
+        [purchase, *moved, 1],
+        "XC422",
+        "expense_purchase_has_vehicle",
+    )
+    assert detail(error) == {"registration": "KAB 502B"}
+    update(
+        app_conn, yard.owner, made, line("expense", TODAY, 60, vehicle=yard.kaa, item=yard.tyres), 1
+    )
+    alone = stored(owner_conn, made)
+    assert (alone["group_id"], alone["group_total"], alone["units"]) == (None, None, 1)
+    left = groups()
+    assert list(left) == [second["id"]]
+    assert (left[second["id"]]["id"], left[second["id"]]["size"]) == (str(purchase), 0)
+
+
+def test_a_shared_purchase_follows_the_purchase_rules_and_only_an_expense_takes_one(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    sum_wrong = refuses(
+        app_conn,
+        "pettycash_entry_create",
+        yard.owner,
+        [
+            None,
+            *line("expense", TODAY, 100, item=yard.tyres),
+            Jsonb(
+                [
+                    {"vehicle_id": str(yard.kaa), "amount": "60"},
+                    {"vehicle_id": str(yard.kab), "amount": "50"},
+                ]
+            ),
+        ],
+        "XC422",
+        "expense_allocation_sum",
+    )
+    assert detail(sum_wrong) == {}
+    refuses(
+        app_conn,
+        "pettycash_entry_create",
+        yard.owner,
+        [
+            None,
+            *line("expense", TODAY, 100, item=yard.tyres),
+            Jsonb(
+                [
+                    {"vehicle_id": str(yard.kaa), "amount": "50"},
+                    {"vehicle_id": str(yard.kaa), "amount": "50"},
+                ]
+            ),
+        ],
+        "XC422",
+        "expense_vehicles_invalid",
+    )
+    one_part = Jsonb([{"vehicle_id": str(yard.kaa), "amount": "100"}])
+    for kind, code in (
+        ("cash", "pettycash_line_cash_shape"),
+        ("credit", "pettycash_line_credit_vehicle"),
+    ):
+        refuses(
+            app_conn,
+            "pettycash_entry_create",
+            yard.owner,
+            [None, *line(kind, TODAY, 100, holder=yard.clerk.id), one_part],
+            "XC422",
+            code,
+        )
+    plain = read(
+        app_conn,
+        "pettycash_entry_create",
+        yard.owner,
+        None,
+        *line("expense", TODAY, 100, item=yard.tyres),
+        one_part,
+    )
+    row = stored(owner_conn, plain)
+    assert (row["vehicle_id"], row["group_id"], row["total"]) == (yard.kaa, None, 100)
+    hidden = refuses(
+        app_conn,
+        "pettycash_entry_create",
+        yard.clerk,
+        [
+            None,
+            *line("expense", TODAY, 100, item=yard.tyres),
+            Jsonb(
+                [
+                    {"vehicle_id": str(yard.kaa), "amount": "50"},
+                    {"vehicle_id": str(yard.kab), "amount": "50"},
+                ]
+            ),
+        ],
+        "XC422",
+        "pettycash_vehicle_scope",
+    )
+    assert detail(hidden) == {}

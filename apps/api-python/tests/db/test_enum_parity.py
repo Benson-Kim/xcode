@@ -1,10 +1,10 @@
 """Each domain enumeration against the database that stores it (``docs/04-schema.md`` section 2).
 
 Code tables hold exactly the ``IntEnum`` members (code, name, label); every ``CHECK (column IN
-(...))`` list equals its ``StrEnum``; the permission catalogue equals ``Permission`` and the
-inventory table (``tests/support/permission_catalogue.json``), the keys outside it equal
-``RetiredPermission`` and the hidden key, and their sources and the grant translation equal
-the inventory.
+(...))`` list equals its ``StrEnum`` (a list of numbers, its ``IntEnum``); the permission
+catalogue equals ``Permission`` and the inventory table
+(``tests/support/permission_catalogue.json``), the keys outside it equal ``RetiredPermission``
+and the hidden key, and their sources and the grant translation equal the inventory.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def test_every_code_table_has_an_enum(owner_conn: Conn) -> None:
     assert {r["qualified"] for r in rows} == set(CODE_TABLE_ENUMS)
 
 
-def _check_lists(conn: Conn) -> dict[str, list[str]]:
+def _check_lists(conn: Conn) -> dict[str, list[str] | list[int]]:
     rows = conn.execute(
         """
         SELECT n.nspname AS schema_name, c.relname AS table_name, k.conname,
@@ -70,11 +70,16 @@ def _check_lists(conn: Conn) -> dict[str, list[str]]:
         """,
         (list(SPECIFIED_SCHEMAS),),
     ).fetchall()
-    lists: dict[str, list[str]] = {}
+    lists: dict[str, list[str] | list[int]] = {}
     for r in rows:
         match = _IN_LIST.match(r["definition"])
         if match:
-            values = [v.replace("''", "'") for v in _LITERAL.findall(match[2])]
+            texts = _LITERAL.findall(match[2])
+            values = (
+                [v.replace("''", "'") for v in texts]
+                if texts
+                else [int(v) for v in match[2].split(", ")]
+            )
             lists[f"{r['schema_name']}.{r['table_name']}.{r['conname']}"] = values
     return lists
 

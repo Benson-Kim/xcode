@@ -38,6 +38,7 @@ from xcode_api.domain.identity import (
     DeviceVerification,
     OperatorRequest,
     PinCompletion,
+    PinProblem,
     PinVerdict,
     SessionCheck,
     SessionContext,
@@ -53,6 +54,7 @@ from ..support.fakes import held_permissions, role_rights
 from ..support.scenario import (
     CODE_HASH,
     EMAIL,
+    NEW_CODE_HASH,
     NEW_PIN_HASH,
     PHONE,
     PIN_HASH,
@@ -61,6 +63,7 @@ from ..support.scenario import (
     Conn,
     make_account,
     new_token_hash,
+    set_user,
     store_code,
 )
 from ..support.scenario import T0 as AUTH_T0
@@ -353,41 +356,61 @@ async def test_identity_routines_map_every_outcome_with_one_statement_each(
     assert "jane" not in repr(issued)
 
     verified = await identity.verify_code(
-        CodeCheck("req", PHONE, UNTRUSTED, CodePurpose.PIN_RESET, CODE_HASH, AUTH_T0)
+        CodeCheck(
+            request_id="req",
+            phone=PHONE,
+            device_id=UNTRUSTED,
+            purpose=CodePurpose.PIN_RESET,
+            code_hash=CODE_HASH,
+            replacement_code_hash=NEW_CODE_HASH,
+            now=AUTH_T0,
+        )
     )
     count = _one_statement(statement_counter, count)
     assert verified.outcome is AuthOutcomeKind.CODE_VERIFIED
 
-    short = await identity.complete_pin(
+    unchanged = await identity.complete_pin(
         PinCompletion(
-            "req",
-            PHONE,
-            UNTRUSTED,
-            CodePurpose.PIN_RESET,
-            CODE_HASH,
-            3,
-            NEW_PIN_HASH,
-            new_token_hash(),
-            None,
-            AUTH_T0,
+            request_id="req",
+            phone=PHONE,
+            device_id=UNTRUSTED,
+            purpose=CodePurpose.PIN_RESET,
+            code_hash=CODE_HASH,
+            new_pin_is_current=True,
+            checked_pin_hash=PIN_HASH,
+            pin_hash=PIN_HASH,
+            device_name=None,
+            trust=True,
+            device_token_hash=None,
+            refresh_token_hash=new_token_hash(),
+            trust_days=None,
+            now=AUTH_T0,
         )
     )
     count = _one_statement(statement_counter, count)
-    assert (short.outcome, short.minimum_pin_length) == (AuthOutcomeKind.INVALID_PIN, 4)
+    assert (unchanged.outcome, unchanged.pin_problem, unchanged.minimum_pin_length) == (
+        AuthOutcomeKind.INVALID_PIN,
+        PinProblem.UNCHANGED,
+        4,
+    )
 
     completed_hash = new_token_hash()
     completed = await identity.complete_pin(
         PinCompletion(
-            "req",
-            PHONE,
-            UNTRUSTED,
-            CodePurpose.PIN_RESET,
-            CODE_HASH,
-            4,
-            NEW_PIN_HASH,
-            completed_hash,
-            30,
-            AUTH_T0,
+            request_id="req",
+            phone=PHONE,
+            device_id=UNTRUSTED,
+            purpose=CodePurpose.PIN_RESET,
+            code_hash=CODE_HASH,
+            new_pin_is_current=False,
+            checked_pin_hash=PIN_HASH,
+            pin_hash=NEW_PIN_HASH,
+            device_name=None,
+            trust=True,
+            device_token_hash=None,
+            refresh_token_hash=completed_hash,
+            trust_days=30,
+            now=AUTH_T0,
         )
     )
     count = _one_statement(statement_counter, count)
@@ -438,7 +461,16 @@ async def test_verify_device_maps_through_the_gateway(
     account = make_account(operator_conn, owner_conn)
     store_code(owner_conn, account.user_id, "new_device", UNTRUSTED)
     outcome = await IdentityRoutines(pool).verify_device(
-        DeviceVerification("req", PHONE, UNTRUSTED, CODE_HASH, new_token_hash(), 7, AUTH_T0)
+        DeviceVerification(
+            request_id="req",
+            phone=PHONE,
+            device_id=UNTRUSTED,
+            code_hash=CODE_HASH,
+            replacement_code_hash=NEW_CODE_HASH,
+            refresh_token_hash=new_token_hash(),
+            trust_days=7,
+            now=AUTH_T0,
+        )
     )
     assert outcome.outcome is AuthOutcomeKind.AUTHENTICATED
 
@@ -467,7 +499,15 @@ async def test_ops_routines_map_the_operator_routines(
     )
     cleared = await ops.clear_pause(request)
     count = _one_statement(statement_counter, count)
-    assert cleared.was_paused is False
+    assert cleared.was_locked is False
+    set_user(owner_conn, provisioned.user_id, failed_attempts=5)
+    count = statement_counter()
+    locked = await ops.clear_pause(request)
+    count = _one_statement(statement_counter, count)
+    assert (locked.user_id, locked.was_locked) == (provisioned.user_id, True)
+    unlocked = await ops.clear_pause(request)
+    count = _one_statement(statement_counter, count)
+    assert unlocked.was_locked is False
     revoked = await ops.revoke_sessions(request)
     count = _one_statement(statement_counter, count)
     assert (revoked.devices, revoked.tokens) == (0, 0)

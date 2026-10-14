@@ -170,6 +170,8 @@ class ChangeLogSection(StrEnum):
     LOGO = "logo"
     SIGN_IN = "signIn"
     PETTYCASH = "pettycash"
+    CENTRAL_EXPENSES = "centralexpenses"
+    REPORTS = "reports"
 
 
 class ScopeMode(StrEnum):

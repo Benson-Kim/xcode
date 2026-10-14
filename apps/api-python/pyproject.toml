@@ -20,6 +20,9 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+xcode_api = ["infra/exports/fonts/*"]
+
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
 # Dev and test dependencies are installed with `pip install -r requirements-dev.txt`
@@ -54,6 +57,11 @@ strict = true
 warn_unreachable = true
 files = ["src"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# The two export libraries ship no type information.
+module = ["reportlab.*", "xlsxwriter.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

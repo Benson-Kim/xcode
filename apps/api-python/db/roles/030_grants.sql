@@ -13,7 +13,7 @@ $$;
 
 -- Schema usage.
 GRANT USAGE ON SCHEMA api TO xcode_app, xcode_operator;
-GRANT USAGE ON SCHEMA identity, tenancy, setup, revenue, pettycash, ops, api TO xcode_api_executor;
+GRANT USAGE ON SCHEMA identity, tenancy, setup, revenue, pettycash, expenses, reports, ops, api TO xcode_api_executor;
 -- The executor owns every api.* routine (SECURITY DEFINER); assigning it ownership needs
 -- CREATE on the api schema. It still has no table or sequence privilege outside the DML
 -- grants below, so least privilege holds for data.
@@ -26,6 +26,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE xcode_owner IN SCHEMA tenancy REVOKE EXECUTE O
 ALTER DEFAULT PRIVILEGES FOR ROLE xcode_owner IN SCHEMA setup REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE xcode_owner IN SCHEMA revenue REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE xcode_owner IN SCHEMA pettycash REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE xcode_owner IN SCHEMA expenses REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE xcode_owner IN SCHEMA reports REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE xcode_owner IN SCHEMA ops REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 -- Data schemas: the executor reads and writes new tables and uses new sequences. Each
@@ -35,7 +37,7 @@ DO $$
 DECLARE
   v_schema text;
 BEGIN
-  FOREACH v_schema IN ARRAY ARRAY['identity', 'tenancy', 'setup', 'revenue', 'pettycash', 'ops'] LOOP
+  FOREACH v_schema IN ARRAY ARRAY['identity', 'tenancy', 'setup', 'revenue', 'pettycash', 'expenses', 'ops'] LOOP
     EXECUTE format(
       'ALTER DEFAULT PRIVILEGES FOR ROLE xcode_owner IN SCHEMA %I '
       'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO xcode_api_executor',

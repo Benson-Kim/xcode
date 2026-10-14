@@ -18,7 +18,14 @@ from uuid import UUID
 
 from xcode_api.application.repositories import RevenueRepository, SetupRepository, TenancyRepository
 from xcode_api.domain.errors import DomainRefusal
-from xcode_api.domain.revenue import RevenueCapture, RevenueDashboardQuery, RevenueWeekQuery
+from xcode_api.domain.revenue import (
+    RevenueCapture,
+    RevenueDashboardQuery,
+    RevenueDayQuery,
+    RevenueDayRow,
+    RevenueDaySave,
+    RevenueWeekQuery,
+)
 from xcode_api.domain.setup import VehicleRetirement, VehicleReturn
 from xcode_api.domain.tenancy import PersonSave, SettingsSave, TenantContext
 
@@ -212,4 +219,52 @@ class RevenueCase:
     run: Callable[[RevenueWorld], Awaitable[None]]
 
 
-CASES = (RevenueCase("capture_a_week", capture_a_week),)
+async def save_a_day(world: RevenueWorld) -> None:
+    """The day read, a day save, its replay, a refused row that saves nothing, a stale row,
+    an unknown vehicle, and the change log they leave."""
+    owner = world.owner
+    north = await world.setup.company("North Star")
+    kda = await world.setup.vehicle(north, "KDA 482M", date(2026, 10, 1), 7000)
+    kdb = await world.setup.vehicle(north, "KDB 111A", date(2026, 10, 1), 7000)
+    await world.record(
+        world.revenue.capture(
+            RevenueCapture(
+                world.later(owner), kda, date(2026, 10, 2), Decimal(5000), None, None, None, None
+            )
+        )
+    )
+
+    def row(vehicle: UUID, amount: int | None, version: int | None = None) -> RevenueDayRow:
+        return RevenueDayRow(
+            vehicle, None if amount is None else Decimal(amount), None, None, version
+        )
+
+    async def save(day: date, *rows: RevenueDayRow) -> Any:
+        return await world.record(
+            world.revenue.save_day(RevenueDaySave(world.later(owner), day, rows))
+        )
+
+    await world.record(world.revenue.day(RevenueDayQuery(world.later(owner), None, None)))
+    # Each save logs one vehicle at most: the two worlds' ids differ, so rows logged in
+    # vehicle-id order would compare in a random order.
+    await save(TODAY, row(kdb, 4500))
+    await save(TODAY, row(kdb, 4500), row(kda, 6000))
+    await save(TODAY, row(kdb, 4500), row(kda, 6000))
+    await save(TODAY - timedelta(days=1), row(kda, 4200), row(kdb, None))
+    await save(TODAY, row(kda, 6100, 7))
+    await save(TODAY, row(UNKNOWN, 100))
+    await save(TODAY, row(kda, 100), row(kda, 200))
+    await save(TODAY)
+    await world.record(
+        world.revenue.day(RevenueDayQuery(world.later(owner), TODAY + timedelta(days=7), None))
+    )
+    await world.record(
+        world.revenue.day(RevenueDayQuery(world.later(owner), date(2026, 10, 9), north))
+    )
+    await world.setup.history("revenue")
+
+
+CASES = (
+    RevenueCase("capture_a_week", capture_a_week),
+    RevenueCase("save_a_day", save_a_day),
+)

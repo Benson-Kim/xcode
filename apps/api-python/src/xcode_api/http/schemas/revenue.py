@@ -125,3 +125,52 @@ class SaveRevenue(ApiModel):
 class RevenueSaved(ApiModel):
     id: UUID
     version: int
+
+
+class LastWeekDto(ApiModel):
+    amount: Money | None
+    reason: str | None
+
+
+class RevenueDayVehicleDto(ApiModel):
+    id: UUID
+    company_id: UUID
+    registration: str
+    day: RevenueCellDto
+    last_week: LastWeekDto | None
+    fleet_number: str | None
+
+
+class RevenueDayDto(ApiModel):
+    """``GET /setup/revenue/day``: at most 500 vehicles, ``truncated`` when more."""
+
+    day: date = Field(alias="date")
+    business_date: date
+    vehicles: list[RevenueDayVehicleDto]
+    truncated: bool
+
+
+class SaveRevenueDayRow(ApiModel):
+    """A row of ``PUT /setup/revenue/day/{date}``, read as ``SaveRevenue`` reads its body."""
+
+    vehicle_id: UUID | None = None
+    amount: Amount | None = None
+    reason: str | None = None
+    note: str | None = None
+    version: int | None = Field(default=None, ge=-(2**63), le=2**63 - 1)
+
+
+class SaveRevenueDay(ApiModel):
+    rows: list[SaveRevenueDayRow] = Field(default_factory=list)
+
+
+class RevenueDayRowSaved(ApiModel):
+    vehicle_id: UUID
+    id: UUID
+    version: int
+
+
+class RevenueDaySaved(ApiModel):
+    """Each saved row in the order sent."""
+
+    rows: list[RevenueDayRowSaved]

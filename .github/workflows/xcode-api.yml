@@ -42,11 +42,11 @@ jobs:
         run: ruff format --check .
       - name: Lock drift (runtime)
         run: |
-          uv pip compile --universal --python-version 3.13 requirements.txt -o requirements.lock.txt
+          uv pip compile --universal --python-version 3.13 --generate-hashes requirements.txt -o requirements.lock.txt
           git diff --exit-code requirements.lock.txt
       - name: Lock drift (dev)
         run: |
-          uv pip compile --universal --python-version 3.13 requirements-dev.txt -o requirements-dev.lock.txt
+          uv pip compile --universal --python-version 3.13 --generate-hashes requirements-dev.txt -o requirements-dev.lock.txt
           git diff --exit-code requirements-dev.lock.txt
 
   typecheck:
@@ -207,10 +207,10 @@ jobs:
     permissions:
       contents: read
       packages: write
-    env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/xcode-api
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Image name (Docker refuses upper case; the owner has some)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/xcode-api" >> "$GITHUB_ENV"
       - name: Build image
         run: docker build -f deploy/Dockerfile -t "$IMAGE:${{ github.sha }}" .
       - name: Vulnerability scan (fails on critical and high findings that have a fix)

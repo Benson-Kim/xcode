@@ -30,9 +30,14 @@ from ...domain.setup import (
     RecurringCancelStop,
     RecurringDefinition,
     RecurringListQuery,
+    RecurringMonth,
     RecurringPage,
+    RecurringPause,
+    RecurringRuns,
+    RecurringRunsQuery,
     RecurringSave,
     RecurringStop,
+    SavingCondition,
     SetupPageQuery,
     ShareVehicle,
     TargetSetRemoval,
@@ -88,6 +93,34 @@ def _definition(d: RecurringDefinition) -> tuple[Any, ...]:
         d.expense_item_id,
         d.note,
         d.month,
+        _condition(d.condition),
+        _opening(d),
+    )
+
+
+def _condition(c: SavingCondition | None) -> Jsonb | None:
+    if c is None:
+        return None
+    return Jsonb({"min": None if c.min is None else format(c.min, "f"), "days": c.days})
+
+
+def _opening(d: RecurringDefinition) -> Jsonb | None:
+    """SQL NULL keeps the stored opening, the JSON null removes it; amounts travel as text."""
+    if d.keep_opening:
+        return None
+    if d.opening is None:
+        return Jsonb(None)
+    return Jsonb(
+        {
+            "date": None if d.opening.date is None else d.opening.date.isoformat(),
+            "amounts": [
+                {
+                    "vehicle_id": None if a.vehicle_id is None else str(a.vehicle_id),
+                    "amount": None if a.amount is None else format(a.amount, "f"),
+                }
+                for a in d.opening.amounts
+            ],
+        }
     )
 
 
@@ -304,6 +337,29 @@ class SetupRoutines:
             command.item_id,
             command.context.now,
         )
+
+    async def pause_recurring(self, command: RecurringPause) -> WriteResult:
+        return await self._write(
+            "setup_recurring_pause", *_tenant(command.context), command.item_id, command.context.now
+        )
+
+    async def resume_recurring(self, command: RecurringPause) -> WriteResult:
+        return await self._write(
+            "setup_recurring_resume",
+            *_tenant(command.context),
+            command.item_id,
+            command.context.now,
+        )
+
+    async def recurring_runs(self, query: RecurringRunsQuery) -> RecurringRuns:
+        value = await self._read(
+            "setup_recurring_runs", *_tenant(query.context), query.item_id, query.context.now
+        )
+        return document(value, RecurringRuns, "api.setup_recurring_runs")
+
+    async def recurring_month(self, context: TenantContext) -> RecurringMonth:
+        value = await self._read("setup_recurring_summary", *_tenant(context), context.now)
+        return document(value, RecurringMonth, "api.setup_recurring_summary")
 
     # --- expense catalogue ------------------------------------------------------------------
 

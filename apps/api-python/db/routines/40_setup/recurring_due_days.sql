@@ -1,7 +1,7 @@
 -- setup.recurring_due_days(p_version setup.recurring_versions, p_from date, p_through date) RETURNS SETOF date
--- Purpose: the days in p_from..p_through on which the version posts, in order: inside its start_on..end_on, before the item's stopped_from, while it is the version in charge (from its effective_from until a higher revision's effective_from), on its weekday, month day (or the month's last day) and, for yearly, its month; daily (legacy) posts every such day.
--- Callers: setup.vehicle_postings (the vehicle report and the investment return).
--- Reads: setup.recurring_versions, setup.recurring_items. Writes: nothing.
+-- Purpose: the days in p_from..p_through on which the version posts, in order: inside its start_on..end_on, before the item's stopped_from, while it is the version in charge (from its effective_from until a higher revision's effective_from), on its weekday, month day (or the month's last day) and, for yearly, its month; daily posts every such day; a day inside a pause of the item posts nothing.
+-- Callers: setup.scheduled_runs, api.setup_recurring_list, api.setup_recurring_summary.
+-- Reads: setup.recurring_versions, setup.recurring_items, setup.recurring_pauses. Writes: nothing.
 -- Raises: none.
 -- Tests: tests/db/test_setup_helpers.py.
 -- Each version is stepped arithmetically (weekly from the first matching weekday, monthly and
@@ -70,7 +70,17 @@ AS $$
          ) AS d
     WHERE p_version.frequency IN (3, 4) AND d.day BETWEEN b.first AND b.last
   )
-  SELECT due.day FROM due ORDER BY due.day;
+  SELECT due.day
+  FROM due
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM setup.recurring_pauses AS p
+    WHERE p.organization_id = p_version.organization_id
+      AND p.item_id = p_version.item_id
+      AND p.paused_from <= due.day
+      AND (p.paused_through IS NULL OR p.paused_through >= due.day)
+  )
+  ORDER BY due.day;
 $$;
 
 REVOKE ALL ON FUNCTION setup.recurring_due_days(setup.recurring_versions, date, date) FROM PUBLIC;

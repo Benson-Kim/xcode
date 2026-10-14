@@ -8,7 +8,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from . import legacy_report
 from .load import LOAD
+from .profile import LEGACY
 from .records import ToolError
 from .transform import MANIFEST, TRANSFORM
 
@@ -26,6 +28,8 @@ def run(work_dir: Path, out: Out = print, everything: bool = False, limit: int =
         raise ToolError(f"{work_dir} holds no transform: run transform (or load) first")
     load = _read(work_dir / LOAD)
     source = manifest["source"]
+    if source.get("kind") == LEGACY:
+        return legacy_report.run(work_dir, manifest, summary, load, out, everything, limit)
     out("DATA MIGRATION REPORT")
     out(
         f"  extracted   {manifest['extracted_at']} from {source.get('database')} "
@@ -79,6 +83,12 @@ def run(work_dir: Path, out: Out = print, everything: bool = False, limit: int =
     for r in summary["rejected"]:
         flag = " BLOCKING" if r["blocking"] else ""
         out(f"  {r['table']} {r['key']}: {r['problem']} [{r['constraint'] or '-'}]{flag}")
+    if summary["deferred"] is not None:
+        out(
+            f"  DEFERRED RULE BROKEN: {summary['deferred']['problem']} "
+            f"[{summary['deferred']['constraint'] or '-'}] BLOCKING: the refused rows above "
+            "take rows this rule needs; fix them in SQL Server and extract again"
+        )
 
     out("")
     out(f"DROPPED BY A DOCUMENTED RULE ({len(summary['dropped'])})")

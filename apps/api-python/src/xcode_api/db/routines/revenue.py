@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from ...application.errors import IntegrityBug
@@ -15,6 +16,10 @@ from ...domain.revenue import (
     RevenueCapture,
     RevenueDashboard,
     RevenueDashboardQuery,
+    RevenueDay,
+    RevenueDayQuery,
+    RevenueDayResult,
+    RevenueDaySave,
     RevenueWeek,
     RevenueWeekQuery,
 )
@@ -79,6 +84,43 @@ class RevenueRoutines:
         except ValueError:
             raise IntegrityBug(f"api.revenue_capture answered {result.outcome}") from None
         return CaptureResult(id=result.id, version=result.version, outcome=outcome)
+
+    async def day(self, query: RevenueDayQuery) -> RevenueDay:
+        value = await self._read(
+            "revenue_day_get",
+            *_tenant(query.context),
+            query.day,
+            query.company_id,
+            query.context.now,
+        )
+        return document(value, RevenueDay, "api.revenue_day_get")
+
+    async def save_day(self, command: RevenueDaySave) -> RevenueDayResult:
+        """The rows travel as a ``jsonb`` array whose amounts and versions are text, so the
+        routine reads every digit that was sent; a day save runs once, like a capture."""
+        rows = Jsonb(
+            [
+                {
+                    "vehicle_id": None if r.vehicle_id is None else str(r.vehicle_id),
+                    "amount": None if r.amount is None else format(r.amount, "f"),
+                    "reason": r.reason,
+                    "note": r.note,
+                    "version": None if r.version is None else str(r.version),
+                }
+                for r in command.rows
+            ]
+        )
+        found = await call(
+            self._pool,
+            "revenue_day_save",
+            *_tenant(command.context),
+            command.day,
+            rows,
+            command.context.now,
+        )
+        if len(found) != 1 or found[0].get("revenue_day_save") is None:
+            raise IntegrityBug("api.revenue_day_save returned no single value")
+        return document(found[0]["revenue_day_save"], RevenueDayResult, "api.revenue_day_save")
 
     async def _read(self, routine: str, *args: Any) -> Any:
         rows = await call(self._pool, routine, *args, idempotent=True)

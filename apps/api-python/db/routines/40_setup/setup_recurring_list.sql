@@ -1,7 +1,7 @@
 -- api.setup_recurring_list(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_page integer, p_page_size integer, p_kind text, p_company_id uuid, p_status text, p_now timestamptz) RETURNS jsonb
--- Purpose: one page of the scheduled items the actor can see (items of a kind whose view right they lack are left out, also from the total), filtered by the current version's kind (cost, savings), by a company owning a visible vehicle the current version shares to, and by whether the item runs (not stopped or ended on the business date and sharing to a visible vehicle in the fleet that day: running, stopped; blank or all keeps every item), each as its latest version, running items first, then by name and item id, with only the shares on vehicles the actor can see (partial when others exist), the amount of those shares, the part still on vehicles in the fleet, the expense item's name and the reported bucket (a cost without one reports recurring charges, 2); {total, items}.
+-- Purpose: one page of the scheduled items the actor can see (items of a kind whose view right they lack are left out, also from the total), filtered by the current version's kind (cost, savings), by a company owning a visible vehicle the current version shares to, and by whether the item runs (not stopped or ended on the business date and sharing to a visible vehicle in the fleet that day: running, stopped; blank or all keeps every item), each as its latest version, running items first, then by name and item id, with only the shares on vehicles the actor can see (partial when others exist), the amount of those shares, the part still on vehicles in the fleet, the expense item's name and the reported bucket (a cost without one reports recurring charges, 2); each also with its open pause (paused_from), the next run date after today on which a share vehicle is in the fleet (null while paused, stopped or ended, or when none is), and for a saving the last run date on the actor's vehicles with its share count and states (saved, skipped, held), the balance through setup.saving_balance, the revenue rule and the opening {date, total on the actor's vehicles}; {total, items}.
 -- Callers: SetupRoutines.list_recurring; ListRecurring (GET /setup/recurring).
--- Reads: setup.recurring_items, setup.recurring_versions, setup.recurring_allocations, setup.fleet_vehicles, setup.expense_items, and what tenancy.business_date, tenancy.has_permission, tenancy.actor_scope and setup.visible_vehicles read. Writes: nothing.
+-- Reads: setup.recurring_items, setup.recurring_versions, setup.recurring_allocations, setup.fleet_vehicles, setup.expense_items, setup.recurring_pauses, setup.saving_openings, setup.saving_opening_amounts, and what tenancy.business_date, tenancy.has_permission, tenancy.actor_scope, setup.visible_vehicles, setup.scheduled_runs, setup.recurring_due_days and setup.saving_balance read. Writes: nothing.
 -- Raises: XC422 recurring_filter_kind_invalid, XC422 recurring_filter_status_invalid (both before the membership check, as the filter is read before the request runs), XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.require_any_permission, XC422 page_out_of_range via tenancy.check_page, XC422 time_zone_invalid via tenancy.business_date.
 -- Tests: tests/db/test_setup_recurring_routines.py, tests/api/test_setup_recurring.py.
 
@@ -68,7 +68,8 @@ BEGIN
     FROM setup.recurring_items AS i
     CROSS JOIN LATERAL (
       SELECT v.id AS version_id, v.revision, v.name, v.kind, v.frequency, v.day, v.last_day,
-             v.month, v.start_on, v.end_on, v.expense_item_id, v.bucket, v.note
+             v.month, v.start_on, v.end_on, v.expense_item_id, v.bucket, v.note, v.condition_min,
+             v.condition_days
       FROM setup.recurring_versions AS v
       WHERE v.organization_id = i.organization_id AND v.item_id = i.id
       ORDER BY v.revision DESC
@@ -139,7 +140,56 @@ BEGIN
                       'bucket', CASE WHEN r.kind = 1 THEN coalesce(r.bucket, 2::smallint) END,
                       'note', r.note,
                       'month', r.month,
-                      'active_amount', coalesce(shares.active_amount, 0)
+                      'active_amount', coalesce(shares.active_amount, 0),
+                      'paused_from', (
+                        SELECT p.paused_from FROM setup.recurring_pauses AS p
+                        WHERE p.organization_id = p_organization_id
+                          AND p.item_id = r.id
+                          AND p.paused_through IS NULL
+                      ),
+                      'last_run', last.day,
+                      'last_run_vehicles', coalesce(last.vehicles, 0),
+                      'balance', CASE
+                                   WHEN r.kind = 2 THEN setup.saving_balance(r.id, v_vehicles, v_today, v_today)
+                                 END,
+                      'last_run_states', CASE WHEN r.kind = 2 THEN last.states END,
+                      'condition', CASE
+                                     WHEN r.condition_min IS NOT NULL THEN jsonb_build_object(
+                                       'min', r.condition_min, 'days', r.condition_days
+                                     )
+                                   END,
+                      'opening', (
+                        SELECT jsonb_build_object(
+                                 'date', o.opened_on,
+                                 'total', coalesce(
+                                   (
+                                     SELECT sum(a.amount) FROM setup.saving_opening_amounts AS a
+                                     WHERE a.organization_id = o.organization_id
+                                       AND a.item_id = o.item_id
+                                       AND a.vehicle_id = ANY (v_vehicles)
+                                   ),
+                                   0
+                                 )
+                               )
+                        FROM setup.saving_openings AS o
+                        WHERE o.organization_id = p_organization_id AND o.item_id = r.id
+                      ),
+                      'next_run', (
+                        SELECT d.day
+                        FROM setup.recurring_versions AS v
+                        CROSS JOIN LATERAL setup.recurring_due_days(v, v_today + 1, v_today + 400) AS d (day)
+                        WHERE v.organization_id = p_organization_id AND v.id = r.version_id
+                          AND EXISTS (
+                            SELECT 1
+                            FROM setup.recurring_allocations AS a
+                            JOIN setup.fleet_vehicles AS f
+                              ON f.organization_id = a.organization_id AND f.id = a.vehicle_id
+                            WHERE a.organization_id = p_organization_id AND a.version_id = v.id
+                              AND f.joined_on <= d.day AND (f.left_on IS NULL OR f.left_on > d.day)
+                          )
+                        ORDER BY d.day
+                        LIMIT 1
+                      )
                     ) AS document
              FROM listed AS r
              LEFT JOIN LATERAL (
@@ -163,6 +213,34 @@ BEGIN
                  AND a.version_id = r.version_id
                  AND a.vehicle_id = ANY (v_vehicles)
              ) AS shares ON true
+             LEFT JOIN LATERAL (
+               WITH runs AS (
+                 SELECT s.run_on, s.state
+                 FROM setup.scheduled_runs(
+                        v_vehicles,
+                        (
+                          SELECT min(v.start_on) FROM setup.recurring_versions AS v
+                          WHERE v.organization_id = p_organization_id AND v.item_id = r.id
+                        ),
+                        v_today,
+                        v_today,
+                        '{2}',
+                        ARRAY[r.id]
+                      ) AS s
+                 WHERE r.kind = 2 AND s.item_id = r.id
+               ),
+               latest AS (SELECT max(runs.run_on) AS day FROM runs)
+               SELECT latest.day,
+                      count(runs.run_on) AS vehicles,
+                      jsonb_build_object(
+                        'saved', count(runs.run_on) FILTER (WHERE runs.state = 1),
+                        'skipped', count(runs.run_on) FILTER (WHERE runs.state = 2),
+                        'held', count(runs.run_on) FILTER (WHERE runs.state = 3)
+                      ) AS states
+               FROM latest
+               LEFT JOIN runs ON runs.run_on = latest.day
+               GROUP BY latest.day
+             ) AS last ON true
              ORDER BY r.running DESC, r.name, r.id
              OFFSET (p_page - 1) * p_page_size
              LIMIT p_page_size

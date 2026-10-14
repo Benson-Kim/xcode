@@ -7,6 +7,7 @@ reason) and every row it makes. A drop predicate says whether a row is not moved
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from collections import defaultdict
@@ -448,6 +449,41 @@ def permission_translation(table: Table, rows: list[Record], ctx: Context) -> li
     return made
 
 
+REASON_TEXT_ACTIONS = frozenset({"person.activated", "person.deactivated"})
+"""The actions whose ``After`` the .NET people module writes as the reason sentence."""
+
+
+def audit_reason_text(table: Table, rows: list[Record], ctx: Context) -> list[Record]:
+    """``After`` of an access change holds the reason sentence, not JSON: it moves as a JSON
+    string. A value that is not JSON under any other action is refused."""
+    kept = []
+    for row in rows:
+        text = row.values["after"]
+        if not isinstance(text, str):
+            kept.append(row)
+            continue
+        try:
+            json.loads(text)
+        except ValueError as exc:
+            if row.values["action"] not in REASON_TEXT_ACTIONS:
+                ctx.ledger.reject(
+                    table.target, table.source, row.key, f"After is not JSON: {exc}", "parse"
+                )
+                continue
+            value = json.dumps(text, ensure_ascii=False)
+            ctx.ledger.change(
+                table.target,
+                row.key,
+                "after",
+                text,
+                value,
+                "the reason sentence .NET stored instead of JSON, kept as a JSON string",
+            )
+            row.values["after"] = value
+        kept.append(row)
+    return kept
+
+
 def audit_ids(table: Table, rows: list[Record], ctx: Context) -> list[Record]:
     """The identity ``id`` replaces the source GUID, numbered in occurrence order."""
 
@@ -605,6 +641,7 @@ CONVERSIONS: dict[str, Conversion] = {
     "target_sets": target_sets,
     "allocation_sums": allocation_sums,
     "permission_translation": permission_translation,
+    "audit_reason_text": audit_reason_text,
     "audit_ids": audit_ids,
     "json_keys": json_keys,
     "device_dates": device_dates,

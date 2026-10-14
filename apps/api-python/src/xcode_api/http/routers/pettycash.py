@@ -17,6 +17,7 @@ from ...application.pettycash.approve_day import ApprovePettyCashDayCommand
 from ...application.pettycash.approve_entries import ApprovePettyCashEntriesCommand
 from ...application.pettycash.approve_entry import ApprovePettyCashEntryCommand
 from ...application.pettycash.create_entry import CreatePettyCashEntryCommand
+from ...application.pettycash.export_entries import ExportPettyCashEntriesQuery
 from ...application.pettycash.get_dashboard import GetPettyCashDashboardQuery
 from ...application.pettycash.get_options import GetPettyCashOptionsQuery
 from ...application.pettycash.get_overview import GetPettyCashOverviewQuery
@@ -27,9 +28,11 @@ from ...application.pettycash.reopen_entry import ReopenPettyCashEntryCommand
 from ...application.pettycash.send_back_entry import SendBackPettyCashEntryCommand
 from ...application.pettycash.update_entry import UpdatePettyCashEntryCommand
 from ...container import Container
+from ...domain.expenses import ExpenseAllocation
 from ...domain.pettycash import PettyCashApproved, PettyCashLine, PettyCashSaved, PettyCashTicked
+from ...domain.reports import PDF_CONTENT_TYPE, XLSX_CONTENT_TYPE
 from ..dependencies import container, current_caller
-from ..responses import respond
+from ..responses import file_response, respond
 from ..routing import SetupRoute
 from ..schemas.common import Page, problem_responses
 from ..schemas.pettycash import (
@@ -191,8 +194,13 @@ async def get_dashboard(caller: CallerDep, c: ContainerDep) -> Response:
     responses=problem_responses(400, 403, 404, 409),
 )
 async def create_entry(body: SavePettyCashEntry, caller: CallerDep, c: ContainerDep) -> Response:
+    allocations = (
+        None
+        if body.allocations is None
+        else tuple(ExpenseAllocation(a.vehicle_id, a.amount) for a in body.allocations)
+    )
     result = await c.create_pettycash_entry.execute(
-        CreatePettyCashEntryCommand(caller, body.id, _line(body))
+        CreatePettyCashEntryCommand(caller, body.id, _line(body), allocations)
     )
     return _saved(result)
 
@@ -314,3 +322,32 @@ async def reopen_entry(
         ReopenPettyCashEntryCommand(caller, entry_id, body.version, body.reason)
     )
     return _saved(result)
+
+
+@router.get(
+    "/export",
+    operation_id="ExportPettyCash",
+    response_class=Response,
+    responses={
+        200: {"description": "The file", "content": {XLSX_CONTENT_TYPE: {}, PDF_CONTENT_TYPE: {}}},
+        **problem_responses(400, 403, 404),
+    },
+)
+async def export_entries(
+    *,
+    caller: CallerDep,
+    c: ContainerDep,
+    from_date: FromDay = None,
+    to_date: ToDay = None,
+    holder_id: HolderFilter = None,
+    view: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
+    format: str | None = None,
+) -> Response:
+    file = await c.export_pettycash_entries.execute(
+        ExportPettyCashEntriesQuery(
+            caller, from_date, to_date, holder_id, view, _words(status), q, format
+        )
+    )
+    return file_response(file)

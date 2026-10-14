@@ -48,11 +48,13 @@ from .http.routers import (
     access,
     auth,
     auth_steps,
+    expenses,
     health,
     history,
     metrics,
     organization,
     pettycash,
+    reports,
     revenue,
     setup_companies,
     setup_expenses,
@@ -155,6 +157,8 @@ def create_app(
         setup_investment.router,
         revenue.router,
         pettycash.router,
+        expenses.router,
+        reports.router,
     ]
     for router in routers:
         app.include_router(router)

@@ -751,6 +751,8 @@ depend on them; the helpers are routines because they change with the rules.
 | `0006_revenue.sql` | schema `revenue`, code table, table 6.1, trigger, RLS, grants |
 | `0007_readonly.sql` | empty grant file for `xcode_readonly` with the DBA checklist as comments (so the deny-by-default is explicit and reviewable) |
 | `0012_pettycash.sql` (prompt 08; numbers 0008 to 0011 are prompt 07b's, section 13) | schema `pettycash`, code tables with rows, table 6.2, RLS, grants |
+| `0013_expenses.sql` (prompt 08b) | section 14: table `expenses.entries` (schemas `expenses` and `reports` come from `db/roles/020_schemas.sql`), `setup.recurring_pauses`, the saving model (version rule columns, `saving_run_states`, `saving_openings`, `saving_opening_amounts`, `saving_runs`), the petty-cash group columns, the change-log sections `centralexpenses` and `reports`, the retired routine signatures, RLS, grants |
+| `0014_orphan_routines.sql` (prompt 08b close-out) | drops `api.auth_sign_in` with 8 arguments and `api.people_list` with 6, the signatures 0008 and 0009 did not drop when the routines gained parameters, and the four-argument `setup.scheduled_runs` and `setup.fleet_postings`, which gain `p_kinds`; no table change |
 
 Each file: one transaction (the runner's), `SET LOCAL lock_timeout = '10s'`, no data except
 code rows and the catalog (`0004` ends with a `DO` block that refuses unless the catalogue has
@@ -1099,7 +1101,7 @@ The saving model of the notes (B18, `DEC-31` to `DEC-35`):
 
 | Column | Type | Null | Constraint |
 |---|---|---|---|
-| `organization_id`, `item_id`, `vehicle_id` | uuid | no | PK; FK `(organization_id, item_id) -> setup.saving_openings` ON DELETE CASCADE; FK `(organization_id, vehicle_id) -> setup.fleet_vehicles` |
+| `organization_id`, `item_id`, `vehicle_id` | uuid | no | PK; FK `(organization_id, item_id) -> setup.saving_openings` ON UPDATE CASCADE ON DELETE CASCADE (the opening's key is its item reference, so an item change reaches the item's own key first); FK `(organization_id, vehicle_id) -> setup.fleet_vehicles` |
 | `amount` | numeric(14,2) | no | `> 0` (a vehicle without an opening amount has no row) |
 
 Both are replaced as a whole by a saving's save (delete and insert in the routine), so `DELETE` is granted on them alone
@@ -1113,8 +1115,8 @@ among the scheduled-item tables. Index: the PKs answer every read (by item; by i
 | `item_id` | uuid | no | PK part; FK `-> setup.recurring_items` |
 | `run_on` | date | no | PK part |
 | `vehicle_id` | uuid | no | PK part; FK `-> setup.fleet_vehicles` |
-| `version_id` | uuid | no | FK `-> setup.recurring_versions` (the version in charge on `run_on`) |
-| `amount` | numeric(14,2) | no | `> 0` (the vehicle's share on that version) |
+| `version_id` | uuid | no | FK `-> setup.recurring_versions` (the version in charge on `run_on` when the run was decided) |
+| `amount` | numeric(14,2) | no | `> 0` (the vehicle's share on that version, kept as decided; readers post the share of the version in charge now through `setup.scheduled_runs`, which takes only `state` from this row, so a revise on the run's day changes the posted amount and keeps the decision) |
 | `state` | smallint | no | FK `setup.saving_run_states` (1 `saved`, 2 `skipped`) |
 | `revenue` | numeric(14,2) | no | the revenue of the window when decided (amounts only, B14-8) |
 | `decided_at` | timestamptz | no | |
@@ -1139,8 +1141,8 @@ among the scheduled-item tables. Index: the PKs answer every read (by item; by i
 | `group_units` | numeric(12,3) | `> 0` |
 | `group_unit_amount` | numeric(14,2) | `<> 0` |
 
-`CHECK ck_entries_group`: the four are all null or all set, and set only on an expense (`kind = 2`). Index `(organization_id,
-group_id) WHERE group_id IS NOT NULL` (the recount: the parts still counted). "Shared by N vehicles" is counted when
+`CHECK ck_entries_group`: the four are all null or all set, and set only on an expense (`kind = 2`). The unique's index `(organization_id, group_id, vehicle_id)` answers the recount
+(the parts still counted), so no second index (built 2026-10-12). "Shared by N vehicles" is counted when
 read, as the group's rows that are not removed and not rejected, so deleting or editing one part recounts the others by
 construction (v2.29 s5).
 
@@ -1166,7 +1168,7 @@ construction (v2.29 s5).
 
 Drops, in reverse order: the petty-cash group index, check and columns; `setup.saving_runs`, `setup.saving_run_states`,
 `setup.saving_opening_amounts`, `setup.saving_openings`; the two version columns and their check;
-`setup.recurring_pauses`; `expenses.entries` and schema `expenses`; schema `reports` (its functions first, by the
-routine runner's catalogue); and re-creates `0012`'s change-log checks. A down migration over data refuses when any
+`setup.recurring_pauses`; `expenses.entries`; and re-creates `0012`'s change-log checks. The schemas `expenses` and
+`reports` stay (they belong to `db/roles/020_schemas.sql`, like every schema), and routine bodies are the runner's. A down migration over data refuses when any
 `centralexpenses` or `reports` change-log row exists (a `DO` block counts them), because those rows cannot satisfy the
 restored check.

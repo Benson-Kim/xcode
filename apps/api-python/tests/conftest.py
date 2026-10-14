@@ -29,9 +29,11 @@ from xcode_api.settings import Settings
 from .support.clock import ManualClock
 from .support.database import Harness, start_harness
 from .support.fakes import (
+    FakeExpensesRepository,
     FakeIdentityRepository,
     FakeOpsRepository,
     FakePettyCashRepository,
+    FakeReportsRepository,
     FakeRevenueRepository,
     FakeSetupRepository,
     FakeTenancyRepository,
@@ -84,14 +86,18 @@ def make_container(
     def factory(settings: Settings, ops: FakeOpsRepository) -> Container:
         tenancy = FakeTenancyRepository()
         setup = FakeSetupRepository(tenancy)
+        pettycash = FakePettyCashRepository(setup)
+        revenue = FakeRevenueRepository(setup)
         return build_container(
             settings,
             ops=ops,
             identity=FakeIdentityRepository(),
             tenancy=tenancy,
             setup=setup,
-            revenue=FakeRevenueRepository(setup),
-            pettycash=FakePettyCashRepository(setup),
+            revenue=revenue,
+            pettycash=pettycash,
+            expenses=FakeExpensesRepository(setup, pettycash),
+            reports=FakeReportsRepository(setup, revenue),
             clock=manual_clock,
         )
 

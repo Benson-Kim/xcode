@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import dataclasses
 import functools
 import json
@@ -23,6 +24,25 @@ from xcode_api.application.ports import (
 )
 from xcode_api.db.contract import EXPECTED_CONTRACT_VERSION
 from xcode_api.domain.errors import Conflict, Forbidden, NotFound, RuleViolation, SessionInvalid
+from xcode_api.domain.expenses import (
+    ExpenseAllocation,
+    ExpenseChange,
+    ExpenseFigures,
+    ExpenseGroup,
+    ExpenseItemOption,
+    ExpenseLedger,
+    ExpenseLedgerQuery,
+    ExpenseLedgerRow,
+    ExpenseOptions,
+    ExpenseOptionsQuery,
+    ExpensePermissions,
+    ExpensePurchase,
+    ExpenseRecorded,
+    ExpenseRemoval,
+    ExpenseSaved,
+    ExpenseSource,
+    ExpenseVehicleOption,
+)
 from xcode_api.domain.identity import (
     AccountLookup,
     AccountPolicy,
@@ -82,6 +102,7 @@ from xcode_api.domain.pettycash import (
     PettyCashFigures,
     PettyCashFloat,
     PettyCashFloatCard,
+    PettyCashGroup,
     PettyCashHolder,
     PettyCashItemOption,
     PettyCashLine,
@@ -96,18 +117,39 @@ from xcode_api.domain.pettycash import (
     SaveOutcome,
 )
 from xcode_api.domain.policies import CODE_TRIES, PIN_TRIES, TRUSTED_DEVICE_IDLE_DAYS
+from xcode_api.domain.reports import (
+    CellKind,
+    ExpenseExportQuery,
+    PettyCashExportQuery,
+    ReportColumn,
+    ReportDocument,
+    ReportExportQuery,
+    ReportFigure,
+    ReportHolder,
+    ReportQuery,
+    ReportsAccess,
+    ReportTable,
+    RevenueExportQuery,
+)
 from xcode_api.domain.revenue import (
     CaptureOutcome,
     CaptureResult,
     CellStatus,
     DashboardPeriod,
     GapBand,
+    LastWeek,
     NoEarningsReason,
     RevenueCapture,
     RevenueCell,
     RevenueDashboard,
     RevenueDashboardQuery,
+    RevenueDay,
+    RevenueDayQuery,
+    RevenueDayResult,
+    RevenueDaySave,
+    RevenueDaySaved,
     RevenueDayTotal,
+    RevenueDayVehicle,
     RevenueGap,
     RevenueVehicleWeek,
     RevenueWeek,
@@ -139,15 +181,25 @@ from xcode_api.domain.setup import (
     MainCategorySave,
     MainCategorySummary,
     NextTarget,
+    OpeningSummary,
     RecurrenceFrequency,
     RecurringCancelStop,
     RecurringDefinition,
     RecurringKind,
     RecurringListQuery,
+    RecurringMonth,
     RecurringPage,
+    RecurringPause,
+    RecurringRun,
+    RecurringRuns,
+    RecurringRunShare,
+    RecurringRunsQuery,
     RecurringSave,
     RecurringStop,
     RecurringSummary,
+    RevenueRule,
+    RunState,
+    RunStates,
     SetupPageQuery,
     ShareSummary,
     ShareVehicle,
@@ -3019,6 +3071,8 @@ class FakeVersion:
     bucket: int | None
     note: str | None
     shares: tuple[tuple[UUID, Decimal], ...]
+    condition_min: Decimal | None = None
+    condition_days: int | None = None
 
 
 @dataclass(slots=True)
@@ -3026,6 +3080,9 @@ class FakeRecurring:
     id: UUID
     versions: list[FakeVersion] = field(default_factory=list)
     stopped_from: date | None = None
+    pauses: list[tuple[date, date | None]] = field(default_factory=list)
+    opened_on: date | None = None
+    opening: dict[UUID, Decimal] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -3617,6 +3674,170 @@ class FakeSetupRepository:
         )
         return WriteResult(id=item.id, version=version, outcome=WriteOutcome.UPDATED)
 
+    async def pause_recurring(self, command: RecurringPause) -> WriteResult:
+        return self._toggle_pause(command, pause=True)
+
+    async def resume_recurring(self, command: RecurringPause) -> WriteResult:
+        return self._toggle_pause(command, pause=False)
+
+    def _toggle_pause(self, command: RecurringPause, *, pause: bool) -> WriteResult:
+        context = command.context
+        member = self._enter_any(context, "scheduled.pause", "savings.pause")
+        today = self._today(context)
+        item = self._recurring(command.item_id)
+        current = item.versions[-1]
+        if _kind_right(current.kind, "view") not in member.permissions:
+            raise NotFound(code="not_found")
+        if _kind_right(current.kind, "pause") not in member.permissions:
+            raise Forbidden(code="permission_missing")
+        stopped = item.stopped_from is not None and item.stopped_from <= today
+        open_at = next((i for i, (_, through) in enumerate(item.pauses) if through is None), None)
+        if pause and stopped:
+            raise RuleViolation(code="recurring_already_stopped")
+        if (open_at is not None) == pause:
+            return self._unchanged(item.id)
+        if stopped:
+            raise RuleViolation(code="recurring_already_stopped")
+        before = self._recurring_snapshot(item)
+        if pause:
+            item.pauses.append((today, None))
+        else:
+            assert open_at is not None
+            start = item.pauses[open_at][0]
+            item.pauses[open_at] = (start, max(today, start) - timedelta(days=1))
+        version = self._log(
+            context,
+            "recurring",
+            item.id,
+            before,
+            self._recurring_snapshot(item),
+            _recurring_reason(current.kind, current.name),
+        )
+        return WriteResult(id=item.id, version=version, outcome=WriteOutcome.UPDATED)
+
+    async def recurring_runs(self, query: RecurringRunsQuery) -> RecurringRuns:
+        """The routine's runs; a held share's revenue is 0 here, as this fake keeps no revenue
+        records, and no run is ever decided."""
+        member = self._enter_any(query.context, "scheduled.view", "savings.view")
+        today = self._today(query.context)
+        item = self._recurring(query.item_id)
+        current = item.versions[-1]
+        if _kind_right(current.kind, "view") not in member.permissions:
+            raise NotFound(code="not_found")
+        start = min(v.start for v in item.versions)
+        runs = self._item_runs(item, start, today, today)
+        dates = sorted({day for day, _, _ in runs}, reverse=True)
+
+        def posted(day: date) -> Decimal:
+            return sum(
+                (a for d, _, (a, s) in runs if d == day and s in (RunState.POSTED, RunState.SAVED)),
+                Decimal(0),
+            )
+
+        return RecurringRuns(
+            id=item.id,
+            name=current.name,
+            kind=RecurringKind(current.kind),
+            start=start,
+            total=sum((posted(d) for d in dates), Decimal(0)),
+            run_count=len(dates),
+            runs=tuple(
+                RecurringRun(
+                    date=day,
+                    amount=posted(day),
+                    shares=tuple(
+                        RecurringRunShare(
+                            vehicle_id=vehicle_id,
+                            registration=self.vehicles[vehicle_id].registration,
+                            amount=amount,
+                            state=state,
+                            revenue=Decimal(0) if state is RunState.HELD else None,
+                        )
+                        for d, vehicle_id, (amount, state) in sorted(
+                            runs, key=lambda r: (self.vehicles[r[1]].registration, str(r[1]))
+                        )
+                        if d == day
+                    ),
+                )
+                for day in dates[:10]
+            ),
+        )
+
+    async def recurring_month(self, context: TenantContext) -> RecurringMonth:
+        member = self._enter_any(context, "scheduled.view", "savings.view")
+        today = self._today(context)
+        first = today.replace(day=1)
+        last = (first + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        costs = "scheduled.view" in member.permissions
+        savings = "savings.view" in member.permissions
+        counts = {(kind, paused): 0 for kind in (1, 2) for paused in (False, True)}
+        costs_due = saved = balance = Decimal(0)
+        for item in self.recurring.values():
+            current = item.versions[-1]
+            if _kind_right(current.kind, "view") not in member.permissions:
+                continue
+            live = (item.stopped_from is None or item.stopped_from > today) and (
+                current.end is None or current.end >= today
+            )
+            if live:
+                counts[(current.kind, any(t is None for _, t in item.pauses))] += 1
+            if current.kind == 2:
+                balance += self._saving_balance(item, today)
+            for day, _, (amount, state) in self._item_runs(item, first, last, last):
+                if state is RunState.POSTED:
+                    costs_due += amount
+                elif state is RunState.SAVED and day <= today:
+                    saved += amount
+        return RecurringMonth(
+            from_date=first,
+            to_date=last,
+            costs_due=costs_due if costs else None,
+            saved=saved if savings else None,
+            savings_balance=balance if savings else None,
+            running_costs=counts[(1, False)] if costs else None,
+            paused_costs=counts[(1, True)] if costs else None,
+            running_savings=counts[(2, False)] if savings else None,
+            paused_savings=counts[(2, True)] if savings else None,
+        )
+
+    def _item_runs(
+        self, item: FakeRecurring, first: date, last: date, today: date
+    ) -> list[tuple[date, UUID, tuple[Decimal, RunState]]]:
+        """``setup.scheduled_runs`` of one item: (day, vehicle, (amount, state))."""
+        runs = []
+        for index, version in enumerate(item.versions):
+            state = (
+                RunState.POSTED
+                if version.kind == 1
+                else RunState.SAVED
+                if version.condition_min is None
+                else RunState.HELD
+            )
+            for vehicle_id, amount in version.shares:
+                vehicle = self.vehicles[vehicle_id]
+                end = min(last, today)
+                if vehicle.left_on is not None and vehicle.left_on <= end:
+                    end = vehicle.left_on - timedelta(days=1)
+                for day in _version_days(item, index, max(first, vehicle.joined_on), end):
+                    runs.append((day, vehicle_id, (amount, state)))
+        return runs
+
+    def _saving_balance(self, item: FakeRecurring, today: date) -> Decimal:
+        opening = Decimal(0)
+        start = min(v.start for v in item.versions)
+        if item.opened_on is not None:
+            start = max(start, item.opened_on + timedelta(days=1))
+            if item.opened_on <= today:
+                opening = sum(item.opening.values(), Decimal(0))
+        return opening + sum(
+            (
+                amount
+                for _, _, (amount, state) in self._item_runs(item, start, today, today)
+                if state is RunState.SAVED
+            ),
+            Decimal(0),
+        )
+
     # --- expense catalogue ------------------------------------------------------------------
 
     async def list_expense_categories(self, query: SetupPageQuery) -> ExpenseCategoryPage:
@@ -3980,11 +4201,13 @@ class FakeSetupRepository:
         else:
             item = self._kind_item(item_id, member)
         current = item.versions[-1] if item.versions else None
-        amount, note, shares = _checked_definition(d, name)
+        start = (current.start if current is not None else today) if d.kind == 2 else d.start
+        amount, note, shares = _checked_definition(d, name, start)
         if current is not None and _kind_right(d.kind, "edit") not in member.permissions:
             raise Forbidden(code="permission_missing")
-        start = _new_save_start(d, current, today)
+        start = _new_save_start(d, start, current, today)
         self._check_shares(shares, current, today)
+        condition, opening = _checked_saving(d, item, current, shares, today)
         if current is None:
             before = "null"
             effective, revision = start, 1
@@ -3992,6 +4215,10 @@ class FakeSetupRepository:
             outcome = WriteOutcome.CREATED
         else:
             parts = _recurring_changes(current, d, name, bucket, amount, start, note, shares)
+            if (current.condition_min, current.condition_days) != condition:
+                parts.append("revenue rule")
+            if opening is not None and opening != (item.opened_on, item.opening):
+                parts.append("opening balance")
             if not parts:
                 return self._unchanged(item.id)
             if item.stopped_from is not None and item.stopped_from <= today:
@@ -4021,8 +4248,12 @@ class FakeSetupRepository:
                 bucket=bucket,
                 note=note,
                 shares=shares,
+                condition_min=condition[0],
+                condition_days=condition[1],
             )
         )
+        if opening is not None:
+            item.opened_on, item.opening = opening
         self.recurring[item.id] = item
         version = self._log(
             context,
@@ -4311,7 +4542,47 @@ class FakeSetupRepository:
             note=version.note,
             month=version.month,
             active_amount=sum((a.amount for a in allocations if a.active), Decimal(0)),
+            **self._recurring_runs_summary(item, today),
         )
+
+    def _recurring_runs_summary(self, item: FakeRecurring, today: date) -> dict[str, Any]:
+        """The list's pause, last run, balance, rule, opening and next run."""
+        version = item.versions[-1]
+        saving = version.kind == 2
+        runs = (
+            self._item_runs(item, min(v.start for v in item.versions), today, today)
+            if saving
+            else []
+        )
+        last = max((day for day, _, _ in runs), default=None)
+        latest = [state for day, _, (_, state) in runs if day == last]
+        upcoming = [
+            day
+            for day in _version_days(
+                item, len(item.versions) - 1, today + timedelta(days=1), today + timedelta(days=400)
+            )
+            if any(_in_fleet(self.vehicles[vehicle_id], day) for vehicle_id, _ in version.shares)
+        ]
+        return {
+            "paused_from": next((start for start, t in item.pauses if t is None), None),
+            "last_run": last,
+            "last_run_vehicles": len(latest),
+            "balance": self._saving_balance(item, today) if saving else None,
+            "last_run_states": RunStates(
+                saved=latest.count(RunState.SAVED),
+                skipped=latest.count(RunState.SKIPPED),
+                held=latest.count(RunState.HELD),
+            )
+            if saving
+            else None,
+            "condition": None
+            if version.condition_min is None or version.condition_days is None
+            else RevenueRule(min=version.condition_min, days=version.condition_days),
+            "opening": None
+            if item.opened_on is None
+            else OpeningSummary(date=item.opened_on, total=sum(item.opening.values(), Decimal(0))),
+            "next_run": upcoming[0] if upcoming else None,
+        }
 
     def _company_snapshot(self, company: FakeCompany) -> str:
         return _compact(
@@ -4352,6 +4623,13 @@ class FakeSetupRepository:
             {
                 "Id": str(item.id),
                 "StoppedFrom": _optional_iso(item.stopped_from),
+                "PausedFrom": next(
+                    (start.isoformat() for start, through in item.pauses if through is None), None
+                ),
+                "Pauses": [
+                    {"From": start.isoformat(), "Through": _optional_iso(through)}
+                    for start, through in sorted(item.pauses, key=lambda p: p[0])
+                ],
                 "Versions": [
                     {
                         "Id": str(v.id),
@@ -4375,9 +4653,22 @@ class FakeSetupRepository:
                             {"VehicleId": str(vehicle), "Amount": _number(amount)}
                             for vehicle, amount in sorted(v.shares, key=lambda s: str(s[0]))
                         ],
+                        "ConditionMin": None
+                        if v.condition_min is None
+                        else _number(v.condition_min),
+                        "ConditionDays": v.condition_days,
                     }
                     for v in item.versions
                 ],
+                "Opening": None
+                if item.opened_on is None
+                else {
+                    "Date": item.opened_on.isoformat(),
+                    "Amounts": [
+                        {"VehicleId": str(vehicle), "Amount": _number(amount)}
+                        for vehicle, amount in sorted(item.opening.items(), key=lambda s: str(s[0]))
+                    ],
+                },
             }
         )
 
@@ -4531,7 +4822,7 @@ def _schedule_valid(frequency: int, day: int | None, last_day: bool, month: int 
 
 
 def _checked_definition(
-    d: RecurringDefinition, name: str
+    d: RecurringDefinition, name: str, start: date | None
 ) -> tuple[Decimal, str | None, tuple[tuple[UUID, Decimal], ...]]:
     """The definition checks in the routine's order: name, amount, kind, note, dates, shares."""
     if not 1 <= len(name) <= 160:
@@ -4542,7 +4833,7 @@ def _checked_definition(
     note = (d.note or "").strip() or None
     if note is not None and len(note) > 200:
         raise RuleViolation(code="recurring_note_length")
-    if d.start is not None and d.end is not None and d.end < d.start:
+    if start is not None and d.end is not None and d.end < start:
         raise RuleViolation(code="recurring_end_before_start")
     vehicles = [s.vehicle_id for s in d.allocations]
     if (
@@ -4557,19 +4848,109 @@ def _checked_definition(
     return amount, note, shares
 
 
-def _new_save_start(d: RecurringDefinition, current: FakeVersion | None, today: date) -> date:
-    """The rules of a new save; the start, which it requires."""
-    if d.frequency == 1:
+def _due_on(version: FakeVersion, day: date) -> bool:
+    if version.frequency == 1:
+        return True
+    if version.frequency == 2:
+        return day.isoweekday() % 7 == version.day
+    month_day = (day + timedelta(days=1)).day == 1 if version.last_day else day.day == version.day
+    return month_day and (version.frequency == 3 or day.month == version.month)
+
+
+def _version_days(item: FakeRecurring, index: int, first: date, last: date) -> list[date]:
+    """``setup.recurring_due_days`` of one version: in charge, started, not ended, before the
+    stop, on its schedule and outside every pause."""
+    version = item.versions[index]
+    bounds = [last]
+    if version.end is not None:
+        bounds.append(version.end)
+    later = [v.effective_from for v in item.versions if v.revision > version.revision]
+    if later:
+        bounds.append(min(later) - timedelta(days=1))
+    if item.stopped_from is not None:
+        bounds.append(item.stopped_from - timedelta(days=1))
+    day, end = max(first, version.effective_from, version.start), min(bounds)
+    days = []
+    while day <= end:
+        paused = any(
+            start <= day and (through is None or day <= through) for start, through in item.pauses
+        )
+        if _due_on(version, day) and not paused:
+            days.append(day)
+        day += timedelta(days=1)
+    return days
+
+
+def _new_save_start(
+    d: RecurringDefinition, start: date | None, current: FakeVersion | None, today: date
+) -> date:
+    """The rules of a new save; the start, which it requires (a saving's is the business
+    date when new, else kept)."""
+    if d.frequency == 1 and d.kind == 1:
         raise RuleViolation(code="recurring_daily_retired")
-    if d.kind == 2 and d.frequency not in (2, 3):
-        raise RuleViolation(code="recurring_savings_frequency")
     if d.kind == 1 and d.expense_item_id is None:
         raise RuleViolation(code="recurring_cost_needs_item")
-    if d.start is None:
+    if start is None:
         raise RuleViolation(code="recurring_start_required")
-    if d.start < today.replace(day=1) and (current is None or d.start != current.start):
+    if start < today.replace(day=1) and (current is None or start != current.start):
         raise RuleViolation(code="recurring_start_too_early")
-    return d.start
+    return start
+
+
+def _checked_saving(
+    d: RecurringDefinition,
+    item: FakeRecurring,
+    current: FakeVersion | None,
+    shares: tuple[tuple[UUID, Decimal], ...],
+    today: date,
+) -> tuple[tuple[Decimal | None, int | None], tuple[date | None, dict[UUID, Decimal]] | None]:
+    """The saving's rule, its opening (None keeps the stored one) and its end, in order."""
+    condition = _checked_condition(d)
+    opening = _checked_opening(d, item, shares, today)
+    stored_end = None if current is None else current.end
+    if d.kind == 2 and d.end is not None and d.end != stored_end:
+        raise RuleViolation(code="recurring_savings_end")
+    return condition, opening
+
+
+def _checked_condition(d: RecurringDefinition) -> tuple[Decimal | None, int | None]:
+    if d.condition is None:
+        return None, None
+    if d.kind == 1:
+        raise RuleViolation(code="recurring_condition_on_cost")
+    minimum = d.condition.min
+    if minimum is None or minimum <= 0 or minimum > _MONEY_CAP or round(minimum, 2) != minimum:
+        raise RuleViolation(code="recurring_condition_min")
+    if d.condition.days not in (1, 7, 30):
+        raise RuleViolation(code="recurring_condition_days")
+    return minimum, d.condition.days
+
+
+def _checked_opening(
+    d: RecurringDefinition,
+    item: FakeRecurring,
+    shares: tuple[tuple[UUID, Decimal], ...],
+    today: date,
+) -> tuple[date | None, dict[UUID, Decimal]] | None:
+    """The opening to store, or None to keep the stored one."""
+    if d.keep_opening and not (d.kind == 1 and item.opened_on is not None):
+        return None
+    if d.opening is None or d.keep_opening:
+        return None, {}
+    if d.kind == 1:
+        raise RuleViolation(code="recurring_opening_on_cost")
+    if d.opening.date is None or d.opening.date > today:
+        raise RuleViolation(code="recurring_opening_future")
+    for a in d.opening.amounts:
+        if a.amount != 0:
+            _money(a.amount)
+    vehicles = [a.vehicle_id for a in d.opening.amounts]
+    if any(v not in {s for s, _ in shares} for v in vehicles) or len(set(vehicles)) != len(
+        vehicles
+    ):
+        raise RuleViolation(code="recurring_opening_vehicle")
+    amounts = {a.vehicle_id: a.amount for a in d.opening.amounts if a.vehicle_id and a.amount}
+    return (d.opening.date, amounts) if amounts else (None, {})
 
 
 def _recurring_changes(
@@ -4750,6 +5131,122 @@ class FakeRevenueRepository:
             outcome = CaptureOutcome.UPDATED
         self.setup._log(context, "revenue", record.id, before, _record_snapshot(record), words)
         return CaptureResult(record.id, record.version, outcome)
+
+    async def day(self, query: RevenueDayQuery) -> RevenueDay:
+        context = query.context
+        member = self.setup._enter(context, "revenue.view")
+        today = self.setup._today(context)
+        day = query.day or today
+        if day > today or day < today - timedelta(days=3650):
+            raise RuleViolation(code="revenue_day_date_range")
+        capture = "revenue.capture" in member.permissions
+        correct = "revenue.correct" in member.permissions
+        earliest = self._earliest(member, today)
+        fleet = sorted(
+            (
+                v
+                for v in self.setup.vehicles.values()
+                if (query.company_id is None or v.company_id == query.company_id)
+                and _revenue_active(v, day)
+            ),
+            key=lambda v: (v.registration, v.id),
+        )
+
+        def last_week(vehicle_id: UUID) -> LastWeek | None:
+            record = self.records.get((vehicle_id, day - timedelta(days=7)))
+            if record is None:
+                return None
+            return LastWeek(
+                amount=record.amount, reason=None if record.reason is None else record.reason.label
+            )
+
+        return RevenueDay(
+            business_date=today,
+            date=day,
+            vehicles=tuple(
+                RevenueDayVehicle(
+                    id=v.id,
+                    company_id=v.company_id,
+                    registration=v.registration,
+                    fleet_number=v.fleet_number,
+                    day=_revenue_cell(
+                        self._days(v.id, day, day, today)[0], today, capture, correct, earliest
+                    ),
+                    last_week=last_week(v.id),
+                )
+                for v in fleet[:500]
+            ),
+            truncated=len(fleet) > 500,
+        )
+
+    async def save_day(self, command: RevenueDaySave) -> RevenueDayResult:
+        """Each row through ``capture`` in ascending vehicle id, all or none: a refusal puts
+        the records and the change log back as they were."""
+        context = command.context
+        self.setup._enter_any(context, "revenue.capture", "revenue.correct")
+        rows = command.rows
+        if not rows:
+            raise RuleViolation(code="revenue_day_rows_required")
+        if len(rows) > 500:
+            raise RuleViolation(code="revenue_day_rows_limit")
+        ids = [r.vehicle_id for r in rows if r.vehicle_id is not None]
+        if len(set(ids)) != len(ids):
+            raise RuleViolation(code="revenue_day_vehicle_repeated")
+        vehicles = [self.setup.vehicles.get(r.vehicle_id) if r.vehicle_id else None for r in rows]
+        if any(v is None for v in vehicles):
+            raise NotFound(code="not_found")
+        captures = [
+            RevenueCapture(
+                context, r.vehicle_id, command.day, r.amount, r.reason, r.note, r.version, None
+            )
+            for r in rows
+            if r.vehicle_id is not None
+        ]
+        registrations = {v.id: v.registration for v in vehicles if v is not None}
+        tenancy = self.setup.tenancy
+        records, log, version = (
+            copy.deepcopy(self.records),
+            len(tenancy.log),
+            tenancy.settings_version,
+        )
+        saved: dict[UUID, CaptureResult] = {}
+        try:
+            for capture in captures:
+                try:
+                    _revenue_entry(capture)
+                except RuleViolation as refusal:
+                    raise _named(refusal, registrations[capture.vehicle_id]) from None
+            for capture in sorted(captures, key=lambda c: c.vehicle_id):
+                try:
+                    saved[capture.vehicle_id] = await self.capture(capture)
+                except RuleViolation as refusal:
+                    raise _named(refusal, registrations[capture.vehicle_id]) from None
+                except Conflict as conflict:
+                    if conflict.code != "revenue_version_conflict":
+                        raise
+                    raise Conflict(
+                        code="revenue_day_conflict",
+                        detail={
+                            "vehicle_id": str(capture.vehicle_id),
+                            "registration": registrations[capture.vehicle_id],
+                            "current": conflict.detail.get("current"),
+                        },
+                    ) from None
+        except Exception:
+            self.records = records
+            del tenancy.log[log:]
+            tenancy.settings_version = version
+            raise
+        return RevenueDayResult(
+            rows=tuple(
+                RevenueDaySaved(
+                    vehicle_id=c.vehicle_id,
+                    id=saved[c.vehicle_id].id,
+                    version=saved[c.vehicle_id].version,
+                )
+                for c in captures
+            )
+        )
 
     async def week(self, query: RevenueWeekQuery) -> RevenueWeek:
         context = query.context
@@ -4997,6 +5494,13 @@ class FakeRevenueRepository:
 _OFFLINE = timedelta(hours=72)
 
 
+def _named(refusal: RuleViolation, registration: str) -> RuleViolation:
+    """A day save's refused row: the same code, its detail naming the vehicle."""
+    return RuleViolation(
+        code=refusal.code, detail={**refusal.detail, "vehicle_registration": registration}
+    )
+
+
 def _revenue_entry(
     command: RevenueCapture,
 ) -> tuple[Decimal | None, NoEarningsReason | None, str | None]:
@@ -5238,6 +5742,10 @@ class FakePettyCashEntry:
     removed_at: datetime | None = None
     removal_reason: str | None = None
     version: int = 1
+    group_id: UUID | None = None
+    group_total: Decimal | None = None
+    group_units: Decimal | None = None
+    group_unit_amount: Decimal | None = None
 
     @property
     def total(self) -> Decimal:
@@ -5457,6 +5965,7 @@ class FakePettyCashRepository:
                     company_name=self.setup.companies[v.company_id].name,
                     registration=v.registration,
                     active=True,
+                    fleet_number=v.fleet_number,
                 )
                 for v in sorted(self.setup.vehicles.values(), key=lambda v: (v.registration, v.id))
                 if v.id in actor.vehicles and _revenue_active(v, day)
@@ -5539,7 +6048,30 @@ class FakePettyCashRepository:
     async def create(self, command: PettyCashCreate) -> PettyCashSaved:
         context = command.context
         actor = self._enter(context, "spend", "spend_other", "issue", "credit")
-        line = _pc_line(command.line)
+        shared = bool(command.allocations)
+        parts: list[tuple[UUID, Decimal, Decimal]] = []
+        if shared and _PC_KINDS.get(_pc_trim(command.line.kind) or "") == 2:
+            given = command.line
+            parts = _expense_check_purchase(
+                given.day,
+                None if given.expense_item_id == _PC_NO_ID else given.expense_item_id,
+                Decimal(1) if given.units is None else given.units,
+                given.unit_amount,
+                _pc_trim(given.note),
+                command.allocations,
+            )
+            if _pc_trim(given.payee) is not None or given.reimbursable:
+                raise RuleViolation(code="pettycash_line_expense_payee")
+            line = _pc_line(replace(given, vehicle_id=parts[0][0]))
+        else:
+            line = _pc_line(command.line)
+            if shared:
+                code = (
+                    "pettycash_line_credit_vehicle"
+                    if line.kind == 3
+                    else "pettycash_line_cash_shape"
+                )
+                raise RuleViolation(code=code)
         entry_id = None if command.id == _PC_NO_ID else command.id
         if entry_id is not None and entry_id in self.stored:
             stored = self.stored[entry_id]
@@ -5551,10 +6083,46 @@ class FakePettyCashRepository:
         assert line.kind is not None and line.day is not None and line.unit_amount is not None
         _pc_check_date(line.day, actor.today)
         self._check_writable(line.day, actor)
-        if line.kind == 2:
+        if len(parts) > 1:
+            for index, (vehicle_id, _, _) in enumerate(parts):
+                self._check_expense(
+                    vehicle_id, line.expense_item_id, line.day, actor, True, index == 0
+                )
+        elif line.kind == 2:
             self._check_expense(line.vehicle_id, line.expense_item_id, line.day, actor, True, True)
         total = _pc_round(line.units * line.unit_amount, 2)
         self._guard(holder, line.kind, _pc_effect_of(line.kind, status, total), actor)
+        if len(parts) > 1:
+            group = entry_id or uuid4()
+            made = []
+            for index, (vehicle_id, units, unit_amount) in enumerate(parts):
+                part = FakePettyCashEntry(
+                    id=group if index == 0 else uuid4(),
+                    holder_id=holder,
+                    kind=2,
+                    entry_date=line.day,
+                    vehicle_id=vehicle_id,
+                    expense_item_id=line.expense_item_id,
+                    units=units,
+                    unit_amount=unit_amount,
+                    payee=None,
+                    note=line.note,
+                    reimbursable=False,
+                    status=status,
+                    recorded_by=actor.id,
+                    recorded_at=context.now,
+                    updated_by=actor.id,
+                    updated_at=context.now,
+                    group_id=group,
+                    group_total=total,
+                    group_units=line.units,
+                    group_unit_amount=line.unit_amount,
+                )
+                self.stored[part.id] = part
+                made.append(part)
+            for part in made:
+                self._log(context, part, "null", "Recorded", None)
+            return self._saved(made[0], SaveOutcome.CREATED)
         entry = FakePettyCashEntry(
             id=entry_id or uuid4(),
             holder_id=holder,
@@ -5625,6 +6193,28 @@ class FakePettyCashRepository:
             moved or line.vehicle_id != entry.vehicle_id,
             moved or line.expense_item_id != entry.expense_item_id,
         )
+        if (
+            entry.group_id is not None
+            and line.vehicle_id != entry.vehicle_id
+            and any(
+                e.group_id == entry.group_id and e.vehicle_id == line.vehicle_id
+                for e in self.stored.values()
+            )
+        ):
+            vehicle = self.setup.vehicles.get(line.vehicle_id) if line.vehicle_id else None
+            raise RuleViolation(
+                code="expense_purchase_has_vehicle",
+                detail={"registration": None if vehicle is None else vehicle.registration},
+            )
+        if (line.expense_item_id, line.units, line.unit_amount) != (
+            entry.expense_item_id,
+            entry.units,
+            entry.unit_amount,
+        ):
+            entry.group_id = None
+            entry.group_total = None
+            entry.group_units = None
+            entry.group_unit_amount = None
         before = _pc_snapshot(entry)
         entry.entry_date = line.day
         entry.vehicle_id = line.vehicle_id
@@ -6084,6 +6674,21 @@ class FakePettyCashRepository:
             can_send_back=flags.can_send_back,
             can_reject=flags.can_reject,
             can_reopen=flags.can_reopen,
+            group=self._group(entry),
+        )
+
+    def _group(self, entry: FakePettyCashEntry) -> PettyCashGroup | None:
+        if entry.group_id is None:
+            return None
+        assert entry.group_total is not None and entry.group_units is not None
+        assert entry.group_unit_amount is not None
+        size = sum(
+            1
+            for e in self.stored.values()
+            if e.group_id == entry.group_id and e.removed_at is None and e.status != 4
+        )
+        return PettyCashGroup(
+            entry.group_id, size, entry.group_total, entry.group_units, entry.group_unit_amount
         )
 
 
@@ -6346,3 +6951,1292 @@ def _pc_snapshot(entry: FakePettyCashEntry) -> str:
             "Version": entry.version,
         }
     )
+
+
+# --- central expenses ----------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class FakeCentralExpense:
+    id: UUID
+    entry_date: date
+    vehicle_id: UUID
+    expense_item_id: UUID
+    units: Decimal
+    unit_amount: Decimal
+    note: str | None
+    group_id: UUID
+    group_size: int
+    group_total: Decimal
+    group_units: Decimal
+    group_unit_amount: Decimal
+    recorded_by: UUID
+    recorded_at: datetime
+    updated_by: UUID
+    updated_at: datetime
+    removed_by: UUID | None = None
+    removed_at: datetime | None = None
+    removal_reason: str | None = None
+    version: int = 1
+
+    @property
+    def total(self) -> Decimal:
+        return _pc_round(self.units * self.unit_amount, 2)
+
+
+_EXPENSE_SOURCES = {"central": 1, "pettycash": 2, "scheduled": 3}
+
+
+class FakeExpensesRepository:
+    """In-memory ``ExpensesRepository`` over the organization of a ``FakeSetupRepository``
+    (members, scope, fleet, catalogue, scheduled items, settings and change log) and, when
+    given, the approved expenses of a ``FakePettyCashRepository``.
+
+    ``tests/db/test_fakes_match_routines.py`` runs ``tests/support/expenses_cases.py`` against
+    this fake and the real routines: the purchase checks in order, the split into rows, the
+    retried purchase, the change and remove steps with the group detachment, the version
+    conflict with ``current``, the reasons and snapshots, and the ledger and options that show
+    the result. No two saves race."""
+
+    def __init__(
+        self,
+        setup: FakeSetupRepository | None = None,
+        pettycash: FakePettyCashRepository | None = None,
+    ) -> None:
+        self.setup = setup or FakeSetupRepository()
+        self.pettycash = pettycash
+        self.stored: dict[UUID, FakeCentralExpense] = {}
+
+    # --- reads ----------------------------------------------------------------------------
+
+    async def ledger(self, query: ExpenseLedgerQuery) -> ExpenseLedger:
+        actor = self._enter(query.context, "expenses.view")
+        if not (1 <= query.page <= 100000 and 1 <= query.page_size <= 100):
+            raise RuleViolation(code="page_out_of_range")
+        source = _expense_check_ledger(query.from_date, query.to_date, query.source, query.q)
+        assert query.from_date is not None and query.to_date is not None
+        rows = self._rows(actor, query.from_date, query.to_date)
+        matched = [r for r in rows if _expense_matches(r, source, _pc_trim(query.q))]
+        matched.sort(key=_expense_order)
+        start = (query.page - 1) * query.page_size
+        return ExpenseLedger(
+            business_date=actor.today,
+            from_date=query.from_date,
+            to_date=query.to_date,
+            permissions=ExpensePermissions(can_record=actor.capture, can_correct=actor.correct),
+            figures=ExpenseFigures(
+                total=_pc_sum(r.total for r, _ in rows),
+                central=_pc_sum(r.total for r, _ in rows if r.source is ExpenseSource.CENTRAL),
+                petty_cash=_pc_sum(
+                    r.total for r, _ in rows if r.source is ExpenseSource.PETTY_CASH
+                ),
+                scheduled=_pc_sum(r.total for r, _ in rows if r.source is ExpenseSource.SCHEDULED),
+            ),
+            items=tuple(r for r, _ in matched[start : start + query.page_size]),
+            page_number=query.page,
+            page_size=query.page_size,
+            total=len(matched),
+            amount=_pc_sum(r.total for r, _ in matched),
+        )
+
+    async def options(self, query: ExpenseOptionsQuery) -> ExpenseOptions:
+        actor = self._enter(query.context, "expenses.capture", "expenses.correct")
+        day = query.day or actor.today
+        _expense_check_date(day, actor.today)
+        vehicles = tuple(
+            ExpenseVehicleOption(
+                id=v.id,
+                company_id=v.company_id,
+                company_name=self.setup.companies[v.company_id].name,
+                registration=v.registration,
+                active=True,
+                fleet_number=v.fleet_number,
+            )
+            for v in sorted(self.setup.vehicles.values(), key=lambda v: (v.registration, v.id))
+            if v.id in actor.vehicles and _revenue_active(v, day)
+        )
+        listed = []
+        for item in self.setup.items.values():
+            category = self.setup.categories[item.category_id]
+            if _in_use(item.stopped_on, day) and _in_use(category.stopped_on, day):
+                listed.append((category.name, item.name, item.id, category))
+        items = tuple(
+            ExpenseItemOption(
+                id=item_id,
+                name=name,
+                category_id=category.id,
+                category_name=category.name,
+                bucket=ExpenseBucket(category.bucket or 2),
+                main_category_name=self._main_name(category),
+            )
+            for _, name, item_id, category in sorted(listed, key=lambda r: r[:3])
+        )
+        return ExpenseOptions(vehicles=vehicles, items=items)
+
+    # --- writes ---------------------------------------------------------------------------
+
+    async def record(self, command: ExpensePurchase) -> ExpenseRecorded:
+        context = command.context
+        actor = self._enter(context, "expenses.capture")
+        note = _pc_trim(command.note)
+        rows = _expense_check_purchase(
+            command.day,
+            command.expense_item_id,
+            command.units,
+            command.unit_amount,
+            note,
+            command.allocations,
+        )
+        purchase = None if command.id == _PC_NO_ID else command.id
+        if purchase is not None:
+            retried = self._retried(purchase, actor.id)
+            if retried is not None:
+                return retried
+        assert command.day is not None and command.expense_item_id is not None
+        assert command.units is not None and command.unit_amount is not None
+        _expense_check_date(command.day, actor.today)
+        self._check_writable(command.day, actor)
+        for vehicle_id, _, _ in rows:
+            self._check_vehicle(vehicle_id, command.day, actor)
+        self._check_item(command.expense_item_id, command.day)
+        group = purchase or uuid4()
+        total = _pc_round(command.units * command.unit_amount, 2)
+        made = []
+        for vehicle_id, units, unit_amount in rows:
+            row = FakeCentralExpense(
+                id=group if len(rows) == 1 else uuid4(),
+                entry_date=command.day,
+                vehicle_id=vehicle_id,
+                expense_item_id=command.expense_item_id,
+                units=units,
+                unit_amount=unit_amount,
+                note=note,
+                group_id=group,
+                group_size=len(rows),
+                group_total=total,
+                group_units=command.units,
+                group_unit_amount=command.unit_amount,
+                recorded_by=actor.id,
+                recorded_at=context.now,
+                updated_by=actor.id,
+                updated_at=context.now,
+            )
+            self.stored[row.id] = row
+            made.append(row)
+        for row in made:
+            self._log(context, row, "null", "Recorded", None)
+        return ExpenseRecorded(ids=tuple(r.id for r in made), total=total)
+
+    async def change(self, command: ExpenseChange) -> ExpenseSaved:
+        context = command.context
+        actor = self._enter(context, "expenses.capture", "expenses.correct")
+        note = _pc_trim(command.note)
+        line = _expense_line(
+            command.day,
+            command.unit_amount,
+            command.units,
+            command.vehicle_id,
+            command.expense_item_id,
+            note,
+        )
+        row = self._row(command.entry_id, actor)
+        day, vehicle_id, item_id, units, unit_amount = line
+        if (row.entry_date, row.vehicle_id, row.expense_item_id, row.units, row.unit_amount) == (
+            day,
+            vehicle_id,
+            item_id,
+            units,
+            unit_amount,
+        ) and row.note == note:
+            return ExpenseSaved(id=row.id, version=row.version)
+        moved = day != row.entry_date
+        other_vehicle = vehicle_id != row.vehicle_id
+        if not actor.correct:
+            _expense_authorize(row, actor)
+            if moved:
+                raise Forbidden(code="expense_change_date")
+        self._check_writable(row.entry_date, actor)
+        self._check_version(row, command.expected_version, actor)
+        if moved:
+            _expense_check_date(day, actor.today)
+            self._check_writable(day, actor)
+        if moved or other_vehicle:
+            registration = self._check_vehicle(vehicle_id, day, actor)
+            if other_vehicle and any(
+                r.group_id == row.group_id and r.vehicle_id == vehicle_id
+                for r in self.stored.values()
+            ):
+                raise RuleViolation(
+                    code="expense_purchase_has_vehicle", detail={"registration": registration}
+                )
+        if moved or item_id != row.expense_item_id:
+            self._check_item(item_id, day)
+        before = _expense_snapshot(row)
+        detach = (
+            item_id != row.expense_item_id or units != row.units or unit_amount != row.unit_amount
+        )
+        row.entry_date = day
+        row.vehicle_id = vehicle_id
+        row.expense_item_id = item_id
+        row.units = units
+        row.unit_amount = unit_amount
+        row.note = note
+        if detach:
+            row.group_size = 1
+            row.group_total = row.total
+            row.group_units = units
+            row.group_unit_amount = unit_amount
+        self._touch(row, context)
+        self._log(context, row, before, "Changed", None)
+        return ExpenseSaved(id=row.id, version=row.version)
+
+    async def remove(self, command: ExpenseRemoval) -> ExpenseSaved:
+        context = command.context
+        actor = self._enter(context, "expenses.capture", "expenses.correct")
+        reason = _typed_reason(command.reason)
+        if reason is None:
+            raise RuleViolation(code="reason_length")
+        row = self._row(command.entry_id, actor)
+        if not actor.correct:
+            _expense_authorize(row, actor)
+        self._check_writable(row.entry_date, actor)
+        self._check_version(row, command.expected_version, actor)
+        before = _expense_snapshot(row)
+        row.removed_by = actor.id
+        row.removed_at = context.now
+        row.removal_reason = reason
+        self._touch(row, context)
+        self._log(context, row, before, "Removed", reason)
+        return ExpenseSaved(id=row.id, version=row.version)
+
+    # --- helpers --------------------------------------------------------------------------
+
+    def _enter(self, context: TenantContext, *rights: str) -> _ExActor:
+        member = self.setup.tenancy._enter(context)
+        held = member.held()
+        if not any(right in held for right in rights):
+            raise Forbidden(code="permission_missing")
+        today = self.setup.tenancy._today(context)
+        if member.scope_mode == "all":
+            vehicles = frozenset(self.setup.vehicles)
+        elif member.scope_mode == "companies":
+            vehicles = frozenset(
+                v.id for v in self.setup.vehicles.values() if v.company_id in member.company_ids
+            )
+        else:
+            vehicles = frozenset(v for v in member.vehicle_ids if v in self.setup.vehicles)
+        earliest = earliest_writable(
+            member.back_limit_mode, member.back_limit_count, member.back_limit_from, today
+        )
+        return _ExActor(member, held, vehicles, today, earliest)
+
+    def _main_name(self, category: FakeCategory | None) -> str | None:
+        if category is None or category.main_category_id is None:
+            return None
+        main = self.setup.main_categories.get(category.main_category_id)
+        return None if main is None else main.name
+
+    def _window(
+        self, vehicle: FakeVehicle, first: date, last: date, today: date
+    ) -> tuple[date, date]:
+        """``setup.report_window``: empty when the first day is after the last."""
+        end = min(last, today)
+        if vehicle.left_on is not None and vehicle.left_on <= end:
+            end = vehicle.left_on - timedelta(days=1)
+        return max(first, vehicle.joined_on), end
+
+    def _rows(
+        self, actor: _ExActor, first: date, last: date
+    ) -> list[tuple[ExpenseLedgerRow, tuple[str, ...]]]:
+        """``expenses.ledger_rows``: each row with the texts the search reads."""
+
+        def inside(vehicle_id: UUID | None, day: date) -> bool:
+            if vehicle_id is None or vehicle_id not in actor.vehicles:
+                return False
+            start, end = self._window(self.setup.vehicles[vehicle_id], first, last, actor.today)
+            return start <= day <= end
+
+        rows = [
+            self._central_row(row, actor)
+            for row in self.stored.values()
+            if row.removed_at is None and inside(row.vehicle_id, row.entry_date)
+        ]
+        rows.extend(
+            self._petty_row(entry)
+            for entry in (self.pettycash.stored.values() if self.pettycash else ())
+            if entry.kind == 2
+            and entry.status == 2
+            and entry.removed_at is None
+            and inside(entry.vehicle_id, entry.entry_date)
+        )
+        for item in self.setup.recurring.values():
+            for index, version in enumerate(item.versions):
+                if version.kind != 1:
+                    continue
+                for vehicle_id, amount in version.shares:
+                    if vehicle_id not in actor.vehicles:
+                        continue
+                    vehicle = self.setup.vehicles[vehicle_id]
+                    start, end = self._window(vehicle, first, last, actor.today)
+                    for day in _version_days(item, index, start, end):
+                        rows.append(self._scheduled_row(item, version, vehicle, day, amount))
+        return rows
+
+    def _names(self, item_id: UUID | None) -> tuple[str | None, str | None, int | None, str | None]:
+        item = None if item_id is None else self.setup.items.get(item_id)
+        category = None if item is None else self.setup.categories.get(item.category_id)
+        return (
+            None if item is None else item.name,
+            None if category is None else category.name,
+            None if category is None else category.bucket,
+            self._main_name(category),
+        )
+
+    def _central_row(
+        self, row: FakeCentralExpense, actor: _ExActor
+    ) -> tuple[ExpenseLedgerRow, tuple[str, ...]]:
+        vehicle = self.setup.vehicles[row.vehicle_id]
+        item_name, category_name, bucket, main = self._names(row.expense_item_id)
+        recorder = self._member_name(row.recorded_by)
+        editable = (
+            actor.correct
+            or (actor.capture and row.recorded_by == actor.id and row.entry_date == actor.today)
+        ) and (actor.earliest is None or row.entry_date >= actor.earliest)
+        document = ExpenseLedgerRow(
+            id=str(row.id),
+            source=ExpenseSource.CENTRAL,
+            entry_date=row.entry_date,
+            vehicle_id=row.vehicle_id,
+            registration=vehicle.registration,
+            expense_item_id=row.expense_item_id,
+            item_name=item_name or "",
+            category_name=category_name,
+            bucket=ExpenseBucket(bucket or 2),
+            units=row.units,
+            unit_amount=row.unit_amount,
+            total=row.total,
+            note=row.note,
+            recorded_by_name=recorder,
+            holder_name=None,
+            schedule_id=None,
+            group=None
+            if row.group_size <= 1
+            else ExpenseGroup(
+                row.group_id,
+                row.group_size,
+                row.group_total,
+                row.group_units,
+                row.group_unit_amount,
+            ),
+            version=row.version,
+            can_edit=editable,
+            can_remove=editable,
+            main_category_name=main,
+            fleet_number=vehicle.fleet_number,
+        )
+        texts = (
+            vehicle.registration,
+            item_name or "",
+            category_name or "",
+            row.note or "",
+            recorder,
+        )
+        return document, texts
+
+    def _petty_row(self, entry: FakePettyCashEntry) -> tuple[ExpenseLedgerRow, tuple[str, ...]]:
+        assert entry.vehicle_id is not None
+        vehicle = self.setup.vehicles[entry.vehicle_id]
+        item_name, category_name, bucket, main = self._names(entry.expense_item_id)
+        holder = self._member_name(entry.holder_id)
+        size = None
+        if entry.group_id is not None and self.pettycash is not None:
+            size = sum(
+                1
+                for e in self.pettycash.stored.values()
+                if e.group_id == entry.group_id and e.removed_at is None and e.status != 4
+            )
+        document = ExpenseLedgerRow(
+            id=str(entry.id),
+            source=ExpenseSource.PETTY_CASH,
+            entry_date=entry.entry_date,
+            vehicle_id=entry.vehicle_id,
+            registration=vehicle.registration,
+            expense_item_id=entry.expense_item_id,
+            item_name=item_name or "",
+            category_name=category_name,
+            bucket=ExpenseBucket(bucket or 2),
+            units=entry.units,
+            unit_amount=entry.unit_amount,
+            total=entry.total,
+            note=entry.note,
+            recorded_by_name=self._member_name(entry.recorded_by),
+            holder_name=holder,
+            schedule_id=None,
+            group=None
+            if size is None or size <= 1
+            else ExpenseGroup(
+                entry.group_id,  # type: ignore[arg-type]
+                size,
+                entry.group_total,  # type: ignore[arg-type]
+                entry.group_units,  # type: ignore[arg-type]
+                entry.group_unit_amount,  # type: ignore[arg-type]
+            ),
+            version=None,
+            can_edit=False,
+            can_remove=False,
+            main_category_name=main,
+            fleet_number=vehicle.fleet_number,
+        )
+        texts = (
+            vehicle.registration,
+            item_name or "",
+            category_name or "",
+            entry.note or "",
+            holder,
+        )
+        return document, texts
+
+    def _scheduled_row(
+        self,
+        item: FakeRecurring,
+        version: FakeVersion,
+        vehicle: FakeVehicle,
+        day: date,
+        amount: Decimal,
+    ) -> tuple[ExpenseLedgerRow, tuple[str, ...]]:
+        _, category_name, _, main = self._names(version.expense_item_id)
+        document = ExpenseLedgerRow(
+            id=f"{item.id}:{day.isoformat()}:{vehicle.id}",
+            source=ExpenseSource.SCHEDULED,
+            entry_date=day,
+            vehicle_id=vehicle.id,
+            registration=vehicle.registration,
+            expense_item_id=version.expense_item_id,
+            item_name=version.name,
+            category_name=category_name,
+            bucket=ExpenseBucket(version.bucket or 2),
+            units=Decimal(1),
+            unit_amount=amount,
+            total=amount,
+            note=version.note,
+            recorded_by_name=None,
+            holder_name=None,
+            schedule_id=item.id,
+            group=None,
+            version=None,
+            can_edit=False,
+            can_remove=False,
+            main_category_name=main,
+            fleet_number=vehicle.fleet_number,
+        )
+        texts = (vehicle.registration, version.name, category_name or "", version.note or "")
+        return document, texts
+
+    def _member_name(self, user_id: UUID) -> str:
+        member = self.setup.tenancy.members.get(user_id)
+        return "" if member is None else f"{member.first_name} {member.last_name}".strip(" ")
+
+    def _retried(self, purchase: UUID, actor_id: UUID) -> ExpenseRecorded | None:
+        rows = sorted(
+            (r for r in self.stored.values() if purchase in (r.group_id, r.id)),
+            key=lambda r: r.id,
+        )
+        if not rows:
+            return None
+        if any(r.group_id != purchase or r.recorded_by != actor_id for r in rows):
+            raise Conflict(code="expense_saved_by_other")
+        return ExpenseRecorded(ids=tuple(r.id for r in rows), total=rows[0].group_total)
+
+    def _row(self, row_id: UUID, actor: _ExActor) -> FakeCentralExpense:
+        row = self.stored.get(row_id)
+        if row is None or row.removed_at is not None or row.vehicle_id not in actor.vehicles:
+            raise NotFound(code="not_found")
+        return row
+
+    def _check_writable(self, day: date, actor: _ExActor) -> None:
+        if actor.earliest is not None and day < actor.earliest:
+            raise RuleViolation(
+                code="record_too_old", detail={"earliest": actor.earliest.isoformat()}
+            )
+
+    def _check_vehicle(self, vehicle_id: UUID, day: date, actor: _ExActor) -> str:
+        vehicle = self.setup.vehicles.get(vehicle_id)
+        if vehicle is None or vehicle_id not in actor.vehicles:
+            raise RuleViolation(code="expense_vehicle_not_yours")
+        if not _revenue_active(vehicle, day):
+            raise RuleViolation(
+                code="expense_vehicle_inactive", detail={"registration": vehicle.registration}
+            )
+        return vehicle.registration
+
+    def _check_item(self, item_id: UUID, day: date) -> None:
+        item = self.setup.items.get(item_id)
+        category = None if item is None else self.setup.categories.get(item.category_id)
+        if (
+            item is None
+            or category is None
+            or not _in_use(item.stopped_on, day)
+            or not _in_use(category.stopped_on, day)
+        ):
+            raise RuleViolation(code="expense_item_not_in_use")
+
+    def _check_version(
+        self, row: FakeCentralExpense, expected: int | None, actor: _ExActor
+    ) -> None:
+        if expected is None:
+            raise RuleViolation(code="expense_version_required")
+        if expected != row.version:
+            vehicle = self.setup.vehicles[row.vehicle_id]
+            start, end = self._window(vehicle, row.entry_date, row.entry_date, actor.today)
+            current = None
+            if start <= row.entry_date <= end:
+                current = dataclasses.asdict(self._central_row(row, actor)[0])
+            raise Conflict(code="expense_version_conflict", detail={"current": current})
+
+    def _touch(self, row: FakeCentralExpense, context: TenantContext) -> None:
+        row.updated_by = context.actor_id
+        row.updated_at = context.now
+        row.version += 1
+
+    def _log(
+        self,
+        context: TenantContext,
+        row: FakeCentralExpense,
+        before: str,
+        verb: str,
+        typed: str | None,
+    ) -> None:
+        vehicle = self.setup.vehicles[row.vehicle_id]
+        item = self.setup.items[row.expense_item_id]
+        currency = self.setup.tenancy.sections["localization"]["currency"]
+        subject = (
+            f"central expense on {vehicle.registration} for {_day_words(row.entry_date)}: "
+            f"{item.name}, {currency} {_formatted(row.total)}"
+        )
+        reason = _pc_compose(f"{verb} {subject}", typed)
+        self.setup._log(context, "centralexpenses", row.id, before, _expense_snapshot(row), reason)
+
+
+@dataclass(frozen=True, slots=True)
+class _ExActor:
+    member: FakeMember
+    held: tuple[str, ...]
+    vehicles: frozenset[UUID]
+    today: date
+    earliest: date | None
+
+    @property
+    def id(self) -> UUID:
+        return self.member.user_id
+
+    @property
+    def capture(self) -> bool:
+        return "expenses.capture" in self.held
+
+    @property
+    def correct(self) -> bool:
+        return "expenses.correct" in self.held
+
+
+def _expense_check_date(day: date, today: date) -> None:
+    if day > today:
+        raise RuleViolation(code="expense_date_future")
+    if day < today - timedelta(days=3650):
+        raise RuleViolation(code="expense_date_too_old")
+
+
+def _expense_check_ledger(
+    first: date | None, last: date | None, source: str | None, q: str | None
+) -> int | None:
+    """``expenses.check_ledger``; the source's order (NULL for all)."""
+    word = (_pc_trim(source) or "").lower() or None
+    if first is None or last is None:
+        raise RuleViolation(code="expense_period_required")
+    if first > last:
+        raise RuleViolation(code="expense_period_order")
+    if (last - first).days > 366:
+        raise RuleViolation(code="expense_period_length")
+    if word is not None and word not in _EXPENSE_SOURCES:
+        raise RuleViolation(code="expense_source_invalid")
+    text = _pc_trim(q)
+    if text is not None and len(text) > 200:
+        raise RuleViolation(code="expense_search_length")
+    return None if word is None else _EXPENSE_SOURCES[word]
+
+
+def _expense_matches(
+    row: tuple[ExpenseLedgerRow, tuple[str, ...]], source: int | None, q: str | None
+) -> bool:
+    document, texts = row
+    if source is not None and _EXPENSE_SOURCES[document.source.value] != source:
+        return False
+    return q is None or any(q.casefold() in text.casefold() for text in texts)
+
+
+def _expense_order(row: tuple[ExpenseLedgerRow, tuple[str, ...]]) -> tuple[Any, ...]:
+    document = row[0]
+    return (
+        -document.entry_date.toordinal(),
+        _EXPENSE_SOURCES[document.source.value],
+        document.registration.encode(),
+        document.id.encode(),
+    )
+
+
+def _expense_line(
+    day: date | None,
+    unit_amount: Decimal | None,
+    units: Decimal | None,
+    vehicle_id: UUID | None,
+    item_id: UUID | None,
+    note: str | None,
+) -> tuple[date, UUID, UUID, Decimal, Decimal]:
+    """``pettycash.check_line`` of an expense line (units are required here)."""
+    line = _pc_line(
+        PettyCashLine(
+            "expense",
+            day,
+            unit_amount,
+            None,
+            vehicle_id,
+            item_id,
+            Decimal(0) if units is None else units,
+            None,
+            note,
+            False,
+        )
+    )
+    assert line.day is not None and line.vehicle_id is not None and line.expense_item_id is not None
+    assert line.unit_amount is not None
+    return line.day, line.vehicle_id, line.expense_item_id, line.units, line.unit_amount
+
+
+def _expense_check_purchase(
+    day: date | None,
+    item_id: UUID | None,
+    units: Decimal | None,
+    unit_amount: Decimal | None,
+    note: str | None,
+    allocations: tuple[ExpenseAllocation, ...] | None,
+) -> list[tuple[UUID, Decimal, Decimal]]:
+    """``expenses.check_purchase``: the rows of a purchase, in the order sent."""
+    vehicles = [a.vehicle_id for a in allocations or ()]
+    if (
+        allocations is None
+        or not 1 <= len(allocations) <= 50
+        or any(v is None or v == _PC_NO_ID for v in vehicles)
+        or len(set(vehicles)) != len(vehicles)
+    ):
+        raise RuleViolation(code="expense_vehicles_invalid")
+    _expense_line(day, unit_amount, units, vehicles[0], item_id, note)
+    assert units is not None and unit_amount is not None
+    amounts = [a.amount for a in allocations]
+    if any(a is None or a == 0 or a != _pc_round(a, 2) for a in amounts):
+        raise RuleViolation(code="expense_allocation_amount")
+    total = _pc_round(units * unit_amount, 2)
+    exact = [a for a in amounts if a is not None]
+    if any((a > 0) != (total > 0) for a in exact):
+        raise RuleViolation(code="expense_allocation_sign")
+    if _pc_sum(exact) != total:
+        raise RuleViolation(code="expense_allocation_sum")
+    ids = [v for v in vehicles if v is not None]
+    if len(ids) == 1:
+        return [(ids[0], units, unit_amount)]
+    share = units / len(ids)
+    if (
+        len(set(exact)) == 1
+        and share == _pc_round(share, 3)
+        and _pc_round(_pc_round(share, 3) * unit_amount, 2) == exact[0]
+    ):
+        return [(v, _pc_round(share, 3), unit_amount) for v in ids]
+    return [(v, Decimal(1), a) for v, a in zip(ids, exact, strict=True)]
+
+
+def _expense_authorize(row: FakeCentralExpense, actor: _ExActor) -> None:
+    """Capture alone: only the actor's own row of the business date."""
+    if row.recorded_by != actor.id:
+        raise Forbidden(code="expense_change_other")
+    if row.entry_date != actor.today:
+        raise Forbidden(code="expense_change_earlier_day")
+
+
+def _expense_snapshot(row: FakeCentralExpense) -> str:
+    """``expenses.entry_snapshot``."""
+
+    def instant(moment: datetime | None) -> str | None:
+        return None if moment is None else _instant_text(moment)
+
+    return _compact(
+        {
+            "Id": str(row.id),
+            "Date": row.entry_date.isoformat(),
+            "VehicleId": str(row.vehicle_id),
+            "ExpenseItemId": str(row.expense_item_id),
+            "Units": _number(row.units),
+            "UnitAmount": _number(row.unit_amount),
+            "Total": _number(row.total),
+            "Note": row.note,
+            "GroupId": str(row.group_id),
+            "GroupSize": row.group_size,
+            "GroupTotal": _number(row.group_total),
+            "GroupUnits": _number(row.group_units),
+            "GroupUnitAmount": _number(row.group_unit_amount),
+            "RecordedBy": str(row.recorded_by),
+            "RecordedAt": instant(row.recorded_at),
+            "UpdatedBy": str(row.updated_by),
+            "UpdatedAt": instant(row.updated_at),
+            "RemovedBy": None if row.removed_by is None else str(row.removed_by),
+            "RemovedAt": instant(row.removed_at),
+            "RemovalReason": row.removal_reason,
+            "Version": row.version,
+        }
+    )
+
+
+# --- reports: the catalogue, two builders, the exports' log ------------------------------
+
+_FLEET_REPORTS = ("net", "target", "moneyOut", "gaps", "savings")
+_PETTYCASH_REPORTS = (
+    "cashBook",
+    "managers",
+    "vehicles",
+    "items",
+    "waiting",
+    "sentBack",
+    "rejected",
+)
+_REPORT_TITLES = {
+    "net": "Net by vehicle",
+    "target": "Revenue against target",
+    "moneyOut": "Money out",
+    "gaps": "Capture gaps",
+    "savings": "Savings",
+    "investment": "Investment",
+    "cashBook": "Cash book",
+    "managers": "By manager",
+    "vehicles": "By vehicle",
+    "items": "By item",
+    "waiting": "Waiting for approval",
+    "sentBack": "Sent back",
+    "rejected": "Rejected and reopened",
+}
+_XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@dataclass(frozen=True, slots=True)
+class _FakeTable:
+    """A whole report before search and paging, as ``reports.build`` answers it."""
+
+    group: str
+    report: str
+    title: str
+    from_date: date | None
+    to_date: date | None
+    business_date: date
+    headline: ReportFigure
+    figures: tuple[ReportFigure, ...]
+    columns: tuple[ReportColumn, ...]
+    rows: tuple[tuple[Any, ...], ...]
+
+
+def _rp_column(key: str, label: str, kind: str, total: bool = False) -> ReportColumn:
+    return ReportColumn(key, label, CellKind(kind), total)
+
+
+def _rp_figure(label: str, value: Decimal | int, kind: str) -> ReportFigure:
+    return ReportFigure(label, Decimal(value), CellKind(kind))
+
+
+def _rp_cell_text(cell: Any, kind: CellKind) -> str | None:
+    """``reports.cell_text``: what a cell shows, for the search."""
+    if cell is None:
+        return None
+    if isinstance(cell, Decimal | int) and not isinstance(cell, bool):
+        amount = Decimal(cell)
+        plain = format(amount, "f")
+        if "." in plain:
+            plain = plain.rstrip("0").rstrip(".")
+        return f"{plain} {_formatted(amount)}"
+    text = str(cell)
+    if kind == CellKind.DATE:
+        return f"{text} {_day_words(date.fromisoformat(text))}"
+    return text
+
+
+def _rp_matching(table: _FakeTable, q: str | None) -> list[tuple[Any, ...]]:
+    if q is None:
+        return list(table.rows)
+    words = q.lower().split()
+    kept = []
+    for row in table.rows:
+        shown = " | ".join(
+            text
+            for text in (
+                _rp_cell_text(cell, column.kind)
+                for cell, column in zip(row, table.columns, strict=False)
+            )
+            if text is not None
+        ).lower()
+        if all(word in shown for word in words):
+            kept.append(row)
+    return kept
+
+
+def _rp_totals(
+    columns: tuple[ReportColumn, ...], rows: list[tuple[Any, ...]]
+) -> tuple[Decimal | None, ...]:
+    totals: list[Decimal | None] = []
+    for index, column in enumerate(columns):
+        if not column.sum:
+            totals.append(None)
+            continue
+        total = Decimal(0)
+        for row in rows:
+            cell = row[index] if index < len(row) else None
+            if isinstance(cell, Decimal | int) and not isinstance(cell, bool):
+                total += Decimal(cell)
+        totals.append(total)
+    return tuple(totals)
+
+
+def _rp_period(first: date | None, last: date | None, today: date) -> tuple[date, date]:
+    if first is None or last is None:
+        raise RuleViolation(code="report_period_both")
+    if first > last:
+        raise RuleViolation(code="report_period_order")
+    if (last - first).days + 1 > 367:
+        raise RuleViolation(code="report_period_length")
+    if first > today:
+        raise RuleViolation(code="report_period_future")
+    return first, min(last, today)
+
+
+def _rp_format(text: str | None) -> str:
+    word = (_pc_trim(text) or "xlsx").lower()
+    if word not in ("xlsx", "pdf"):
+        raise RuleViolation(code="export_format_invalid")
+    return word
+
+
+def _rp_search(text: str | None) -> str | None:
+    trimmed = _pc_trim(text)
+    if trimmed is not None and len(trimmed) > 200:
+        raise RuleViolation(code="report_search_length")
+    return trimmed
+
+
+def _rp_period_words(first: date | None, last: date | None) -> str | None:
+    if first is None or last is None:
+        return None
+    if first == last:
+        return _day_words(first)
+    return f"{_day_words(first)} to {_day_words(last)}"
+
+
+def _rp_jsonb_order(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Keys as jsonb stores them: by length, then by bytes."""
+    return dict(sorted(snapshot.items(), key=lambda kv: (len(kv[0]), kv[0].encode())))
+
+
+class FakeReportsRepository:
+    """In-memory ``ReportsRepository`` over the fleet of a ``FakeSetupRepository`` and the
+    records of the ``FakeRevenueRepository`` sharing it.
+
+    ``tests/db/test_fakes_match_routines.py`` runs ``tests/support/reports_cases.py`` against
+    this fake and the real routines. The catalogue, the rights, the page, search and period
+    checks, the search over what the cells show, the paging and the footer, the Net by vehicle
+    and Capture gaps builders (the setup fake posts no money out, so net is the revenue and the
+    net table has no main-category columns) and the exports' document and audit row with the
+    10,000-row cap are real. Every other builder answers an empty table with its title and no
+    columns, and the three screen exports an empty document, so the parity cases keep to the
+    builders above."""
+
+    def __init__(
+        self,
+        setup: FakeSetupRepository | None = None,
+        revenue: FakeRevenueRepository | None = None,
+    ) -> None:
+        self.setup = setup or FakeSetupRepository()
+        self.revenue = revenue or FakeRevenueRepository(self.setup)
+
+    async def access(self, context: TenantContext) -> ReportsAccess:
+        member = self.setup._enter(context, "reports.view")
+        today = self.setup._today(context)
+        held = member.permissions
+        petty = "pettycash.reports" in held
+        fleet = (*_FLEET_REPORTS, "investment") if "reports.investment" in held else _FLEET_REPORTS
+        localization = self.setup.tenancy.sections["localization"]
+        return ReportsAccess(
+            business_date=today,
+            first_day_of_week=int(localization["first_day_of_week"]),
+            fleet=fleet,
+            petty_cash=_PETTYCASH_REPORTS if petty else (),
+            holders=tuple(self._holders(member)) if petty else (),
+            can_export="reports.export" in held,
+        )
+
+    async def report(self, query: ReportQuery) -> ReportTable:
+        member = self.setup._enter(query.context, "reports.view")
+        page, size = query.page or 0, query.page_size or 0
+        if not (1 <= page <= 100_000 and 1 <= size <= 100):
+            raise RuleViolation(code="page_out_of_range")
+        q = _rp_search(query.q)
+        today = self.setup._today(query.context)
+        table = self._build(member, query, today)
+        rows = _rp_matching(table, q)
+        return ReportTable(
+            group=table.group,
+            report=table.report,
+            title=table.title,
+            from_date=table.from_date,
+            to_date=table.to_date,
+            business_date=table.business_date,
+            headline=table.headline,
+            figures=table.figures,
+            columns=table.columns,
+            rows=tuple(rows[(page - 1) * size : page * size]),
+            page_number=page,
+            page_size=size,
+            total=len(rows),
+            totals=_rp_totals(table.columns, rows),
+        )
+
+    async def export_report(self, query: ReportExportQuery) -> ReportDocument:
+        member = self.setup._enter(query.context, "reports.export")
+        if "reports.view" not in member.permissions:
+            raise Forbidden(code="permission_missing")
+        word = _rp_format(query.format)
+        q = _rp_search(query.q)
+        today = self.setup._today(query.context)
+        table = self._build(member, query, today)
+        rows = _rp_matching(table, q)
+        self._cap(len(rows))
+        if query.group == "pettycash":
+            names = {h.id: h.name for h in self._holders(member)}
+            filters = names.get(query.holder_id, "All floats") if query.holder_id else "All floats"
+        else:
+            company = self.setup.companies.get(query.company_id) if query.company_id else None
+            filters = company.name if company is not None else "All companies"
+        snapshot = {
+            "group": query.group,
+            "report": query.report,
+            "from": None if table.from_date is None else table.from_date.isoformat(),
+            "to": None if table.to_date is None else table.to_date.isoformat(),
+            "holderId": None if query.holder_id is None else str(query.holder_id),
+            "companyId": None if query.company_id is None else str(query.company_id),
+            "q": q,
+            "rows": len(rows),
+            "format": word,
+        }
+        return self._exported(
+            query.context, member, table, rows, filters=filters, q=q, word=word, snapshot=snapshot
+        )
+
+    async def export_revenue(self, query: RevenueExportQuery) -> ReportDocument:
+        member = self.setup._enter(query.context, "revenue.export")
+        if "revenue.view" not in member.permissions:
+            raise Forbidden(code="permission_missing")
+        word = _rp_format(query.format)
+        today = self.setup._today(query.context)
+        start = query.week_start or today
+        table = self._empty("revenue", "week", "Revenue", start, today, today)
+        snapshot = {
+            "screen": "revenue",
+            "weekStart": start.isoformat(),
+            "companyId": None if query.company_id is None else str(query.company_id),
+            "rows": 0,
+            "format": word,
+        }
+        return self._exported(
+            query.context,
+            member,
+            table,
+            [],
+            filters="All companies",
+            q=None,
+            word=word,
+            snapshot=snapshot,
+        )
+
+    async def export_expenses(self, query: ExpenseExportQuery) -> ReportDocument:
+        member = self.setup._enter(query.context, "expenses.export")
+        if "expenses.view" not in member.permissions:
+            raise Forbidden(code="permission_missing")
+        word = _rp_format(query.format)
+        today = self.setup._today(query.context)
+        first, last = query.from_date or today, min(query.to_date or today, today)
+        table = self._empty("expenses", "ledger", "Central expenses", first, last, today)
+        q = _pc_trim(query.q)
+        snapshot = {
+            "screen": "expenses",
+            "from": first.isoformat(),
+            "to": (query.to_date or today).isoformat(),
+            "source": _pc_trim(query.source),
+            "q": q,
+            "rows": 0,
+            "format": word,
+        }
+        return self._exported(
+            query.context,
+            member,
+            table,
+            [],
+            filters="All sources",
+            q=q,
+            word=word,
+            snapshot=snapshot,
+        )
+
+    async def export_pettycash(self, query: PettyCashExportQuery) -> ReportDocument:
+        member = self.setup._enter(query.context, "pettycash.export")
+        if "pettycash.view" not in member.permissions:
+            raise Forbidden(code="permission_missing")
+        word = _rp_format(query.format)
+        view = _pc_trim(query.view)
+        if view not in ("expenses", "cash"):
+            raise RuleViolation(code="pettycash_export_view_invalid")
+        today = self.setup._today(query.context)
+        first, last = query.from_date or today, min(query.to_date or today, today)
+        title = "Petty cash, expenses" if view == "expenses" else "Petty cash, cash received"
+        table = self._empty("pettycash", view, title, first, last, today)
+        q = _pc_trim(query.q)
+        snapshot = {
+            "screen": "pettycash",
+            "from": first.isoformat(),
+            "to": (query.to_date or today).isoformat(),
+            "holderId": None if query.holder_id is None else str(query.holder_id),
+            "view": view,
+            "status": None if query.statuses is None else list(query.statuses),
+            "q": q,
+            "rows": 0,
+            "format": word,
+        }
+        return self._exported(
+            query.context,
+            member,
+            table,
+            [],
+            filters="All floats",
+            q=q,
+            word=word,
+            snapshot=snapshot,
+        )
+
+    # --- internals --------------------------------------------------------------------------
+
+    def _holders(self, member: FakeMember) -> list[ReportHolder]:
+        view_all = "pettycash.view_all" in member.permissions
+        members = sorted(
+            self.setup.tenancy.members.values(),
+            key=lambda m: (f"{m.first_name} {m.last_name}".strip().upper(), str(m.user_id)),
+        )
+        return [
+            ReportHolder(m.user_id, f"{m.first_name} {m.last_name}".strip(), True)
+            for m in members
+            if "pettycash.spend" in m.permissions and (view_all or m.user_id == member.user_id)
+        ]
+
+    def _visible(self, member: FakeMember, company_id: UUID | None) -> list[FakeVehicle]:
+        if member.scope_mode == "all":
+            ids = set(self.setup.vehicles)
+        elif member.scope_mode == "companies":
+            ids = {v.id for v in self.setup.vehicles.values() if v.company_id in member.company_ids}
+        else:
+            ids = {v for v in member.vehicle_ids if v in self.setup.vehicles}
+        return sorted(
+            (
+                v
+                for v in self.setup.vehicles.values()
+                if v.id in ids and (company_id is None or v.company_id == company_id)
+            ),
+            key=lambda v: (v.registration, str(v.id)),
+        )
+
+    def _build(
+        self, member: FakeMember, query: ReportQuery | ReportExportQuery, today: date
+    ) -> _FakeTable:
+        if query.group == "fleet":
+            if query.report not in (*_FLEET_REPORTS, "investment"):
+                raise NotFound(code="not_found")
+            if query.report == "investment":
+                if "reports.investment" not in member.permissions:
+                    raise Forbidden(code="report_investment_permission")
+                return self._empty(
+                    "fleet", "investment", _REPORT_TITLES["investment"], None, None, today
+                )
+            first, last = _rp_period(query.from_date, query.to_date, today)
+            vehicles = self._visible(member, query.company_id)
+            if query.report == "net":
+                return self._net(vehicles, first, last, today)
+            if query.report == "gaps":
+                return self._gaps(vehicles, first, last, today)
+            title = _REPORT_TITLES[query.report]
+            return self._empty("fleet", query.report, title, first, last, today)
+        if query.group == "pettycash":
+            if query.report not in _PETTYCASH_REPORTS:
+                raise NotFound(code="not_found")
+            if "pettycash.reports" not in member.permissions:
+                raise Forbidden(code="report_pettycash_permission")
+            holders = [h for h in self._holders(member) if query.holder_id in (None, h.id)]
+            if query.holder_id is not None and not holders:
+                raise NotFound(code="not_found")
+            title = _REPORT_TITLES[query.report]
+            if query.report == "waiting":
+                return self._empty("pettycash", "waiting", title, None, None, today)
+            first, last = _rp_period(query.from_date, query.to_date, today)
+            return self._empty("pettycash", query.report, title, first, last, today)
+        raise NotFound(code="not_found")
+
+    def _window(
+        self, vehicle: FakeVehicle, first: date, last: date, today: date
+    ) -> tuple[date, date] | None:
+        start = max(first, vehicle.joined_on)
+        end = min(last, today)
+        if vehicle.left_on is not None and vehicle.left_on <= end:
+            end = vehicle.left_on - timedelta(days=1)
+        return (start, end) if start <= end else None
+
+    def _net(self, vehicles: list[FakeVehicle], first: date, last: date, today: date) -> _FakeTable:
+        lines = []
+        for vehicle in vehicles:
+            window = self._window(vehicle, first, last, today)
+            if window is None:
+                continue
+            revenue = sum(
+                (
+                    r.amount
+                    for (vehicle_id, day), r in self.revenue.records.items()
+                    if vehicle_id == vehicle.id
+                    and window[0] <= day <= window[1]
+                    and r.amount is not None
+                ),
+                Decimal(0),
+            )
+            company = self.setup.companies[vehicle.company_id].name
+            row = (vehicle.registration, company, revenue, Decimal(0), revenue, Decimal(0))
+            lines.append((vehicle, row))
+        lines.sort(key=lambda item: (-item[1][4], item[0].registration, str(item[0].id)))
+        rows = tuple(row for _, row in lines)
+        revenue_total = sum((row[2] for row in rows), Decimal(0))
+        return _FakeTable(
+            "fleet",
+            "net",
+            "Net by vehicle",
+            first,
+            last,
+            today,
+            _rp_figure("Net", revenue_total, "net"),
+            (
+                _rp_figure("Revenue", revenue_total, "money"),
+                _rp_figure("Money out", 0, "money"),
+                _rp_figure("Saved", 0, "money"),
+            ),
+            (
+                _rp_column("vehicle", "Vehicle", "vehicle"),
+                _rp_column("company", "Company", "text"),
+                _rp_column("revenue", "Revenue", "money", True),
+                _rp_column("moneyOut", "Money out", "money", True),
+                _rp_column("net", "Net", "net", True),
+                _rp_column("saved", "Saved", "money", True),
+            ),
+            rows,
+        )
+
+    def _gaps(
+        self, vehicles: list[FakeVehicle], first: date, last: date, today: date
+    ) -> _FakeTable:
+        lines = []
+        for vehicle in vehicles:
+            window = self._window(vehicle, first, last, today)
+            if window is None:
+                continue
+            company = self.setup.companies[vehicle.company_id].name
+            day = window[0]
+            while day <= window[1]:
+                active = _revenue_active(vehicle, day)
+                record = self.revenue.records.get((vehicle.id, day))
+                if active and (day < today or record is not None) and record is None:
+                    row = (day.isoformat(), vehicle.registration, company, "Revenue not captured")
+                    lines.append((day, vehicle, row))
+                day += timedelta(days=1)
+        lines.sort(key=lambda item: (item[0], item[1].registration, str(item[1].id)))
+        rows = tuple(row for _, _, row in lines)
+        return _FakeTable(
+            "fleet",
+            "gaps",
+            "Capture gaps",
+            first,
+            last,
+            today,
+            _rp_figure("Missing days", len(rows), "count"),
+            (_rp_figure("Vehicles with gaps", len({v.id for _, v, _ in lines}), "count"),),
+            (
+                _rp_column("date", "Date", "date"),
+                _rp_column("vehicle", "Vehicle", "vehicle"),
+                _rp_column("company", "Company", "text"),
+                _rp_column("missing", "What is missing", "text"),
+            ),
+            rows,
+        )
+
+    def _empty(
+        self,
+        group: str,
+        report: str,
+        title: str,
+        first: date | None,
+        last: date | None,
+        today: date,
+    ) -> _FakeTable:
+        return _FakeTable(
+            group, report, title, first, last, today, _rp_figure(title, 0, "money"), (), (), ()
+        )
+
+    def _cap(self, count: int) -> None:
+        if count > 10_000:
+            raise RuleViolation(code="export_too_many_rows", detail={"count": f"{count:,}"})
+
+    def _exported(
+        self,
+        context: TenantContext,
+        member: FakeMember,
+        table: _FakeTable,
+        rows: list[tuple[Any, ...]],
+        *,
+        filters: str,
+        q: str | None,
+        word: str,
+        snapshot: dict[str, Any],
+    ) -> ReportDocument:
+        period = _rp_period_words(table.from_date, table.to_date)
+        sections = self.setup.tenancy.sections
+        reason = f"Exported {table.title}"
+        if period is not None:
+            reason += f" for {period}"
+        if q is not None:
+            reason += f', searched for "{q}"'
+        reason += " to " + ("PDF" if word == "pdf" else "Excel")
+        after = _compact(_rp_jsonb_order(snapshot))
+        self.setup._log(context, "reports", uuid4(), "null", after, reason)
+        return ReportDocument(
+            group=table.group,
+            report=table.report,
+            title=table.title,
+            from_date=table.from_date,
+            to_date=table.to_date,
+            business_date=table.business_date,
+            headline=table.headline,
+            figures=table.figures,
+            columns=table.columns,
+            rows=tuple(rows),
+            total=len(rows),
+            totals=_rp_totals(table.columns, rows),
+            organization=sections["branding"].get("display_name") or "XCODE",
+            period=period,
+            filters=filters,
+            exported_by=f"{member.first_name} {member.last_name}".strip(),
+            exported_on=context.now,
+            currency=sections["localization"].get("currency"),
+            file_name=f"{table.title}{'' if period is None else ' ' + period}.{word}",
+            content_type="application/pdf" if word == "pdf" else _XLSX_TYPE,
+        )

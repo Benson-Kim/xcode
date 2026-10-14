@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import os
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -25,7 +24,7 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from . import __version__
+from . import __version__, legacy_checks
 from .database import (
     Connection,
     check_deferred,
@@ -38,26 +37,17 @@ from .database import (
     run_db_verify,
 )
 from .formats import sha256
-from .records import ToolError
-from .tablemap import TABLES
-from .transform import MANIFEST, OLD_SETS, TRANSFORM, Manifest
+from .profile import LEGACY, Profile
+from .records import Check, ToolError
+from .transform import MANIFEST, OLD_SETS, TRANSFORM, Manifest, profile_for
+
+__all__ = ["LOAD", "Check", "run"]
 
 LOAD = "load.json"
 OPERATOR_ENV = "XCODE_OPERATOR"
 LOCK = "SELECT pg_advisory_xact_lock(hashtext('xcode.migrate'))"
 SESSION_SAMPLE = 200
 TENANT_SCHEMAS = ("tenancy", "setup", "revenue", "pettycash", "expenses")
-
-
-@dataclass
-class Check:
-    name: str
-    ok: bool
-    detail: str
-    lines: list[str]
-
-    def as_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "ok": self.ok, "detail": self.detail, "lines": self.lines}
 
 
 def operator() -> str:
@@ -69,14 +59,17 @@ def operator() -> str:
     return name
 
 
-def read_work(work_dir: Path) -> tuple[dict[str, Any], dict[str, bytes], bytes]:
+def read_work(
+    work_dir: Path, profile: Profile | None = None
+) -> tuple[dict[str, Any], dict[str, bytes], bytes]:
+    profile = profile or profile_for(Manifest.read(work_dir).kind)
     path = work_dir / TRANSFORM
     if not path.is_file():
         raise ToolError(f"{path} is missing: run transform first")
     summary: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     if sha256((work_dir / MANIFEST).read_bytes()) != summary["manifest_sha256"]:
         raise ToolError("manifest.json changed since the transform")
-    by_target = {t.target: t for t in TABLES}
+    by_target = {t.target: t for t in profile.tables}
     files: dict[str, bytes] = {}
     for table in summary["tables"]:
         known = by_target.get(table["target"])
@@ -94,6 +87,8 @@ def read_work(work_dir: Path) -> tuple[dict[str, Any], dict[str, bytes], bytes]:
         if sha256(data) != table["sha256"]:
             raise ToolError(f"{table['file']} does not match its SHA-256 in transform.json")
         files[table["target"]] = data
+    if profile.kind == LEGACY:
+        return summary, files, b""
     old_sets = (work_dir / OLD_SETS).read_bytes()
     if sha256(old_sets) != summary["permission_old_sets"]["sha256"]:
         raise ToolError(f"{OLD_SETS} does not match its SHA-256 in transform.json")
@@ -107,15 +102,19 @@ def run(
     accept_rejected: int | None,
 ) -> dict[str, Any]:
     name = operator() if apply else None
-    summary, files, old_sets = read_work(work_dir)
     manifest = Manifest.read(work_dir)
+    profile = profile_for(manifest.kind)
+    summary, files, old_sets = read_work(work_dir, profile)
     checks: list[Check] = []
-    checks.append(_rejections(summary, accept_rejected))
+    checks.append(_rejections(summary, accept_rejected, profile.kind))
+    checks.append(_deferred_rules(summary, profile.kind))
     checks.append(_ledger(summary, manifest))
+    if profile.kind == LEGACY:
+        checks.append(legacy_checks.source_ledger(summary, manifest))
     verified, output = run_db_verify()
     checks.append(Check("xcode-api db verify (before the load)", verified, "", output.splitlines()))
 
-    state = inspect_target(conn, TABLES)
+    state = inspect_target(conn, profile.tables)
     if state.migration != summary["target"]["migration"]:
         raise ToolError(
             f"the target is at migration {state.migration:04d}, the transform ran against "
@@ -139,7 +138,7 @@ def run(
                     [],
                 )
             )
-            checks.extend(_verify(conn, summary, files, old_sets, manifest))
+            checks.extend(_verify(conn, summary, files, old_sets, manifest, profile.kind))
             passed = all(c.ok for c in checks)
             if apply and passed:
                 _record(conn, summary, name, checks)
@@ -171,7 +170,14 @@ def run(
     return result
 
 
-def _rejections(summary: dict[str, Any], accepted: int | None) -> Check:
+_FIX_PEOPLE = {
+    LEGACY: "give each legacy user a row with a number in --people and transform again "
+    "(questions 90 and 98)",
+}
+_FIX_SOURCE = {LEGACY: "the old application"}
+
+
+def _rejections(summary: dict[str, Any], accepted: int | None, kind: str = "") -> Check:
     rejected = len(summary["rejected"])
     blocking = int(summary["blocking"])
     lines = [f"{r['table']} {r['key']}: {r['problem']}" for r in summary["rejected"]]
@@ -179,19 +185,32 @@ def _rejections(summary: dict[str, Any], accepted: int | None) -> Check:
         return Check(
             "no refused person or organization",
             False,
-            f"{blocking} refused rows of identity.users or tenancy.organizations: fix them in "
-            "SQL Server and extract again (question 16)",
+            f"{blocking} refused rows of identity.users or tenancy.organizations: "
+            + _FIX_PEOPLE.get(kind, "fix them in SQL Server and extract again (question 16)"),
             lines,
         )
     if rejected and accepted != rejected:
         return Check(
             "refused rows acknowledged",
             False,
-            f"{rejected} rows are refused and would not move: review them, fix them in SQL "
-            f"Server, or pass --accept-rejected {rejected}",
+            f"{rejected} rows are refused and would not move: review them, fix them in "
+            f"{_FIX_SOURCE.get(kind, 'SQL Server')}, or pass --accept-rejected {rejected}",
             lines,
         )
     return Check("refused rows acknowledged", True, f"{rejected} refused", lines)
+
+
+def _deferred_rules(summary: dict[str, Any], kind: str = "") -> Check:
+    broken = summary["deferred"]
+    if broken is None:
+        return Check("the accepted rows keep every deferred rule", True, "", [])
+    return Check(
+        "the accepted rows keep every deferred rule",
+        False,
+        f"{broken['problem']}: a refused row takes rows this rule needs with it; fix the "
+        f"refused rows in {_FIX_SOURCE.get(kind, 'SQL Server')} and extract again",
+        [],
+    )
 
 
 def _ledger(summary: dict[str, Any], manifest: Manifest) -> Check:
@@ -226,12 +245,22 @@ def _verify(
     files: dict[str, bytes],
     old_sets: bytes,
     manifest: Manifest,
+    kind: str = "",
 ) -> list[Check]:
-    return [
+    generic = [
         _counts(conn, summary),
         _checksums(conn, summary, files),
         _organizations(conn),
         _versions(conn),
+    ]
+    if kind == LEGACY:
+        return [
+            *generic,
+            *legacy_checks.verify(conn, summary, manifest),
+            _figures(conn, manifest.extracted_at),
+        ]
+    return [
+        *generic,
         _sessions(conn, manifest.extracted_at),
         _revenue(conn, summary),
         _translation(conn, old_sets),

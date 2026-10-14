@@ -1,9 +1,9 @@
 -- api.setup_vehicle_restore(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_vehicle_id uuid, p_returned_on date, p_reason text, p_now timestamptz) RETURNS api.write_result
--- Purpose: bring a retired visible vehicle of a company in use back into the fleet on a return date (the business date when none) from its leave date through the business date, recording the days between as an away period; a vehicle that is not retired answers unchanged.
+-- Purpose: bring a retired visible vehicle of a company in use back into the fleet on a return date (the business date when none) from its leave date through the business date, recording the days between as an away period, then deciding the saving runs those days complete; a vehicle that is not retired answers unchanged.
 -- Callers: SetupRoutines.restore_vehicle; RestoreVehicle (POST /setup/vehicles/{id}/restore).
--- Reads: setup.fleet_vehicles, and what tenancy.business_date, setup.vehicle_visible, setup.company_visible and setup.company_active_on read. Writes: setup.fleet_vehicles, setup.vehicle_away_periods, and through setup.record_setup_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
+-- Reads: setup.fleet_vehicles, and what tenancy.business_date, setup.vehicle_visible, setup.company_visible and setup.company_active_on read. Writes: setup.fleet_vehicles, setup.vehicle_away_periods, setup.saving_runs through setup.decide_saving_runs, and through setup.record_setup_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 reason_length via tenancy.check_typed_reason, XC422 time_zone_invalid via tenancy.business_date, XC404 not_found, XC422 vehicle_company_archived_restore, XC422 vehicle_return_date_range.
--- Tests: tests/db/test_setup_vehicle_routines.py, tests/api/test_setup_vehicles.py.
+-- Tests: tests/db/test_setup_vehicle_routines.py, tests/db/test_recurring_pause_routines.py, tests/api/test_setup_vehicles.py.
 
 CREATE OR REPLACE FUNCTION api.setup_vehicle_restore(
   p_actor_id uuid,
@@ -68,6 +68,7 @@ BEGIN
   UPDATE setup.fleet_vehicles
   SET left_on = NULL, updated_at = p_now
   WHERE organization_id = p_organization_id AND id = p_vehicle_id;
+  PERFORM setup.decide_saving_runs(p_vehicle_id, v_vehicle.left_on, v_today, p_now);
   v_version := setup.record_setup_change(
     'vehicles', p_vehicle_id, p_vehicle_id, v_before, setup.vehicle_snapshot(p_vehicle_id),
     tenancy.compose_reason(v_automatic, v_reason), p_now

@@ -47,6 +47,10 @@ loading `.env` everywhere is not carried over).
 | `XCODE_SHUTDOWN_GRACE_SECONDS` | int | 10 | mail queue drain budget; not negative |
 | `XCODE_OPERATOR` | string | OS user name | recorded in `ops.operator_actions` by every CLI command; printable, at most 128 characters |
 
+Two variables are read outside `Settings`: `XCODE_DB_DIR` (where the runner finds `db/`; by
+default the first `db` folder above the working directory) and, for the test harness only,
+`XCODE_TEST_DATABASE_URL` and `XCODE_TEST_TEMPLATE` (`docs/09-testing.md` section 5).
+
 Rules: validation errors list every bad variable at once and exit with code 2 before any
 network socket opens. Secrets are never logged, including in the startup settings summary
 (which logs key names and non-secret values).
@@ -86,7 +90,7 @@ owner URL and nothing of the API's own configuration or secrets.
 | Route | Checks | Success | Failure |
 |---|---|---|---|
 | `GET /health/live` | none | 200 `text/plain` `Healthy` | process not running |
-| `GET /health/ready` | `SELECT 1` via the pool within 10 s; rate-limit backend reachable when `postgres` | 200 `text/plain` `Healthy` | 503 `text/plain` `Unhealthy`, no detail |
+| `GET /health/ready` | the startup checks have passed (section 6); `SELECT 1` via the pool and the contract version within 10 s; the shared limiter answers when the backend is `postgres` (a hit on its own window `health:ready`) | 200 `text/plain` `Healthy` | 503 `text/plain` `Unhealthy`, no detail; the reason in `health.ready.failed` |
 | `GET /health` | none (legacy; staging `start.js` depends on it) | 200 `application/json` `{"status":"ok"}` | |
 
 Bodies and content types are those of `docs/06-http-contract.md` section 1.10 (parity with
@@ -100,20 +104,45 @@ the reason is logged.
 `auth_refusals_total{reason}` (reason is internal: `unknown`, `paused`, `capped`,
 `wrong_pin`; never exposed per account), `mail_queue_depth`, `rate_limit_rejections_total`.
 
+- `route` is the route template (`/setup/people/{id}`); a request no route matched is counted
+  as `unmatched`, so a scanner's paths never become label values. `state` is `idle`, `busy`
+  or `waiting`, read from the pool at scrape time.
+- Each app has its own registry (`infra/metrics.py`); the HTTP middleware binds it to the
+  request (`application/observability.py`), so the gateway reports routine durations and the
+  auth routines' refusals without importing the client library. A 429 counts as a rate-limit
+  rejection.
+- `/metrics` has no authentication: the proxy must never forward it, and it is exempt from
+  `XCODE_ALLOWED_HOSTS` because the scraper calls by address. Tests: `tests/api/test_metrics.py`.
+- Whoever can both send a sign-in and read `/metrics` learns from `auth_refusals_total{reason}`
+  whether a number exists (`unknown` against `wrong_pin`, `paused` or `capped`), which the
+  identical answers of section 1.6 of `docs/06-http-contract.md` otherwise hide. So `/metrics`
+  must be reachable by the operators' scraper alone: never through the proxy, never on a host
+  where other accounts share the loopback interface (`docs/13-open-questions.md` question 86).
+
 ## 6. Startup sequence
 
 1. Parse and validate settings (exit 2 on failure).
 2. Configure logging.
-3. Open the pool (fail after 30 s with exit 1), run `SELECT 1`, check that the connected
-   role is `xcode_app` (log a warning if it is not: least privilege is being bypassed).
-4. Optionally (development only) auto-migrate and demo-seed.
+3. Cap the worker threads (anyio's limiter for synchronous dependencies and the loop's
+   default executor, 4 each; the PIN pool keeps its own 2), open the pool (fail after 30 s:
+   `startup.database_unreachable`, exit 1), run `SELECT 1`, check that the connected role is
+   `xcode_app` (`db.role_unexpected` warning if it is not: least privilege is being bypassed).
+4. Optionally (development only) auto-migrate as `xcode_owner` and demo-seed as
+   `xcode_operator`, each through its own URL; outside development the process never reads
+   `XCODE_MIGRATION_DATABASE_URL` or `XCODE_DATABASE_OPERATOR_URL`.
 5. Verify routine compatibility: call `api.meta_contract_version()` and compare with the
    version the package expects; refuse to start on mismatch (prevents a new API against an
    old database or the reverse).
 6. Log the number of active users without an organization membership (parity with the .NET
    startup warning), via `api.meta_unassigned_user_count` (granted to `xcode_app` like
-   every `api.meta_*` routine).
-7. Start serving. Readiness becomes true only after step 5.
+   every `api.meta_*` routine): `startup.unassigned_users`, message
+   `{n} active users have no organization membership and cannot sign in`, only when n > 0.
+7. Start the mail queue and serve. Readiness becomes true only after steps 5 and 6 and turns
+   false again when shutdown starts.
+
+A failure in steps 3 to 6 ends the lifespan; uvicorn's startup-failure code 3 becomes exit 1
+(`cli/commands/serve.py`). Tests: `tests/api/test_operability.py`,
+`tests/unit/test_production_startup.py`.
 
 ## 7. Shutdown sequence
 
@@ -148,8 +177,8 @@ may not exist on that host. Questions 39 to 45 of `docs/13-open-questions.md` li
 to measure there first; until they are answered, nothing in this section is proven for
 the real host.
 
-Container (specified here, written in the bootstrap phase):
-- `python:3.13-slim` builder installs `requirements.lock.txt` into a venv; runtime stage
+Container (`deploy/Dockerfile`; the base image pinned by digest, recorded in `deploy/README.md`):
+- `python:3.13-slim-bookworm` builder installs `requirements.lock.txt` into a venv; runtime stage
   copies the venv and `db/` (the runner needs the SQL files), creates user `xcode` (uid
   10001), sets `PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`, read-only root filesystem
   with `/tmp` as tmpfs, `ENTRYPOINT ["xcode-api"]`, `CMD ["serve"]`, healthcheck on
@@ -160,11 +189,14 @@ Container (specified here, written in the bootstrap phase):
 - Behind a reverse proxy that terminates TLS and sets `X-Forwarded-For`; the proxy's address
   is in `XCODE_TRUSTED_PROXIES`; HSTS and HTTPS redirection are the proxy's job.
 
-CI (GitHub Actions, written in the bootstrap phase):
-- jobs: `lint` (ruff check, ruff format --check), `typecheck` (mypy), `test` (PostgreSQL 18
-  service container, `XCODE_TEST_DATABASE_URL` set, `pytest -n auto`), `audit` (pip-audit
-  on the lock file), `db-verify` (migrate a fresh database, `db verify`, `db status` exit 0),
-  `image` (build; push on tags).
+CI (`.github/workflows/xcode-api.yml`; every action pinned by commit, its tag in a comment):
+- jobs: `lint` (ruff check, ruff format --check, lock drift), `typecheck` (mypy), `test`
+  (PostgreSQL 18 service container, `XCODE_TEST_DATABASE_URL` set, `pytest -n auto`), `audit`
+  (pip-audit on the lock file), `db-verify` (a fresh database: `db migrate`, `db status`,
+  `db verify`, then `seed-demo` twice and `db verify` again), `migration-tool` (the data
+  migration tool's lint, types and tests), `image` (build, vulnerability scan failing on
+  critical and high findings that have a fix, run read-only as uid 10001, push to GHCR on
+  tags `xcode-api-v*`). Dependencies install from the lock files.
 - The lock file is checked for drift: `uv pip compile` output must equal the committed file.
 
 Release checklist (platform controls the API cannot verify itself; see `docs/12-security.md`):
@@ -177,6 +209,8 @@ Release checklist (platform controls the API cannot verify itself; see `docs/12-
   are explicit; `XCODE_RATE_LIMIT_BACKEND=postgres` when more than one replica runs.
 
 ## 10. Runbook entries (minimum)
+
+The procedures, with commands and log event names, are `deploy/runbook.md`.
 
 - "Readiness is failing": check pool saturation (`db_pool_connections`), PostgreSQL
   availability, role timeouts; the log line `health.ready.failed` carries the exception

@@ -699,18 +699,42 @@ def test_the_scheduled_item_snapshot_is_the_dotnet_json(
         ),
         stopped_from=date(2026, 6, 1),
     )
+    owner_conn.execute(
+        "INSERT INTO setup.recurring_pauses (organization_id, item_id, paused_from, "
+        "paused_through) VALUES (%s, %s, '2026-05-01', NULL), (%s, %s, '2026-04-01', '2026-04-10')",
+        (org, item, org, item),
+    )
+    owner_conn.execute(
+        "UPDATE setup.recurring_versions SET condition_min = 5000, condition_days = 7 "
+        "WHERE id = %s",
+        (second,),
+    )
+    owner_conn.execute(
+        "INSERT INTO setup.saving_openings (organization_id, item_id, opened_on) "
+        "VALUES (%s, %s, '2026-03-01')",
+        (org, item),
+    )
+    owner_conn.execute(
+        "INSERT INTO setup.saving_opening_amounts (organization_id, item_id, vehicle_id, amount) "
+        "VALUES (%s, %s, %s, 500.50)",
+        (org, item, low),
+    )
     with _as(executor, fleet.owner):
         assert _text(executor, "setup.recurring_snapshot(%s)", (item,)) == (
-            f'{{"Id":"{item}","StoppedFrom":"2026-06-01","Versions":['
+            f'{{"Id":"{item}","StoppedFrom":"2026-06-01","PausedFrom":"2026-05-01",'
+            '"Pauses":[{"From":"2026-04-01","Through":"2026-04-10"},'
+            '{"From":"2026-05-01","Through":null}],"Versions":['
             f'{{"Id":"{first}","Revision":1,"EffectiveFrom":"2026-03-01","Name":"Parking",'
             '"Kind":1,"Amount":1000,"Frequency":2,"Day":1,"LastDay":false,"Month":null,'
             f'"Start":"2026-03-01","End":null,"ExpenseItemId":"{parking}","Bucket":2,'
             f'"Note":"Stage fees","Allocations":[{{"VehicleId":"{low}","Amount":300}},'
-            f'{{"VehicleId":"{high}","Amount":700}}]}},'
+            f'{{"VehicleId":"{high}","Amount":700}}],"ConditionMin":null,"ConditionDays":null}},'
             f'{{"Id":"{second}","Revision":2,"EffectiveFrom":"2026-03-20","Name":"Owner savings",'
             '"Kind":2,"Amount":1250.5,"Frequency":4,"Day":null,"LastDay":true,"Month":2,'
             '"Start":"2026-03-01","End":"2027-12-31","ExpenseItemId":null,"Bucket":null,'
-            f'"Note":null,"Allocations":[{{"VehicleId":"{low}","Amount":1250.5}}]}}]}}'
+            f'"Note":null,"Allocations":[{{"VehicleId":"{low}","Amount":1250.5}}],'
+            '"ConditionMin":5000,"ConditionDays":7}],'
+            f'"Opening":{{"Date":"2026-03-01","Amounts":[{{"VehicleId":"{low}","Amount":500.5}}]}}}}'
         )
 
 

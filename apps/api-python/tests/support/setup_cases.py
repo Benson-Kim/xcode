@@ -25,11 +25,16 @@ from xcode_api.domain.setup import (
     InvestmentRemoval,
     InvestmentUpdate,
     MainCategorySave,
+    OpeningAmount,
     RecurringCancelStop,
     RecurringDefinition,
     RecurringListQuery,
+    RecurringPause,
+    RecurringRunsQuery,
     RecurringSave,
     RecurringStop,
+    SavingCondition,
+    SavingOpening,
     SetupPageQuery,
     Share,
     TargetSetRemoval,
@@ -372,6 +377,82 @@ async def delete_an_investment(world: SetupWorld) -> None:
     await world.history("investment")
 
 
+async def pause_and_run_scheduled_items(world: SetupWorld) -> None:
+    """A saving with a revenue rule and an opening, a plain saving and a weekly cost: their
+    runs, the month summary and the list, around a pause and a resume."""
+    owner = world.tenancy.owner
+    category = await world.record(
+        world.setup.create_expense_category(ExpenseCategorySave(owner, None, "Fees", None, False))
+    )
+    fees = await world.record(
+        world.setup.create_expense_item(ExpenseItemCreate(owner, category.id, "Stage fees"))
+    )
+    north = await world.company("North Star")
+    kda = await world.vehicle(north, "KDA 482M", date(2026, 9, 1), 7000)
+
+    def item(
+        name: str, kind: int, frequency: int, day: int | None, **more: Any
+    ) -> RecurringDefinition:
+        return RecurringDefinition(
+            name=name,
+            kind=kind,
+            amount=Decimal(300),
+            frequency=frequency,
+            day=day,
+            last_day=False,
+            start=date(2026, 10, 1),
+            end=None,
+            allocations=(Share(kda, Decimal(300)),),
+            expense_item_id=fees.id if kind == 1 else None,
+            note=None,
+            month=None,
+            **more,
+        )
+
+    ruled = await world.record(
+        world.setup.create_recurring(
+            RecurringSave(
+                owner,
+                None,
+                item(
+                    "Fuel fund",
+                    2,
+                    1,
+                    None,
+                    condition=SavingCondition(Decimal(5000), 1),
+                    opening=SavingOpening(date(2026, 10, 1), (OpeningAmount(kda, Decimal(800)),)),
+                ),
+                None,
+            )
+        )
+    )
+    plain = await world.record(
+        world.setup.create_recurring(
+            RecurringSave(owner, None, item("Owner savings", 2, 2, 5), None)
+        )
+    )
+    cost = await world.record(
+        world.setup.create_recurring(RecurringSave(owner, None, item("Fees", 1, 2, 5), None))
+    )
+    for target in (ruled.id, plain.id, cost.id, UNKNOWN):
+        await world.record(world.setup.recurring_runs(RecurringRunsQuery(owner, target)))
+    await world.record(world.setup.recurring_month(owner))
+    await world.record(world.setup.pause_recurring(RecurringPause(owner, plain.id)))
+    await world.record(world.setup.pause_recurring(RecurringPause(owner, plain.id)))
+    await world.record(world.setup.pause_recurring(RecurringPause(owner, UNKNOWN)))
+    await world.record(
+        world.setup.list_recurring(RecurringListQuery(owner, None, None, None, 1, 25))
+    )
+    await world.record(world.setup.recurring_month(owner))
+    await world.record(world.setup.resume_recurring(RecurringPause(owner, plain.id)))
+    await world.record(world.setup.resume_recurring(RecurringPause(owner, plain.id)))
+    await world.record(world.setup.recurring_runs(RecurringRunsQuery(owner, plain.id)))
+    await world.record(
+        world.setup.list_recurring(RecurringListQuery(owner, None, None, None, 1, 25))
+    )
+    await world.history("recurring")
+
+
 @dataclass(frozen=True)
 class SetupCase:
     name: str
@@ -385,4 +466,5 @@ CASES = (
     SetupCase("arrange_main_categories", arrange_main_categories),
     SetupCase("revise_a_scheduled_item", revise_a_scheduled_item),
     SetupCase("delete_an_investment", delete_an_investment),
+    SetupCase("pause_and_run_scheduled_items", pause_and_run_scheduled_items),
 )

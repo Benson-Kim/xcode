@@ -58,7 +58,17 @@ class MigrationError(RuntimeError):
     whose roles and schemas were never set up)."""
 
 
-REQUIRED_SCHEMAS = ("identity", "tenancy", "setup", "revenue", "pettycash", "ops", "api")
+REQUIRED_SCHEMAS = (
+    "identity",
+    "tenancy",
+    "setup",
+    "revenue",
+    "pettycash",
+    "expenses",
+    "reports",
+    "ops",
+    "api",
+)
 
 _ROUTINE_NAME = re.compile(
     r"CREATE\s+OR\s+REPLACE\s+(?:FUNCTION|PROCEDURE)\s+([a-z_]+)\.([a-z_][a-z0-9_]*)\s*\(",

@@ -39,7 +39,7 @@ Mapping to the three-layer rule "UI -> Domain <- Data":
 |---|---|---|
 | UI (screens, state holders, platform-specific) | `http/` routers (the screens), Pydantic request/response models (the state holders), middleware | FastAPI, Starlette, Pydantic |
 | Domain (use cases -> entities + business rules; pure) | `application/` (use cases, ports, commands) and `domain/` (entities, values, policies) | standard library only |
-| Data (repository implementations owning connections, caches, clients) | `db/` (PostgreSQL repositories), `security/`, `infra/` | psycopg, PyJWT, aiosmtplib, prometheus-client (`infra/metrics.py` only), structlog |
+| Data (repository implementations owning connections, caches, clients) | `db/` (PostgreSQL repositories), `security/`, `infra/` | psycopg, PyJWT, aiosmtplib, prometheus-client (`infra/metrics.py` only), XlsxWriter and ReportLab (`infra/exports/` only), structlog |
 
 Import rules, enforced by `tests/unit/test_layers.py` (an `ast` walk over every module in
 `src/xcode_api`; no third-party tool):

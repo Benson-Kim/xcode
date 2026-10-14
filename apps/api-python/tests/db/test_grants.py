@@ -62,7 +62,8 @@ def _login(url: str, role: str) -> str:
 def _all_tables(owner: Conn) -> list[str]:
     rows = owner.execute(
         "SELECT schemaname || '.' || tablename AS qualified FROM pg_tables "
-        "WHERE schemaname IN ('identity', 'tenancy', 'setup', 'revenue', 'pettycash', 'ops')"
+        "WHERE schemaname IN "
+        "('identity', 'tenancy', 'setup', 'revenue', 'pettycash', 'expenses', 'ops')"
     ).fetchall()
     return sorted(r["qualified"] for r in rows)
 
@@ -103,6 +104,7 @@ def test_append_only_tables_refuse_update_and_delete(executor: Conn) -> None:
         "setup.vehicle_away_periods",
         "setup.recurring_versions",
         "setup.recurring_allocations",
+        "setup.saving_runs",
     }
     for table in append_only:
         for privilege in ("UPDATE", "DELETE"):
@@ -118,6 +120,7 @@ def test_no_routine_body_rewrites_history_or_deletes_a_setup_record() -> None:
         "vehicle_away_periods",
         "recurring_versions",
         "recurring_allocations",
+        "saving_runs",
     )
     never_deleted = (
         *append_only,

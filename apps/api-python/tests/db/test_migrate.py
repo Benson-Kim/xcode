@@ -23,6 +23,7 @@ from xcode_api.db.migrate import (
 from xcode_api.db.verify import run_checks
 
 from ..support.database import Harness, _with_role
+from ..support.rows import seed_organization
 
 pytestmark = pytest.mark.structure
 
@@ -562,3 +563,28 @@ def test_the_setup_migration_splits_weekly_targets_and_groups_categories_by_buck
         "setup.vehicle_target_sets: 4 sets from 5 dated weekly targets; 1 too small to split, "
         "left for the owner; setup.expense_main_categories: 3 made for 4 categories"
     ) in notices
+
+
+def test_the_expenses_migration_refuses_to_reverse_over_its_change_log_rows(
+    fresh_owner_url: str,
+) -> None:
+    runner, conn = _runner(fresh_owner_url)
+    log = (
+        "INSERT INTO tenancy.change_log (organization_id, version, section, entity_id, "
+        "vehicle_id, actor_id, reason, occurred_at, before, after, request_id) VALUES "
+        "(%(org)s, 3, 'reports', gen_random_uuid(), NULL, %(user)s, 'Exported Net by vehicle', "
+        "now(), 'null', '{}', 'request-2')"
+    )
+    try:
+        with advisory_lock(conn):
+            runner.migrate(to=13)
+            rows = seed_organization(conn)
+            conn.execute(log, rows.params())
+            with pytest.raises(psycopg.Error, match="centralexpenses or reports"):
+                runner.down(13, confirmed=True, env="testing")
+            conn.execute("DELETE FROM tenancy.change_log WHERE section = 'reports'")
+            runner.down(13, confirmed=True, env="testing")
+            with pytest.raises(psycopg.errors.CheckViolation, match="ck_change_log_section"):
+                conn.execute(log, rows.params())
+    finally:
+        conn.close()

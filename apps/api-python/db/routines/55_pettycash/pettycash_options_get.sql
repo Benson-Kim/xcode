@@ -1,5 +1,5 @@
 -- api.pettycash_options_get(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_date date, p_now timestamptz) RETURNS jsonb
--- Purpose: the choices of the entry form on p_date (default the business date) (PettyCashOptionsDto): for a person who may add or edit an expense, the vehicles they see that are in the fleet on the date (by registration) and the expense items in use on the date (by category, then name); for a person who may add for another manager, give cash or record a credit note, the active holders; every other part an empty list.
+-- Purpose: the choices of the entry form on p_date (default the business date) (PettyCashOptionsDto): for a person who may add or edit an expense, the vehicles they see that are in the fleet on the date (by registration, with their fleet number) and the expense items in use on the date (by category, then name); for a person who may add for another manager, give cash or record a credit note, the active holders; every other part an empty list.
 -- Callers: PettyCashRoutines.options; GetPettyCashOptions (GET /setup/pettycash/options).
 -- Reads: setup.fleet_vehicles, setup.psv_companies, setup.expense_items, setup.expense_categories, and what tenancy.business_date, tenancy.effective_permissions, setup.visible_vehicles, setup.vehicle_active_on and pettycash.holders read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.require_any_permission, XC422 time_zone_invalid via tenancy.business_date, XC422 pettycash_future_date via pettycash.check_date, XC422 pettycash_too_old via pettycash.check_date.
@@ -46,7 +46,8 @@ BEGIN
                'company_id', f.company_id,
                'company_name', c.name,
                'registration', f.registration,
-               'active', true
+               'active', true,
+               'fleet_number', f.fleet_number
              ) ORDER BY f.registration, f.id), '[]'::jsonb)
     INTO v_vehicles
     FROM setup.fleet_vehicles AS f

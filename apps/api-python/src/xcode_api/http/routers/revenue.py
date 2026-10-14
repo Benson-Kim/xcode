@@ -14,18 +14,26 @@ from starlette.responses import Response
 
 from ...application.caller import Caller
 from ...application.revenue.capture_revenue import CaptureRevenueCommand
+from ...application.revenue.export_week import ExportRevenueWeekQuery
 from ...application.revenue.get_dashboard import GetRevenueDashboardQuery
+from ...application.revenue.get_day import GetRevenueDayQuery
 from ...application.revenue.get_week import GetRevenueWeekQuery
+from ...application.revenue.save_day import SaveRevenueDayCommand
 from ...container import Container
+from ...domain.reports import PDF_CONTENT_TYPE, XLSX_CONTENT_TYPE
+from ...domain.revenue import RevenueDayRow
 from ..dependencies import container, current_caller
-from ..responses import respond
+from ..responses import file_response, respond
 from ..routing import SetupRoute
 from ..schemas.common import problem_responses
 from ..schemas.revenue import (
     RevenueDashboardDto,
+    RevenueDayDto,
+    RevenueDaySaved,
     RevenueSaved,
     RevenueWeekDto,
     SaveRevenue,
+    SaveRevenueDay,
 )
 
 CallerDep = Annotated[Caller, Depends(current_caller)]
@@ -74,6 +82,64 @@ async def get_dashboard(
         GetRevenueDashboardQuery(caller, period, company_id)
     )
     return respond(RevenueDashboardDto.from_record(dashboard))
+
+
+@router.get(
+    "/day",
+    operation_id="GetRevenueDay",
+    response_model=RevenueDayDto,
+    responses=problem_responses(400, 403),
+)
+async def get_day(
+    caller: CallerDep,
+    c: ContainerDep,
+    day: Annotated[date | None, Query(alias="date")] = None,
+    company_id: CompanyFilter = None,
+) -> Response:
+    result = await c.get_revenue_day.execute(GetRevenueDayQuery(caller, day, company_id))
+    return respond(RevenueDayDto.from_record(result))
+
+
+@router.put(
+    "/day/{date}",
+    operation_id="SaveRevenueDay",
+    response_model=RevenueDaySaved,
+    responses=problem_responses(400, 403, 404, 409),
+)
+async def save_day(
+    day: Annotated[date, Path(alias="date")],
+    body: SaveRevenueDay,
+    caller: CallerDep,
+    c: ContainerDep,
+) -> Response:
+    rows = tuple(
+        RevenueDayRow(r.vehicle_id, r.amount, r.reason, r.note, r.version) for r in body.rows
+    )
+    result = await c.save_revenue_day.execute(SaveRevenueDayCommand(caller, day, rows))
+    return respond(RevenueDaySaved.from_record(result))
+
+
+@router.get(
+    "/export",
+    operation_id="ExportRevenueWeek",
+    response_class=Response,
+    responses={
+        200: {"description": "The file", "content": {XLSX_CONTENT_TYPE: {}, PDF_CONTENT_TYPE: {}}},
+        **problem_responses(400, 403),
+    },
+)
+async def export_week(
+    *,
+    caller: CallerDep,
+    c: ContainerDep,
+    week_start: Annotated[date | None, Query(alias="weekStart")] = None,
+    company_id: CompanyFilter = None,
+    format: str | None = None,
+) -> Response:
+    file = await c.export_revenue_week.execute(
+        ExportRevenueWeekQuery(caller, week_start, company_id, format)
+    )
+    return file_response(file)
 
 
 @router.put(

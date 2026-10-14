@@ -222,11 +222,13 @@ def test_a_cost_is_named_after_its_expense_item_and_counts_in_its_bucket(
     assert (log["entity_id"], log["vehicle_id"], log["version"]) == (item, None, before + 1)
     assert (log["reason"], log["before"]) == ("Scheduled expense, Parking", "null")
     assert log["after"] == (
-        f'{{"Id":"{item}","StoppedFrom":null,"Versions":[{{"Id":"{version["id"]}","Revision":1,'
+        f'{{"Id":"{item}","StoppedFrom":null,"PausedFrom":null,"Pauses":[],'
+        f'"Versions":[{{"Id":"{version["id"]}","Revision":1,'
         '"EffectiveFrom":"2026-03-01","Name":"Parking","Kind":1,"Amount":1200,"Frequency":2,'
         '"Day":6,"LastDay":false,"Month":null,"Start":"2026-03-01","End":null,'
         f'"ExpenseItemId":"{rules.parking}","Bucket":2,"Note":"Stage fees",'
-        f'"Allocations":[{{"VehicleId":"{rules.kda}","Amount":1200}}]}}]}}'
+        f'"Allocations":[{{"VehicleId":"{rules.kda}","Amount":1200}}],'
+        '"ConditionMin":null,"ConditionDays":null}],"Opening":null}'
     )
 
 
@@ -420,16 +422,11 @@ def test_daily_schedules_are_no_longer_offered(app_conn: Conn, rules: Rules) -> 
     )
 
 
-def test_savings_are_weekly_or_monthly(app_conn: Conn, rules: Rules) -> None:
-    _create_refused(
-        app_conn,
-        rules.owner,
-        _saving(rules, frequency=4, day=10, month=3),
-        "XC422",
-        "recurring_savings_frequency",
-    )
+def test_savings_run_daily_weekly_monthly_or_yearly(app_conn: Conn, rules: Rules) -> None:
+    _create(app_conn, rules.owner, _saving(rules, frequency=1, day=None))
     _create(app_conn, rules.owner, _saving(rules, frequency=2, day=6))
     _create(app_conn, rules.owner, _saving(rules, frequency=3, day=None, last_day=True))
+    _create(app_conn, rules.owner, _saving(rules, frequency=4, day=10, month=3))
 
 
 def test_a_cost_needs_an_expense_item(app_conn: Conn, rules: Rules) -> None:
@@ -444,7 +441,7 @@ def test_a_cost_needs_an_expense_item(app_conn: Conn, rules: Rules) -> None:
 
 def test_a_start_date_is_required(app_conn: Conn, rules: Rules) -> None:
     _create_refused(
-        app_conn, rules.owner, _saving(rules, start=None), "XC422", "recurring_start_required"
+        app_conn, rules.owner, _cost(rules, start=None), "XC422", "recurring_start_required"
     )
 
 
@@ -454,22 +451,22 @@ def test_schedules_start_no_earlier_than_the_first_of_the_business_month(
     _create_refused(
         app_conn,
         rules.owner,
-        _saving(rules, start=date(2026, 2, 28)),
+        _cost(rules, start=date(2026, 2, 28)),
         "XC422",
         "recurring_start_too_early",
     )
-    _create(app_conn, rules.owner, _saving(rules, start=date(2026, 3, 1)))
-    pending = _create(app_conn, rules.owner, _saving(rules, start=date(2026, 3, 20)))
+    _create(app_conn, rules.owner, _cost(rules, start=date(2026, 3, 1)))
+    pending = _create(app_conn, rules.owner, _cost(rules, start=date(2026, 3, 20)))
     _revise_refused(
         app_conn,
         rules.owner,
         pending,
-        _saving(rules, start=date(2026, 2, 20)),
+        _cost(rules, start=date(2026, 2, 20)),
         "XC422",
         "recurring_start_too_early",
     )
     assert (
-        _revise(app_conn, rules.owner, pending, _saving(rules, start=date(2026, 3, 2)))["outcome"]
+        _revise(app_conn, rules.owner, pending, _cost(rules, start=date(2026, 3, 2)))["outcome"]
         == "updated"
     )
 
@@ -681,10 +678,10 @@ def test_a_running_item_keeps_its_start_date(
 def test_postponing_a_pending_item_takes_effect_today_and_backdating_from_its_start(
     app_conn: Conn, owner_conn: Conn, rules: Rules
 ) -> None:
-    pending = _create(app_conn, rules.owner, _saving(rules, start=date(2026, 3, 20)))
+    pending = _create(app_conn, rules.owner, _cost(rules, start=date(2026, 3, 20)))
     assert _versions(owner_conn, pending)[0]["effective_from"] == date(2026, 3, 20)
-    _revise(app_conn, rules.owner, pending, _saving(rules, start=date(2026, 3, 25)))
-    _revise(app_conn, rules.owner, pending, _saving(rules, start=date(2026, 3, 10)))
+    _revise(app_conn, rules.owner, pending, _cost(rules, start=date(2026, 3, 25)))
+    _revise(app_conn, rules.owner, pending, _cost(rules, start=date(2026, 3, 10)))
     versions = _versions(owner_conn, pending)
     assert [(v["revision"], v["effective_from"], v["start_on"]) for v in versions] == [
         (1, date(2026, 3, 20), date(2026, 3, 20)),
@@ -974,6 +971,14 @@ def test_the_list_row_is_the_latest_version_with_its_reported_bucket(
         "note": "Legacy",
         "month": None,
         "active_amount": 250,
+        "paused_from": None,
+        "last_run": None,
+        "last_run_vehicles": 0,
+        "balance": None,
+        "last_run_states": None,
+        "condition": None,
+        "opening": None,
+        "next_run": "2026-03-18",
     }
     assert (rows[str(saving)]["bucket"], rows[str(saving)]["expense_item_name"]) == (None, None)
 

@@ -9,6 +9,7 @@ from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from ..domain.identity import AccessGrant, CodePurpose, TokenClaims
+from ..domain.reports import ReportDocument
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,3 +161,19 @@ class RateLimiter(Protocol):
     async def hit(
         self, key: str, limit: int, window_seconds: int, now: datetime
     ) -> RateLimitDecision: ...
+
+
+@runtime_checkable
+class ReportFileWriter(Protocol):
+    """Builds the file of an export from a report document, in the format the adapter owns.
+
+    ``content_type`` names that format; ``write`` lays the document out cell for cell and
+    returns the whole file. It formats what the routine summed and never adds anything up.
+    Synchronous and CPU-bound: callers run it off the event loop. Adapters:
+    ``infra/exports/xlsx.py`` (XlsxWriter) and ``infra/exports/pdf.py`` (ReportLab).
+    """
+
+    @property
+    def content_type(self) -> str: ...
+
+    def write(self, document: ReportDocument) -> bytes: ...

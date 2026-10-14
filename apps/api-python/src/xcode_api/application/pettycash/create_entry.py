@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from ...domain.expenses import ExpenseAllocation
 from ...domain.pettycash import PettyCashCreate, PettyCashLine, PettyCashSaved
 from ..caller import Caller
 from ..ports import Clock
@@ -17,6 +18,7 @@ class CreatePettyCashEntryCommand:
     caller: Caller
     id: UUID | None
     line: PettyCashLine
+    allocations: tuple[ExpenseAllocation, ...] | None = None
 
 
 class CreatePettyCashEntry:
@@ -26,5 +28,10 @@ class CreatePettyCashEntry:
 
     async def execute(self, command: CreatePettyCashEntryCommand) -> PettyCashSaved:
         return await self._pettycash.create(
-            PettyCashCreate(command.caller.context(self._clock), command.id, command.line)
+            PettyCashCreate(
+                command.caller.context(self._clock),
+                command.id,
+                command.line,
+                command.allocations,
+            )
         )

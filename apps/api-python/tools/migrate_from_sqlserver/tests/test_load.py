@@ -17,14 +17,13 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from migrate_from_sqlserver import report as report_command
 from migrate_from_sqlserver.cli import main
 from migrate_from_sqlserver.formats import parse_csv
 from migrate_from_sqlserver.tablemap import TABLES
 
 from . import fixture_data as fx
 from .conftest import Target, run_cli
-
-LOADED_TABLES = [t.target for t in TABLES if t.since <= 12]
 
 
 def _load(tmp: Path, *args: str) -> tuple[int, dict, dict | None]:
@@ -37,12 +36,14 @@ def _load(tmp: Path, *args: str) -> tuple[int, dict, dict | None]:
 
 
 def _counts(target: Target) -> dict[str, int]:
-    """Rows in every loaded table, and the load's own operator actions (the template already
-    holds the migration runner's)."""
+    """Rows in every mapped table the target has (a table of a later migration than the
+    target's is absent), and the load's own operator actions (the template already holds the
+    migration runner's)."""
     with target.owner() as conn:
         counts = {
-            name: conn.execute(f"SELECT count(*) FROM {name}").fetchone()[0]  # type: ignore[index]
-            for name in LOADED_TABLES
+            t.target: conn.execute(f"SELECT count(*) FROM {t.target}").fetchone()[0]  # type: ignore[index]
+            for t in TABLES
+            if conn.execute("SELECT to_regclass(%s) IS NOT NULL", (t.target,)).fetchone()[0]  # type: ignore[index]
         }
         counts["data_migration_load"] = conn.execute(
             "SELECT count(*) FROM ops.operator_actions WHERE action = 'data_migration_load'"
@@ -498,6 +499,103 @@ def test_source_rows_for_a_table_the_target_lacks_stop_the_transform(
     assert main(["transform", "--input", str(extract), "--output", str(tmp_path / "w")]) == 1
 
 
+def test_central_expenses_and_recurring_pauses_move_into_a_target_with_migration_0013(
+    target: Target, tmp_path: Path
+) -> None:
+    if not target.scalar("SELECT to_regclass('expenses.entries') IS NOT NULL"):
+        pytest.skip("the target predates migration 0013")
+    data = fx.rows()
+    group = fx.guid("ce:g2")
+    data["CentralExpenses"] = [
+        {
+            "OrganizationId": fx.ORG,
+            "Id": fx.guid(f"ce:{vehicle}"),
+            "Date": "2026-10-01",
+            "VehicleId": vehicle,
+            "ExpenseItemId": fx.TYRES,
+            "Units": "1.500",
+            "UnitAmount": "10.00",
+            "Total": "15.00",
+            "Note": " shared tyres ",
+            "GroupId": group,
+            "GroupSize": "2",
+            "GroupTotal": "30.00",
+            "GroupUnits": "3.000",
+            "GroupUnitAmount": "10.00",
+            "RecordedBy": fx.OWNER,
+            "RecordedAt": fx.at(fx.EXTRACTED_AT),
+            "UpdatedBy": fx.OWNER,
+            "UpdatedAt": fx.at(fx.EXTRACTED_AT),
+            "RemovedBy": None,
+            "RemovedAt": None,
+            "RemovalReason": None,
+            "Version": "1",
+        }
+        for vehicle in (fx.V1, fx.V2)
+    ]
+    fuel = fx.guid("recurring:fuel")
+    data["RecurringPause"] = [
+        {
+            "OrganizationId": fx.ORG,
+            "Id": fx.guid("pause:1"),
+            "ItemId": fuel,
+            "From": "2026-08-01",
+            "Through": "2026-08-31",
+        },
+        {
+            "OrganizationId": fx.ORG,
+            "Id": fx.guid("pause:2"),
+            "ItemId": fuel,
+            "From": "2026-10-01",
+            "Through": None,
+        },
+    ]
+    extract = tmp_path / "extract"
+    fx.build(extract, data)
+    code = main(
+        [
+            "load",
+            "--apply",
+            "--accept-rejected",
+            "1",
+            "--input",
+            str(extract),
+            "--output",
+            str(tmp_path / "w"),
+        ]
+    )
+
+    assert code == 0
+    with target.owner() as conn:
+        expenses = conn.execute(
+            "SELECT vehicle_id::text, entry_date::text, units::text, total::text, note, "
+            "group_id::text, group_size, group_total::text, recorded_by::text "
+            "FROM expenses.entries ORDER BY vehicle_id"
+        ).fetchall()
+        pauses = conn.execute(
+            "SELECT id::text, item_id::text, paused_from::text, paused_through::text "
+            "FROM setup.recurring_pauses ORDER BY paused_from"
+        ).fetchall()
+    assert expenses == sorted(
+        (
+            v.lower(),
+            "2026-10-01",
+            "1.500",
+            "15.00",
+            "shared tyres",
+            group.lower(),
+            2,
+            "30.00",
+            fx.OWNER.lower(),
+        )
+        for v in (fx.V1, fx.V2)
+    )
+    assert pauses == [
+        (fx.guid("pause:1").lower(), fuel.lower(), "2026-08-01", "2026-08-31"),
+        (fx.guid("pause:2").lower(), fuel.lower(), "2026-10-01", None),
+    ]
+
+
 def test_the_map_covers_every_column_the_target_requires(target: Target) -> None:
     """A target column that is NOT NULL without a default must be mapped; a mapped column must
     exist. This fails when a migration adds or renames a column the map does not know."""
@@ -548,22 +646,23 @@ def test_the_cli_runs_as_the_prompt_shows(target: Target, tmp_path: Path) -> Non
 def test_a_row_lost_without_a_documented_rule_stops_the_load(
     target: Target, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A conversion that loses a row without a ledger entry is caught by the ledger check."""
+    """A conversion that loses a row without a ledger entry is caught by the ledger check. The
+    row is an audit event, which nothing references: no other check notices it is gone."""
     from migrate_from_sqlserver import conversions
 
-    original = conversions.CONVERSIONS["normalized_name"]
+    original = conversions.CONVERSIONS["audit_ids"]
 
     def losing(table, rows, ctx):  # type: ignore[no-untyped-def]
-        kept = original(table, rows, ctx)
-        return kept[1:] if table.source == "PsvCompany" else kept
+        return original(table, rows, ctx)[1:]
 
-    monkeypatch.setitem(conversions.CONVERSIONS, "normalized_name", losing)
+    monkeypatch.setitem(conversions.CONVERSIONS, "audit_ids", losing)
     code, _, load = _load(tmp_path, "--apply", "--accept-rejected", "1")
     assert code == 1
     assert load is not None and load["committed"] is False
-    ledger = _checks(load)["every source row is loaded, dropped by a documented rule, or refused"]
-    assert ledger["ok"] is False
-    assert any("setup.psv_companies" in line for line in ledger["lines"])
+    failed = [c["name"] for c in load["checks"] if not c["ok"]]
+    ledger = "every source row is loaded, dropped by a documented rule, or refused"
+    assert failed == [ledger]
+    assert any("tenancy.audit_events" in line for line in _checks(load)[ledger]["lines"])
     assert all(n == 0 for n in _counts(target).values())
 
 
@@ -632,3 +731,72 @@ def test_a_settings_version_behind_the_change_log_stops_the_load(
     check = _checks(load)["each organization's settings version is past its change log"]
     assert check["ok"] is False
     assert all(n == 0 for n in _counts(target).values())
+
+
+def test_a_refused_row_that_breaks_a_deferred_rule_is_listed_and_stops_the_transform(
+    target: Target, tmp_path: Path
+) -> None:
+    """A vehicle refused by its own check takes its allocations with it, so the loan's
+    allocations no longer add up: the transform still lists the vehicle by its source key."""
+    data = fx.rows()
+    vehicle = next(v for v in data["FleetVehicle"] if v["Id"] == fx.V2)
+    vehicle["LeftOn"] = "2026-01-01"
+    extract = tmp_path / "extract"
+    fx.build(extract, data)
+    work = tmp_path / "work"
+
+    assert main(["transform", "--input", str(extract), "--output", str(work)]) == 1
+    summary = json.loads((work / "transform.json").read_text(encoding="utf-8"))
+    assert "allocation_sum_mismatch" in summary["deferred"]["problem"]
+    refused = {(r["table"], r["key"]): r["constraint"] for r in summary["rejected"]}
+    assert (
+        refused[("setup.fleet_vehicles", f"OrganizationId={fx.ORG}|Id={fx.V2}")]
+        == "ck_fleet_vehicles_left_on"
+    )
+
+    accepted = str(len(summary["rejected"]))
+    assert main(["load", "--dry-run", "--input", str(work), "--accept-rejected", accepted]) == 1
+    load = json.loads((work / "load.json").read_text(encoding="utf-8"))
+    checks = _checks(load)
+    assert checks["refused rows acknowledged"]["ok"] is True
+    assert checks["the accepted rows keep every deferred rule"]["ok"] is False
+    assert all(n == 0 for n in _counts(target).values())
+    lines: list[str] = []
+    report_command.run(work, out=lines.append)
+    assert any(line.startswith("  DEFERRED RULE BROKEN:") for line in lines)
+
+
+def test_the_reason_sentence_an_access_change_audits_moves_as_a_json_string(
+    target: Target, tmp_path: Path
+) -> None:
+    """The .NET people module stores the reason sentence of an access change in ``After``, not
+    JSON; it moves as a JSON string. Text under any other action is still refused."""
+    sentence = 'Removed access for Grace Achieng. Reason: Moved to "Ena".'
+    data = fx.rows()
+    base = data["AuditEvents"][0]
+    removed, garbled = fx.guid("audit:removed"), fx.guid("audit:garbled")
+    data["AuditEvents"] += [
+        dict(base, Id=removed, Action="person.deactivated", Before=None, After=sentence),
+        dict(base, Id=garbled, Action="person.updated", Before=None, After="{not json"),
+    ]
+    extract = tmp_path / "extract"
+    fx.build(extract, data)
+    work = tmp_path / "work"
+    args = ["--input", str(extract), "--output", str(work), "--accept-rejected", "2"]
+
+    assert main(["load", "--apply", *args]) == 0
+    summary = json.loads((work / "transform.json").read_text(encoding="utf-8"))
+    refused = [r for r in summary["rejected"] if r["table"] == "tenancy.audit_events"]
+    assert [r["key"] for r in refused] == [f"OrganizationId={fx.ORG}|Id={garbled}"]
+    assert refused[0]["problem"].startswith("After is not JSON")
+    changed = [
+        (c["from"], c["to"])
+        for c in summary["changed"]
+        if c["key"] == f"OrganizationId={fx.ORG}|Id={removed}" and c["column"] == "after"
+    ]
+    assert changed == [(sentence, json.dumps(sentence, ensure_ascii=False))]
+    stored = target.scalar(
+        "SELECT jsonb_typeof(after) || ':' || (after #>> '{}') FROM tenancy.audit_events "
+        "WHERE action = 'person.deactivated'"
+    )
+    assert stored == f"string:{sentence}"

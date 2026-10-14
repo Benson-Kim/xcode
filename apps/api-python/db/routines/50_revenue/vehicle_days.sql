@@ -9,6 +9,9 @@
 -- the next start), so no lookup runs per day. Records are read for the period only: a function
 -- body is planned without its arguments, and an unbounded join hashed the organization's whole
 -- history even for one vehicle's week.
+-- The days and the records are materialized so that they join on vehicle and day: planned
+-- without its arguments, the body merged on the vehicle alone and filtered every record of the
+-- vehicle against every day (a year of 500 vehicles: 61 million rows, 22 s, against 1.2 s).
 
 CREATE OR REPLACE FUNCTION revenue.vehicle_days(
   p_vehicle_ids uuid[],
@@ -38,7 +41,7 @@ AS $$
       AND t.vehicle_id = ANY (p_vehicle_ids)
       AND t.starts_on <= p_through
   ),
-  days AS (
+  days AS MATERIALIZED (
     SELECT v.id AS vehicle_id,
            p_from + n.offset_days AS day,
            v.joined_on <= p_from + n.offset_days
@@ -53,7 +56,7 @@ AS $$
      AND p_from + n.offset_days >= a.left_on
      AND p_from + n.offset_days < a.returned_on
   ),
-  records AS (
+  records AS MATERIALIZED (
     SELECT r.vehicle_id, r.business_date, r.id, r.amount, r.reason, r.note,
            r.corrected_after_date, r.version
     FROM revenue.records AS r

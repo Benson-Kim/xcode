@@ -1,9 +1,9 @@
 -- api.setup_vehicle_report(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_vehicle_id uuid, p_period text, p_from date, p_through date, p_now timestamptz) RETURNS jsonb
--- Purpose: a visible vehicle's figures for the current week or month, or for a range of at most 367 days ending by the business date: money in, the target of the days that count, every scheduled posting and approved petty-cash expense (source pettycash) with its bucket, the bucket and savings totals, money out, net, after savings and costs.
+-- Purpose: a visible vehicle's figures for the current week or month, or for a range of at most 367 days ending by the business date: money in, the target of the days that count, every posting of setup.fleet_postings (source null for a scheduled run, central, pettycash) with its bucket, the bucket and savings totals, money out, net, after savings and costs.
 -- Callers: SetupRoutines.vehicle_report; GetVehicleReport (GET /setup/vehicles/{id}/report).
--- Reads: revenue.records, and what tenancy.business_date, tenancy.settings_document, setup.vehicle_visible, setup.report_window, setup.vehicle_money_in, setup.vehicle_postings, pettycash.vehicle_postings, setup.vehicle_net and setup.day_target read. Writes: nothing.
+-- Reads: revenue.records, and what tenancy.business_date, tenancy.settings_document, setup.vehicle_visible, setup.report_window, setup.vehicle_money_in, setup.fleet_postings, setup.vehicle_net and setup.day_target read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 time_zone_invalid via tenancy.business_date, XC422 report_period_invalid, XC422 report_range_required, XC422 report_range_invalid, XC404 not_found.
--- Tests: tests/db/test_setup_vehicle_routines.py, tests/api/test_setup_vehicles.py, tests/db/test_pettycash_routines.py.
+-- Tests: tests/db/test_setup_vehicle_routines.py, tests/api/test_setup_vehicles.py, tests/db/test_pettycash_routines.py, tests/db/test_expense_routines.py.
 -- A week starts on the organization's first day of the week. The target counts the days before
 -- the business date and any day with a record, each at its day target in the set in force that day.
 
@@ -85,7 +85,7 @@ BEGIN
   SELECT coalesce(
            jsonb_agg(
              jsonb_build_object(
-               'item_id', p.item_id,
+               'item_id', p.id,
                'version_id', p.version_id,
                'day', p.day,
                'name', p.name,
@@ -93,7 +93,7 @@ BEGIN
                'amount', p.amount,
                'bucket', p.bucket,
                'source', p.source
-             ) ORDER BY p.day, p.name COLLATE "C", p.item_id, p.version_id),
+             ) ORDER BY p.day, p.name COLLATE "C", p.id, p.version_id),
            '[]'::jsonb),
          coalesce(sum(p.amount) FILTER (WHERE p.kind = 1 AND p.bucket = 1), 0),
          coalesce(sum(p.amount) FILTER (WHERE p.kind = 1 AND p.bucket = 2), 0),
@@ -101,9 +101,15 @@ BEGIN
          coalesce(sum(p.amount) FILTER (WHERE p.kind = 2), 0)
   INTO v_postings, v_repairs, v_charges, v_loans, v_savings
   FROM (
-    SELECT s.*, NULL::text AS source FROM setup.vehicle_postings(p_vehicle_id, v_window) AS s
-    UNION ALL
-    SELECT c.*, 'pettycash' FROM pettycash.vehicle_postings(p_vehicle_id, v_window) AS c
+    SELECT f.id,
+           f.version_id,
+           f.day,
+           f.name,
+           f.kind,
+           f.amount,
+           f.bucket,
+           CASE f.source WHEN 1 THEN 'central' WHEN 2 THEN 'pettycash' END AS source
+    FROM setup.fleet_postings(ARRAY[p_vehicle_id], v_from, v_through, v_today) AS f
   ) AS p;
   v_money_out := v_repairs + v_charges + v_loans;
   v_net := setup.vehicle_net(p_vehicle_id, v_from, v_through, v_today);

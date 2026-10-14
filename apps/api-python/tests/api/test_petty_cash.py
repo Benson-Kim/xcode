@@ -138,7 +138,9 @@ ENTRY_KEYS = [
     "canSendBack",
     "canReject",
     "canReopen",
+    "group",
 ]
+GROUP_KEYS = ["id", "size", "total", "units", "unitAmount"]
 CHANGED = "This entry has changed."
 INSTANT = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}\+00:00$")
 REVIEWER_RIGHTS = (
@@ -633,6 +635,7 @@ async def test_the_options_and_dashboard_follow_the_rights(yard: Yard) -> None:
             "companyName": "Petty Fleet",
             "registration": "KAA 501A",
             "active": True,
+            "fleetNumber": None,
         }
     ]
     assert [list(i) for i in options["items"]] == [
@@ -720,6 +723,7 @@ OPERATIONS = {
     ("GET", "/setup/pettycash/overview"): "GetPettyCashOverview",
     ("GET", "/setup/pettycash/entries"): "ListPettyCashEntries",
     ("GET", "/setup/pettycash/options"): "GetPettyCashOptions",
+    ("GET", "/setup/pettycash/export"): "ExportPettyCash",
     ("GET", "/setup/pettycash/dashboard"): "GetPettyCashDashboard",
     ("POST", "/setup/pettycash/entries"): "CreatePettyCashEntry",
     ("PUT", "/setup/pettycash/entries/{id:uuid}"): "UpdatePettyCashEntry",
@@ -747,3 +751,121 @@ def sentence(code: str) -> str:
     detail = MESSAGES[code].detail
     assert detail is not None
     return detail
+
+
+# --- shared purchases -----------------------------------------------------------------------
+
+
+def _second_vehicle(yard: Yard) -> str:
+    row = yard.api.owner.execute(
+        "SELECT company_id FROM setup.fleet_vehicles WHERE id = %s", (yard.vehicle,)
+    ).fetchone()
+    assert row is not None
+    joined = date(2026, 9, 1)
+    added = add_vehicle(
+        yard.api.owner,
+        yard.org,
+        row["company_id"],
+        "KAB 502B",
+        joined_on=joined,
+        fleet_number="F-12",
+    )
+    return str(added)
+
+
+def shared(yard: Yard, amount: Any, *shares: tuple[str, Any], **more: Any) -> dict[str, Any]:
+    allocations = [{"vehicleId": vehicle, "amount": share} for vehicle, share in shares]
+    body = expense(yard, amount, allocations=allocations, **more)
+    del body["vehicleId"]
+    return body
+
+
+async def test_a_shared_expense_is_one_entry_per_vehicle_on_the_wire(yard: Yard) -> None:
+    second = _second_vehicle(yard)
+    await cash(yard, 1000)
+    purchase = str(uuid4())
+    body = shared(yard, "150", (yard.vehicle, 300), (second, "150"), units=3, id=purchase)
+    response, count = await statements(post(yard, yard.clerk, "/entries", body))
+    saved = ok(response)
+    assert count == 2
+    assert saved == {"id": purchase, "version": 1, "status": "waiting", "balance": 550}
+    assert ok(await post(yard, yard.clerk, "/entries", {**body, "note": "Again"})) == saved
+    alone = ok(await post(yard, yard.clerk, "/entries", shared(yard, 100, (second, 100))))
+
+    async def listed() -> dict[str, Any]:
+        page = ok(await get(yard, yard.reviewer, "/entries"))
+        return {e["id"]: e for e in page["items"]}
+
+    entries = await listed()
+    assert [list(e) for e in entries.values()] == [ENTRY_KEYS] * 4
+    parts = sorted(
+        (e for e in entries.values() if e["group"] is not None), key=lambda e: e["registration"]
+    )
+    assert [list(e["group"]) for e in parts] == [GROUP_KEYS] * 2
+    group = {"id": purchase, "size": 2, "total": 450, "units": 3, "unitAmount": 150}
+    assert [e["group"] for e in parts] == [group, group]
+    assert [(e["registration"], e["units"], e["unitAmount"], e["total"]) for e in parts] == [
+        ("KAA 501A", 1, 300, 300),
+        ("KAB 502B", 1, 150, 150),
+    ]
+    assert parts[0]["id"] == purchase
+    assert [e["note"] for e in parts] == [None, None]
+    assert (entries[alone["id"]]["registration"], entries[alone["id"]]["group"]) == (
+        "KAB 502B",
+        None,
+    )
+    reject = f"/entries/{parts[1]['id']}/reject"
+    ok(await post(yard, yard.reviewer, reject, {"version": 1, "reason": "Not ours"}))
+    assert (await listed())[purchase]["group"]["size"] == 1
+    body = problem(
+        await post(yard, yard.reviewer, f"/entries/{purchase}/approve", {"version": 9}),
+        409,
+        CHANGED,
+        "This entry was changed after you opened it. Check it and save again.",
+    )
+    assert list(body["current"]) == ENTRY_KEYS
+    assert body["current"]["group"] == {
+        "id": purchase,
+        "size": 1,
+        "total": 450,
+        "units": 3,
+        "unitAmount": 150,
+    }
+    vehicles = ok(await get(yard, yard.clerk, "/options"))["vehicles"]
+    assert [(v["registration"], v["fleetNumber"]) for v in vehicles] == [
+        ("KAA 501A", None),
+        ("KAB 502B", "F-12"),
+    ]
+
+
+async def test_a_shared_expense_follows_the_purchase_rules_and_only_an_expense_takes_one(
+    yard: Yard,
+) -> None:
+    second = _second_vehicle(yard)
+    for body, code in (
+        (shared(yard, 100, (yard.vehicle, 60), (second, 50)), "expense_allocation_sum"),
+        (
+            shared(yard, 100, (yard.vehicle, "50.005"), (second, "49.995")),
+            "expense_allocation_amount",
+        ),
+        (shared(yard, 100, (yard.vehicle, 50), (yard.vehicle, 50)), "expense_vehicles_invalid"),
+        (
+            shared(yard, 100, (yard.vehicle, 50), (second, 50), payee="Tyre World"),
+            "pettycash_line_expense_payee",
+        ),
+    ):
+        problem(await post(yard, yard.clerk, "/entries", body), 400, INVALID, sentence(code))
+    given = {
+        "kind": "cash",
+        "date": TODAY,
+        "unitAmount": 100,
+        "holderId": str(yard.clerk.user_id),
+        "allocations": [{"vehicleId": yard.vehicle, "amount": 100}],
+    }
+    problem(
+        await post(yard, yard.owner, "/entries", given),
+        400,
+        INVALID,
+        sentence("pettycash_line_cash_shape"),
+    )
+    assert ok(await get(yard, yard.reviewer, "/entries"))["total"] == 0

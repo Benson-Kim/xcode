@@ -10,3 +10,5 @@ ruff>=0.16                 # lint + format (includes the flake8-bandit "S" rules
 mypy>=1.20                 # strict typing of src/
 pip-audit>=2.9             # dependency vulnerability audit in CI
 uv>=0.8                    # lock file generation (`uv pip compile`)
+pypdf>=6                   # reads the produced PDF exports in tests (pages, fonts, text)
+defusedxml>=0.7            # parses the produced Excel exports' XML parts in tests

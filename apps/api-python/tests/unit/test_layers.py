@@ -60,6 +60,8 @@ ALLOWED: dict[str, set[str]] = {
         "structlog",
         "aiosmtplib",
         "prometheus_client",
+        "xlsxwriter",
+        "reportlab",
     },
     "settings": {STDLIB_OK, "pydantic", "pydantic_settings"},
     # composition root may import everything
@@ -80,6 +82,8 @@ THIRD_PARTY_ROOTS = {
     "aiosmtplib",
     "prometheus_client",
     "uvicorn",
+    "xlsxwriter",
+    "reportlab",
 }
 
 ROUTINE_SQL_ALLOWED = re.compile(r"^SELECT \* FROM api\.[a-z_]+\(")

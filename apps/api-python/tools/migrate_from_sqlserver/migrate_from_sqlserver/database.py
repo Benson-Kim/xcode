@@ -47,24 +47,22 @@ def production() -> bool:
 _LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 
 
-def require_tls(url: str) -> None:
-    """In production a target that is not on this machine needs ``sslmode=verify-full`` in
+def require_tls(url: str, env: str = TARGET_ENV) -> None:
+    """In production a database that is not on this machine needs ``sslmode=verify-full`` in
     its URL, read by libpq's own parser (a repeated key counts as libpq counts it)."""
     if not production():
         return
     try:
         params = conninfo_to_dict(url)
     except psycopg.ProgrammingError as exc:
-        raise ToolError(f"{TARGET_ENV} is not a valid connection string") from exc
+        raise ToolError(f"{env} is not a valid connection string") from exc
     hosts = [h for h in str(params.get("host") or "").split(",") if h]
     addresses = [a for a in str(params.get("hostaddr") or "").split(",") if a]
     local = all(h.startswith("/") or h in _LOOPBACK for h in hosts) and all(
         a in _LOOPBACK for a in addresses
     )
     if not local and params.get("sslmode") != "verify-full":
-        raise ToolError(
-            f"in production {TARGET_ENV} must set sslmode=verify-full for a remote target"
-        )
+        raise ToolError(f"in production {env} must set sslmode=verify-full for a remote target")
 
 
 def connect_target(url: str | None = None) -> Connection:
@@ -202,10 +200,12 @@ class Refusal:
     problem: str
 
 
-def refusal(exc: psycopg.Error) -> Refusal:
+def refusal(exc: psycopg.Error, details: bool = True) -> Refusal:
+    """The refusal as the database words it; without ``details`` the detail line (which can
+    quote the refused row's values) is left out."""
     diag = exc.diag
     text = diag.message_primary or str(exc).splitlines()[0]
-    if diag.message_detail:
+    if details and diag.message_detail:
         text += f" ({diag.message_detail})"
     return Refusal(diag.constraint_name, f"{exc.sqlstate}: {text}")
 
@@ -216,6 +216,7 @@ def insert_rows(
     columns: Sequence[str],
     rows: Sequence[Sequence[Cell]],
     on_refused: Callable[[int, Refusal], None],
+    details: bool = True,
 ) -> None:
     """``COPY`` the rows under a savepoint; when the database refuses the batch, halve it until
     each refused row is alone, so every refusal names one source row and the others load."""
@@ -228,7 +229,7 @@ def insert_rows(
                 copy_in(conn, target, columns, csv_bytes(columns, rows[low:high]))
         except psycopg.Error as exc:
             if high - low == 1:
-                on_refused(low, refusal(exc))
+                on_refused(low, refusal(exc, details))
                 return
             middle = (low + high) // 2
             attempt(low, middle)
@@ -237,13 +238,13 @@ def insert_rows(
     attempt(0, len(rows))
 
 
-def check_deferred(conn: Connection) -> Refusal | None:
+def check_deferred(conn: Connection, details: bool = True) -> Refusal | None:
     try:
         with conn.transaction():
             conn.execute("SET CONSTRAINTS ALL IMMEDIATE")
             conn.execute("SET CONSTRAINTS ALL DEFERRED")
     except psycopg.Error as exc:
-        return refusal(exc)
+        return refusal(exc, details)
     return None
 
 

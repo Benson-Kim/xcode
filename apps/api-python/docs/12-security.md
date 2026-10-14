@@ -138,10 +138,10 @@ Decided in `docs/05-routines.md` section 11 and `docs/06-http-contract.md` 2.13;
 | Petty-cash reports follow the floats a person may see | the holders are the person's own float, or every float with `pettycash.view_all`; a `holderId` outside them is 404, never another float's figures | `tests/db/test_report_routines.py::test_a_petty_cash_report_of_another_float_is_not_found` |
 | Bounded exports | at most 10 000 rows per file (`export_too_many_rows`, checked on the matching rows before any byte is built); a report read is bounded by the period (367 days) and paged (100 rows at most); the role's statement timeout bounds the time; the file is built in a worker thread so a large export cannot stall the event loop | `tests/api/test_reports.py::test_an_export_past_the_row_bound_is_refused_with_its_sentence`; the timeout by `db verify` (role settings) |
 | Every export leaves an audit row | the routine that reads the rows writes the change-log row (section `reports`, the rows count, the format, the filters) and the audit event `reports.exported` in the same transaction; a failure after the commit leaves a row for a file not delivered, never a file without a row | `tests/db/test_report_routines.py::test_an_export_writes_one_change_log_row_with_its_count`, and one API test per export route reading the row back |
-| No spreadsheet formula injection | every text cell is written with `write_string` and the workbook refuses to turn strings into formulas, numbers or links; a text starting with `=`, `+`, `-`, `@`, a tab or a carriage return also gets the `quote_prefix` format, so Excel keeps it text when the cell is edited; the value itself is not changed | `tests/unit/test_export_files.py::test_a_cell_starting_with_equals_stays_text` (the produced sheet's XML: an inline or shared string, never an `<f>` element, the quote-prefix style) and `tests/api/test_expenses.py::test_an_exported_note_starting_with_equals_stays_text` |
+| No spreadsheet formula injection | every text cell is written with `write_string` and the workbook refuses to turn strings into formulas, numbers or links; a text starting with `=`, `+`, `-`, `@`, a tab or a carriage return also gets the `quote_prefix` format, so Excel keeps it text when the cell is edited; the bands, figure labels, column headers and totals words (they carry the display name and catalogue names such as a main category) always have it; the value itself is not changed | `tests/api/test_export_injection.py` (every Excel export, Revenue, Central expenses, Petty cash and a report, with names and notes starting with each of the six characters: no `<f>` element anywhere, every such cell quote-prefixed, bands and labels included), `tests/unit/test_export_files.py::test_a_cell_starting_with_equals_stays_text` and `tests/api/test_expenses.py::test_an_exported_item_starting_with_equals_stays_text` |
 | The export's rows are the screen's rows | each export reads through the same SQL as its screen (the ledger, the week, the petty-cash list, the report builders), with the same filters and the person's scope | `tests/api/test_reports.py::test_screens_export_what_they_list` |
 | Central-expense writes respect the back-dating limit | `tenancy.check_writable` on record (the date), change (the old and the new date) and remove (the date) (`DEC-30`) | `tests/db/test_expense_routines.py::test_a_central_expense_before_the_limit_is_refused_on_record_change_and_remove` |
-| A day save cannot bypass the single capture's rules | `api.revenue_day_save` runs `revenue.capture_entry`, the single capture's own steps (threshold, rights, limit, version) | `tests/db/test_revenue_day_routines.py::test_each_row_runs_the_single_capture_rules` (one case per rule) |
+| A day save cannot bypass the single capture's rules | `api.revenue_day_save` runs `revenue.capture_row`, the single capture's own steps (threshold, rights, limit, version); `revenue.capture_entry` is that routine with every per-call value worked out per row, so the two cannot drift | `tests/db/test_revenue_day_routines.py::test_each_row_runs_the_single_capture_rules` (one case per rule) |
 | Retried and racing purchases make one purchase | the purchase id's advisory lock before the retry lookup; `UNIQUE (organization_id, group_id, vehicle_id)` | `tests/db/test_expense_routines.py::test_two_connections_recording_one_purchase_make_one_set_of_rows` |
 | A decided saving run never changes | `setup.saving_runs` is `INSERT`-only for the executor; `ON CONFLICT DO NOTHING` on the run's key; the per-vehicle advisory lock orders deciders | `tests/db/test_recurring_pause_routines.py::test_two_connections_deciding_one_run_store_one_row`, `tests/db/test_grants.py` (no `UPDATE` or `DELETE`) |
 
@@ -324,3 +324,49 @@ no RLS policy for `xcode_readonly`. Retention is a DBA decision recorded in
 - `reports.view` opens every fleet report but the investment one (`DEC-40`, the prototype's `MODS`), so a person without
   `savings.view` or `scheduled.view` reads the savings and money-out figures of their vehicles through the reports. The
   vehicle report has shown both kinds to `vehicles.view` holders since 06 (question 73). Owner: product.
+
+- On a shared host (the cPanel account `priori`) every local account reaches the loopback
+  interface: it can scrape `/metrics`, call the health probes and, because the trusted proxies
+  default to loopback, send an `X-Forwarded-For` the API believes, dodging the per-address
+  sign-in and PIN limits (the per-device and per-account limits hold). Open as
+  `docs/13-open-questions.md` question 86 (default: a loopback port the host firewall keeps
+  to the proxy's account, metrics off there; a Unix socket is not usable until `serve` can
+  bind one and trusts its peer as the proxy, because every socket request's client address
+  is `unknown` and the per-address limits would become one bucket for every user). Owner:
+  operations.
+- `auth_refusals_total{reason}` on `/metrics` tells an unknown number from a real one to anyone
+  who can both send a sign-in and scrape (the enumeration resistance of the answers does not
+  extend to the counters). Kept because the counts are how a brute-force wave is seen; the
+  guard is that only the operators' scraper reaches `/metrics` (`docs/08-operability.md`
+  section 5, question 86). Owner: operations.
+- The demo seed's PINs (`application/ops/seed_demo.py`) are the .NET demo's and live in the
+  source; the seed refuses every environment but development in the settings, the CLI and the
+  routine (`p_environment`), so they never reach a real account through the API or the CLI.
+  The routine cannot know its environment: it trusts `p_environment`, so an operator calling
+  `api.ops_seed_demo` by hand can still seed an empty database (it refuses one that holds any
+  other organization). Owner: operations (the operator credential is the guard).
+- A day save still runs each row through the single capture's steps (`revenue.capture_row`),
+  so its time grows with the rows. Measured on 14 Oct under load, 500 rows took 18.9 s, past
+  the role's 5 s statement timeout (question 101). The same day it was made set-based: the
+  per-call values are read once, there is one subtransaction per call and one decision of
+  saving runs per call. 500 rows now take 1.4 s to capture, 0.4 s to replay and 1.2 to 1.7 s
+  to correct on a quiet cluster (`docs/perf/scheduled-and-day.md`). A test runs that save
+  under the role's own timeout. What remains is load: a busy machine could make it several
+  times slower, and past 5 s a save answers 500 with nothing saved (all or none). Owner: the
+  revenue follow-up, if the 500-row test ever comes near its timeout.
+- At ten times the demo fleet (500 vehicles, 13 months of records), the `net` report over a year
+  took 5.6 s (median, 6.3 s max) on 13 Oct, past the 5 s statement timeout. On 14 Oct, on a
+  clone seeded the same way, it took 3.7 s before and 2.8 s (3.4 s max) after two changes,
+  with answers byte-identical (`docs/perf/reports.md`, "14 Oct"). The changes: the day figures
+  are summed inside each window without building the day series, and the organization is read
+  once per statement in `setup.scheduled_runs`. `gaps` now takes 1.9 s and `savings` 1.9 s.
+  The 2.0 s budget is still not met, and the margin to the timeout is 1.6 s on a quiet
+  machine. Next levers, measured but not built:
+  - the row-level-security policies read `tenancy.current_organization()` once per row;
+    written as `(SELECT tenancy.current_organization())` they are read once per statement.
+    On the clone that cut the records scan from 662 ms to 66 ms and `savings` by 0.7 s. It
+    needs a migration and `db verify`'s expected policy text.
+  - `net` reads `setup.scheduled_runs` twice (through `fleet_totals` and `money_out_by_main`).
+  - stored daily totals.
+
+  Owner: the reports follow-up.

@@ -14,6 +14,19 @@ class ToolError(RuntimeError):
     """A condition that stops the command before any write (exit status 1)."""
 
 
+@dataclass
+class Check:
+    """One verification of the load: its name, whether it passed, and what it found."""
+
+    name: str
+    ok: bool
+    detail: str
+    lines: list[str]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "ok": self.ok, "detail": self.detail, "lines": self.lines}
+
+
 def decimal_of(value: object, what: str) -> Decimal:
     if not isinstance(value, Decimal):
         raise ToolError(f"{what} is not a number: {value!r}")

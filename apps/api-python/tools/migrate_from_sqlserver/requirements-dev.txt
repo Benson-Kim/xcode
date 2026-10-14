@@ -4,3 +4,5 @@
 # CREATEROLE); without them the database tests are skipped with that reason.
 
 pytest>=8.3
+ruff>=0.16                 # lint + format, with the API's rule set in this folder's pyproject.toml
+mypy>=1.20                 # strict typing of the package (pyproject.toml [tool.mypy])
