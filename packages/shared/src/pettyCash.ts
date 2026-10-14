@@ -7,7 +7,8 @@
 import { withQuery } from "./query";
 
 export type PettyCashKind = "cash" | "expense" | "credit";
-export type PettyCashStatus = "waiting" | "approved" | "sentBack";
+// rejected is final until reopened (v2.29).
+export type PettyCashStatus = "waiting" | "approved" | "sentBack" | "rejected";
 export type PettyCashBucket = 1 | 2 | 3;
 // "range" is any span asked for with from and to; "week" is what the phone still sends with date and period.
 export type PettyCashPeriod = "day" | "week" | "range";
@@ -21,6 +22,7 @@ export const PETTY_CASH_STATUSES: readonly PettyCashStatus[] = [
   "waiting",
   "approved",
   "sentBack",
+  "rejected",
 ];
 
 export const PETTY_CASH_KIND_LABELS: Record<PettyCashKind, string> = {
@@ -33,6 +35,7 @@ export const PETTY_CASH_STATUS_LABELS: Record<PettyCashStatus, string> = {
   waiting: "Waiting",
   approved: "Approved",
   sentBack: "Sent back",
+  rejected: "Rejected",
 };
 
 export const PETTY_CASH_NOTE_LIMIT = 80;
@@ -42,8 +45,9 @@ export const PETTY_CASH_REASON_LIMIT = 500;
 export const PETTY_CASH_MAX_UNITS = 999_999_999.999;
 export const PETTY_CASH_PAGE_SIZE = 100;
 
-// Any of these opens the Petty cash menu item.
+// Any of these opens the Petty cash menu item: the v2.29 view right, or a released key that opened it before.
 export const PETTY_CASH_PERMISSIONS = [
+  "pettycash.view",
   "pettycash.spend",
   "pettycash.view_all",
   "pettycash.approve_item",
@@ -66,6 +70,20 @@ export interface PettyCashPermissions {
   canApproveItem: boolean;
   canApproveDay: boolean;
   approvalLimit: number | null;
+  // The 20 petty cash rights of v2.29, and the earliest date this person may still change (null for no limit).
+  canView?: boolean;
+  canSpendOther?: boolean;
+  canEditOwn?: boolean;
+  canEdit?: boolean;
+  canDeleteOwn?: boolean;
+  canDelete?: boolean;
+  canDeleteApproved?: boolean;
+  canSendBack?: boolean;
+  canReject?: boolean;
+  canReopen?: boolean;
+  canCredit?: boolean;
+  canDeleteCash?: boolean;
+  earliestDate?: string | null;
 }
 
 // A person with a float: anyone who may record spending, plus anyone with entries. active is false once they lost
@@ -162,6 +180,12 @@ export interface PettyCashEntry {
   canReview: boolean;
   // Waiting, and above this person's approval limit.
   aboveLimit: boolean;
+  // v2.29: why it was rejected or reopened, and the finer rights on this entry.
+  rejectReason?: string | null;
+  reopenReason?: string | null;
+  canSendBack?: boolean;
+  canReject?: boolean;
+  canReopen?: boolean;
 }
 
 export interface PettyCashEntryPage {
@@ -189,6 +213,8 @@ export interface PettyCashVehicleOption {
   companyName: string;
   registration: string;
   active: boolean;
+  // v2.29: shown as "KDG 412M · 14"; null until a fleet number is set.
+  fleetNumber?: string | null;
 }
 
 export interface PettyCashItemOption {
@@ -244,6 +270,12 @@ export interface SendBackPettyCashEntry {
 }
 
 export interface RemovePettyCashEntry {
+  version: number;
+  reason: string;
+}
+
+// Reject or reopen (P12, P13): a reason of 1 to 200 characters.
+export interface DecidePettyCashEntry {
   version: number;
   reason: string;
 }

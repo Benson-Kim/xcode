@@ -12,6 +12,7 @@ import { CellNote, DataTable, Td, Tr, type Column } from "../ui";
 import { Days } from "./dayGroups";
 import { entryLabel, unitsFormat } from "./labels";
 import { RowActions, type EntryActions } from "./RowActions";
+import { isRejected, isSentBack, isWaiting, statusOf } from "./status";
 import { StatusTag } from "./StatusTag";
 
 const SELECT: Column = { label: "Select", hidden: true, width: 38 };
@@ -32,13 +33,31 @@ export type Selection = {
   onToggle: (entry: PettyCashEntry) => void;
 };
 
-// An expense can be ticked for approval when this person may approve it and it still waits.
+// An expense can be ticked for approval when this person may approve it, it waits (and was not sent back) and it is
+// within their limit.
 export const selectable = (entry: PettyCashEntry) =>
-  entry.canReview && !entry.aboveLimit;
+  entry.canReview && isWaiting(entry) && !entry.aboveLimit;
+
+const counted = (entries: PettyCashEntry[]) =>
+  entries
+    .filter((entry) => !isRejected(entry))
+    .reduce((sum, entry) => sum + entry.total, 0);
+
+// The notes under an item: why it was rejected, what it was sent back for, why it was reopened.
+function notesOf(entry: PettyCashEntry) {
+  const notes: string[] = [];
+  if (entry.note) notes.push(entry.note);
+  if (isRejected(entry) && entry.rejectReason) notes.push(entry.rejectReason);
+  if (isSentBack(entry) && entry.sentBackNote)
+    notes.push(`Sent back, ${entry.sentBackNote}`);
+  if ((isWaiting(entry) || isSentBack(entry)) && entry.reopenReason)
+    notes.push(`Reopened, ${entry.reopenReason}`);
+  return notes;
+}
 
 // Expenses of the days shown, under a row for each day when there are several. With a selection, the ones waiting for
-// this person to approve have a checkbox. The footer counts every matching entry; it adds them up (less those sent
-// back) when they are all on this page.
+// this person to approve have a checkbox. The footer counts every matching entry; it adds them up (less rejected
+// ones, which the manager carries) when they are all on this page.
 export function EntriesTable({
   entries,
   total,
@@ -78,12 +97,7 @@ export function EntriesTable({
             Expenses, {plural(total, "entry", "entries")}
           </td>
           <td className="r">
-            {entries.length === total &&
-              formats.formatNumber(
-                entries
-                  .filter((entry) => entry.status !== "sentBack")
-                  .reduce((sum, entry) => sum + entry.total, 0),
-              )}
+            {entries.length === total && formats.formatNumber(counted(entries))}
           </td>
           <td colSpan={3} />
         </tr>
@@ -116,10 +130,9 @@ export function EntriesTable({
             </Td>
             <Td label="Item" className="item">
               {entry.expenseItemName}
-              {entry.note && <CellNote>{entry.note}</CellNote>}
-              {entry.status === "sentBack" && entry.sentBackNote && (
-                <CellNote>Sent back: {entry.sentBackNote}</CellNote>
-              )}
+              {notesOf(entry).map((note) => (
+                <CellNote key={note}>{note}</CellNote>
+              ))}
             </Td>
             <Td label="Qty" numeric>
               {unitsText(entry.units)}
@@ -139,9 +152,9 @@ export function EntriesTable({
               {entry.holderName}
             </Td>
             <Td label="Status">
-              {entry.status && <StatusTag status={entry.status} />}
+              <StatusTag status={statusOf(entry)} />
             </Td>
-            <Td>
+            <Td numeric>
               <RowActions entry={entry} actions={actions} />
             </Td>
           </Tr>

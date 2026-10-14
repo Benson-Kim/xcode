@@ -7,7 +7,11 @@ import {
 } from "@testing-library/react";
 import { beforeAll, expect, it, vi } from "vitest";
 
-import { DASHBOARD_CARDS, PERMISSION_KEYS } from "@xcode/shared/permissions";
+import {
+  DASHBOARD_CARDS,
+  PERMISSION_KEYS,
+  RIGHTS,
+} from "@xcode/shared/permissions";
 
 import { AppShell } from "../components/AppShell";
 import { appearanceFixture } from "./renderInApp";
@@ -95,6 +99,7 @@ const MENU = [
   "Central expenses",
   "Petty cash",
   "Scheduled expenses",
+  "Savings",
   "Reports",
   "PSV companies",
   "Vehicles",
@@ -116,14 +121,14 @@ const menuLabels = () =>
     .filter((label) => label !== "Setup" && label !== "Expenses");
 
 it("shows the whole menu, in order, to someone holding every permission", async () => {
-  signIn([...PERMISSION_KEYS]);
+  signIn([...PERMISSION_KEYS, ...RIGHTS]);
   const menu = within(screen.getByRole("navigation", { name: "Main" }));
   await menu.findByRole("button", { name: "Organization settings" });
   expect(menuLabels()).toEqual(MENU);
 });
 
 it("groups Expenses and Setup under their own headings, around Reports", async () => {
-  signIn([...PERMISSION_KEYS]);
+  signIn([...PERMISSION_KEYS, ...RIGHTS]);
   const menu = within(screen.getByRole("navigation", { name: "Main" }));
   await menu.findByRole("button", { name: "Organization settings" });
   const all = entries().map((button) => button.textContent);
@@ -134,6 +139,7 @@ it("groups Expenses and Setup under their own headings, around Reports", async (
     "Central expenses",
     "Petty cash",
     "Scheduled expenses",
+    "Savings",
     "Reports",
     "Setup",
     "PSV companies",
@@ -165,7 +171,7 @@ it("groups Expenses and Setup under their own headings, around Reports", async (
 });
 
 it("folds each group on its own, and opens it again", async () => {
-  signIn([...PERMISSION_KEYS]);
+  signIn([...PERMISSION_KEYS, ...RIGHTS]);
   const menu = within(screen.getByRole("navigation", { name: "Main" }));
   const expenses = await menu.findByRole("button", { name: "Expenses" });
   const setup = menu.getByRole("button", { name: "Setup" });
@@ -269,7 +275,7 @@ it.each([
 });
 
 it("titles the dashboard cards, in order, as the shared list does", async () => {
-  signIn([...PERMISSION_KEYS]);
+  signIn([...PERMISSION_KEYS, ...RIGHTS]);
   const expected: string[] = DASHBOARD_CARDS.map((card) => card.title);
   const titles = () =>
     screen

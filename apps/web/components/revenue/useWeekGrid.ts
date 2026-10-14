@@ -4,19 +4,23 @@ import { weekDays } from "@xcode/shared/dates";
 import type { RevenueWeek } from "@xcode/shared/revenue";
 
 import { revenueWeekPath } from "../../lib/endpoints/revenue";
+import { useDebounced } from "../../lib/useDebounced";
 import { useRevenueWeek } from "./useRevenueWeek";
 
-// The week on screen: which week and company, the data for it, and what the toolbar derives from it.
+// The week on screen: which week, company and search, the data for it, and what the toolbar derives from it.
 export function useWeekGrid(canView: boolean) {
   const [weekStart, setWeekStart] = useState("");
   const [companyId, setCompanyId] = useState("");
+  // The search matches the registration or the fleet number, on the server, once typing pauses (v2.29).
+  const [search, setSearch] = useState("");
+  const q = useDebounced(search.trim());
 
   const query = useMemo(
-    () => revenueWeekPath({ weekStart, companyId }),
-    [companyId, weekStart],
+    () => revenueWeekPath({ weekStart, companyId, q }),
+    [companyId, weekStart, q],
   );
   // One request per week and company for all but the largest fleets; every cell comes from it.
-  const week = useRevenueWeek(canView ? query : null, companyId);
+  const week = useRevenueWeek(canView ? query : null, companyId, q);
   const data = week.data;
   // The toolbar keeps the last week shown while the next one loads, so its controls (and focus) stay in place.
   const [shown, setShown] = useState<RevenueWeek>();
@@ -48,6 +52,9 @@ export function useWeekGrid(canView: boolean) {
     setWeekStart,
     companyId,
     setCompanyId,
+    search,
+    setSearch,
+    searching: q !== "",
     today,
     start,
     days,

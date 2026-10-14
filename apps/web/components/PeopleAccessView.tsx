@@ -2,56 +2,55 @@
 
 import { useState } from "react";
 
+import { useAppearance } from "../lib/appearance";
 import { streamError, useResource } from "../lib/data";
 import {
   CATALOG_PATH,
   PEOPLE_PATH,
-  RECENT_CHANGES_PATH,
   ROLES_PATH,
   SCOPE_PATH,
 } from "../lib/endpoints/people";
 import { useSession } from "../lib/session-context";
 import type {
-  ChangeLogPage,
+  MyScope,
   PermissionGroup,
   Person,
   Role,
   ScopeOptions,
 } from "../lib/types";
-import { PeopleList, type PeopleFilters } from "./people/PeopleList";
+import { BlockDialog } from "./people/BlockDialog";
+import { PeopleList } from "./people/PeopleList";
 import { PersonEditor } from "./people/PersonEditor";
-import { RecentChanges } from "./people/RecentChanges";
-import type { HistoryRow } from "./setup/shared";
-import { Banner, Button, ListPager, PageHeader } from "./ui";
+import { Banner, Button, ListPager, PageHeader, useToast } from "./ui";
 import { usePagedList } from "./usePagedList";
 
+// People and access (v2.32, v2.33): one row a person, with what they can reach by module, their vehicles, how far
+// back they may change records, and where they are with signing in. Edit opens the person pop up; Block and
+// Unblock act from the row.
 export function PeopleAccessView({
   canManageAccess = false,
 }: {
   canManageAccess?: boolean;
 }) {
-  const { can } = useSession();
-  const canManage = can("people.manage") || canManageAccess;
+  const { can, session } = useSession();
+  const { appearance } = useAppearance();
+  const toast = useToast();
+  const legacy = can("people.manage") || canManageAccess;
+  const canAdd = can("people.add") || legacy;
+  const canEdit = can("people.edit") || legacy;
+  const canBlock = can("people.block") || legacy;
+  const canSignIn = can("people.sign_in") || legacy;
+  const canManage = canAdd || canEdit;
   const roles = useResource<Role[]>(ROLES_PATH);
   const catalog = useResource<PermissionGroup[]>(CATALOG_PATH);
   const scope = useResource<ScopeOptions>(canManage ? SCOPE_PATH : null);
-  const recent = useResource<ChangeLogPage<HistoryRow>>(
-    can("audit.view") ? RECENT_CHANGES_PATH : null,
-  );
+  const mine = useResource<MyScope>(canManage ? "setup/access/me" : null);
   const [editing, setEditing] = useState<Person | "new" | null>(null);
-  // Filters at the top of the list, as in the design: role, and where they are with signing in.
-  const [filters, setFilters] = useState<PeopleFilters>({
-    role: "all",
-    status: "all",
-  });
-  // The list comes a server page at a time, filtered by the server.
-  const query = new URLSearchParams();
-  if (filters.role !== "all") query.set("role", filters.role);
-  if (filters.status !== "all") query.set("status", filters.status);
-  const people = usePagedList<Person>(
-    `${PEOPLE_PATH}${query.toString() ? `?${query}` : ""}`,
-  );
+  const [blocking, setBlocking] = useState<Person | null>(null);
+  // The list comes a server page at a time.
+  const people = usePagedList<Person>(PEOPLE_PATH);
   const error = streamError(people) || roles.error || catalog.error;
+  const today = appearance?.businessDate ?? "";
 
   const editor = editing && (
     <PersonEditor
@@ -59,13 +58,21 @@ export function PeopleAccessView({
       roles={roles.data}
       groups={catalog.data}
       scopeOptions={canManage ? scope.data : { companies: [], vehicles: [] }}
-      canManage={canManage}
-      canManageAccess={canManageAccess}
+      fullScope={mine.data?.allCompanies ?? false}
+      today={today}
+      canManage={editing === "new" ? canAdd : canEdit}
+      canSignIn={canSignIn}
       onClose={() => setEditing(null)}
-      onSaved={() => {
+      onSaved={(name, isNew) => {
         setEditing(null);
         people.reload();
+        toast(
+          isNew
+            ? `Saved. ${name.split(" ")[0]} sets a PIN at first sign in.`
+            : "Saved",
+        );
       }}
+      onChanged={people.reload}
     />
   );
 
@@ -74,7 +81,7 @@ export function PeopleAccessView({
       <PageHeader
         title="People and access"
         actions={
-          canManage && (
+          canAdd && (
             <Button tone="primary" onClick={() => setEditing("new")}>
               New person
             </Button>
@@ -88,26 +95,25 @@ export function PeopleAccessView({
         loading={people.loading}
         pendingRows={people.pendingRows}
         failed={Boolean(people.error)}
-        roles={roles.data}
         scope={scope.data}
-        permissionTotal={catalog.data?.reduce(
-          (sum, group) => sum + group.items.length,
-          0,
-        )}
-        filters={filters}
-        onFilters={setFilters}
-        canManage={canManage}
+        canEdit={canEdit}
+        canBlock={canBlock}
+        selfId={session?.userId}
         onEdit={setEditing}
+        onBlock={setBlocking}
       />
       <ListPager list={people} />
-      {can("audit.view") && (
-        <RecentChanges
-          loading={recent.loading}
-          data={recent.data}
-          error={recent.error}
+      {editor}
+      {blocking && (
+        <BlockDialog
+          person={blocking}
+          onDone={() => {
+            setBlocking(null);
+            people.reload();
+          }}
+          onClose={() => setBlocking(null)}
         />
       )}
-      {editor}
     </>
   );
 }

@@ -252,16 +252,43 @@ it("adds, edits and removes entries with invest.manage", async () => {
   );
 });
 
+async function fillNewVehicle() {
+  fireEvent.click(await screen.findByRole("button", { name: "New vehicle" }));
+  fireEvent.change(screen.getByLabelText("Registration"), {
+    target: { value: "kdn204b" },
+  });
+  fireEvent.change(screen.getByLabelText("Fleet number"), {
+    target: { value: "9" },
+  });
+  await within(screen.getByRole("dialog", { name: "New vehicle" })).findByRole(
+    "option",
+    { name: "North Star" },
+  );
+  fireEvent.change(screen.getByLabelText("PSV company"), {
+    target: { value: "company-1" },
+  });
+  fireEvent.change(screen.getByLabelText("Target, Monday"), {
+    target: { value: "1500" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Same every day" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+}
+
 it("dates a new vehicle from the business date, never the computer clock", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-12-01T10:00:00Z"));
-  serve();
+  const fetchMock = serve();
 
   const { unmount } = renderInApp(<VehiclesPage />, {
     permissions: ["vehicles.manage"],
   });
-  fireEvent.click(await screen.findByRole("button", { name: "New vehicle" }));
-  expect(screen.getByLabelText("In the fleet from")).toHaveValue("");
+  await fillNewVehicle();
+  expect(
+    await screen.findByText(
+      "The business date has not loaded yet. Try again in a moment.",
+    ),
+  ).toBeInTheDocument();
+  expect(writes(fetchMock)).toEqual([]);
   unmount();
 
   renderInApp(
@@ -269,10 +296,18 @@ it("dates a new vehicle from the business date, never the computer clock", async
     { permissions: ["vehicles.manage"] },
     { businessDate },
   );
-  fireEvent.click(await screen.findByRole("button", { name: "New vehicle" }));
-  expect(screen.getByLabelText("In the fleet from")).toHaveValue(businessDate);
-  expect(screen.getByLabelText("In the fleet from")).toHaveAttribute(
-    "max",
-    businessDate,
-  );
+  await fillNewVehicle();
+  await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
+  expect(writes(fetchMock)[0]).toEqual([
+    "/api/setup/vehicles",
+    "POST",
+    {
+      registration: "KDN 204B",
+      companyId: "company-1",
+      joinedOn: businessDate,
+      fleetNumber: "9",
+      dayTargets: [1500, 1500, 1500, 1500, 1500, 1500, 1500],
+      initialInvestment: null,
+    },
+  ]);
 });

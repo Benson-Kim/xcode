@@ -18,6 +18,7 @@ import {
   overviewOf,
   paths,
   permissionsOf,
+  REJECTED,
   servePettyCash,
   writes,
 } from "./pettyCashServer";
@@ -131,7 +132,7 @@ it("offers Approve and Send back only on entries the server lets this person rev
   servePettyCash({
     permissions: REVIEWER,
     entries: [
-      expense({ id: "e1", canReview: true }),
+      expense({ id: "e1", canReview: true, canSendBack: true }),
       expense({
         id: "e2",
         registration: "KDB 100X",
@@ -192,9 +193,9 @@ it("shows the comment on a sent-back entry", async () => {
   });
   renderInApp(<PettyCashPage />);
   const row = await screen.findByRole("row", { name: /KDA 482M/ });
-  expect(within(row).getByText("Sent back")).toBeInTheDocument();
+  expect(within(row).getByText("Sent back")).toHaveClass("chip", "back");
   expect(
-    within(row).getByText("Sent back: Attach the receipt"),
+    within(row).getByText("Sent back, Attach the receipt"),
   ).toBeInTheDocument();
 });
 
@@ -219,31 +220,68 @@ it("approves one entry with its version", async () => {
   ]);
 });
 
-it("will not send an entry back without a comment", async () => {
+const REVIEWS = permissionsOf({
+  canSpend: false,
+  canApproveItem: true,
+  canViewAll: true,
+  canSendBack: true,
+  canReject: true,
+  canReopen: true,
+  canDelete: true,
+  canDeleteApproved: true,
+});
+
+const rowOf = (pattern: RegExp) => screen.findByRole("row", { name: pattern });
+
+it("will not send an entry back without a reason, then marks the row Sent back and leaves it out of the ticks", async () => {
   const fetcher = servePettyCash({
-    permissions: REVIEWER,
-    entries: [expense({ canReview: true })],
+    permissions: REVIEWS,
+    entries: [expense({ canReview: true, canSendBack: true })],
   });
   renderInApp(<PettyCashPage />);
+  expect(
+    within(await rowOf(/KDA 482M/)).getByRole("checkbox"),
+  ).toBeInTheDocument();
   fireEvent.click(
     await screen.findByRole("button", {
       name: "Send back KDA 482M, KES 3,500",
     }),
   );
-  const dialog = await screen.findByRole("dialog", { name: "Send back" });
-
-  fireEvent.click(within(dialog).getByRole("button", { name: "Send back" }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Send back expense",
+  });
   expect(
-    await within(dialog).findByText("Say what the manager should fix."),
+    within(dialog).getByText("Grace Wanjiru · Wednesday 30 Sep 2026"),
+  ).toBeInTheDocument();
+  expect(within(dialog).getByText("Tyres")).toBeInTheDocument();
+  expect(within(dialog).getByText("KES 3,500")).toBeInTheDocument();
+  expect(
+    within(dialog)
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+      .filter((name) =>
+        ["No receipt", "Wrong amount", "Wrong vehicle", "Wrong item"].includes(
+          name ?? "",
+        ),
+      ),
+  ).toEqual(["No receipt", "Wrong amount", "Wrong vehicle", "Wrong item"]);
+
+  const send = within(dialog).getByRole("button", { name: "Send back" });
+  expect(send).toHaveClass("btn", "warn");
+  fireEvent.click(send);
+  expect(
+    await within(dialog).findByText("Enter the reason."),
   ).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([]);
 
-  fireEvent.change(within(dialog).getByLabelText("Comment"), {
+  fireEvent.click(within(dialog).getByRole("button", { name: "No receipt" }));
+  expect(within(dialog).getByLabelText("Reason")).toHaveValue("No receipt");
+  fireEvent.change(within(dialog).getByLabelText("Reason"), {
     target: { value: "Attach the receipt" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Send back" }));
   expect(
-    await screen.findByText("Sent back to Grace Wanjiru."),
+    await screen.findByText("Sent back to Grace Wanjiru"),
   ).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([
     {
@@ -252,44 +290,379 @@ it("will not send an entry back without a comment", async () => {
       body: { version: 3, comment: "Attach the receipt" },
     },
   ]);
+
+  const row = await rowOf(/KDA 482M/);
+  await waitFor(() =>
+    expect(within(row).getByText("Sent back")).toHaveClass("chip", "back"),
+  );
+  expect(
+    within(row).getByText("Sent back, Attach the receipt"),
+  ).toBeInTheDocument();
+  expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(
+    within(row).queryByRole("button", { name: /^Approve / }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(row).queryByRole("button", { name: /^Send back / }),
+  ).not.toBeInTheDocument();
 });
 
-it("will not delete an entry without a reason", async () => {
-  const fetcher = servePettyCash({ entries: [expense({ canRemove: true })] });
+it("keeps a sent-back expense out of the ticks and off the Approve button, though the server flags it", async () => {
+  const fetcher = servePettyCash({
+    permissions: REVIEWS,
+    entries: [
+      expense({ id: "e1", canReview: true }),
+      expense({
+        id: "e2",
+        registration: "KDB 100X",
+        status: "sentBack",
+        sentBackNote: "No receipt",
+        canReview: true,
+        canReject: true,
+      }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  const waiting = await rowOf(/KDA 482M/);
+  const back = screen.getByRole("row", { name: /KDB 100X/ });
+  expect(within(waiting).getByRole("checkbox")).toBeInTheDocument();
+  expect(within(back).queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(
+    within(back).queryByRole("button", { name: /^Approve / }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(back).getByRole("button", { name: "Reject KDB 100X, KES 3,500" }),
+  ).toBeInTheDocument();
+  fireEvent.click(within(waiting).getByRole("checkbox"));
+  expect(
+    screen.getByRole("button", { name: "Approve 1, KES 3,500" }),
+  ).toBeInTheDocument();
+  expect(writes(fetcher)).toEqual([]);
+});
+
+it("deletes a waiting expense without a reason, after confirming", async () => {
+  const fetcher = servePettyCash({
+    permissions: REVIEWS,
+    entries: [expense({ canRemove: true })],
+  });
+  renderInApp(<PettyCashPage />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Delete KDA 482M, KES 3,500" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Delete expense" });
+  expect(within(dialog).queryByLabelText("Reason")).not.toBeInTheDocument();
+  expect(within(dialog).getByText("KES 3,500")).toBeInTheDocument();
+  const remove = within(dialog).getByRole("button", { name: "Delete" });
+  expect(remove).toHaveClass("btn", "bad");
+  fireEvent.click(remove);
+  expect(await screen.findByText("Deleted")).toBeInTheDocument();
+  expect(writes(fetcher)).toEqual([
+    {
+      path: "/api/setup/pettycash/entries/e1/remove",
+      method: "POST",
+      body: { version: 3 },
+    },
+  ]);
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("row", { name: /KDA 482M/ }),
+    ).not.toBeInTheDocument(),
+  );
+});
+
+it("will not delete an approved expense without a reason", async () => {
+  const fetcher = servePettyCash({
+    permissions: REVIEWS,
+    entries: [expense({ status: "approved", canRemove: true })],
+  });
   renderInApp(<PettyCashPage />);
   fireEvent.click(
     await screen.findByRole("button", { name: "Delete KDA 482M, KES 3,500" }),
   );
   const dialog = await screen.findByRole("dialog", {
-    name: "Delete this entry",
+    name: "Delete approved expense",
   });
 
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
   expect(
-    await within(dialog).findByText("Say why this entry is being deleted."),
+    await within(dialog).findByText("Enter the reason."),
   ).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([]);
 
-  fireEvent.change(within(dialog).getByLabelText("Reason for deleting"), {
-    target: { value: "Recorded twice" },
-  });
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Entered twice" }),
+  );
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
-  expect(await screen.findByText("Entry deleted.")).toBeInTheDocument();
+  expect(await screen.findByText("Deleted")).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([
     {
       path: "/api/setup/pettycash/entries/e1/remove",
       method: "POST",
-      body: { version: 3, reason: "Recorded twice" },
+      body: { version: 3, reason: "Entered twice" },
     },
   ]);
 });
 
-it("opens the credit note on the day it is recorded, with a manager, an amount and a reason only", async () => {
-  servePettyCash();
+it("rejects a waiting expense with a reason, and the row shows Rejected with it, out of the total", async () => {
+  const fetcher = servePettyCash({
+    permissions: REVIEWS,
+    entries: [
+      expense({ id: "e1", canReject: true }),
+      expense({
+        id: "e2",
+        registration: "KDB 100X",
+        total: 1000,
+        unitAmount: 1000,
+      }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Reject KDA 482M, KES 3,500" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Reject expense" });
+  const reject = within(dialog).getByRole("button", { name: "Reject" });
+  expect(reject).toHaveClass("btn", "bad");
+  fireEvent.click(reject);
+  expect(
+    await within(dialog).findByText("Enter the reason."),
+  ).toBeInTheDocument();
+  expect(writes(fetcher)).toEqual([]);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Not agreed" }));
+  fireEvent.click(reject);
+  expect(await screen.findByText("Rejected")).toBeInTheDocument();
+  expect(writes(fetcher)).toEqual([
+    {
+      path: "/api/setup/pettycash/entries/e1/reject",
+      method: "POST",
+      body: { version: 3, reason: "Not agreed" },
+    },
+  ]);
+  const row = await rowOf(/KDA 482M/);
+  await waitFor(() =>
+    expect(within(row).getByText("Rejected")).toHaveClass("chip", "bad"),
+  );
+  expect(within(row).getByText("Not agreed")).toBeInTheDocument();
+  expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(
+    screen.getByText("Expenses, 2 entries").closest("tr"),
+  ).toHaveTextContent("1,000");
+});
+
+it("reopens an approved or rejected expense with a reason, and it waits again with the reason under it", async () => {
+  const fetcher = servePettyCash({
+    permissions: REVIEWS,
+    entries: [
+      expense({
+        id: "e1",
+        status: REJECTED,
+        rejectReason: "No receipt",
+        canReopen: true,
+      }),
+      expense({
+        id: "e2",
+        registration: "KDB 100X",
+        status: "approved",
+        canReopen: true,
+      }),
+      expense({ id: "e3", registration: "KDC 200Y" }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  const rejected = await rowOf(/KDA 482M/);
+  expect(within(rejected).getByText("No receipt")).toBeInTheDocument();
+  expect(
+    within(screen.getByRole("row", { name: /KDC 200Y/ })).queryByRole(
+      "button",
+      { name: /^Reopen/ },
+    ),
+  ).not.toBeInTheDocument();
+  const reopen = within(rejected).getByRole("button", {
+    name: "Reopen KDA 482M, KES 3,500",
+  });
+  expect(reopen).toHaveClass("act", "warn");
+  fireEvent.click(reopen);
+  const dialog = await screen.findByRole("dialog", { name: "Reopen expense" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Reopen" }));
+  expect(
+    await within(dialog).findByText("Enter the reason."),
+  ).toBeInTheDocument();
+  expect(
+    within(dialog)
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+      .filter((name) => /^(Wrong|Approved)/.test(name ?? "")),
+  ).toEqual([
+    "Wrong amount",
+    "Wrong vehicle",
+    "Wrong item",
+    "Approved by mistake",
+  ]);
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Approved by mistake" }),
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Reopen" }));
+  expect(
+    await screen.findByText("Reopened. Waiting for approval."),
+  ).toBeInTheDocument();
+  expect(writes(fetcher)).toEqual([
+    {
+      path: "/api/setup/pettycash/entries/e1/reopen",
+      method: "POST",
+      body: { version: 3, reason: "Approved by mistake" },
+    },
+  ]);
+  const row = await rowOf(/KDA 482M/);
+  await waitFor(() =>
+    expect(within(row).getByText("Waiting")).toHaveClass("chip", "wait"),
+  );
+  expect(
+    within(row).getByText("Reopened, Approved by mistake"),
+  ).toBeInTheDocument();
+  expect(within(row).queryByText("No receipt")).not.toBeInTheDocument();
+});
+
+it("puts send back, reject and delete under More when two or more apply, and shows one alone as a button", async () => {
+  const fetcher = servePettyCash({
+    permissions: REVIEWS,
+    entries: [
+      expense({
+        id: "e1",
+        canSendBack: true,
+        canReject: true,
+        canRemove: true,
+      }),
+      expense({
+        id: "e2",
+        registration: "KDB 100X",
+        canReject: true,
+        canRemove: true,
+      }),
+      expense({ id: "e3", registration: "KDC 200Y", canReject: true }),
+      expense({
+        id: "e4",
+        registration: "KDD 300Z",
+        status: "sentBack",
+        sentBackNote: "No receipt",
+        canSendBack: true,
+        canReject: true,
+      }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  const three = await rowOf(/KDA 482M/);
+  expect(
+    within(three).queryByRole("button", {
+      name: /^(Send back|Reject|Delete) /,
+    }),
+  ).not.toBeInTheDocument();
+  const more = within(three).getByRole("button", { name: /^More / });
+  expect(more).toHaveClass("act", "plain", "more");
+  expect(more).toHaveAttribute("aria-haspopup", "menu");
+  expect(more.querySelector("svg")).not.toBeNull();
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  fireEvent.click(more);
+  const menu = await screen.findByRole("menu");
+  expect(menu).toHaveClass("pop", "row");
+  const items = within(menu).getAllByRole("menuitem");
+  expect(items.map((item) => item.textContent)).toEqual([
+    "Send back",
+    "Reject",
+    "Delete",
+  ]);
+  expect(items.map((item) => item.className)).toEqual(["", "bad", "bad"]);
+
+  fireEvent.click(items[1]);
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  await screen.findByRole("dialog", { name: "Reject expense" });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+  const two = screen.getByRole("row", { name: /KDB 100X/ });
+  fireEvent.click(within(two).getByRole("button", { name: /^More / }));
+  expect(
+    within(await screen.findByRole("menu"))
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent),
+  ).toEqual(["Reject", "Delete"]);
+  fireEvent.keyDown(document, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+  const one = screen.getByRole("row", { name: /KDC 200Y/ });
+  expect(within(one).queryByRole("button", { name: /^More / })).toBeNull();
+  const single = within(one).getByRole("button", {
+    name: "Reject KDC 200Y, KES 3,500",
+  });
+  expect(single).toHaveClass("act", "bad");
+  expect(single).toHaveTextContent("Reject");
+
+  const sentBack = screen.getByRole("row", { name: /KDD 300Z/ });
+  expect(within(sentBack).queryByRole("button", { name: /^More / })).toBeNull();
+  expect(
+    within(sentBack).queryByRole("button", { name: /^Send back / }),
+  ).toBeNull();
+  expect(
+    within(sentBack).getByRole("button", { name: /^Reject / }),
+  ).toBeInTheDocument();
+  expect(writes(fetcher)).toEqual([]);
+});
+
+it("shows no Edit, Delete, Reopen or More on a row the server has closed to this person, such as one older than their limit", async () => {
+  servePettyCash({
+    permissions: REVIEWS,
+    entries: [
+      expense({
+        id: "e1",
+        date: "2026-09-30",
+        canEdit: true,
+        canRemove: true,
+        canSendBack: true,
+        canReject: true,
+      }),
+      expense({
+        id: "e2",
+        date: "2026-09-28",
+        registration: "KDB 100X",
+        canReview: true,
+      }),
+      expense({
+        id: "e3",
+        date: "2026-09-28",
+        registration: "KDC 200Y",
+        status: "approved",
+      }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  await choosePreset("This week");
+  const open = await rowOf(/KDA 482M/);
+  expect(
+    within(open).getByRole("button", { name: /^Edit / }),
+  ).toBeInTheDocument();
+  expect(
+    within(open).getByRole("button", { name: /^More / }),
+  ).toBeInTheDocument();
+  for (const pattern of [/KDB 100X/, /KDC 200Y/]) {
+    const old = screen.getByRole("row", { name: pattern });
+    for (const name of [/^Edit /, /^Delete /, /^Reopen /, /^More /, /^Reject /])
+      expect(within(old).queryByRole("button", { name })).toBeNull();
+  }
+});
+
+const CREDITOR = permissionsOf({ canCredit: true });
+
+it("opens the credit note on the day shown, with the date control, a manager, an amount and a reason only", async () => {
+  servePettyCash({ permissions: CREDITOR });
   renderInApp(<PettyCashPage />);
   await showCash();
   const dialog = await openDialog("Credit note", "Credit note");
-  expect(within(dialog).getByText("Wednesday 30 Sep 2026")).toBeInTheDocument();
+  expect(within(dialog).getByText("Wed 30 Sep 2026")).toBeInTheDocument();
+  expect(
+    within(dialog).getByRole("button", { name: "Previous day" }),
+  ).toBeEnabled();
+  expect(
+    within(dialog).getByRole("button", { name: "Next day" }),
+  ).toBeDisabled();
+  expect(within(dialog).getByLabelText("Manager")).toBeInTheDocument();
   expect(within(dialog).getByLabelText("Amount, KES")).toBeInTheDocument();
   expect(within(dialog).getByLabelText("Reason")).toBeInTheDocument();
   expect(within(dialog).queryByLabelText("Paid to")).not.toBeInTheDocument();
@@ -298,13 +671,14 @@ it("opens the credit note on the day it is recorded, with a manager, an amount a
   expect(
     within(dialog).queryByLabelText("The payee should pay this back"),
   ).not.toBeInTheDocument();
+  expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument();
   expect(
     within(dialog).queryByText(/Use a minus sign/),
   ).not.toBeInTheDocument();
 });
 
-it("needs a reason on a credit note, takes a negative amount, refuses zero and sends no payee", async () => {
-  const fetcher = servePettyCash();
+it("takes a credit note without a reason, a negative amount, refuses zero and sends no payee", async () => {
+  const fetcher = servePettyCash({ permissions: CREDITOR });
   renderInApp(<PettyCashPage />);
   await showCash();
   const dialog = await openDialog("Credit note", "Credit note");
@@ -313,16 +687,13 @@ it("needs a reason on a credit note, takes a negative amount, refuses zero and s
 
   add();
   expect(
-    await within(dialog).findByText("Say why the money was paid out."),
-  ).toBeInTheDocument();
+    await within(dialog).findAllByText(PETTY_CASH_AMOUNT_ERROR),
+  ).not.toHaveLength(0);
   expect(
-    within(dialog).getAllByText(PETTY_CASH_AMOUNT_ERROR).length,
-  ).toBeGreaterThan(0);
+    within(dialog).queryByText("Say why the money was paid out."),
+  ).not.toBeInTheDocument();
   expect(writes(fetcher)).toEqual([]);
 
-  fireEvent.change(within(dialog).getByLabelText("Reason"), {
-    target: { value: "Double charge" },
-  });
   fireEvent.change(within(dialog).getByLabelText("Amount, KES"), {
     target: { value: "0" },
   });
@@ -337,9 +708,7 @@ it("needs a reason on a credit note, takes a negative amount, refuses zero and s
   });
   add();
   expect(
-    await screen.findByText(
-      "Credit note of KES -500 recorded. It waits for approval.",
-    ),
+    await screen.findByText("Credit note of KES -500 recorded."),
   ).toBeInTheDocument();
   const [save] = writes(fetcher);
   expect(save.path).toBe("/api/setup/pettycash/entries");
@@ -347,18 +716,22 @@ it("needs a reason on a credit note, takes a negative amount, refuses zero and s
   expect(save.body).toEqual({
     id: expect.stringMatching(UUID),
     kind: "credit",
+    holderId: "h1",
     date: BUSINESS_DATE,
     unitAmount: -500,
-    note: "Double charge",
+    note: null,
   });
+  expect(save.body).not.toHaveProperty("payee");
+  expect(save.body).not.toHaveProperty("reimbursable");
 });
 
-it("lets an issuer pick the float for a credit note, shows the cash it holds and sends it", async () => {
+it("lets an issuer pick the float for a credit note, shows the cash it holds and sends it with the reason", async () => {
   const [grace] = overviewOf(permissionsOf()).floats;
   const fetcher = servePettyCash({
     permissions: permissionsOf({
       canSpend: false,
       canIssue: true,
+      canCredit: true,
       holderId: null,
     }),
     answer: (path) =>
@@ -397,7 +770,7 @@ it("lets an issuer pick the float for a credit note, shows the cash it holds and
     target: { value: "1,200.50" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
-  await screen.findByText(/Credit note of KES 1,200.50 recorded/);
+  await screen.findByText("Credit note of KES 1,200.50 recorded.");
   expect(writes(fetcher)[0].body).toEqual({
     id: expect.stringMatching(UUID),
     kind: "credit",
@@ -408,39 +781,103 @@ it("lets an issuer pick the float for a credit note, shows the cash it holds and
   });
 });
 
-it("keeps the payee and the pay-back flag of an old credit note when it is edited", async () => {
-  const fetcher = servePettyCash({
-    entries: [credit({ canEdit: true, version: 5, reimbursable: true })],
-    permissions: permissionsOf({ canIssue: true }),
+it("offers no Edit on cash given or a credit note, even when the row says it can be edited", async () => {
+  servePettyCash({
+    entries: [
+      credit({ canEdit: true, canRemove: true }),
+      cash({ canEdit: true, canRemove: true }),
+    ],
+    permissions: permissionsOf({ canDeleteCash: true }),
   });
   renderInApp(<PettyCashPage />);
   await showCash();
+  await screen.findByRole("button", {
+    name: "Delete credit note to Mama Njeri, KES 800",
+  });
+  expect(screen.queryByRole("button", { name: /^Edit / })).toBeNull();
+});
+
+it("deletes cash given or a credit note with a reason, from the Actions column of someone who may delete cash entries", async () => {
+  const fetcher = servePettyCash({
+    permissions: permissionsOf({ canDeleteCash: true }),
+    entries: [
+      credit({ id: "c1", canRemove: true, version: 6 }),
+      cash({ id: "k1", canRemove: true, version: 2 }),
+      cash({
+        id: "k2",
+        date: "2026-09-30",
+        note: "Old",
+        total: 100,
+        unitAmount: 100,
+      }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  await showCash();
+  expect(
+    (await screen.findAllByRole("columnheader")).map(
+      (header) => header.textContent,
+    ),
+  ).toEqual(["Type", "Manager", "Reason", "In", "Out", "Actions"]);
+  const note = await screen.findByRole("row", {
+    name: /Refund for a double charge/,
+  });
+  const remove = within(note).getByRole("button", {
+    name: "Delete credit note to Mama Njeri, KES 800",
+  });
+  expect(remove).toHaveClass("act", "bad");
+  expect(
+    within(screen.getByRole("row", { name: /Old/ })).queryByRole("button"),
+  ).toBeNull();
+
+  fireEvent.click(remove);
+  const dialog = await screen.findByRole("dialog", {
+    name: "Delete credit note",
+  });
+  expect(within(dialog).getByText("KES 800")).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  expect(
+    await within(dialog).findByText("Enter the reason."),
+  ).toBeInTheDocument();
+  expect(writes(fetcher)).toEqual([]);
+  expect(
+    within(dialog)
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+      .filter((name) =>
+        ["Entered twice", "Wrong manager", "Wrong amount"].includes(name ?? ""),
+      ),
+  ).toEqual(["Entered twice", "Wrong manager", "Wrong amount"]);
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Wrong manager" }),
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  expect(await screen.findByText("Deleted")).toBeInTheDocument();
+  expect(writes(fetcher)).toEqual([
+    {
+      path: "/api/setup/pettycash/entries/c1/remove",
+      method: "POST",
+      body: { version: 6, reason: "Wrong manager" },
+    },
+  ]);
+
   fireEvent.click(
     await screen.findByRole("button", {
-      name: "Edit credit note to Mama Njeri, KES 800",
+      name: "Delete cash for Grace Wanjiru, KES 5,000",
     }),
   );
-  const dialog = await screen.findByRole("dialog", {
-    name: "Edit credit note",
+  const cashDialog = await screen.findByRole("dialog", {
+    name: "Delete cash issued",
   });
-  expect(within(dialog).queryByLabelText("Paid to")).not.toBeInTheDocument();
-  expect(within(dialog).getByLabelText("Reason")).toHaveValue(
-    "Refund for a double charge",
-  );
-  fireEvent.change(within(dialog).getByLabelText("Amount, KES"), {
-    target: { value: "900" },
+  fireEvent.change(within(cashDialog).getByLabelText("Reason"), {
+    target: { value: "Entered twice" },
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
-  await screen.findByText("Saved. It waits for approval.");
-  expect(writes(fetcher)[0].body).toEqual({
-    version: 5,
-    kind: "credit",
-    holderId: "h1",
-    date: BUSINESS_DATE,
-    unitAmount: 900,
-    note: "Refund for a double charge",
-    payee: "Mama Njeri",
-    reimbursable: true,
+  fireEvent.click(within(cashDialog).getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(writes(fetcher)).toHaveLength(2));
+  expect(writes(fetcher)[1]).toEqual({
+    path: "/api/setup/pettycash/entries/k1/remove",
+    method: "POST",
+    body: { version: 2, reason: "Entered twice" },
   });
 });
 
@@ -448,10 +885,18 @@ it("shows the live total of an expense and sends units, amount, vehicle and item
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
   const dialog = await openDialog("Record spending", "Record spending");
-  await offered(
-    within(dialog).getByLabelText("Vehicle"),
-    "KDA 482M, Rongai Express",
-  );
+  await offered(within(dialog).getByLabelText("Vehicle"), "KDA 482M");
+  expect(optionsOf(within(dialog).getByLabelText("Vehicle"))).toEqual([
+    "KDA 482M",
+    "KDB 100X · 7",
+  ]);
+  expect(within(dialog).queryByLabelText("Note")).not.toBeInTheDocument();
+  expect(
+    within(dialog).queryByText(/Use a minus sign/),
+  ).not.toBeInTheDocument();
+  expect(within(dialog).getByText("Wed 30 Sep 2026")).toBeInTheDocument();
+  expect(within(dialog).queryByLabelText("Manager")).not.toBeInTheDocument();
+  expect(within(dialog).getByText("Grace Wanjiru")).toHaveClass("msub");
   const item = within(dialog).getByLabelText("Item");
   expect(optionsOf(item)).toEqual(["Tyres", "Brake pads", "Parking"]);
   expect(
@@ -477,9 +922,6 @@ it("shows the live total of an expense and sends units, amount, vehicle and item
   expect(totalOf(dialog)).toHaveTextContent(/^KES 5,000$/);
   pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
   pick(within(dialog).getByLabelText("Item"), "Tyres");
-  fireEvent.change(within(dialog).getByLabelText("Note"), {
-    target: { value: "Front left" },
-  });
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
   expect(
@@ -495,15 +937,12 @@ it("shows the live total of an expense and sends units, amount, vehicle and item
     expenseItemId: "i1",
     units: 4,
     unitAmount: 1250,
-    note: "Front left",
+    note: null,
   });
 });
 
 async function fillExpense(dialog: HTMLElement, units: string, amount: string) {
-  await offered(
-    within(dialog).getByLabelText("Vehicle"),
-    "KDA 482M, Rongai Express",
-  );
+  await offered(within(dialog).getByLabelText("Vehicle"), "KDA 482M");
   fireEvent.change(within(dialog).getByLabelText("Qty"), {
     target: { value: units },
   });
@@ -572,26 +1011,155 @@ it.each(["0", "1.2345", "", "-2"])(
   },
 );
 
-it("refuses a date after the business date", async () => {
+it("steps the date of a pop up a day at a time, stops at the business date, and records on the day chosen", async () => {
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
   const dialog = await openDialog("Record spending", "Record spending");
+  expect(within(dialog).queryByLabelText("Date")).not.toBeInTheDocument();
+  const next = within(dialog).getByRole("button", { name: "Next day" });
+  expect(next).toBeDisabled();
   await fillExpense(dialog, "2", "10");
-  fireEvent.change(within(dialog).getByLabelText("Date"), {
-    target: { value: "2026-10-01" },
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Previous day" }));
+  expect(within(dialog).getByText("Tue 29 Sep 2026")).toBeInTheDocument();
+  expect(next).toBeEnabled();
+  await waitFor(() =>
+    expect(paths(fetcher)).toContain(
+      "/api/setup/pettycash/options?date=2026-09-29",
+    ),
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Next day" }));
+  expect(within(dialog).getByText("Wed 30 Sep 2026")).toBeInTheDocument();
+  expect(next).toBeDisabled();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Previous day" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  await screen.findByText(/recorded on KDA 482M/);
+  expect(writes(fetcher)[0].body.date).toBe("2026-09-29");
+});
+
+it("stops the date control at the earliest day the person may change", async () => {
+  servePettyCash({
+    permissions: permissionsOf({ earliestDate: "2026-09-28" }),
   });
+  renderInApp(<PettyCashPage />);
+  const dialog = await openDialog("Record spending", "Record spending");
+  const previous = within(dialog).getByRole("button", { name: "Previous day" });
+  fireEvent.click(previous);
+  expect(within(dialog).getByText("Tue 29 Sep 2026")).toBeInTheDocument();
+  expect(previous).toBeEnabled();
+  fireEvent.click(previous);
+  expect(within(dialog).getByText("Mon 28 Sep 2026")).toBeInTheDocument();
+  expect(previous).toBeDisabled();
+  expect(
+    within(dialog).getByRole("button", { name: "Next day" }),
+  ).toHaveFocus();
+});
+
+it("opens a new entry on the earliest day allowed when the days shown are older than the limit", async () => {
+  servePettyCash({
+    permissions: permissionsOf({ earliestDate: "2026-09-28", canCredit: true }),
+  });
+  renderInApp(<PettyCashPage />);
+  await choosePreset("Last week");
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Record spending" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Record spending" });
+  expect(within(dialog).getByText("Mon 28 Sep 2026")).toBeInTheDocument();
+  expect(
+    within(dialog).getByRole("button", { name: "Previous day" }),
+  ).toBeDisabled();
+});
+
+it("offers Record spending only to someone with a float of their own or the right to add for another manager", async () => {
+  const cases: [Partial<ReturnType<typeof permissionsOf>>, boolean][] = [
+    [{ canSpend: true, holderId: "h1" }, true],
+    [{ canSpend: true, holderId: null }, false],
+    [{ canSpend: true, holderId: null, canSpendOther: true }, true],
+    [{ canSpend: false, holderId: "h1", canSpendOther: true }, false],
+  ];
+  for (const [over, shown] of cases) {
+    servePettyCash({ permissions: permissionsOf(over) });
+    const view = renderInApp(<PettyCashPage />);
+    await screen.findByText("Nothing recorded on this day.");
+    expect(
+      screen.queryByRole("button", { name: "Record spending" }) !== null,
+    ).toBe(shown);
+    view.unmount();
+    clearDataCache();
+  }
+});
+
+it("asks which manager's float a new expense goes on when the person has none of their own, and sends it", async () => {
+  const fetcher = servePettyCash({
+    permissions: permissionsOf({
+      holderId: null,
+      canSpendOther: true,
+    }),
+  });
+  renderInApp(<PettyCashPage />);
+  const dialog = await openDialog("Record spending", "Record spending");
+  const manager = within(dialog).getByLabelText("Manager");
+  expect(within(dialog).queryByText(/Cash on hand/)).not.toBeInTheDocument();
+  await fillExpense(dialog, "1", "500");
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   expect(
-    await within(dialog).findByText("The date cannot be after today."),
+    await within(dialog).findByText("Choose the manager."),
   ).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([]);
+
+  await within(manager).findByRole("option", { name: "Peter Otieno" });
+  choose(manager, "Peter Otieno");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  await screen.findByText(/recorded on KDA 482M/);
+  expect(writes(fetcher)[0].body).toEqual({
+    id: expect.stringMatching(UUID),
+    kind: "expense",
+    holderId: "h2",
+    date: BUSINESS_DATE,
+    vehicleId: "v1",
+    expenseItemId: "i1",
+    units: 1,
+    unitAmount: 500,
+    note: null,
+  });
+});
+
+it("records on the manager on screen for someone who may add for another manager, without asking", async () => {
+  const fetcher = servePettyCash({
+    permissions: permissionsOf({
+      canViewAll: true,
+      canSpendOther: true,
+    }),
+  });
+  renderInApp(<PettyCashPage />);
+  choose(
+    await screen.findByRole("combobox", { name: "Manager" }),
+    "Peter Otieno",
+  );
+  await waitFor(() =>
+    expect(paths(fetcher)).toContain(
+      "/api/setup/pettycash/overview?holderId=h2",
+    ),
+  );
+  const dialog = await openDialog("Record spending", "Record spending");
+  expect(within(dialog).queryByLabelText("Manager")).not.toBeInTheDocument();
+  expect(within(dialog).getByText("Peter Otieno")).toHaveClass("msub");
+  await fillExpense(dialog, "1", "500");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  await screen.findByText(/recorded on KDA 482M/);
+  expect(writes(fetcher)[0].body.holderId).toBe("h2");
 });
 
 it.each([0, -300])(
   "sends an expense and a credit note when the float holds %d, with no refusal of its own",
   async (balance) => {
     const [first] = overviewOf(permissionsOf()).floats;
-    const fetcher = servePettyCash({ floats: [{ ...first, balance }] });
+    const fetcher = servePettyCash({
+      permissions: CREDITOR,
+      floats: [{ ...first, balance }],
+    });
     renderInApp(<PettyCashPage />);
     const dialog = await openDialog("Record spending", "Record spending");
     await fillExpense(dialog, "1", "500");
@@ -640,10 +1208,7 @@ it("reports a refused save with role alert and keeps one id for the retry", asyn
   });
   renderInApp(<PettyCashPage />);
   const dialog = await openDialog("Record spending", "Record spending");
-  await offered(
-    within(dialog).getByLabelText("Vehicle"),
-    "KDA 482M, Rongai Express",
-  );
+  await offered(within(dialog).getByLabelText("Vehicle"), "KDA 482M");
   fireEvent.change(within(dialog).getByLabelText("Unit cost, KES"), {
     target: { value: "300" },
   });
@@ -668,10 +1233,7 @@ it("still sends a fresh id from a page opened over plain http, where crypto.rand
   const fetcher = servePettyCash();
   renderInApp(<PettyCashPage />);
   const dialog = await openDialog("Record spending", "Record spending");
-  await offered(
-    within(dialog).getByLabelText("Vehicle"),
-    "KDA 482M, Rongai Express",
-  );
+  await offered(within(dialog).getByLabelText("Vehicle"), "KDA 482M");
   fireEvent.change(within(dialog).getByLabelText("Unit cost, KES"), {
     target: { value: "300" },
   });
@@ -763,12 +1325,7 @@ it("closes the dialog on a 409, shows the message on the page and loads the list
   fireEvent.click(
     await screen.findByRole("button", { name: "Delete KDA 482M, KES 3,500" }),
   );
-  const dialog = await screen.findByRole("dialog", {
-    name: "Delete this entry",
-  });
-  fireEvent.change(within(dialog).getByLabelText("Reason for deleting"), {
-    target: { value: "Recorded twice" },
-  });
+  const dialog = await screen.findByRole("dialog", { name: "Delete expense" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -1005,14 +1562,87 @@ it("opens a new entry on the last day of a past period, and on today when the pe
   fireEvent.click(
     await screen.findByRole("button", { name: "Record spending" }),
   );
-  expect(await screen.findByLabelText("Date")).toHaveValue("2026-09-27");
+  expect(
+    within(await screen.findByRole("dialog")).getByText("Sun 27 Sep 2026"),
+  ).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
   await choosePreset("This week");
   fireEvent.click(
     await screen.findByRole("button", { name: "Record spending" }),
   );
-  expect(await screen.findByLabelText("Date")).toHaveValue("2026-09-30");
+  expect(
+    within(await screen.findByRole("dialog")).getByText("Wed 30 Sep 2026"),
+  ).toBeInTheDocument();
+});
+
+it("draws the four statuses as the design's chips, counts a sent-back expense but not a rejected one, and filters by Rejected", async () => {
+  const fetcher = servePettyCash({
+    entries: [
+      expense({ id: "e1", total: 1000, unitAmount: 1000 }),
+      expense({
+        id: "e2",
+        registration: "KDB 100X",
+        total: 2000,
+        unitAmount: 2000,
+        status: "sentBack",
+        sentBackNote: "No receipt",
+      }),
+      expense({
+        id: "e3",
+        registration: "KDC 200Y",
+        total: 4000,
+        unitAmount: 4000,
+        status: "approved",
+      }),
+      expense({
+        id: "e4",
+        registration: "KDD 300Z",
+        total: 8000,
+        unitAmount: 8000,
+        status: REJECTED,
+        rejectReason: "Not agreed",
+      }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  const chipOf = async (pattern: RegExp, label: string) =>
+    within(await rowOf(pattern)).getByText(label);
+  expect(await chipOf(/KDA 482M/, "Waiting")).toHaveClass("chip", "wait");
+  expect(await chipOf(/KDB 100X/, "Sent back")).toHaveClass("chip", "back");
+  expect(await chipOf(/KDC 200Y/, "Approved")).toHaveClass("chip", "ok");
+  expect(await chipOf(/KDD 300Z/, "Rejected")).toHaveClass("chip", "bad");
+  expect(
+    screen.getByText("Expenses, 4 entries").closest("tr"),
+  ).toHaveTextContent("7,000");
+
+  choose(screen.getByRole("combobox", { name: "Show" }), "Rejected");
+  await waitFor(() =>
+    expect(
+      entryReads(fetcher).some((path) => path.includes("status=rejected")),
+    ).toBe(true),
+  );
+});
+
+it("leaves a rejected expense out of the total of its day", async () => {
+  servePettyCash({
+    entries: [
+      expense({ id: "e1", date: "2026-09-28", total: 3500 }),
+      expense({
+        id: "e2",
+        date: "2026-09-28",
+        registration: "KDB 100X",
+        total: 1000,
+        unitAmount: 1000,
+        status: REJECTED,
+      }),
+    ],
+  });
+  renderInApp(<PettyCashPage />);
+  await choosePreset("This week");
+  await screen.findByRole("row", { name: /KDB 100X/ });
+  const day = document.querySelector<HTMLElement>("[data-day]")!;
+  expect(day).toHaveTextContent("2 entries, KES 3,500");
 });
 
 it("shows units as entered, with up to three decimals and grouping", async () => {
@@ -1127,7 +1757,11 @@ it("keeps Record spending, Credit note, Issue cash and Approve day to the permis
   clearDataCache();
 
   servePettyCash({
-    permissions: permissionsOf({ canSpend: true, canIssue: true }),
+    permissions: permissionsOf({
+      canSpend: true,
+      canIssue: true,
+      canCredit: true,
+    }),
   });
   renderInApp(<PettyCashPage />);
   expect(
@@ -1185,12 +1819,12 @@ it("approves a day for the chosen manager and reports what was left", async () =
 
 it("lists cash and credit notes on the Cash received tab, and moves between tabs with the arrow keys", async () => {
   const fetcher = servePettyCash({
-    permissions: permissionsOf({ canIssue: true }),
+    permissions: permissionsOf({ canIssue: true, canDeleteCash: true }),
     entries: [
       expense(),
-      cash({ canEdit: true, canRemove: true }),
+      cash({ canRemove: true }),
       cash({ id: "k2", total: -300, unitAmount: -300, note: "Returned" }),
-      credit({ status: "approved" }),
+      credit({ status: null }),
     ],
   });
   renderInApp(<PettyCashPage />);
@@ -1213,7 +1847,7 @@ it("lists cash and credit notes on the Cash received tab, and moves between tabs
   expect(screen.queryByText("KDA 482M")).not.toBeInTheDocument();
   expect(
     screen.getByRole("button", {
-      name: "Edit cash for Grace Wanjiru, KES 5,000",
+      name: "Delete cash for Grace Wanjiru, KES 5,000",
     }),
   ).toBeInTheDocument();
   expect(
@@ -1278,6 +1912,7 @@ it("puts the toolbar buttons in the design's order", async () => {
   servePettyCash({
     permissions: permissionsOf({
       canIssue: true,
+      canCredit: true,
       canApproveDay: true,
       canApproveItem: true,
     }),
@@ -1313,7 +1948,7 @@ it("gives cash to a chosen manager, and takes it back with a minus sign", async 
   renderInApp(<PettyCashPage />);
   await showCash();
   const dialog = await openDialog("Issue cash", "Issue cash");
-  expect(within(dialog).getByText("Wednesday 30 Sep 2026")).toBeInTheDocument();
+  expect(within(dialog).getByText("Wed 30 Sep 2026")).toBeInTheDocument();
   expect(within(dialog).queryByLabelText("Date")).not.toBeInTheDocument();
   expect(within(dialog).queryByLabelText("Note")).not.toBeInTheDocument();
   await within(within(dialog).getByLabelText("Manager")).findByRole("option", {
@@ -1538,21 +2173,20 @@ it("reads the amount waiting from the figures and disables the button when nothi
   ).toBeDisabled();
 });
 
-it("lists a credit note on Cash received with its type, who, why and money out, and the net below", async () => {
+it("lists a credit note on Cash received with its type, who, why and money out, with no status or payee, and the net below", async () => {
   servePettyCash({
-    permissions: REVIEWER,
+    permissions: permissionsOf({ canDeleteCash: true }),
     entries: [
       cash({ id: "k1", total: 5000, unitAmount: 5000 }),
       cash({ id: "k2", total: -300, unitAmount: -300, note: "Returned" }),
-      credit({ canReview: true, reimbursable: true }),
+      credit({ status: null, reimbursable: true }),
       credit({
         id: "c2",
         payee: null,
         note: "Fuel",
         total: -200,
         unitAmount: -200,
-        status: "sentBack",
-        sentBackNote: "Attach the receipt",
+        status: null,
       }),
     ],
   });
@@ -1562,21 +2196,14 @@ it("lists a credit note on Cash received with its type, who, why and money out, 
     name: /Refund for a double charge/,
   });
   const cells = within(note).getAllByRole("cell");
-  expect(cells[0]).toHaveTextContent("Credit note");
-  expect(cells[0]).toHaveTextContent("Waiting for approval");
+  expect(cells[0]).toHaveTextContent(/^Credit note$/);
   expect(within(cells[0]).getByText("Credit note")).toHaveClass("chip", "bad");
   expect(cells[1]).toHaveTextContent("Grace Wanjiru");
-  expect(cells[2]).toHaveTextContent("Refund for a double charge");
-  expect(cells[2]).toHaveTextContent("Paid to Mama Njeri");
-  expect(cells[2]).toHaveTextContent("To be paid back");
+  expect(cells[2]).toHaveTextContent(/^Refund for a double charge$/);
   expect(cells[3]).toHaveTextContent(/^$/);
   expect(cells[4]).toHaveTextContent(/^800$/);
   expect(cells[4]).toHaveClass("r", "tot", "neg");
-  expect(
-    within(note).getByRole("button", {
-      name: "Approve credit note to Mama Njeri, KES 800",
-    }),
-  ).toBeInTheDocument();
+  expect(cells[5]).toHaveClass("r");
 
   const back = screen.getByRole("row", { name: /Returned/ });
   expect(within(back).getAllByRole("cell")[0]).toHaveTextContent(
@@ -1586,7 +2213,6 @@ it("lists a credit note on Cash received with its type, who, why and money out, 
 
   const repaid = screen.getByRole("row", { name: /Fuel/ });
   const repaidCells = within(repaid).getAllByRole("cell");
-  expect(repaidCells[0]).toHaveTextContent("Sent back: Attach the receipt");
   expect(repaidCells[3]).toHaveTextContent(/^200$/);
   expect(repaidCells[4]).toHaveTextContent(/^$/);
 
@@ -1595,16 +2221,34 @@ it("lists a credit note on Cash received with its type, who, why and money out, 
   ).toEqual(["Type", "Manager", "Reason", "In", "Out", "Actions"]);
   const footer = screen.getByText("Net cash received").closest("tr")!;
   expect(footer).toHaveTextContent("Net cash received4,100");
+  expect(footer.querySelectorAll("td")).toHaveLength(3);
 });
 
-it("leaves out the Actions column of Cash received when no row has an action", async () => {
-  servePettyCash({ entries: [cash()] });
-  renderInApp(<PettyCashPage />);
+it("leaves out the Actions column of Cash received for someone who may not delete cash entries, and keeps it, empty on old rows, for someone who may", async () => {
+  servePettyCash({
+    entries: [cash({ canRemove: true })],
+  });
+  const view = renderInApp(<PettyCashPage />);
   await showCash();
   await within(screen.getByRole("tabpanel")).findByText("Cash issued");
   expect(
     screen.getAllByRole("columnheader").map((header) => header.textContent),
   ).toEqual(["Type", "Manager", "Reason", "In", "Out"]);
+  expect(screen.queryByRole("button", { name: /^Delete / })).toBeNull();
+  view.unmount();
+  clearDataCache();
+
+  servePettyCash({
+    permissions: permissionsOf({ canDeleteCash: true }),
+    entries: [cash({ canRemove: false })],
+  });
+  renderInApp(<PettyCashPage />);
+  await showCash();
+  await within(screen.getByRole("tabpanel")).findByText("Cash issued");
+  expect(
+    screen.getAllByRole("columnheader").map((header) => header.textContent),
+  ).toEqual(["Type", "Manager", "Reason", "In", "Out", "Actions"]);
+  expect(screen.queryByRole("button", { name: /^Delete / })).toBeNull();
 });
 
 it("says no cash moved when there is none, and that nothing matches when searching", async () => {

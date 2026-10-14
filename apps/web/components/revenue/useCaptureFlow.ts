@@ -1,11 +1,12 @@
 import { useCallback, useState, type RefObject } from "react";
 
 import { nextToCapture } from "@xcode/shared/capture";
+import { shiftDate } from "@xcode/shared/dates";
 import type { RevenueVehicle, RevenueWeek } from "@xcode/shared/revenue";
 
 import { useResource } from "../../lib/data";
 import { vehicleWeekPath } from "../../lib/endpoints/revenue";
-import { captureAt, openAt, type Capture } from "./capture";
+import { captureAt, type Capture } from "./capture";
 import { useFocusReturn } from "./useFocusReturn";
 import type { useRowWindow } from "./useRowWindow";
 
@@ -18,7 +19,6 @@ export type OpenDay = (
 type Flow = {
   data: RevenueWeek | undefined;
   canCapture: boolean;
-  today: string;
   reload: () => void;
   markStale: () => void;
   gridRef: RefObject<HTMLElement | null>;
@@ -30,7 +30,6 @@ type Flow = {
 export function useCaptureFlow({
   data,
   canCapture,
-  today,
   reload,
   markStale,
   gridRef,
@@ -71,26 +70,28 @@ export function useCaptureFlow({
   const openDay = useCallback<OpenDay>(
     (item, date, from) => {
       if (!isShown()) remember(from);
-      setCapture(openAt(item, date, today));
+      setCapture(captureAt(item, date));
     },
-    [isShown, remember, today],
+    [isShown, remember],
   );
 
-  // After a save: the next vehicle still missing the same day, then done. The grid reloads alongside.
-  async function advance(saved: Capture) {
+  // After a save: a new capture moves to the next vehicle with no record for that day and closes when none is
+  // left; a correction closes. The grid reloads alongside.
+  async function advance(saved: Capture, wasNew: boolean) {
     markStale();
     reload();
     const done = [...saved.done, saved.vehicleId];
-    const next = data
-      ? nextToCapture(
-          data,
-          saved.vehicleId,
-          saved.date,
-          (id, date) => date === saved.date && done.includes(id),
-          canCapture,
-        )
-      : null;
-    setCapture(next ? captureAt(next.vehicle, next.opening, done) : null);
+    const next =
+      data && wasNew
+        ? nextToCapture(
+            data,
+            saved.vehicleId,
+            saved.date,
+            (id, date) => date === saved.date && done.includes(id),
+            canCapture,
+          )
+        : null;
+    setCapture(next ? captureAt(next.vehicle, saved.date, done) : null);
   }
 
   return {
@@ -99,9 +100,10 @@ export function useCaptureFlow({
     openDay,
     advance,
     close: () => setCapture(null),
-    // Jumps to the vehicle's gap: the same vehicle, on the day it is missing.
-    openGap: (date: string) =>
-      capture && setCapture({ ...capture, date, gap: null }),
+    // The pop up's own date control: the same vehicle, a day earlier or later.
+    shiftDay: (days: number) =>
+      capture &&
+      setCapture({ ...capture, date: shiftDate(capture.date, days), done: [] }),
     title: gridVehicle?.registration ?? otherVehicle?.registration ?? "",
     vehicle: gridCell ? gridVehicle : otherCell ? otherVehicle : undefined,
     cell: gridCell ?? otherCell,

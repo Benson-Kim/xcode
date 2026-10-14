@@ -4,10 +4,12 @@ import { PETTY_CASH_PERMISSIONS } from "@xcode/shared/pettyCash";
 import {
   DASHBOARD_CARDS,
   EXPENSES_NAV,
+  MIDDLE_NAV,
   NAV,
   NAV_SECTIONS,
   PERMISSION_KEYS,
   PRIMARY_NAV,
+  RIGHTS,
   SETUP_NAV,
   canSee,
   permissionChecker,
@@ -16,9 +18,38 @@ import {
 } from "@xcode/shared/permissions";
 
 describe("PERMISSION_KEYS", () => {
-  it("lists every key of the catalog once", () => {
+  it("lists every released key once", () => {
     expect(PERMISSION_KEYS).toHaveLength(40);
     expect(new Set(PERMISSION_KEYS).size).toBe(PERMISSION_KEYS.length);
+  });
+});
+
+describe("RIGHTS", () => {
+  it("lists the 59 rights of v2.33 once, in catalogue order", () => {
+    expect(RIGHTS).toHaveLength(59);
+    expect(new Set(RIGHTS).size).toBe(RIGHTS.length);
+    expect(RIGHTS[0]).toBe("dash.net");
+    expect(RIGHTS.at(-1)).toBe("audit.view");
+  });
+
+  it("holds the 20 petty cash rights and the four of each of scheduled expenses and savings", () => {
+    expect(RIGHTS.filter((key) => key.startsWith("pettycash."))).toHaveLength(
+      20,
+    );
+    expect(RIGHTS.filter((key) => key.startsWith("scheduled."))).toEqual([
+      "scheduled.view",
+      "scheduled.add",
+      "scheduled.edit",
+      "scheduled.pause",
+    ]);
+    expect(RIGHTS.filter((key) => key.startsWith("savings."))).toEqual([
+      "savings.view",
+      "savings.add",
+      "savings.edit",
+      "savings.pause",
+    ]);
+    expect(RIGHTS).toContain("vehicles.target");
+    expect(RIGHTS).toContain("people.sign_in");
   });
 });
 
@@ -65,12 +96,12 @@ describe("canSee", () => {
 });
 
 describe("NAV", () => {
-  it("names only permissions in the catalog", () => {
+  it("names only rights or released keys", () => {
     const keys: string[] = Object.values(NAV).flatMap((item) =>
       "any" in item ? [...item.any] : [],
     );
     expect(keys.length).toBeGreaterThan(0);
-    const catalog: readonly string[] = PERMISSION_KEYS;
+    const catalog: readonly string[] = [...PERMISSION_KEYS, ...RIGHTS];
     for (const key of keys) expect(catalog).toContain(key);
   });
 
@@ -84,6 +115,10 @@ describe("NAV", () => {
       "Petty cash",
       "Scheduled expenses and savings",
     ]);
+    expect(MIDDLE_NAV.map((id) => NAV[id].label)).toEqual([
+      "Savings",
+      "Reports",
+    ]);
     expect(SETUP_NAV.map((id) => NAV[id].label)).toEqual([
       "PSV companies",
       "Vehicles",
@@ -94,7 +129,7 @@ describe("NAV", () => {
     ]);
   });
 
-  it("lays the sections out as items, the Expenses group, Reports, then the Setup group", () => {
+  it("lays the sections out as items, the Expenses group, Savings and Reports, then the Setup group", () => {
     expect(
       NAV_SECTIONS.map((section) =>
         section.kind === "group"
@@ -104,7 +139,7 @@ describe("NAV", () => {
     ).toEqual([
       ["items", PRIMARY_NAV],
       ["expenses", "Expenses", EXPENSES_NAV],
-      ["items", ["reports"]],
+      ["items", MIDDLE_NAV],
       ["setup", "Setup", SETUP_NAV],
     ]);
   });
@@ -129,15 +164,48 @@ describe("NAV", () => {
     expect(canSee(NAV.reports, permissionChecker(["reports.view"]))).toBe(true);
   });
 
-  it("opens Petty cash for the petty cash permissions and Vehicles for investment viewers", () => {
+  it("opens Petty cash on its view right, Vehicles on its view right or for investment viewers", () => {
     expect(NAV.pettycash.any).toEqual(PETTY_CASH_PERMISSIONS);
-    expect(NAV.vehicles.any).toEqual(["vehicles.manage", "invest.view"]);
+    expect(canSee(NAV.pettycash, permissionChecker(["pettycash.view"]))).toBe(
+      true,
+    );
+    expect(canSee(NAV.vehicles, permissionChecker(["vehicles.view"]))).toBe(
+      true,
+    );
     expect(canSee(NAV.vehicles, permissionChecker(["invest.view"]))).toBe(true);
-    expect(canSee(NAV.expenses, permissionChecker(["commitments.view"]))).toBe(
+    expect(canSee(NAV.expenses, permissionChecker(["catalog.view"]))).toBe(
       true,
     );
     expect(canSee(NAV.expenses, permissionChecker(["revenue.view"]))).toBe(
       false,
+    );
+  });
+
+  it("keeps Scheduled expenses and Savings apart, each on its own view right", () => {
+    expect(canSee(NAV.recurring, permissionChecker(["scheduled.view"]))).toBe(
+      true,
+    );
+    expect(canSee(NAV.recurring, permissionChecker(["savings.view"]))).toBe(
+      false,
+    );
+    expect(canSee(NAV.savings, permissionChecker(["savings.view"]))).toBe(true);
+    expect(canSee(NAV.savings, permissionChecker(["scheduled.view"]))).toBe(
+      false,
+    );
+  });
+
+  it("keeps the released keys opening their menu entries for a v2.11 phone", () => {
+    expect(canSee(NAV.vehicles, permissionChecker(["vehicles.manage"]))).toBe(
+      true,
+    );
+    expect(canSee(NAV.companies, permissionChecker(["companies.manage"]))).toBe(
+      true,
+    );
+    expect(canSee(NAV.recurring, permissionChecker(["commitments.view"]))).toBe(
+      true,
+    );
+    expect(canSee(NAV.pettycash, permissionChecker(["pettycash.spend"]))).toBe(
+      true,
     );
   });
 

@@ -22,12 +22,32 @@ export type Vehicle = {
   recurringItems?: number | null;
   // Each stretch the vehicle was out of the fleet: away from leftOn through the day before returnedOn (D4).
   away?: { leftOn: string; returnedOn: string }[];
+  // v2.29 to v2.32: the fleet number, the initial investment (null when left empty), the seven day targets of the
+  // set in force today (Monday first) and the next set waiting to start.
+  fleetNumber?: string | null;
+  initialInvestment?: number | null;
+  dayTargets?: number[] | null;
+  nextTarget?: {
+    startsOn: string;
+    dayTargets: number[];
+    weeklyTarget: number;
+  } | null;
+};
+
+// One dated target set of a vehicle (GET setup/vehicles/{id}/targets): seven day figures, Monday first.
+export type TargetSet = {
+  id: string;
+  startsOn: string;
+  days: number[];
+  weekTotal: number;
+  inForce: boolean;
+  canRemove: boolean;
 };
 
 // What the scheduled-item editor needs to pick vehicles (GET recurring/vehicle-options).
 export type VehicleOption = Pick<
   Vehicle,
-  "id" | "companyId" | "companyName" | "registration"
+  "id" | "companyId" | "companyName" | "registration" | "fleetNumber"
 > & { active?: boolean };
 
 export type HistoryRow = {
@@ -77,17 +97,31 @@ export type RecurringItem = {
   bucket?: ExpenseBucket | null;
   note?: string | null;
   month?: number | null;
+  // The saving model (v2.30): the last run's outcomes, the revenue rule, the opening balance and the next run.
+  lastRunStates?: { saved: number; skipped: number; held: number } | null;
+  condition?: { min: number; days: number } | null;
+  opening?: { date: string; total: number } | null;
+  nextRun?: string | null;
 };
 
 // GET setup/recurring/summary: the business date's month, with what scheduled expenses post in it, what savings set
-// aside in it so far and the savings balance to date.
+// aside in it so far, the savings balance to date, and how many of each kind run or are paused (null for a kind
+// the caller cannot view).
 export type RecurringSummary = {
   from: string;
   to: string;
   costsDue: number;
   saved: number;
   savingsBalance: number;
+  runningCosts?: number | null;
+  pausedCosts?: number | null;
+  runningSavings?: number | null;
+  pausedSavings?: number | null;
 };
+
+// What happened to a vehicle on a run of a saving: saved, skipped (below the revenue rule), or held until every
+// day of its window has a record.
+export type RunState = "saved" | "skipped" | "held";
 
 // GET setup/recurring/{id}/runs: the last ten run dates, newest first; total and runCount cover every run to date.
 export type RecurringRuns = {
@@ -100,7 +134,13 @@ export type RecurringRuns = {
   runs: {
     date: string;
     amount: number;
-    shares: { vehicleId: string; registration: string; amount: number }[];
+    shares: {
+      vehicleId: string;
+      registration: string;
+      amount: number;
+      state?: RunState;
+      revenue?: number | null;
+    }[];
   }[];
 };
 

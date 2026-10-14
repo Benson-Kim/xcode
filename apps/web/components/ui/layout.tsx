@@ -80,6 +80,7 @@ export function HeroBand({
   variant = "default",
   label,
   className,
+  toolsClass,
   children,
 }: {
   period?: ReactNode;
@@ -88,6 +89,8 @@ export function HeroBand({
   variant?: "default" | "eq";
   label?: string;
   className?: string;
+  // The design's narrower tools box (.btools.slim), for a search field alone.
+  toolsClass?: string;
   children?: ReactNode;
 }) {
   const slots = useContext(HeroSlotsContext);
@@ -105,7 +108,7 @@ export function HeroBand({
     >
       {period && <div className="dbar">{period}</div>}
       {variant === "eq" ? <div className="eqn">{children}</div> : children}
-      {tools && <div className="btools">{tools}</div>}
+      {tools && <div className={cn("btools", toolsClass)}>{tools}</div>}
       {replacesHead && (
         <div className="bacts">
           {trailing}

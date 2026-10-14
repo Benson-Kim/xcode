@@ -130,9 +130,19 @@ it("adds, edits, retires and restores a vehicle without a typed reason", async (
   fireEvent.change(screen.getByLabelText("PSV company"), {
     target: { value: company.id },
   });
-  fireEvent.change(screen.getByLabelText("Weekly target"), {
-    target: { value: "14000" },
+  fireEvent.change(screen.getByLabelText("Fleet number"), {
+    target: { value: "21" },
   });
+  fireEvent.change(screen.getByLabelText("Target, Monday"), {
+    target: { value: "2000" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Same every day" }));
+  fireEvent.change(screen.getByLabelText("Target, Sunday"), {
+    target: { value: "4000" },
+  });
+  expect(screen.getByText("Target for the week").nextSibling).toHaveTextContent(
+    "16,000",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
   // A new vehicle stays open once added; Cancel goes back to the list.
@@ -140,8 +150,11 @@ it("adds, edits, retires and restores a vehicle without a typed reason", async (
 
   fireEvent.click(await screen.findByRole("button", { name: "Edit KDA 482M" }));
   expect(screen.queryByLabelText(/Reason/)).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Weekly target"), {
-    target: { value: "16000" },
+  fireEvent.change(screen.getByLabelText("Fleet number"), {
+    target: { value: "7" },
+  });
+  fireEvent.change(screen.getByLabelText("Initial investment, KES"), {
+    target: { value: "1200000" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(fetchMock)).toHaveLength(2));
@@ -166,18 +179,20 @@ it("adds, edits, retires and restores a vehicle without a typed reason", async (
       {
         registration: "KDG 905B",
         companyId: company.id,
-        weeklyTarget: 14000,
         joinedOn: businessDate,
+        fleetNumber: "21",
+        dayTargets: [2000, 2000, 2000, 2000, 2000, 2000, 4000],
+        initialInvestment: null,
       },
     ],
     [
       "/api/setup/vehicles/vehicle-1",
       "PUT",
       {
-        registration: "KDA 482M",
         companyId: company.id,
-        weeklyTarget: 16000,
         joinedOn: "2026-01-01",
+        fleetNumber: "7",
+        initialInvestment: 1200000,
       },
     ],
     ["/api/setup/vehicles/vehicle-1/retire", "POST", { leftOn: "2026-09-20" }],

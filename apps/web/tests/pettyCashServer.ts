@@ -9,6 +9,7 @@ import type {
   PettyCashOverview,
   PettyCashPeriod,
   PettyCashPermissions,
+  PettyCashVehicleOption,
 } from "@xcode/shared/pettyCash";
 
 import { appearanceFixture } from "./renderInApp";
@@ -32,8 +33,24 @@ export const permissionsOf = (
   canApproveItem: false,
   canApproveDay: false,
   approvalLimit: null,
+  canView: true,
+  canSpendOther: false,
+  canEditOwn: false,
+  canEdit: false,
+  canDeleteOwn: false,
+  canDelete: false,
+  canDeleteApproved: false,
+  canSendBack: false,
+  canReject: false,
+  canReopen: false,
+  canCredit: false,
+  canDeleteCash: false,
+  earliestDate: null,
   ...over,
 });
+
+// The shared status type does not list "rejected" yet; the wire does.
+export const REJECTED: PettyCashEntry["status"] = "rejected";
 
 export const expense = (
   over: Partial<PettyCashEntry> = {},
@@ -66,6 +83,11 @@ export const expense = (
   canRemove: false,
   canReview: false,
   aboveLimit: false,
+  rejectReason: null,
+  reopenReason: null,
+  canSendBack: false,
+  canReject: false,
+  canReopen: false,
   ...over,
 });
 
@@ -101,7 +123,11 @@ export const cash = (over: Partial<PettyCashEntry> = {}): PettyCashEntry =>
     ...over,
   });
 
-export const OPTIONS: PettyCashOptions = {
+type ServedOptions = Omit<PettyCashOptions, "vehicles"> & {
+  vehicles: (PettyCashVehicleOption & { fleetNumber?: string })[];
+};
+
+export const OPTIONS: ServedOptions = {
   vehicles: [
     {
       id: "v1",
@@ -115,6 +141,7 @@ export const OPTIONS: PettyCashOptions = {
       companyId: "c1",
       companyName: "Rongai Express",
       registration: "KDB 100X",
+      fleetNumber: "7",
       active: true,
     },
   ],
@@ -217,9 +244,41 @@ type Options = {
   answer?: (path: string, init: RequestInit | undefined) => Answer;
 };
 
+const DECISIONS = /^entries\/([^/]+)\/(send-back|reject|reopen|remove)$/;
+
+// What send back, reject, reopen and remove do to an entry, so the list read after them shows it.
+function decide(
+  rows: PettyCashEntry[],
+  id: string,
+  action: string,
+  body: { comment?: string; reason?: string },
+) {
+  const at = rows.findIndex((row) => row.id === id);
+  if (at < 0) return;
+  const row = rows[at];
+  if (action === "remove") return void rows.splice(at, 1);
+  const next = { ...row, version: row.version + 1 };
+  if (action === "send-back") {
+    next.status = "sentBack";
+    next.sentBackNote = body.comment ?? null;
+  } else if (action === "reject") {
+    Object.assign(next, { status: "rejected", rejectReason: body.reason });
+  } else {
+    Object.assign(next, {
+      status: "waiting",
+      sentBackNote: null,
+      rejectReason: null,
+      reopenReason: body.reason,
+    });
+  }
+  rows[at] = next;
+}
+
 // Answers the petty cash endpoints. A write is answered `{ id, version: 4, status: "waiting", balance: 0 }` unless `answer` says otherwise.
+// Send back, reject, reopen and remove also change the entry they name.
 export function servePettyCash(options: Options = {}) {
   const permissions = options.permissions ?? permissionsOf();
+  const rows = [...(options.entries ?? [])];
   const fetcher = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -240,8 +299,17 @@ export function servePettyCash(options: Options = {}) {
       if (!url.pathname.startsWith("/api/setup/pettycash/"))
         return json({}, 404);
       const route = url.pathname.slice("/api/setup/pettycash/".length);
-      if (method !== "GET")
+      if (method !== "GET") {
+        const decision = DECISIONS.exec(route);
+        if (decision)
+          decide(
+            rows,
+            decision[1],
+            decision[2],
+            JSON.parse(String(init?.body ?? "{}")),
+          );
         return json({ id: "saved", version: 4, status: "waiting", balance: 0 });
+      }
       if (route === "overview") {
         const from = url.searchParams.get("from");
         const to = url.searchParams.get("to");
@@ -279,7 +347,7 @@ export function servePettyCash(options: Options = {}) {
         const status = url.searchParams.get("status");
         const from = url.searchParams.get("from");
         const to = url.searchParams.get("to");
-        const items = (options.entries ?? []).filter(
+        const items = rows.filter(
           (entry) =>
             (!kinds || kinds.includes(entry.kind)) &&
             (!status || entry.status === status) &&

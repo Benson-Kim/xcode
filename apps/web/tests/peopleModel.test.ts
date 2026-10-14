@@ -7,7 +7,7 @@ import {
   personPayload,
   scopeGroups,
   scopeLabel,
-  signInState,
+  personStatus,
   validatePerson,
   withNeeds,
   withoutDependents,
@@ -132,8 +132,8 @@ describe("scopeLabel", () => {
     vehicles: [],
   } as ScopeOptions;
 
-  it("says all companies", () => {
-    expect(scopeLabel(person({ scopeMode: "all" }))).toBe("All companies");
+  it("says all vehicles", () => {
+    expect(scopeLabel(person({ scopeMode: "all" }))).toBe("All vehicles");
   });
 
   it("names up to two companies and counts more", () => {
@@ -165,11 +165,12 @@ describe("scopeLabel", () => {
   });
 });
 
-describe("signInState", () => {
-  it("is none without access, waiting without a PIN, otherwise active", () => {
-    expect(signInState(person({ active: false }))).toBe("none");
-    expect(signInState(person({ hasPin: false }))).toBe("waiting");
-    expect(signInState(person())).toBe("active");
+describe("personStatus", () => {
+  it("takes the API's status, else blocked without access, not signed in without a PIN, otherwise active", () => {
+    expect(personStatus(person({ status: "locked" }))).toBe("locked");
+    expect(personStatus(person({ active: false }))).toBe("blocked");
+    expect(personStatus(person({ hasPin: false }))).toBe("not_signed_in");
+    expect(personStatus(person())).toBe("active");
   });
 });
 
@@ -213,7 +214,12 @@ describe("validatePerson", () => {
     email: "amina@example.co.ke",
     vehicleIds: ["v1"],
   };
-  const ctx = { rolesLoaded: true, assignableCount: 1, permissions: ["a"] };
+  const ctx = {
+    rolesLoaded: true,
+    assignableCount: 1,
+    permissions: ["a"],
+    today: "2026-10-12",
+  };
 
   const cases: [string, Partial<typeof ready>, Partial<typeof ctx>, object][] =
     [
@@ -234,7 +240,7 @@ describe("validatePerson", () => {
         "an email without a domain",
         { email: "amina@example" },
         {},
-        { email: "Enter an email address like name@company.co.ke" },
+        { email: "Enter the email that receives codes." },
       ],
       [
         "no role to assign once roles are loaded",
@@ -252,13 +258,13 @@ describe("validatePerson", () => {
         "companies scope with none ticked",
         { scopeMode: "companies", companyIds: [] },
         {},
-        { scope: "Tick at least one company." },
+        { scope: "Pick at least one vehicle this person can see." },
       ],
       [
         "vehicles scope with none ticked",
         { vehicleIds: [] },
         {},
-        { scope: "Tick at least one vehicle." },
+        { scope: "Pick at least one vehicle this person can see." },
       ],
       [
         "all scope needs no ticks",
@@ -318,6 +324,7 @@ describe("personPayload", () => {
       vehicleIds: [],
       permissions: ["a"],
       approvalLimit: 5000,
+      backLimit: { mode: "days", count: 7, from: null },
       version: 3,
     });
   });

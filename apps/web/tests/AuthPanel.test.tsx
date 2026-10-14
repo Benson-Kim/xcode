@@ -1,237 +1,367 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { AuthError } from "@xcode/shared/auth";
 
 import { AuthPanel } from "../components/AuthPanel";
-import { PinInput } from "../components/PinInput";
-import { authApi } from "../lib/api";
-import { restoreSession } from "../lib/session";
+import { authApi, readDevice } from "../lib/api";
+import { readSession, restoreSession } from "../lib/session";
+import { appearanceFixture } from "./fixtures";
 
-vi.mock("../lib/api", () => ({ authApi: vi.fn() }));
+vi.mock("../lib/api", () => ({ authApi: vi.fn(), readDevice: vi.fn() }));
 vi.mock("../lib/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/session")>()),
   restoreSession: vi.fn(),
+  readSession: vi.fn(),
 }));
+
+const session = {
+  userId: "me",
+  firstName: "Antony",
+  lastName: "Maina",
+  role: "Owner",
+  permissions: [],
+};
+
 beforeEach(() => {
   vi.mocked(authApi).mockReset();
+  vi.mocked(readDevice).mockReset();
+  vi.mocked(readDevice).mockResolvedValue({ trusted: false });
   vi.mocked(restoreSession).mockResolvedValue(false);
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      headers: new Headers(),
-      json: async () => ({
-        firstName: "Test",
-        lastName: "User",
-        role: "Owner",
-        permissions: [],
-      }),
-    }),
-  );
+  vi.mocked(readSession).mockResolvedValue(session);
+  vi.stubGlobal("fetch", stubApp());
 });
 
-it("PIN input validates repeated and sequential new PINs without rejecting existing sign-in PINs", () => {
-  const { rerender } = render(
-    <PinInput value="1111" onChange={() => {}} newPin />,
-  );
-  expect(screen.getByLabelText("New PIN")).toHaveAttribute(
-    "aria-invalid",
-    "true",
-  );
-  rerender(<PinInput value="4321" onChange={() => {}} newPin />);
-  expect(screen.getByLabelText("New PIN")).toHaveAttribute(
-    "aria-invalid",
-    "true",
-  );
-  rerender(<PinInput value="5826" onChange={() => {}} newPin />);
-  expect(screen.getByLabelText("New PIN")).toHaveAttribute(
-    "aria-invalid",
-    "false",
-  );
-});
+// The app behind the sign-in: the session, the appearance (with the idle limit given) and empty lists.
+function stubApp(idleUnlockSeconds?: number) {
+  return vi.fn(async (input: string) => {
+    const body = input.includes("/auth/session")
+      ? session
+      : input.includes("appearance")
+        ? { ...appearanceFixture("2026-10-12"), idleUnlockSeconds }
+        : input.includes("trusted-devices")
+          ? []
+          : { items: [], pageNumber: 1, pageSize: 100, total: 0 };
+    return new Response(JSON.stringify(body), { status: 200 });
+  });
+}
 
-// The sign-in form appears once the page has checked for an existing session.
 async function renderPanel() {
   render(<AuthPanel />);
   await screen.findByRole("heading", { name: "Sign in" });
 }
 
-function fillSignIn() {
+const refused = (status: string, httpStatus: number, extra = {}) =>
+  new AuthError({ status, ...extra } as never, httpStatus);
+
+function typeNumber(value = "0733 520 614") {
   fireEvent.change(screen.getByLabelText("Mobile number"), {
-    target: { value: "+254712345678" },
+    target: { value },
   });
-  fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "5826" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 }
 
-it("AUTH-13 sends new devices through verification before showing a session", async () => {
+it("asks for the mobile number alone, then the PIN, which submits itself on the fourth digit", async () => {
   vi.mocked(authApi)
-    .mockResolvedValueOnce({ status: "verification_required" })
+    .mockResolvedValueOnce({ status: "pin_required" })
     .mockResolvedValueOnce({ status: "authenticated" });
   await renderPanel();
-  fillSignIn();
-  expect(
-    await screen.findByRole("heading", { name: "Check your email" }),
-  ).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("6 digit code"), {
-    target: { value: "123456" },
-  });
-  fireEvent.click(screen.getByLabelText(/^Remember this device/));
-  fireEvent.click(screen.getByRole("button", { name: "Confirm code" }));
+  expect(screen.queryByLabelText("PIN")).not.toBeInTheDocument();
+  typeNumber();
+  expect(await screen.findByLabelText("PIN")).toBeInTheDocument();
+  expect(authApi).toHaveBeenCalledWith("start", { phoneNumber: "0733520614" });
+  // On a device that is not trusted the PIN step shows the number only, never a name.
+  expect(screen.getByText("0733 520 614")).toBeInTheDocument();
+  expect(screen.queryByText("Antony Maina")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "482" } });
+  expect(authApi).toHaveBeenCalledTimes(1);
+  fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "4826" } });
+  await waitFor(() =>
+    expect(authApi).toHaveBeenLastCalledWith("pin", {
+      phoneNumber: "0733520614",
+      pin: "4826",
+    }),
+  );
   expect(
     await screen.findByRole("heading", { name: "Dashboard" }),
   ).toBeInTheDocument();
-  expect(authApi).toHaveBeenLastCalledWith("verify-device", {
-    phoneNumber: "+254712345678",
-    pin: "",
-    code: "123456",
-    rememberDevice: true,
+});
+
+it("refuses a number that is not ten digits before asking the server", async () => {
+  await renderPanel();
+  typeNumber("0733");
+  expect(
+    await screen.findByText("Enter your 10 digit mobile number."),
+  ).toBeInTheDocument();
+  expect(authApi).not.toHaveBeenCalled();
+});
+
+it("says a wrong PIN with the tries left, then that the PIN is locked, with Reset PIN as the only way on", async () => {
+  vi.mocked(authApi)
+    .mockResolvedValueOnce({ status: "pin_required" })
+    .mockRejectedValueOnce(
+      refused("authentication_failed", 401, { triesLeft: 1 }),
+    )
+    .mockRejectedValueOnce(refused("pin_locked", 423))
+    .mockResolvedValueOnce({
+      status: "verification_required",
+      purpose: "pin_reset",
+    });
+  await renderPanel();
+  typeNumber();
+  const pin = await screen.findByLabelText("PIN");
+  fireEvent.change(pin, { target: { value: "1111" } });
+  expect(await screen.findByText("Wrong PIN. 1 try left.")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "2222" } });
+  expect(
+    await screen.findByText("Too many wrong PINs. Reset your PIN to sign in."),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("PIN")).toBeDisabled();
+  expect(
+    screen.queryByRole("button", { name: "Forgot PIN" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Reset PIN" }));
+  expect(
+    await screen.findByRole("heading", { name: "Reset PIN" }),
+  ).toBeInTheDocument();
+  expect(authApi).toHaveBeenLastCalledWith("pin/forgot", {
+    phoneNumber: "0733520614",
   });
 });
 
-it("resends a device code by repeating the sign-in that produced it, never with an empty PIN", async () => {
-  vi.mocked(authApi).mockResolvedValue({ status: "verification_required" });
+it("confirms a new device with a code, ticks Trust this device by default, and the code submits on the sixth digit", async () => {
+  vi.mocked(authApi)
+    .mockResolvedValueOnce({ status: "pin_required" })
+    .mockResolvedValueOnce({
+      status: "verification_required",
+      purpose: "new_device",
+      maskedEmail: "m•••a@zurigenesis.co.ke",
+    })
+    .mockResolvedValueOnce({ status: "authenticated" });
   await renderPanel();
-  fillSignIn();
-  await screen.findByRole("heading", { name: "Check your email" });
+  typeNumber();
+  fireEvent.change(await screen.findByLabelText("PIN"), {
+    target: { value: "4826" },
+  });
+  expect(
+    await screen.findByRole("heading", { name: "Confirm this device" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("m•••a@zurigenesis.co.ke")).toBeInTheDocument();
+  expect(screen.getByLabelText("Trust this device")).toBeChecked();
+  fireEvent.change(screen.getByLabelText("6 digit code"), {
+    target: { value: "123456" },
+  });
+  await waitFor(() =>
+    expect(authApi).toHaveBeenLastCalledWith("code", {
+      phoneNumber: "0733520614",
+      purpose: "new_device",
+      code: "123456",
+      trustDevice: true,
+    }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Dashboard" }),
+  ).toBeInTheDocument();
+});
+
+it("takes a first sign in through a code to choosing a PIN, checked on screen before it is sent", async () => {
+  vi.mocked(authApi)
+    .mockResolvedValueOnce({
+      status: "verification_required",
+      purpose: "first_setup",
+      maskedEmail: "m•••y@zurigenesis.co.ke",
+    })
+    .mockResolvedValueOnce({ status: "code_verified" })
+    .mockRejectedValueOnce(refused("invalid_pin", 400, { pinProblem: "weak" }))
+    .mockResolvedValueOnce({ status: "authenticated" });
+  await renderPanel();
+  typeNumber("0705337482");
+  expect(
+    await screen.findByRole("heading", { name: "First sign in" }),
+  ).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("6 digit code"), {
+    target: { value: "654321" },
+  });
+  expect(
+    await screen.findByRole("heading", { name: "Choose your PIN" }),
+  ).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("New PIN"), {
+    target: { value: "1234" },
+  });
+  fireEvent.change(screen.getByLabelText("Repeat PIN"), {
+    target: { value: "1235" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save and sign in" }));
+  expect(
+    await screen.findByText("The two PINs do not match."),
+  ).toBeInTheDocument();
+  expect(authApi).toHaveBeenCalledTimes(2);
+  fireEvent.change(screen.getByLabelText("Repeat PIN"), {
+    target: { value: "1234" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save and sign in" }));
+  expect(
+    await screen.findByText("Choose a PIN that is harder to guess."),
+  ).toBeInTheDocument();
+  expect(authApi).toHaveBeenLastCalledWith("pin/new", {
+    phoneNumber: "0705337482",
+    purpose: "first_setup",
+    code: "654321",
+    pin: "1234",
+    trustDevice: true,
+  });
+  fireEvent.change(screen.getByLabelText("New PIN"), {
+    target: { value: "4826" },
+  });
+  fireEvent.change(screen.getByLabelText("Repeat PIN"), {
+    target: { value: "4826" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save and sign in" }));
+  expect(
+    await screen.findByRole("heading", { name: "Dashboard" }),
+  ).toBeInTheDocument();
+});
+
+it("says when a wrong code was the last try and a new one has been sent, and sends a new code on request", async () => {
+  vi.mocked(authApi)
+    .mockResolvedValueOnce({
+      status: "verification_required",
+      purpose: "first_setup",
+    })
+    .mockResolvedValueOnce({ status: "code_resent" })
+    .mockResolvedValueOnce({ status: "verification_required" });
+  await renderPanel();
+  typeNumber();
+  fireEvent.change(await screen.findByLabelText("6 digit code"), {
+    target: { value: "000000" },
+  });
+  expect(
+    await screen.findByText("Wrong code. A new code has been sent."),
+  ).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Send a new code" }));
-  await waitFor(() => expect(authApi).toHaveBeenCalledTimes(2));
-  expect(authApi).toHaveBeenLastCalledWith(
-    "sign-in",
-    expect.objectContaining({ phoneNumber: "+254712345678", pin: "5826" }),
+  await waitFor(() =>
+    expect(authApi).toHaveBeenLastCalledWith("code/resend", {
+      phoneNumber: "0733520614",
+      purpose: "first_setup",
+    }),
   );
-});
-
-it("returns to sign-in when the session can no longer be refreshed", async () => {
-  vi.mocked(authApi).mockResolvedValueOnce({ status: "authenticated" });
-  await renderPanel();
-  fillSignIn();
-  await screen.findByRole("heading", { name: "Dashboard" });
-  window.dispatchEvent(new Event("xcode:session-expired"));
   expect(
-    await screen.findByRole("heading", { name: "Sign in" }),
+    await screen.findByText("A new code has been sent."),
   ).toBeInTheDocument();
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "Your session has ended. Sign in again.",
-  );
 });
 
-it("accepts existing PINs of up to eight digits", () => {
-  render(<PinInput value="58264913" onChange={() => {}} />);
-  const input = screen.getByLabelText("PIN");
-  expect(input).toHaveAttribute("maxLength", "8");
-  expect(input).toHaveAttribute("pattern", "[0-9]{4,8}");
-});
-
-it("AUTH-03 displays remaining pause time and keeps PIN reset available", async () => {
-  vi.mocked(authApi).mockRejectedValue(
-    new AuthError({ status: "paused", retryAfterSeconds: 900 }, 423),
-  );
-  await renderPanel();
-  fillSignIn();
-  expect(await screen.findByRole("timer")).toHaveTextContent("15:00");
-  expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", { name: "Forgot PIN" }));
-  expect(screen.getByRole("button", { name: "Send code" })).not.toBeDisabled();
-});
-
-it.each([
-  ["First time here?", "setup-pin"],
-  ["Forgot PIN", "pin-reset"],
-])("%s requires code before submitting a new PIN", async (label, operation) => {
+it("starts at the PIN with the person's name on a trusted device, and returns there after sign out", async () => {
+  vi.mocked(readDevice).mockResolvedValue({
+    trusted: true,
+    phoneNumber: "0733520614",
+    firstName: "Antony",
+    lastName: "Maina",
+    role: "Owner",
+  });
   vi.mocked(authApi)
-    .mockResolvedValueOnce({ status: "check_email" })
-    .mockResolvedValueOnce({ status: "code_verified" })
-    .mockResolvedValueOnce({ status: "authenticated" });
-
-  await renderPanel();
-  fireEvent.click(screen.getByRole("button", { name: label }));
-  fireEvent.change(screen.getByLabelText("Mobile number"), {
-    target: { value: "+254712345678" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Send code" }));
-  expect(await screen.findByLabelText("6 digit code")).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("6 digit code"), {
-    target: { value: "123456" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Confirm code" }));
-  await waitFor(() => expect(authApi).toHaveBeenCalledTimes(2));
-  const pin = await screen.findByLabelText("New PIN");
-  fireEvent.change(pin, { target: { value: "6942" } });
-  fireEvent.change(screen.getByLabelText("Type it again"), {
-    target: { value: "6942" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Save PIN" }));
-  expect(
-    await screen.findByRole("heading", { name: "Dashboard" }),
-  ).toBeInTheDocument();
-  expect(authApi).toHaveBeenLastCalledWith(`${operation}/complete`, {
-    phoneNumber: "+254712345678",
-    pin: "6942",
-    code: "123456",
-    rememberDevice: false,
-  });
-});
-
-it("never keeps or shows a PIN someone just chose", async () => {
-  // Signed in, the app shell also loads the organization's appearance; this test has none.
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: string) =>
-      url.includes("/auth/session")
-        ? {
-            ok: true,
-            status: 200,
-            headers: new Headers(),
-            json: async () => ({
-              firstName: "Test",
-              lastName: "User",
-              role: "Owner",
-              permissions: [],
-            }),
-          }
-        : {
-            ok: false,
-            status: 404,
-            headers: new Headers(),
-            json: async () => ({}),
-          },
-    ),
-  );
-  vi.mocked(authApi)
-    .mockResolvedValueOnce({ status: "check_email" })
-    .mockResolvedValueOnce({ status: "code_verified" })
     .mockResolvedValueOnce({ status: "authenticated" })
     .mockResolvedValueOnce({ status: "signed_out" });
-  await renderPanel();
-  fireEvent.click(screen.getByRole("button", { name: "First time here?" }));
-  // One of the demo numbers the sign-in page lists.
-  fireEvent.change(screen.getByLabelText("Mobile number"), {
-    target: { value: "0712 345 678" },
+  render(<AuthPanel />);
+  expect(await screen.findByText("Antony Maina")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Mobile number")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "4826" } });
+  expect(
+    await screen.findByRole("heading", { name: "Dashboard" }),
+  ).toBeInTheDocument();
+  expect(authApi).toHaveBeenCalledWith("pin", {
+    phoneNumber: "0733520614",
+    pin: "4826",
   });
-  fireEvent.click(screen.getByRole("button", { name: "Send code" }));
-  fireEvent.change(await screen.findByLabelText("6 digit code"), {
-    target: { value: "123456" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Confirm code" }));
-  fireEvent.change(await screen.findByLabelText("New PIN"), {
-    target: { value: "6942" },
-  });
-  fireEvent.change(screen.getByLabelText("Type it again"), {
-    target: { value: "6942" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Save PIN" }));
-  await screen.findByRole("heading", { name: "Dashboard" });
-
-  const userMenu = await waitFor(() =>
-    document.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!,
-  );
-  fireEvent.click(userMenu);
+  fireEvent.click(screen.getByRole("button", { name: "Antony Maina" }));
   fireEvent.click(await screen.findByRole("menuitem", { name: "Sign out" }));
-  await screen.findByRole("heading", { name: "Sign in" });
-  expect(screen.getByText("Revenue clerk: 0712 345 678")).toBeInTheDocument();
-  expect(document.body).not.toHaveTextContent("6942");
+  expect(await screen.findByLabelText("PIN")).toBeInTheDocument();
+  expect(
+    within(document.querySelector(".signin")!).getByText("Antony Maina"),
+  ).toBeInTheDocument();
+});
+
+it("forgets the name once the server asks a trusted device for a code again", async () => {
+  vi.mocked(readDevice).mockResolvedValue({
+    trusted: true,
+    phoneNumber: "0733520614",
+    firstName: "Antony",
+    lastName: "Maina",
+    role: "Owner",
+  });
+  vi.mocked(authApi).mockResolvedValueOnce({
+    status: "verification_required",
+    purpose: "new_device",
+    maskedEmail: "m•••a@zurigenesis.co.ke",
+  });
+  render(<AuthPanel />);
+  fireEvent.change(await screen.findByLabelText("PIN"), {
+    target: { value: "4826" },
+  });
+  expect(
+    await screen.findByRole("heading", { name: "Confirm this device" }),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  expect(await screen.findByLabelText("Mobile number")).toBeInTheDocument();
+});
+
+it("blocks a refused number at the number step", async () => {
+  vi.mocked(authApi).mockRejectedValueOnce(refused("blocked", 403));
+  await renderPanel();
+  typeNumber();
+  expect(
+    await screen.findByText("This number is blocked. Speak to the office."),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("Mobile number")).toBeInTheDocument();
+});
+
+it("asks for the PIN again after a while without activity, keeping the app underneath", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    vi.mocked(restoreSession).mockResolvedValue(true);
+    vi.mocked(readDevice).mockResolvedValue({
+      trusted: true,
+      phoneNumber: "0733520614",
+      firstName: "Antony",
+      lastName: "Maina",
+      role: "Owner",
+    });
+    vi.stubGlobal("fetch", stubApp(60));
+    vi.mocked(authApi).mockResolvedValueOnce({ status: "authenticated" });
+    render(<AuthPanel />);
+    expect(
+      await screen.findByRole("heading", { name: "Dashboard" }),
+    ).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+    });
+    expect(await screen.findByLabelText("PIN")).toBeInTheDocument();
+    expect(
+      within(document.querySelector(".signin")!).getByText("Antony Maina"),
+    ).toBeInTheDocument();
+    // The app is still there, inert, under the PIN screen.
+    expect(
+      screen.getByRole("heading", { name: "Dashboard", hidden: true }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("PIN"), {
+      target: { value: "4826" },
+    });
+    await waitFor(() =>
+      expect(screen.queryByLabelText("PIN")).not.toBeInTheDocument(),
+    );
+    expect(authApi).toHaveBeenLastCalledWith("pin", {
+      phoneNumber: "0733520614",
+      pin: "4826",
+    });
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("picks the session back up after a page refresh", async () => {
@@ -240,29 +370,18 @@ it("picks the session back up after a page refresh", async () => {
   expect(
     await screen.findByRole("heading", { name: "Dashboard" }),
   ).toBeInTheDocument();
-  expect(screen.queryByLabelText("Mobile number")).not.toBeInTheDocument();
   expect(authApi).not.toHaveBeenCalled();
 });
 
-it("submits and keeps credentials the browser autofilled without input events", async () => {
-  vi.mocked(authApi).mockRejectedValue(
-    new AuthError({ status: "authentication_failed" }, 401),
-  );
-  await renderPanel();
-  // Autofill sets the field values directly; React sees no change event.
-  const phone = screen.getByLabelText("Mobile number") as HTMLInputElement;
-  const pin = screen.getByLabelText("PIN") as HTMLInputElement;
-  phone.value = "+254712345678";
-  pin.value = "5826";
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-
-  await waitFor(() =>
-    expect(authApi).toHaveBeenCalledWith(
-      "sign-in",
-      expect.objectContaining({ phoneNumber: "+254712345678", pin: "5826" }),
-    ),
-  );
-  await screen.findByRole("alert");
-  expect(phone).toHaveValue("+254712345678");
-  expect(pin).toHaveValue("5826");
+it("returns to sign-in when the session can no longer be refreshed", async () => {
+  vi.mocked(restoreSession).mockResolvedValue(true);
+  render(<AuthPanel />);
+  await screen.findByRole("heading", { name: "Dashboard" });
+  act(() => {
+    window.dispatchEvent(new Event("xcode:session-expired"));
+  });
+  expect(
+    await screen.findByText("Your session has ended. Sign in again."),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("Mobile number")).toBeInTheDocument();
 });

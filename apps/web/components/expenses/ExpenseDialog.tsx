@@ -4,7 +4,6 @@ import { useId, useState, type FormEvent } from "react";
 
 import {
   EXPENSE_ENTRIES_PATH,
-  EXPENSE_NOTE_LIMIT,
   expenseEntryPath,
   expenseTotal,
   type ChangeExpense,
@@ -20,13 +19,16 @@ import {
   parsePettyCashUnits,
 } from "@xcode/shared/pettyCash";
 
+import { useResource } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
+import type { MyScope } from "../../lib/types";
+import { DateStep } from "../pettycash/DateStep";
 import { DialogFooter, FormDialog } from "../pettycash/DialogFooter";
 import { itemOptions } from "../pettycash/itemOptions";
 import { newEntryId, sendJson } from "../pettycash/request";
 import { useDialogAction } from "../pettycash/useDialogAction";
-import { Banner, Button, Field, TextInput } from "../ui";
-import { DateAndVehicle, PurchaseFields } from "./PurchaseFields";
+import { Banner, Button } from "../ui";
+import { PurchaseFields, VehicleField } from "./PurchaseFields";
 import { SplitRows, splitState, type Split } from "./SplitRows";
 import { isDateShape, useExpenseChoices } from "./useExpenseChoices";
 
@@ -113,24 +115,6 @@ const dateProblemOf = (date: string, businessDate: string) =>
       ? "The date cannot be after today."
       : "";
 
-function NoteField({
-  note,
-  onNote,
-}: {
-  note: string;
-  onNote: (note: string) => void;
-}) {
-  return (
-    <Field id="ex-note" label="Note" hint="Optional.">
-      <TextInput
-        maxLength={EXPENSE_NOTE_LIMIT}
-        value={note}
-        onChange={(event) => onNote(event.target.value)}
-      />
-    </Field>
-  );
-}
-
 function ExpenseForm({
   entry,
   startDate,
@@ -153,18 +137,22 @@ function ExpenseForm({
   const [itemId, setItemId] = useState(entry?.expenseItemId ?? "");
   const [units, setUnits] = useState(String(entry?.units ?? 1));
   const [cost, setCost] = useState(entry ? String(entry.unitAmount) : "");
-  const [note, setNote] = useState(entry?.note ?? "");
   const [vehicleId, setVehicleId] = useState(entry?.vehicleId ?? "");
   const [splits, setSplits] = useState<Split[] | null>(null);
   const { saving, error, run } = useDialogAction(onConflict);
   const formId = useId();
+  // The earliest day this person may still change (the back-dating limit, v2.32): the date control stops there,
+  // and a new expense started from an older day opens on it.
+  const scope = useResource<MyScope>("setup/access/me");
+  const earliest = scope.data?.earliest ?? null;
+  const day = !entry && earliest && date < earliest ? earliest : date;
 
   const {
     vehicleChoices,
     vehicleOptions,
     itemChoices,
     error: choicesError,
-  } = useExpenseChoices(date, entry);
+  } = useExpenseChoices(day, entry);
 
   const parsedCost = parsePettyCashAmount(cost);
   const count = parsePettyCashUnits(units);
@@ -172,7 +160,7 @@ function ExpenseForm({
     parsedCost.ok && count !== null
       ? expenseTotal(count, parsedCost.amount)
       : null;
-  const dateProblem = dateProblemOf(date, businessDate);
+  const dateProblem = dateProblemOf(day, businessDate);
   const unitsProblem =
     units.trim() && count === null ? PETTY_CASH_UNITS_ERROR : "";
   const costProblem = cost.trim() && !parsedCost.ok ? parsedCost.error : "";
@@ -188,16 +176,15 @@ function ExpenseForm({
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!valid || !parsedCost.ok || count === null || total === null) return;
-    const text = note.trim() || null;
 
     void run(async () => {
       await saveExpense(entry, newId, {
-        date,
+        date: day,
         vehicleId,
         expenseItemId: itemId,
         units: count,
         unitAmount: parsedCost.amount,
-        note: text,
+        note: null,
         allocations: split
           ? splits!.map((row, at) => ({
               vehicleId: row.vehicleId,
@@ -221,25 +208,29 @@ function ExpenseForm({
       className="flex flex-col gap-3.5"
     >
       {choicesError && <Banner>{choicesError}</Banner>}
-      <DateAndVehicle
-        date={date}
-        businessDate={businessDate}
-        dateProblem={dateProblem}
-        onDate={setDate}
-        split={Boolean(splits)}
-        vehicleId={vehicleId}
-        vehicleOptions={vehicleOptions}
-        onVehicle={setVehicleId}
-        onSplit={
-          entry
-            ? undefined
-            : () =>
-                setSplits([
-                  { vehicleId, amount: "" },
-                  { vehicleId: "", amount: "" },
-                ])
-        }
+      <DateStep
+        date={day}
+        earliest={earliest}
+        latest={businessDate}
+        onChange={setDate}
       />
+      {dateProblem && <div className="ferr">{dateProblem}</div>}
+      {!splits && (
+        <VehicleField
+          vehicleId={vehicleId}
+          options={vehicleOptions}
+          onVehicle={setVehicleId}
+          onSplit={
+            entry
+              ? undefined
+              : () =>
+                  setSplits([
+                    { vehicleId, amount: "" },
+                    { vehicleId: "", amount: "" },
+                  ])
+          }
+        />
+      )}
       <PurchaseFields
         itemId={itemId}
         onItem={setItemId}
@@ -250,7 +241,6 @@ function ExpenseForm({
         cost={cost}
         onCost={setCost}
         costProblem={costProblem}
-        group={entry?.group ?? null}
         total={total}
       />
       {splits && (
@@ -265,7 +255,6 @@ function ExpenseForm({
           }}
         />
       )}
-      <NoteField note={note} onNote={setNote} />
       {error && (
         <div className="ferr" role="alert">
           {error}

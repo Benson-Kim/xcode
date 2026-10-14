@@ -38,6 +38,7 @@ const running = {
   joinedOn: "2026-01-01",
   leftOn: null,
   active: true,
+  fleetNumber: "5",
 };
 
 // The vehicle list, as the API sends it after each save.
@@ -101,10 +102,10 @@ function serve(lists: unknown[][]) {
 
 const row = (registration: string) =>
   within(screen.getByRole("row", { name: new RegExp(registration) }));
-// The badge in the vehicle's Status cell.
+// The badge beside the plate of a vehicle that is not active; an active vehicle carries none.
 const status = (registration: string) =>
-  row(registration).getByText(/Active|Left|Joins/, {
-    selector: "td[data-label='Status'] > *",
+  row(registration).getByText(/Left|Joins|Leaves/, {
+    selector: "td[data-label='Registration'] > .chip",
   });
 
 it("tells a vehicle that has not joined yet from one that has left the fleet", async () => {
@@ -118,7 +119,24 @@ it("tells a vehicle that has not joined yet from one that has left the fleet", a
   await screen.findByRole("button", { name: /^(Edit|Open) KDA 482M$/ });
   expect(status("KDA 482M")).toHaveTextContent("Joins 3 Oct 2026");
   expect(status("KCY 117T")).toHaveTextContent("Left fleet 10 Sep 2026");
-  expect(status("KDG 905B")).toHaveTextContent("Active");
+  expect(
+    row("KDG 905B").queryByText(/Active|Left|Joins|Leaves/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getAllByRole("columnheader").map((header) => header.textContent),
+  ).toEqual([
+    "Registration",
+    "Fleet number",
+    "PSV company",
+    "Weekly target",
+    "Initial investment",
+    "Scheduled, September 2026",
+    "Actions",
+  ]);
+  expect(row("KDG 905B").getByText("5")).toHaveAttribute(
+    "data-label",
+    "Fleet number",
+  );
   // Leaving the fleet ends the target; a vehicle that has not joined yet keeps the one it starts on.
   expect(row("KCY 117T").getByTitle("Target ended")).toHaveTextContent("—");
   expect(row("KCY 117T").queryByText(/KES/)).not.toBeInTheDocument();
@@ -130,16 +148,7 @@ it("tells a vehicle that has not joined yet from one that has left the fleet", a
 });
 
 it("lets a vehicle that has not joined yet be edited, and shows what the server saved", async () => {
-  const moved = {
-    ...joining,
-    joinedOn: "2026-09-20",
-    active: true,
-    weeklyTarget: 16000,
-    targets: [
-      { effectiveFrom: "2026-09-20", weeklyAmount: 16000, revision: 2 },
-      { effectiveFrom: "2026-09-20", weeklyAmount: 15000, revision: 1 },
-    ],
-  };
+  const moved = { ...joining, fleetNumber: "14", initialInvestment: 900000 };
   const fetchMock = serve([[joining], [moved]]);
   renderInApp(
     <VehiclesPage />,
@@ -154,11 +163,13 @@ it("lets a vehicle that has not joined yet be edited, and shows what the server 
     screen.getByText("KDA 482M · North Star · Joins 3 Oct 2026"),
   ).toBeInTheDocument();
   expect(
-    screen.getByText(
-      "Joins the fleet on 3 Oct 2026, after the business date. To save a change, set a join date on or before 21 Sep 2026.",
-    ),
+    screen.getByText("Joins the fleet on 3 Oct 2026, after the business date."),
   ).toBeInTheDocument();
-  expect(screen.getByLabelText("Weekly target")).toBeEnabled();
+  expect(screen.getByLabelText("Fleet number")).toBeEnabled();
+  expect(screen.queryByLabelText("Weekly target")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("In the fleet from")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Registration")).not.toBeInTheDocument();
+  expect(screen.queryByText("Target history")).not.toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "Restore to active fleet" }),
   ).not.toBeInTheDocument();
@@ -169,26 +180,33 @@ it("lets a vehicle that has not joined yet be edited, and shows what the server 
     screen.getByText("It can leave the fleet once it has joined."),
   ).toBeInTheDocument();
 
-  fireEvent.change(screen.getByLabelText("In the fleet from"), {
-    target: { value: "2026-09-20" },
+  fireEvent.change(screen.getByLabelText("Fleet number"), {
+    target: { value: "14" },
   });
-  fireEvent.change(screen.getByLabelText("Weekly target"), {
-    target: { value: "16000" },
+  fireEvent.change(screen.getByLabelText("Initial investment, KES"), {
+    target: { value: "900000" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/setup/vehicles/joining",
-      expect.objectContaining({ method: "PUT" }),
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          companyId: "company-1",
+          joinedOn: "2026-10-03",
+          fleetNumber: "14",
+          initialInvestment: 900000,
+        }),
+      }),
     ),
   );
 
-  // The editor shows the vehicle as the server now has it: in the fleet, with its new target history.
-  expect(await screen.findByText("Target history")).toBeInTheDocument();
-  expect(screen.queryByText(/Joins 3 Oct 2026/)).not.toBeInTheDocument();
+  // The editor shows the vehicle as the server now has it, named by its registration and fleet number.
   expect(
-    screen.getByRole("button", { name: "Retire vehicle" }),
+    await screen.findByText("KDA 482M · 14 · North Star · Joins 3 Oct 2026"),
   ).toBeInTheDocument();
+  expect(screen.getByLabelText("Fleet number")).toHaveValue("14");
 });
 
 it("keeps a retired vehicle read-only until it is restored, and reloads it after retiring", async () => {
@@ -206,7 +224,9 @@ it("keeps a retired vehicle read-only until it is restored, and reloads it after
   fireEvent.click(
     await screen.findByRole("button", { name: /^(Edit|Open) KCY 117T$/ }),
   );
-  expect(screen.getByLabelText("Weekly target")).toBeDisabled();
+  expect(screen.getByLabelText("Fleet number")).toBeDisabled();
+  expect(screen.getByLabelText("PSV company")).toBeDisabled();
+  expect(screen.getByLabelText("Initial investment, KES")).toBeDisabled();
   expect(
     screen.getByRole("button", { name: "Restore to active fleet" }),
   ).toBeInTheDocument();
@@ -225,8 +245,8 @@ it("keeps a retired vehicle read-only until it is restored, and reloads it after
   expect(
     await screen.findByText("Left the fleet on 21 Sep 2026."),
   ).toBeInTheDocument();
-  // The form keeps the target the server has.
-  expect(screen.getByLabelText("Weekly target")).toHaveValue("15,000");
+  // The form keeps the fleet number the server has.
+  expect(screen.getByLabelText("Fleet number")).toHaveValue("5");
 });
 
 // D4: restoring a vehicle whose leave already took effect records the days it was away, so the editor has to say
@@ -252,11 +272,6 @@ it("restores a retired vehicle on a chosen date and lists the days it was away",
   expect(screen.getByLabelText("Returns to the fleet")).toHaveValue(
     "2026-09-21",
   );
-  expect(
-    screen.getByText(
-      "10 to 20 Sep 2026 is recorded as time away: those days are neither expected nor missing.",
-    ),
-  ).toBeInTheDocument();
 
   fireEvent.click(
     screen.getByRole("button", { name: "Restore to active fleet" }),
@@ -277,7 +292,7 @@ it("restores a retired vehicle on a chosen date and lists the days it was away",
   expect(screen.getByText("10 to 20 Sep 2026")).toBeInTheDocument();
   expect(screen.getByText("Back on 21 Sep 2026")).toBeInTheDocument();
   // Back in the fleet, so it can be edited and retired again.
-  expect(screen.getByLabelText("Weekly target")).toBeEnabled();
+  expect(screen.getByLabelText("Fleet number")).toBeEnabled();
   expect(
     screen.getByRole("button", { name: "Retire vehicle" }),
   ).toBeInTheDocument();
@@ -297,9 +312,6 @@ it("says a return on the day it left undoes the leave instead of recording time 
   fireEvent.change(screen.getByLabelText("Returns to the fleet"), {
     target: { value: "2026-09-10" },
   });
-  expect(
-    screen.getByText("Returning on the day it left undoes the leave outright."),
-  ).toBeInTheDocument();
 
   fireEvent.click(
     screen.getByRole("button", { name: "Restore to active fleet" }),
@@ -353,13 +365,8 @@ it("says a share for a vehicle that is not in the fleet today does not post, wit
     { businessDate },
   );
 
-  expect(
-    screen.getByLabelText("KDA 482M (not in the fleet today)"),
-  ).toBeChecked();
-  expect(
-    screen.getByText(
-      /KDA 482M is not in the fleet today, so its share stays in the total but does not post/,
-    ),
-  ).toBeInTheDocument();
+  // The vehicle stays ticked but cannot be changed while it is out of the fleet.
+  expect(screen.getByLabelText("KDA 482M")).toBeChecked();
+  expect(screen.getByLabelText("KDA 482M")).toBeDisabled();
   expect(screen.queryByText(/left the fleet/i)).not.toBeInTheDocument();
 });

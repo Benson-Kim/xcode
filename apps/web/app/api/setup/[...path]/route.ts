@@ -95,7 +95,7 @@ async function proxy(
     return NextResponse.json({ status: "invalid_request" }, { status: 404 });
   const operation = path.map(encodeURIComponent).join("/");
   if (
-    !/^(companies|vehicles|recurring|revenue|pettycash|expenses|reports|expense-categories|expense-items|investment|history|preferences|appearance|organization\/logo|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy|businessDate)|access\/(catalog|me|roles|scope-options)|people)(\/[^/]+)*$/.test(
+    !/^(companies|vehicles|vehicle-targets|recurring|revenue|pettycash|expenses|reports|expense-categories|expense-main-categories|expense-items|investment|history|preferences|appearance|organization\/logo|organization\/settings|organization\/settings\/(organization|localization|branding|securityPolicy|businessDate|revenue)|access\/(catalog|me|roles|scope-options)|people)(\/[^/]+)*$/.test(
       operation,
     )
   )

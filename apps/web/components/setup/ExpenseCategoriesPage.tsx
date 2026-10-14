@@ -2,586 +2,410 @@
 
 import { useState } from "react";
 
-import { plural } from "@xcode/shared/format";
-
-import { apiRequest, streamError, useStreamedList } from "../../lib/data";
+import { streamError, useStreamedList } from "../../lib/data";
+import {
+  catalogApi,
+  EXPENSE_CATEGORIES_PATH,
+  EXPENSE_MAIN_CATEGORIES_PATH,
+} from "../../lib/endpoints/catalog";
 import { useFormats } from "../../lib/formats";
+import { useSession } from "../../lib/session-context";
 import type {
-  ExpenseBucket,
   ExpenseCategory,
   ExpenseItem,
+  ExpenseMainCategory,
 } from "../../lib/types";
 import {
   Banner,
   Button,
   DataTable,
-  Dialog,
-  Field,
-  Hint,
   PageHeader,
   RowAction,
-  SelectInput,
-  StatusBadge,
   Tabs,
   Td,
-  TextInput,
-  Toolbar,
   Tr,
   useToast,
 } from "../ui";
-import { expenseBucketNames } from "./shared";
+import {
+  CatalogDialog,
+  type CatalogForm,
+  type CatalogKind,
+} from "./CatalogDialog";
 
-type Kind = "category" | "item";
-type Status = "all" | "on" | "off";
-// A new category or item in the pop-up, or the row being changed in place.
-type Adding = {
-  kind: Kind;
-  name: string;
-  bucket: ExpenseBucket;
-  categoryId: string;
-  error: string;
+type Tab = "mains" | "cats" | "items";
+
+const NEW_LABELS: Record<Tab, string> = {
+  mains: "New main category",
+  cats: "New category",
+  items: "New item",
 };
-type Editing = {
-  kind: Kind;
-  id: string;
-  name: string;
-  bucket: ExpenseBucket;
-  error: string;
+const TAB_KIND: Record<Tab, CatalogKind> = {
+  mains: "main",
+  cats: "cat",
+  items: "item",
 };
 
-const buckets: ExpenseBucket[] = [1, 2, 3];
-const NAME_LIMIT = 100;
+const byName = (left: { name: string }, right: { name: string }) =>
+  left.name.localeCompare(right.name);
 
-// Expense categories, each counting in one of the three buckets, and the items people pick when they record an
-// expense or a scheduled cost. Changing them needs expenses.setup; expenses.view or commitments.view only reads them.
-export function ExpenseCategoriesPage({ canManage }: { canManage: boolean }) {
-  const categories = useStreamedList<ExpenseCategory>(
-    "setup/expense-categories",
-    100,
-  );
+// Expense items in three levels: main categories group categories, and categories group the items people pick when
+// they record an expense or a scheduled cost. Each level is changed with the catalog rights; catalog.view (or
+// expenses.view, scheduled.view) only reads them.
+export function ExpenseCategoriesPage({
+  canManage = false,
+}: {
+  canManage?: boolean;
+}) {
+  const { can } = useSession();
   const toast = useToast();
   const { formatDateOnly } = useFormats();
-  const [tab, setTab] = useState<"items" | "categories">("items");
-  const [status, setStatus] = useState<Status>("all");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [adding, setAdding] = useState<Adding | null>(null);
-  const [editing, setEditing] = useState<Editing | null>(null);
+  const categories = useStreamedList<ExpenseCategory>(
+    EXPENSE_CATEGORIES_PATH,
+    100,
+  );
+  const mains = useStreamedList<ExpenseMainCategory>(
+    EXPENSE_MAIN_CATEGORIES_PATH,
+    100,
+  );
+  const [tab, setTab] = useState<Tab>("items");
+  const [form, setForm] = useState<CatalogForm | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const shown = (active: boolean) =>
-    status === "all" || (status === "off") === !active;
-  // Grouped by the bucket each category counts in, then by name.
-  const sorted = [...categories.items].sort(
-    (left, right) =>
-      left.bucket - right.bucket || left.name.localeCompare(right.name),
+  // The released expenses.setup key stands for adding, editing and stopping together.
+  const manage = canManage || can("expenses.setup");
+  const canAdd = manage || can("catalog.add");
+  const canEdit = manage || can("catalog.edit");
+  const canStop = manage || can("catalog.stop");
+
+  const sortedCategories = [...categories.items].sort(byName);
+  const rows = sortedCategories.flatMap((category) =>
+    [...category.items].sort(byName).map((item) => ({ item, category })),
   );
-  const visibleCategories = sorted.filter((category) => shown(category.active));
-  const visibleItems = sorted
-    .filter(
-      (category) => categoryFilter === "all" || category.id === categoryFilter,
-    )
-    .flatMap((category) =>
-      [...category.items]
-        .sort((left, right) => left.name.localeCompare(right.name))
-        .map((item) => ({ item, category })),
-    )
-    .filter(({ item }) => shown(item.active));
+  const unset = categories.items.filter(
+    (category) => !category.mainCategoryId,
+  ).length;
+  const inUse = rows.filter(({ item }) => item.active).length;
+  const mainName = (category: ExpenseCategory) =>
+    category.mainCategoryName ??
+    mains.items.find((main) => main.id === category.mainCategoryId)?.name ??
+    null;
 
-  function clash(
-    kind: Kind,
-    name: string,
-    categoryId: string,
-    except?: string,
-  ) {
+  function open(kind: CatalogKind, id: string | null = null) {
+    const category = sortedCategories.find((candidate) => candidate.id === id);
+    const item = rows.find((row) => row.item.id === id)?.item;
+    const main = mains.items.find((candidate) => candidate.id === id);
+    setForm({
+      kind,
+      id,
+      name:
+        (kind === "main" ? main : kind === "cat" ? category : item)?.name ?? "",
+      link:
+        kind === "cat"
+          ? (category?.mainCategoryId ?? "")
+          : kind === "item"
+            ? (item?.categoryId ?? sortedCategories[0]?.id ?? "")
+            : "",
+      error: "",
+    });
+  }
+
+  function problem(current: CatalogForm, name: string) {
     const lower = name.toLowerCase();
-    if (kind === "category")
-      return sorted.some(
-        (category) =>
-          category.id !== except && category.name.toLowerCase() === lower,
+    const taken = (names: { id: string; name: string }[]) =>
+      names.some(
+        (other) =>
+          other.id !== current.id && other.name.toLowerCase() === lower,
       );
-    return (
-      sorted.find((category) => category.id === categoryId)?.items ?? []
-    ).some((item) => item.id !== except && item.name.toLowerCase() === lower);
+    const clash = `${name} is already here.`;
+    if (current.kind === "main")
+      return !name
+        ? "Enter the main category name."
+        : taken(mains.items)
+          ? clash
+          : "";
+    if (current.kind === "cat")
+      return !name
+        ? "Enter the category name."
+        : taken(categories.items)
+          ? clash
+          : "";
+    if (!name) return "Enter the item name.";
+    if (!current.link) return "Choose the category.";
+    return taken(
+      categories.items.find((category) => category.id === current.link)
+        ?.items ?? [],
+    )
+      ? clash
+      : "";
   }
 
-  function nameProblem(
-    kind: Kind,
-    name: string,
-    categoryId: string,
-    except?: string,
-  ) {
-    if (!name) return "Enter the name.";
-    if (kind === "item" && !categoryId) return "Add a category first.";
-    if (clash(kind, name, categoryId, except))
-      return kind === "category"
-        ? "That category already exists."
-        : "That item already exists in this category.";
-    return "";
-  }
-
-  async function send(path: string, method: string, body: object) {
+  async function submit(current: CatalogForm) {
+    const name = current.name.trim();
+    const refused = problem(current, name);
+    if (refused) return setForm({ ...current, error: refused });
+    const original =
+      current.kind === "main"
+        ? mains.items.find((main) => main.id === current.id)
+        : current.kind === "cat"
+          ? categories.items.find((category) => category.id === current.id)
+          : rows.find((row) => row.item.id === current.id)?.item;
+    const unchanged =
+      original !== undefined &&
+      name === original.name &&
+      (current.kind === "cat"
+        ? current.link === ((original as ExpenseCategory).mainCategoryId ?? "")
+        : current.kind === "item"
+          ? current.link === (original as ExpenseItem).categoryId
+          : true);
+    if (unchanged) return setForm(null);
     setBusy(true);
     try {
-      await apiRequest(path, { method, body: JSON.stringify(body) });
+      if (current.kind === "main")
+        await (current.id
+          ? catalogApi.renameMain(current.id, name)
+          : catalogApi.createMain(name));
+      else if (current.kind === "cat") {
+        const body = { name, mainCategoryId: current.link || null };
+        await (current.id
+          ? catalogApi.updateCategory(current.id, body)
+          : catalogApi.createCategory(body));
+      } else if (current.id) {
+        const moved = current.link !== (original as ExpenseItem).categoryId;
+        await catalogApi.updateItem(current.id, {
+          name,
+          ...(moved ? { categoryId: current.link } : {}),
+        });
+      } else await catalogApi.createItem(current.link, name);
+      toast(
+        current.id
+          ? "Saved"
+          : current.kind === "main"
+            ? "Main category added"
+            : current.kind === "cat"
+              ? "Category added"
+              : "Item added",
+      );
       categories.reload();
-      return "";
+      mains.reload();
+      setForm(null);
     } catch (value) {
-      return (value as Error).message;
+      setForm({ ...current, error: (value as Error).message });
     } finally {
       setBusy(false);
     }
   }
 
-  function openAdd(kind: Kind) {
+  async function toggle(item: ExpenseItem) {
+    // The stored stop date decides, not active: that follows the business date, so a stop dated ahead of it still needs resuming to cancel.
+    const stopped = Boolean(item.stoppedOn);
+    setBusy(true);
     setError("");
-    setAdding({
-      kind,
-      name: "",
-      bucket: 1,
-      categoryId:
-        categoryFilter !== "all"
-          ? categoryFilter
-          : (sorted.find((category) => category.active)?.id ?? ""),
-      error: "",
-    });
+    try {
+      await catalogApi.setItemStopped(item.id, !stopped);
+      toast(`${item.name} ${stopped ? "resumed" : "stopped"}.`);
+      categories.reload();
+      mains.reload();
+    } catch (value) {
+      setError((value as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function add() {
-    if (!adding) return;
-    const name = adding.name.trim();
-    const problem = nameProblem(adding.kind, name, adding.categoryId);
-    if (problem) return setAdding({ ...adding, error: problem });
-    const failed =
-      adding.kind === "category"
-        ? await send("setup/expense-categories", "POST", {
-            name,
-            bucket: adding.bucket,
-          })
-        : await send(
-            `setup/expense-categories/${adding.categoryId}/items`,
-            "POST",
-            { name },
-          );
-    if (failed) return setAdding({ ...adding, error: failed });
-    toast(`${name} added.`);
-    setTab(adding.kind === "category" ? "categories" : "items");
-    setAdding(null);
-  }
-
-  async function saveEdit(original: ExpenseCategory | ExpenseItem) {
-    if (!editing) return;
-    const name = editing.name.trim();
-    const categoryId =
-      "categoryId" in original ? original.categoryId : original.id;
-    const problem = nameProblem(editing.kind, name, categoryId, original.id);
-    if (problem) return setEditing({ ...editing, error: problem });
-    const unchanged =
-      name === original.name &&
-      ("bucket" in original ? original.bucket === editing.bucket : true);
-    if (unchanged) return setEditing(null);
-    const failed =
-      editing.kind === "category"
-        ? await send(`setup/expense-categories/${original.id}`, "PUT", {
-            name,
-            bucket: editing.bucket,
-          })
-        : await send(`setup/expense-items/${original.id}`, "PUT", { name });
-    if (failed) return setEditing({ ...editing, error: failed });
-    toast("Saved.");
-    setEditing(null);
-  }
-
-  async function toggle(kind: Kind, entity: ExpenseCategory | ExpenseItem) {
-    const base =
-      kind === "category"
-        ? `setup/expense-categories/${entity.id}`
-        : `setup/expense-items/${entity.id}`;
-    // The stored stop date decides, not `active`: that follows the business date, so a stop dated ahead of it still needs turning on to cancel.
-    const off = Boolean(entity.stoppedOn);
-    const failed = await send(
-      `${base}/${off ? "restore" : "stop"}`,
-      "POST",
-      {},
-    );
-    setError(failed);
-    if (failed) return;
-    setEditing(null);
-    toast(`${entity.name} ${off ? "turned on" : "turned off"}.`);
-  }
-
-  function actions(kind: Kind, entity: ExpenseCategory | ExpenseItem) {
-    return (
-      <div className="tacts">
-        <RowAction
-          disabled={busy}
-          aria-label={`Edit ${entity.name}`}
-          onClick={() => {
-            setError("");
-            setEditing({
-              kind,
-              id: entity.id,
-              name: entity.name,
-              bucket: "bucket" in entity ? entity.bucket : 1,
-              error: "",
-            });
-          }}
-        >
-          Edit
-        </RowAction>
-        <RowAction
-          tone={entity.stoppedOn ? "ok" : "warn"}
-          disabled={busy}
-          aria-label={`${entity.stoppedOn ? "Turn on" : "Turn off"} ${entity.name}`}
-          onClick={() => void toggle(kind, entity)}
-        >
-          {entity.stoppedOn ? "Turn on" : "Turn off"}
-        </RowAction>
-      </div>
-    );
-  }
-
-  const editingEntity = editing
-    ? editing.kind === "category"
-      ? sorted.find((category) => category.id === editing.id)
-      : sorted
-          .flatMap((category) => category.items)
-          .find((item) => item.id === editing.id)
-    : undefined;
-
-  const statusFilter = (
-    <>
-      <label htmlFor="expense-status" className="sr-only">
-        Show
-      </label>
-      <SelectInput
-        id="expense-status"
-        density="compact"
-        inline
-        value={status}
-        onChange={(event) => setStatus(event.target.value as Status)}
+  const edit = (kind: CatalogKind, id: string, name: string) =>
+    canEdit && (
+      <RowAction
+        disabled={busy}
+        aria-label={`Edit ${name}`}
+        onClick={() => open(kind, id)}
       >
-        <option value="all">All</option>
-        <option value="on">In use</option>
-        <option value="off">Turned off</option>
-      </SelectInput>
-    </>
-  );
-  const statusCell = (entity: ExpenseCategory | ExpenseItem) => (
-    <Td label="Status" className="nw">
-      <StatusBadge tone={entity.active ? "ok" : "off"}>
-        {!entity.active
-          ? "Turned off"
-          : entity.stoppedOn
-            ? `Turns off on ${formatDateOnly(entity.stoppedOn)}`
-            : "In use"}
-      </StatusBadge>
-    </Td>
-  );
-  const actionColumn = canManage ? [{ label: "Actions", numeric: true }] : [];
+        Edit
+      </RowAction>
+    );
+  const actionColumn = (shown: boolean) =>
+    shown ? [{ label: "Actions", numeric: true }] : [];
+  const loadError = streamError(categories) || streamError(mains) || error;
 
   return (
     <>
       <PageHeader
         title="Expense items"
         actions={
-          canManage ? (
-            <Button
-              tone="primary"
-              onClick={() => openAdd(tab === "items" ? "item" : "category")}
-            >
-              {tab === "items" ? "New item" : "New category"}
+          canAdd ? (
+            <Button tone="primary" onClick={() => open(TAB_KIND[tab])}>
+              {NEW_LABELS[tab]}
             </Button>
           ) : undefined
         }
       />
-      {(categories.error || error) && (
-        <Banner>{streamError(categories) || error}</Banner>
-      )}
-      {!canManage && (
-        <Hint>You can see the categories and items but not change them.</Hint>
-      )}
+      {loadError && <Banner>{loadError}</Banner>}
       <Tabs
         id="expenses"
-        label="Expense categories"
+        label="Expense items"
+        className="three"
         options={[
           {
-            value: "items",
-            label: "Items",
-            note: `${sorted.flatMap((category) => category.items).filter((item) => item.active).length} in use`,
+            value: "mains" as const,
+            label: "Main categories",
+            note: mains.items.length,
           },
           {
-            value: "categories",
+            value: "cats" as const,
             label: "Categories",
-            note: String(sorted.length),
+            note: `${categories.items.length}${unset ? `, ${unset} with no main category` : ""}`,
           },
+          { value: "items" as const, label: "Items", note: `${inUse} in use` },
         ]}
         value={tab}
-        onChange={(next) => {
-          setTab(next);
-          setEditing(null);
-        }}
+        onChange={setTab}
       >
         {tab === "items" ? (
-          <>
-            <Toolbar>
-              <label htmlFor="expense-category" className="sr-only">
-                Category
-              </label>
-              <SelectInput
-                id="expense-category"
-                density="compact"
-                inline
-                value={categoryFilter}
-                onChange={(event) => setCategoryFilter(event.target.value)}
-              >
-                <option value="all">All categories</option>
-                {sorted.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </SelectInput>
-              {statusFilter}
-              {!categories.loading && (
-                <Hint>{plural(visibleItems.length, "item", "items")}</Hint>
-              )}
-            </Toolbar>
-            <DataTable
-              columns={[
-                { label: "Item" },
-                { label: "Category" },
-                { label: "Status" },
-                ...actionColumn,
-              ]}
-              loading={categories.loading}
-              pendingRows={categories.pendingRows}
-              loadingLabel="Loading expense items"
-              isEmpty={!visibleItems.length}
-              failed={Boolean(categories.error)}
-              emptyMessage="No items here yet."
-            >
-              {visibleItems.map(({ item, category }) => (
+          <DataTable
+            columns={[
+              { label: "Item" },
+              { label: "Category" },
+              { label: "Main category" },
+              { label: "Status" },
+              ...actionColumn(canEdit || canStop),
+            ]}
+            loading={categories.loading}
+            pendingRows={categories.pendingRows}
+            loadingLabel="Loading expense items"
+            isEmpty={!rows.length}
+            failed={Boolean(categories.error)}
+            emptyMessage="No items here yet."
+          >
+            {rows.map(({ item, category }) => {
+              const main = mainName(category);
+              return (
                 <Tr key={item.id}>
-                  <Td label="Item" className="item">
+                  <Td label="Item" item>
                     {item.name}
                   </Td>
-                  <Td
-                    label="Category"
-                    title={
-                      category.active
-                        ? `Counts as ${expenseBucketNames[category.bucket]}`
-                        : "Its category is turned off"
-                    }
-                  >
-                    {category.name}
+                  <Td label="Category">{category.name}</Td>
+                  <Td label="Main category">
+                    {main ?? <span className="chip mute">Not set</span>}
                   </Td>
-                  {statusCell(item)}
-                  {canManage && <Td numeric>{actions("item", item)}</Td>}
-                </Tr>
-              ))}
-            </DataTable>
-          </>
-        ) : (
-          <>
-            <Toolbar>
-              {statusFilter}
-              {!categories.loading && (
-                <Hint>
-                  {plural(visibleCategories.length, "category", "categories")}
-                </Hint>
-              )}
-            </Toolbar>
-            <DataTable
-              columns={[
-                { label: "Category" },
-                { label: "Counts as" },
-                { label: "Items", numeric: true },
-                { label: "Status" },
-                ...actionColumn,
-              ]}
-              loading={categories.loading}
-              pendingRows={categories.pendingRows}
-              loadingLabel="Loading expense categories"
-              isEmpty={!visibleCategories.length}
-              failed={Boolean(categories.error)}
-              emptyMessage="No categories here yet."
-            >
-              {visibleCategories.map((category) => (
-                <Tr key={category.id}>
-                  <Td label="Category" className="item">
-                    {category.name}
+                  <Td label="Status">
+                    {!item.active ? (
+                      <span className="chip wait">Stopped</span>
+                    ) : item.stoppedOn ? (
+                      <span className="chip wait">
+                        Stops {formatDateOnly(item.stoppedOn)}
+                      </span>
+                    ) : (
+                      <span className="chip ok">In use</span>
+                    )}
                   </Td>
-                  <Td label="Counts as">
-                    {expenseBucketNames[category.bucket]}
-                  </Td>
-                  <Td label="Items" numeric>
-                    {category.items.filter((item) => item.active).length}
-                  </Td>
-                  {statusCell(category)}
-                  {canManage && (
-                    <Td numeric>{actions("category", category)}</Td>
+                  {(canEdit || canStop) && (
+                    <Td numeric>
+                      <div className="tacts">
+                        {edit("item", item.id, item.name)}
+                        {canStop && (
+                          <RowAction
+                            tone={item.stoppedOn ? "ok" : "warn"}
+                            disabled={busy}
+                            aria-label={`${item.stoppedOn ? "Resume" : "Stop"} ${item.name}`}
+                            onClick={() => void toggle(item)}
+                          >
+                            {item.stoppedOn ? "Resume" : "Stop"}
+                          </RowAction>
+                        )}
+                      </div>
+                    </Td>
                   )}
                 </Tr>
-              ))}
-            </DataTable>
-          </>
+              );
+            })}
+          </DataTable>
+        ) : tab === "cats" ? (
+          <DataTable
+            columns={[
+              { label: "Category" },
+              { label: "Main category" },
+              { label: "Items", numeric: true },
+              ...actionColumn(canEdit),
+            ]}
+            loading={categories.loading}
+            pendingRows={categories.pendingRows}
+            loadingLabel="Loading expense categories"
+            isEmpty={!sortedCategories.length}
+            failed={Boolean(categories.error)}
+            emptyMessage="No categories yet."
+          >
+            {sortedCategories.map((category) => {
+              const main = mainName(category);
+              return (
+                <Tr key={category.id}>
+                  <Td label="Category" item>
+                    {category.name}
+                  </Td>
+                  <Td label="Main category">
+                    {main ?? <span className="chip mute">Not set</span>}
+                  </Td>
+                  <Td label="Items" numeric>
+                    {category.items.length}
+                  </Td>
+                  {canEdit && (
+                    <Td numeric>
+                      <div className="tacts">
+                        {edit("cat", category.id, category.name)}
+                      </div>
+                    </Td>
+                  )}
+                </Tr>
+              );
+            })}
+          </DataTable>
+        ) : (
+          <DataTable
+            columns={[
+              { label: "Main category" },
+              { label: "Categories", numeric: true },
+              { label: "Items", numeric: true },
+              ...actionColumn(canEdit),
+            ]}
+            loading={mains.loading}
+            pendingRows={mains.pendingRows}
+            loadingLabel="Loading main categories"
+            isEmpty={!mains.items.length}
+            failed={Boolean(mains.error)}
+            emptyMessage="No main categories yet."
+          >
+            {mains.items.map((main) => (
+              <Tr key={main.id}>
+                <Td label="Main category" item>
+                  {main.name}
+                </Td>
+                <Td label="Categories" numeric>
+                  {main.categoryCount}
+                </Td>
+                <Td label="Items" numeric>
+                  {main.itemCount}
+                </Td>
+                {canEdit && (
+                  <Td numeric>
+                    <div className="tacts">
+                      {edit("main", main.id, main.name)}
+                    </div>
+                  </Td>
+                )}
+              </Tr>
+            ))}
+          </DataTable>
         )}
       </Tabs>
-      <Dialog
-        open={Boolean(adding)}
-        size="sm"
-        title={adding?.kind === "category" ? "New category" : "New item"}
-        onClose={() => setAdding(null)}
-        footer={
-          <>
-            <Button tone="outline" onClick={() => setAdding(null)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              form="expense-add-form"
-              tone="ok"
-              disabled={busy}
-            >
-              Save
-            </Button>
-          </>
-        }
-      >
-        {adding && (
-          <form
-            id="expense-add-form"
-            className="contents"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void add();
-            }}
-          >
-            <Field id="expense-new-name" label="Name">
-              <TextInput
-                autoFocus
-                maxLength={NAME_LIMIT}
-                value={adding.name}
-                placeholder={
-                  adding.kind === "category"
-                    ? "For example Bodywork"
-                    : "For example Brake pads"
-                }
-                onChange={(event) =>
-                  setAdding({ ...adding, name: event.target.value, error: "" })
-                }
-              />
-            </Field>
-            {adding.kind === "category" ? (
-              <Field id="expense-new-bucket" label="Counts as">
-                <SelectInput
-                  value={adding.bucket}
-                  onChange={(event) =>
-                    setAdding({
-                      ...adding,
-                      bucket: Number(event.target.value) as ExpenseBucket,
-                    })
-                  }
-                >
-                  {buckets.map((bucket) => (
-                    <option key={bucket} value={bucket}>
-                      {expenseBucketNames[bucket]}
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-            ) : (
-              <Field id="expense-new-category" label="Category">
-                <SelectInput
-                  value={adding.categoryId}
-                  onChange={(event) =>
-                    setAdding({
-                      ...adding,
-                      categoryId: event.target.value,
-                      error: "",
-                    })
-                  }
-                >
-                  {sorted.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                      {category.active ? "" : " (turned off)"}
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-            )}
-            {adding.error && <Banner>{adding.error}</Banner>}
-          </form>
-        )}
-      </Dialog>
-      <Dialog
-        open={Boolean(editing && editingEntity)}
-        size="sm"
-        title={editing?.kind === "category" ? "Edit category" : "Edit item"}
-        subtitle={editingEntity?.name}
-        onClose={() => setEditing(null)}
-        footer={
-          <>
-            <Button tone="outline" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              form="expense-edit-form"
-              tone="ok"
-              disabled={busy}
-            >
-              Save
-            </Button>
-          </>
-        }
-      >
-        {editing && editingEntity && (
-          <form
-            id="expense-edit-form"
-            className="contents"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void saveEdit(editingEntity);
-            }}
-          >
-            <Field id="expense-edit-name" label="Name" error={editing.error}>
-              <TextInput
-                autoFocus
-                maxLength={NAME_LIMIT}
-                value={editing.name}
-                onChange={(event) =>
-                  setEditing({
-                    ...editing,
-                    name: event.target.value,
-                    error: "",
-                  })
-                }
-              />
-            </Field>
-            {editing.kind === "category" && (
-              <Field id="expense-edit-bucket" label="Counts as">
-                <SelectInput
-                  value={editing.bucket}
-                  onChange={(event) =>
-                    setEditing({
-                      ...editing,
-                      bucket: Number(event.target.value) as ExpenseBucket,
-                    })
-                  }
-                >
-                  {buckets.map((bucket) => (
-                    <option key={bucket} value={bucket}>
-                      {expenseBucketNames[bucket]}
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-            )}
-          </form>
-        )}
-      </Dialog>
+      {form && (
+        <CatalogDialog
+          form={form}
+          setForm={setForm}
+          mains={mains.items}
+          categories={sortedCategories}
+          busy={busy}
+          onSave={() => void submit(form)}
+          onClose={() => setForm(null)}
+        />
+      )}
     </>
   );
 }

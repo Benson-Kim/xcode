@@ -196,8 +196,8 @@ it("shows the message, not a saved toast, when a vehicle save is intercepted", a
   renderInApp(<VehiclesPage />, { permissions: ["vehicles.manage"] });
 
   fireEvent.click(await screen.findByRole("button", { name: "Edit KDA 482M" }));
-  fireEvent.change(screen.getByLabelText("Weekly target"), {
-    target: { value: "16000" },
+  fireEvent.change(screen.getByLabelText("Fleet number"), {
+    target: { value: "14" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
 

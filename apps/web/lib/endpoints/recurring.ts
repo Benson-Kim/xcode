@@ -17,6 +17,13 @@ export type SaveRecurringRequest = {
   expenseItemId: string | null;
   note: string | null;
   month: number | null;
+  // Savings only (v2.30): save every run, or only when the vehicle's revenue over `days` reaches `min`; and the
+  // opening balance as at a date, an amount per vehicle. Absent on a revise keeps the stored one; null clears it.
+  condition?: { min: number; days: number } | null;
+  opening?: {
+    date: string;
+    amounts: { vehicleId: string; amount: number }[];
+  } | null;
 };
 
 export const recurringApi = {

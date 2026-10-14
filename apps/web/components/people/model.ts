@@ -1,3 +1,4 @@
+import { shiftDate } from "@xcode/shared/dates";
 import {
   formatPhone,
   normalisePhone,
@@ -6,7 +7,15 @@ import {
 } from "@xcode/shared/format";
 
 import type { SavePersonRequest } from "../../lib/endpoints/people";
-import type { Permission, Person, Role, ScopeOptions } from "../../lib/types";
+import type {
+  BackLimit,
+  BackLimitMode,
+  Permission,
+  Person,
+  PersonStatus,
+  Role,
+  ScopeOptions,
+} from "../../lib/types";
 
 export const APPROVALS = [
   "pettycash.approve_item",
@@ -14,26 +23,33 @@ export const APPROVALS = [
   "bills.approve",
 ];
 
-export type SignInState = "active" | "waiting" | "none";
+// Holding a float is the right to add petty cash expenses (pettycash.is_holder).
+export const FLOAT_RIGHT = "pettycash.spend";
 
-export function signInState(person: Person): SignInState {
-  if (!person.active) return "none";
-  return person.hasPin ? "active" : "waiting";
+// Where a person is with signing in (v2.33), from the API's status or, for an older answer, from the old flags.
+export function personStatus(person: Person): PersonStatus {
+  if (person.status) return person.status;
+  if (!person.active) return "blocked";
+  return person.hasPin ? "active" : "not_signed_in";
 }
+
+export const STATUS_CHIPS: Record<
+  PersonStatus,
+  { label: string; tone: "ok" | "wait" | "bad" }
+> = {
+  active: { label: "Active", tone: "ok" },
+  not_signed_in: { label: "Not signed in yet", tone: "wait" },
+  pin_reset_due: { label: "PIN reset due", tone: "wait" },
+  locked: { label: "Locked", tone: "bad" },
+  blocked: { label: "Blocked", tone: "bad" },
+};
 
 export function roleDefaults(roles: Role[] | undefined, role: string) {
   return roles?.find((candidate) => candidate.name === role)?.permissions ?? [];
 }
 
-export function changesFromRole(permissions: string[], defaults: string[]) {
-  return (
-    permissions.filter((key) => !defaults.includes(key)).length +
-    defaults.filter((key) => !permissions.includes(key)).length
-  );
-}
-
 export function scopeLabel(person: Person, options?: ScopeOptions) {
-  if (person.scopeMode === "all") return "All companies";
+  if (person.scopeMode === "all") return "All vehicles";
   if (person.scopeMode === "companies") {
     if (person.otherCompanies > 0) {
       const total = person.companyIds.length + person.otherCompanies;
@@ -153,9 +169,15 @@ export type PersonForm = {
   // null until the person changes a permission: the role's defaults apply, whenever the roles arrive.
   permissions: string[] | null;
   approvalLimit: string;
+  // How far back they may change records (v2.32): the rolling limit and the fixed date.
+  backMode: BackLimitMode;
+  backCount: string;
+  backFromOn: boolean;
+  backFrom: string;
 };
 
 export function initialForm(person?: Person): PersonForm {
+  const limit = person?.backLimit;
   return {
     firstName: person?.firstName ?? "",
     lastName: person?.lastName ?? "",
@@ -167,7 +189,61 @@ export function initialForm(person?: Person): PersonForm {
     vehicleIds: person?.vehicleIds ?? [],
     permissions: person?.permissions ?? null,
     approvalLimit: person?.approvalLimit ? String(person.approvalLimit) : "",
+    // New people start on 7 days back.
+    backMode: limit?.mode ?? (person ? "none" : "days"),
+    backCount:
+      limit?.count !== undefined && limit?.count !== null
+        ? String(limit.count)
+        : person
+          ? ""
+          : "7",
+    backFromOn: Boolean(limit?.from),
+    backFrom: limit?.from ?? "",
   };
+}
+
+export function readBackLimit(form: PersonForm): BackLimit {
+  return {
+    mode: form.backMode,
+    count: form.backMode === "none" ? null : Number(form.backCount) || 0,
+    from: form.backFromOn && form.backFrom ? form.backFrom : null,
+  };
+}
+
+// The limit in words, as the list shows it: "Any date", "2 days back", "1 month back, not before 14 September 2026".
+export function backLimitText(
+  limit: BackLimit,
+  formatDateOnly: (value: string) => string,
+) {
+  const parts: string[] = [];
+  if (limit.mode === "days")
+    parts.push(
+      limit.count ? plural(limit.count, "day", "days") + " back" : "Today only",
+    );
+  if (limit.mode === "months")
+    parts.push(plural(limit.count ?? 0, "month", "months") + " back");
+  if (limit.from)
+    parts.push(
+      `${parts.length ? "not" : "Not"} before ${formatDateOnly(limit.from)}`,
+    );
+  return parts.length ? parts.join(", ") : "Any date";
+}
+
+// The earliest date the limit allows today, or "" for no limit. Months go back to the same day; when that day does
+// not exist, the last day of that month.
+export function earliestAllowed(limit: BackLimit, today: string): string {
+  let rolling = "";
+  if (limit.mode === "days") rolling = shiftDate(today, -(limit.count ?? 0));
+  else if (limit.mode === "months") {
+    const [year, month, day] = today.split("-").map(Number);
+    const target = new Date(Date.UTC(year, month - 1 - (limit.count ?? 0), 1));
+    const last = new Date(
+      Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+    ).getUTCDate();
+    target.setUTCDate(Math.min(day, last));
+    rolling = target.toISOString().slice(0, 10);
+  }
+  return limit.from && limit.from > rolling ? limit.from : rolling;
 }
 
 // What the person's scope holds that is not offered here (archived, out of the fleet, or outside the editor's own
@@ -183,24 +259,41 @@ export function keptCounts(form: PersonForm, options: ScopeOptions) {
   };
 }
 
-export type Errors = Partial<
-  Record<
-    | "firstName"
-    | "lastName"
-    | "phoneNumber"
-    | "email"
-    | "role"
-    | "scope"
-    | "permissions",
-    string
-  >
->;
+export type ErrorKey =
+  | "firstName"
+  | "lastName"
+  | "phoneNumber"
+  | "email"
+  | "role"
+  | "scope"
+  | "backLimit"
+  | "permissions";
+
+export type Errors = Partial<Record<ErrorKey, string>>;
+
+export type Pane = "det" | "lim" | "sig" | "acc";
+
+// The pane that holds the first problem, so a save error opens it.
+export function paneFor(errors: Errors): Pane | null {
+  if (
+    errors.firstName ||
+    errors.lastName ||
+    errors.phoneNumber ||
+    errors.email ||
+    errors.role
+  )
+    return "det";
+  if (errors.scope || errors.backLimit) return "lim";
+  if (errors.permissions) return "acc";
+  return null;
+}
 
 export type PersonContext = {
   // False until the roles request answers.
   rolesLoaded: boolean;
   assignableCount: number;
   permissions: string[];
+  today: string;
 };
 
 export function validatePerson(form: PersonForm, ctx: PersonContext): Errors {
@@ -210,13 +303,24 @@ export function validatePerson(form: PersonForm, ctx: PersonContext): Errors {
   const phoneValidation = phoneError(normalisePhone(form.phoneNumber));
   if (phoneValidation) next.phoneNumber = phoneValidation;
   if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(form.email.trim()))
-    next.email = "Enter an email address like name@company.co.ke";
+    next.email = "Enter the email that receives codes.";
   if (ctx.rolesLoaded && !ctx.assignableCount)
     next.role = "You cannot assign any available role.";
   if (form.scopeMode === "companies" && !form.companyIds.length)
-    next.scope = "Tick at least one company.";
+    next.scope = "Pick at least one vehicle this person can see.";
   if (form.scopeMode === "vehicles" && !form.vehicleIds.length)
-    next.scope = "Tick at least one vehicle.";
+    next.scope = "Pick at least one vehicle this person can see.";
+  if (
+    form.backMode !== "none" &&
+    (form.backCount.trim() === "" ||
+      !/^\d+$/.test(form.backCount.trim()) ||
+      (form.backMode === "months" && Number(form.backCount) === 0))
+  )
+    next.backLimit = `Enter the number of ${form.backMode}.`;
+  else if (form.backFromOn && !form.backFrom)
+    next.backLimit = "Enter the date.";
+  else if (form.backFromOn && ctx.today && form.backFrom > ctx.today)
+    next.backLimit = "The date is after today.";
   if (!ctx.permissions.length)
     next.permissions = "Tick at least one permission.";
   return next;
@@ -243,6 +347,7 @@ export function personPayload(
     permissions: ctx.permissions,
     approvalLimit:
       ctx.needsLimit && form.approvalLimit ? Number(form.approvalLimit) : null,
+    backLimit: readBackLimit(form),
     version: ctx.version,
   };
 }

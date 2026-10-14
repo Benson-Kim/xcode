@@ -31,6 +31,13 @@ export const AUTH_STATUSES = [
   "signed_out",
   "device_revoked",
   "service_unavailable",
+  // The number-first routes (XCODE Web v2.33): the next step after a number, the PIN lock, a blocked person, the
+  // third wrong code and a changed PIN.
+  "pin_required",
+  "pin_locked",
+  "blocked",
+  "code_resent",
+  "pin_changed",
 ] as const;
 
 // unexpected_response is never sent: the client raises it for an answer it cannot trust.
@@ -43,7 +50,16 @@ const SUCCESS_STATUSES: readonly string[] = [
   "code_verified",
   "signed_out",
   "device_revoked",
+  "pin_required",
+  "code_resent",
+  "pin_changed",
 ];
+
+// What a code was sent for: confirming a new device, the first sign in, or a PIN reset.
+export type CodePurpose = "new_device" | "first_setup" | "pin_reset";
+
+// Why a new PIN was refused.
+export type PinProblem = "length" | "weak" | "unchanged";
 
 function isAuthBody(body: unknown): body is AuthResponse {
   return (
@@ -64,6 +80,16 @@ export interface AuthRequest {
   refreshToken?: string;
   // Web only: whether the browser keeps this device trusted after it closes.
   rememberDevice?: boolean;
+  // The number-first routes: the trusted-device token, the device's name, what a code is for, whether to trust
+  // the device after a code, and the current and new PIN of a change.
+  deviceToken?: string;
+  deviceName?: string;
+  purpose?: CodePurpose;
+  trustDevice?: boolean;
+  currentPin?: string;
+  newPin?: string;
+  // Web only, on a trusted-device remove: the row is this browser, so it forgets its own trust.
+  thisDevice?: boolean;
 }
 
 export interface AuthResponse {
@@ -75,6 +101,20 @@ export interface AuthResponse {
   maskedEmail?: string | null;
   // With invalid_pin: the shortest new PIN the organization accepts.
   minimumPinLength?: number | null;
+  // The step envelope of the number-first routes.
+  purpose?: CodePurpose | null;
+  triesLeft?: number | null;
+  pinProblem?: PinProblem | null;
+  deviceToken?: string | null;
+}
+
+// A device the person trusts (GET /auth/trusted-devices).
+export interface TrustedDevice {
+  id: string;
+  name: string | null;
+  trustedAt: string;
+  lastUsedAt: string | null;
+  thisDevice: boolean;
 }
 
 export interface PersonIdentity {
@@ -104,7 +144,28 @@ export type AuthOperation =
   | "pin-reset/complete"
   | "unlock"
   | "refresh"
-  | "sign-out";
+  | "sign-out"
+  // The number-first routes of XCODE Web v2.33.
+  | "start"
+  | "pin"
+  | "code"
+  | "code/resend"
+  | "pin/forgot"
+  | "pin/new"
+  | "pin/change";
+
+// The prototype's words for a refused new PIN.
+export function pinProblemText(
+  problem: PinProblem | null | undefined,
+  changing = false,
+): string {
+  if (problem === "length") return "The PIN is 4 digits.";
+  if (problem === "unchanged")
+    return changing
+      ? "Choose a PIN different from the current one."
+      : "Choose a PIN different from the old one.";
+  return "Choose a PIN that is harder to guess.";
+}
 
 export class AuthError extends Error {
   constructor(
@@ -114,15 +175,21 @@ export class AuthError extends Error {
     super(
       response.status === "paused"
         ? "Sign-in is paused. Try again when the timer ends, or reset your PIN."
-        : response.status === "invalid_pin"
-          ? pinHelp(response.minimumPinLength ?? undefined)
-          : response.status === "unexpected_response"
-            ? "The service answered in a way this app does not understand. Try again shortly."
-            : httpStatus === 429
-              ? "Too many requests. Please wait a minute."
-              : httpStatus >= 500
-                ? "The service is not available right now. Try again shortly."
-                : "Authentication could not be completed. Check your details and try again.",
+        : response.status === "pin_locked"
+          ? "Too many wrong PINs. Reset your PIN to sign in."
+          : response.status === "blocked"
+            ? "This number is blocked. Speak to the office."
+            : response.status === "invalid_pin" && response.pinProblem
+              ? pinProblemText(response.pinProblem)
+              : response.status === "invalid_pin"
+                ? pinHelp(response.minimumPinLength ?? undefined)
+                : response.status === "unexpected_response"
+                  ? "The service answered in a way this app does not understand. Try again shortly."
+                  : httpStatus === 429
+                    ? "Too many requests. Please wait a minute."
+                    : httpStatus >= 500
+                      ? "The service is not available right now. Try again shortly."
+                      : "Authentication could not be completed. Check your details and try again.",
     );
   }
 }
@@ -132,7 +199,10 @@ export function createAuthClient(
   fetcher: typeof fetch = fetch,
 ) {
   return async (
-    operation: AuthOperation | `devices/${string}/revoke`,
+    operation:
+      | AuthOperation
+      | `devices/${string}/revoke`
+      | `trusted-devices/${string}/remove`,
     request: AuthRequest,
     accessToken?: string,
   ): Promise<AuthResponse> => {

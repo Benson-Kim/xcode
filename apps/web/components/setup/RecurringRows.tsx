@@ -5,16 +5,37 @@ import { plural } from "@xcode/shared/format";
 import { useFormats } from "../../lib/formats";
 import {
   recurringFrequency,
-  recurringMonthlyEstimate,
   recurringNextPosting,
 } from "../recurringPresentation";
 import { RowAction, RowActionGroup, StatusBadge, Td, Tr } from "../ui";
-import {
-  costBucket,
-  expenseBucketNames,
-  type RecurringItem,
-  RegPlate,
-} from "./shared";
+import { type RecurringItem, RegPlate } from "./shared";
+
+// The revenue rule of a saving in words: "Every run", or "Revenue KES 12,000 or more over the 7 days to the run".
+export function ruleText(
+  item: Pick<RecurringItem, "condition">,
+  kes: (amount: number) => string,
+) {
+  const rule = item.condition;
+  if (!rule) return "Every run";
+  const window =
+    rule.days === 1 ? "that day" : `over the ${rule.days} days to the run`;
+  return `Revenue ${kes(rule.min)} or more ${window}`;
+}
+
+// What the last run did: "3 saved, 1 skipped, 2 waiting for revenue".
+export function runTally(
+  states: { saved: number; skipped: number; held: number } | null | undefined,
+  fallback?: number,
+) {
+  if (!states) return fallback !== undefined ? `${fallback} saved` : "";
+  return [
+    states.saved ? `${states.saved} saved` : "",
+    states.skipped ? `${states.skipped} skipped` : "",
+    states.held ? `${states.held} waiting for revenue` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
 
 function RecurringStatus({
   item,
@@ -54,6 +75,7 @@ export function RecurringRow({
   active,
   fleet,
   canEdit,
+  canPause,
   busy,
   onOpen,
   onRuns,
@@ -66,6 +88,7 @@ export function RecurringRow({
   active: boolean;
   fleet: Set<string> | null;
   canEdit: boolean;
+  canPause: boolean;
   busy: boolean;
   onOpen: () => void;
   onRuns: () => void;
@@ -73,11 +96,10 @@ export function RecurringRow({
 }) {
   const { formatDateOnly, formatNumber, kes } = useFormats();
   const scheduled =
-    stopped || !active || !today ? null : recurringNextPosting(item, today);
+    stopped || !active || !today
+      ? null
+      : (item.nextRun ?? recurringNextPosting(item, today));
   const next = item.pausedFrom ? null : scheduled;
-  const outOfFleetCount = item.allocations.filter(
-    (allocation) => allocation.active === false,
-  ).length;
   // What posts now. `amount` is the saved total, which still counts vehicles not in the fleet today.
   const posting = item.activeAmount ?? item.amount;
   const posted = item.allocations.filter(
@@ -89,43 +111,29 @@ export function RecurringRow({
     shares.every((allocation) => allocation.amount === shares[0].amount)
       ? formatNumber(shares[0].amount)
       : "Varies";
-  const action = canEdit ? "Edit" : "Open";
   const ended = Boolean(today && item.end && item.end < today);
-  const canPause =
-    canEdit && active && !stopped && !ended && !(today && !scheduled);
-  const postingNote = [
-    item.partial ? "Your vehicles' share." : "",
-    posting !== item.amount
-      ? `${kes(item.amount)} in total, with ${outOfFleetCount === 1 ? "1 share for a vehicle" : `${outOfFleetCount} shares for vehicles`} not in the fleet today.`
-      : "",
-    `About ${kes(recurringMonthlyEstimate(posting, item.frequency))} a month`,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const pausable =
+    canPause && active && !stopped && !ended && !(today && !scheduled);
   return (
     <Tr>
-      <Td label="Item" className="item nw" title={itemNote(item)}>
+      <Td label={savings ? "Saving" : "Item"} className="item nw">
         {item.name}
       </Td>
-      <Td label="Vehicles" className="nw">
-        <RecurringVehicles
-          item={item}
-          fleet={fleet}
-          outOfFleetCount={outOfFleetCount}
-        />
+      <Td label="Vehicles">
+        <RecurringVehicles item={item} fleet={fleet} />
       </Td>
-      <Td label="Amount per vehicle" numeric>
+      <Td label={savings ? "Per vehicle" : "Amount per vehicle"} numeric>
         {share}
       </Td>
       {!savings && (
-        <Td label="Each run" numeric className="tot" title={postingNote}>
+        <Td label="Each run" numeric className="tot">
           {formatNumber(posting)}
         </Td>
       )}
       <Td label="Runs" className={savings ? undefined : "nw"}>
         {recurringFrequency(item)}
-        {item.end && (
-          <span className="note">Until {formatDateOnly(item.end)}</span>
+        {savings && item.condition && (
+          <span className="note">{ruleText(item, kes)}</span>
         )}
       </Td>
       {savings ? (
@@ -134,7 +142,9 @@ export function RecurringRow({
             {item.lastRun && (
               <>
                 {formatDateOnly(item.lastRun)}
-                <span className="note">{item.lastRunVehicles ?? 0} saved</span>
+                <span className="note">
+                  {runTally(item.lastRunStates, item.lastRunVehicles ?? 0)}
+                </span>
               </>
             )}
           </Td>
@@ -163,10 +173,13 @@ export function RecurringRow({
               Runs
             </RowAction>
           )}
-          <RowAction aria-label={`${action} ${item.name}`} onClick={onOpen}>
-            {action}
+          <RowAction
+            aria-label={`${canEdit ? "Edit" : "Open"} ${item.name}`}
+            onClick={onOpen}
+          >
+            {canEdit ? "Edit" : "Open"}
           </RowAction>
-          {canPause && (
+          {pausable && (
             <RowAction
               tone={item.pausedFrom ? "ok" : "warn"}
               aria-label={`${item.pausedFrom ? "Resume" : "Pause"} ${item.name}`}
@@ -194,16 +207,13 @@ export function SavingsFooter({ rows }: { rows: RecurringItem[] }) {
   );
 }
 
-// One plate for one vehicle, "All vehicles" when it covers every active vehicle the viewer can see, else a count
-// with the registrations on hover.
+// "All vehicles" when it covers every active vehicle the viewer can see, else the plates of the vehicles it covers.
 function RecurringVehicles({
   item,
   fleet,
-  outOfFleetCount,
 }: {
   item: RecurringItem;
   fleet: Set<string> | null;
-  outOfFleetCount: number;
 }) {
   const registrations = item.allocations
     .map((allocation) => allocation.registration)
@@ -220,13 +230,10 @@ function RecurringVehicles({
     [...fleet].every((id) => covered.has(id));
   const title = [
     registrations.join(", "),
-    outOfFleetCount ? `${outOfFleetCount} not in the fleet today` : "",
     item.partial ? "plus vehicles you can't see" : "",
   ]
     .filter(Boolean)
     .join("; ");
-  if (item.allocations.length === 1 && !item.partial && registrations.length)
-    return <RegPlate>{registrations[0]}</RegPlate>;
   if (everyVehicle || !registrations.length)
     return (
       <span title={title || undefined}>
@@ -235,7 +242,8 @@ function RecurringVehicles({
           : plural(item.allocations.length, "vehicle", "vehicles")}
       </span>
     );
-  // As the design: the plates of the vehicles it covers.
+  if (registrations.length === 1 && !item.partial)
+    return <RegPlate>{registrations[0]}</RegPlate>;
   return (
     <div className="splitv" title={title || undefined}>
       {registrations.map((registration) => (
@@ -243,13 +251,4 @@ function RecurringVehicles({
       ))}
     </div>
   );
-}
-
-// The note and, for a cost, the bucket it counts under (a cost saved without one counts as a recurring charge).
-function itemNote(item: RecurringItem) {
-  const bucket = costBucket(item);
-  const text = [item.note, bucket ? expenseBucketNames[bucket] : null]
-    .filter(Boolean)
-    .join(". ");
-  return text || undefined;
 }

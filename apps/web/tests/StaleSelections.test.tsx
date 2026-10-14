@@ -184,10 +184,9 @@ it("shows an owner's role as Owner to someone who may not give that role", async
   fireEvent.click(
     await screen.findByRole("button", { name: /^(Edit|View) Antony Maina$/ }),
   );
-  // The list's Role filter stays behind the pop up.
   const role = await within(
     screen.getByRole("dialog", { name: "Antony Maina" }),
-  ).findByLabelText("Role");
+  ).findByLabelText("Job");
   expect(role).toBeDisabled();
   expect(role).toHaveValue("Owner");
   expect(
@@ -221,11 +220,13 @@ it("says what a person's scope holds beyond the companies and vehicles listed", 
   fireEvent.click(
     await screen.findByRole("button", { name: /^(Edit|View) Jane Njeri$/ }),
   );
-  expect(await screen.findByLabelText("North Star")).toBeChecked();
+  fireEvent.click(
+    await within(
+      screen.getByRole("navigation", { name: "Sections" }),
+    ).findByRole("button", { name: /^Vehicles and dates/ }),
+  );
   expect(
-    screen.getByText(
-      "Also 1 company that is not listed here: archived, or outside what you can see. It is kept as it is.",
-    ),
+    await screen.findByText(/^Sees every vehicle of 2 companies\./),
   ).toBeInTheDocument();
   unmount();
 
@@ -236,10 +237,15 @@ it("says what a person's scope holds beyond the companies and vehicles listed", 
   fireEvent.click(
     await screen.findByRole("button", { name: /^(Edit|View) Peter Otieno$/ }),
   );
+  fireEvent.click(
+    await within(
+      screen.getByRole("navigation", { name: "Sections" }),
+    ).findByRole("button", { name: /^Vehicles and dates/ }),
+  );
   expect(await screen.findByLabelText("KDA 482M")).not.toBeChecked();
   expect(
     screen.getByText(
-      "Also 1 vehicle that is not listed here: out of the fleet, or outside what you can see. It is kept as it is.",
+      "1 vehicle outside your access or the fleet stays as it is.",
     ),
   ).toBeInTheDocument();
 });

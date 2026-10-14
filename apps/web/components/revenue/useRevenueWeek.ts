@@ -20,6 +20,7 @@ type Rest = { first: RevenueWeek; week?: RevenueWeek; error: string };
 async function fetchPages(
   first: RevenueWeek,
   companyId: string,
+  q: string,
   signal: AbortSignal,
 ) {
   const numbers = remainingWeekPages(first);
@@ -31,6 +32,7 @@ async function fetchPages(
       const path = revenueWeekPagePath({
         weekStart: first.weekStart,
         companyId,
+        q,
         page: numbers[index],
         pageSize: REVENUE_WEEK_PAGE_SIZE,
       });
@@ -49,7 +51,7 @@ async function fetchPages(
 // The whole week grid. The first request lists it up to the API's limit; a larger fleet's other vehicles follow in
 // pages, and the grid changes only once they are all in, keeping the last whole week meanwhile. Pages that do not
 // add up to one fleet are loaded again from the first answer.
-export function useRevenueWeek(path: string | null, companyId: string) {
+export function useRevenueWeek(path: string | null, companyId: string, q = "") {
   const first = useResource<RevenueWeek>(path);
   const data = first.data;
   const [rest, setRest] = useState<Rest>();
@@ -61,7 +63,7 @@ export function useRevenueWeek(path: string | null, companyId: string) {
     const { signal } = controller;
     loadWholeWeek(
       data,
-      (week) => fetchPages(week, companyId, signal),
+      (week) => fetchPages(week, companyId, q, signal),
       () => withRetry(() => apiRequest<RevenueWeek>(path, { signal }), signal),
     ).then(
       (week) => setRest({ first: data, week, error: "" }),
@@ -69,7 +71,7 @@ export function useRevenueWeek(path: string | null, companyId: string) {
         !signal.aborted && setRest({ first: data, error: error.message }),
     );
     return () => controller.abort();
-  }, [data, pending, companyId, path]);
+  }, [data, pending, companyId, q, path]);
 
   const loaded = rest?.first === data ? rest : undefined;
   const whole = useMemo(

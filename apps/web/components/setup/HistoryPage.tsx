@@ -34,6 +34,7 @@ const sections: Record<string, string> = {
   securityPolicy: "Security policy",
   logo: "Logo",
   people: "People and access",
+  signIn: "Sign in",
   revenue: "Revenue",
   pettycash: "Petty cash",
   centralexpenses: "Central expenses",

@@ -1,16 +1,13 @@
-import {
-  PETTY_CASH_STATUS_LABELS,
-  type PettyCashStatus,
-} from "@xcode/shared/pettyCash";
+import { ENTRY_STATUS_LABELS, type EntryStatus } from "./status";
 
-import { StatusBadge } from "../ui";
+const CLASSES: Record<EntryStatus, string> = {
+  waiting: "chip wait",
+  sentBack: "chip back",
+  approved: "chip ok",
+  rejected: "chip bad",
+};
 
-const TONES = { waiting: "warn", approved: "ok", sentBack: "off" } as const;
-
-export function StatusTag({ status }: { status: PettyCashStatus }) {
-  return (
-    <StatusBadge tone={TONES[status]}>
-      {PETTY_CASH_STATUS_LABELS[status]}
-    </StatusBadge>
-  );
+export function StatusTag({ status }: { status: EntryStatus | null }) {
+  if (!status) return null;
+  return <span className={CLASSES[status]}>{ENTRY_STATUS_LABELS[status]}</span>;
 }

@@ -33,6 +33,7 @@ const personBody: SavePersonRequest = {
   vehicleIds: [],
   permissions: ["revenue.view"],
   approvalLimit: null,
+  backLimit: { mode: "days", count: 7, from: null },
   version: undefined,
 };
 

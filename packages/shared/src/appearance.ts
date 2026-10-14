@@ -29,6 +29,8 @@ export type Appearance = {
   fontScale: number;
   lockoutThreshold?: number;
   lockoutMinutes?: number;
+  // The client asks for the PIN again after this long without activity (v2.33: 15 minutes).
+  idleUnlockSeconds?: number;
 };
 
 // "system" and anything unrecognised follow the device.

@@ -1,22 +1,24 @@
 import type { ReactNode } from "react";
 
-import { percentText } from "@xcode/shared/format";
-import type { RevenueWeek } from "@xcode/shared/revenue";
+import { gapText, type RevenueWeek } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
 import { shiftDate } from "../revenueFormat";
 import { BandFigure, BandStats, HeroBand, Skeleton } from "../ui";
+import { DEFAULT_LOW_DAY_THRESHOLD } from "./capture";
 import { BandSkeleton } from "./RegPlate";
 
+// Counted from the grid when the API does not say: low days plus no revenue days, and missing days.
 function countDays(week: RevenueWeek) {
-  let noRevenue = 0;
+  let below = 0;
   let missing = 0;
   for (const vehicle of week.vehicles)
     for (const day of vehicle.days) {
-      if (day.status === "reason") noRevenue++;
+      if (day.status === "reason" || (day.status === "amount" && day.reason))
+        below++;
       else if (day.status === "missing") missing++;
     }
-  return { noRevenue, missing };
+  return { below, missing };
 }
 
 export function WeekToolbar({
@@ -24,20 +26,27 @@ export function WeekToolbar({
   shown,
   data,
   companyId,
+  search,
   exportMenu,
   onWeek,
   onCompany,
+  onSearch,
 }: {
   start: string;
   shown: RevenueWeek | undefined;
   data: RevenueWeek | undefined;
   companyId: string;
+  search: string;
   exportMenu?: ReactNode;
   onWeek: (weekStart: string) => void;
   onCompany: (companyId: string) => void;
+  onSearch: (value: string) => void;
 }) {
   const formats = useFormats();
   const counts = data && countDays(data);
+  const threshold = data?.lowDayThreshold ?? DEFAULT_LOW_DAY_THRESHOLD;
+  // A week still running is judged on its days so far.
+  const finished = data ? data.weekThrough < data.businessDate : false;
   const period = (
     <div className="step">
       <button
@@ -82,15 +91,26 @@ export function WeekToolbar({
         ))}
       </select>
     ) : undefined;
-  const tools =
-    companies || exportMenu ? (
-      <>
-        {companies}
-        {exportMenu}
-      </>
-    ) : undefined;
+  const tools = (
+    <>
+      {companies}
+      <input
+        className="inp srch"
+        type="search"
+        placeholder="Search vehicle"
+        aria-label="Search vehicle"
+        value={search}
+        onChange={(event) => onSearch(event.target.value)}
+      />
+      {exportMenu}
+    </>
+  );
   return (
-    <HeroBand period={period} tools={tools}>
+    <HeroBand
+      period={period}
+      tools={tools}
+      toolsClass={companies ? undefined : "slim"}
+    >
       {data ? (
         <>
           <BandFigure
@@ -101,18 +121,19 @@ export function WeekToolbar({
             <BandStats
               items={[
                 {
-                  label: "Expected",
-                  value: formats.formatNumber(data.totalExpected),
+                  label: finished ? "Gap to target" : "Gap to target so far",
+                  value:
+                    data.gap === null || data.gap === undefined
+                      ? "0"
+                      : gapText(data.gap, formats.formatNumber),
                 },
                 {
-                  label: "Reached",
-                  value: data.percent === null ? "" : percentText(data.percent),
+                  label: `Below ${formats.formatNumber(threshold)}`,
+                  value: String(data.belowThresholdDays ?? counts.below),
                 },
-                { label: "No revenue days", value: String(counts.noRevenue) },
                 {
                   label: "Missing days",
-                  value: String(counts.missing),
-                  tone: counts.missing > 0 ? "neg" : undefined,
+                  value: String(data.missingDays ?? counts.missing),
                 },
               ]}
             />

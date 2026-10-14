@@ -8,9 +8,13 @@ import {
 } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
+import { cn } from "../ui";
 import { cellState } from "./capture";
 import type { OpenDay } from "./useCaptureFlow";
 
+// One day of a vehicle's week (v2.29): the amount with the reason in small type under it when the day was low, a
+// reason chip for a no revenue day, "Missing" for a past day with no record, "Due" for today. A cell the person
+// can change is a button; the server says which (canEdit covers the rights and the back-dating limit).
 export const DayCell = memo(function DayCell({
   vehicle,
   cell,
@@ -25,17 +29,19 @@ export const DayCell = memo(function DayCell({
   onOpen: OpenDay;
 }) {
   const formats = useFormats();
-  const clickable = canOpen(cell, canCapture);
+  const clickable = canOpen(cell, canCapture) && cell.canEdit;
   const meta = STATUS_META[cell.status];
-  const missing = meta.awaitsCapture;
   const now = cell.date === today;
   const content = meta.recorded ? (
     cell.amount !== null ? (
-      formats.formatNumber(cell.amount)
+      <>
+        {formats.formatNumber(cell.amount)}
+        {cell.reason && <small className="rwhy">{cell.reason}</small>}
+      </>
     ) : (
       <span className="chip mute">{cell.reason}</span>
     )
-  ) : missing ? (
+  ) : meta.awaitsCapture ? (
     now ? (
       <span className="due">Due</span>
     ) : (
@@ -44,26 +50,22 @@ export const DayCell = memo(function DayCell({
   ) : (
     <span className="sr-only">{meta.label}</span>
   );
-  const edited = cell.editedAfterCapture && (
-    <span className="note">Edited</span>
-  );
-  if (!clickable)
-    return (
-      <>
-        {content}
-        {edited}
-      </>
-    );
   return (
-    <button
-      type="button"
-      data-opens={`${vehicle.id}|${cell.date}`}
-      aria-label={`${vehicle.registration}, ${formats.formatWeekdayDate(cell.date)}: ${cellState(formats, cell)}`}
-      onClick={(event) => onOpen(vehicle, cell.date, event.currentTarget)}
-      className="-mx-1.5 rounded-lg px-1.5 py-0.5 text-right hover:bg-paper-2"
-    >
-      {content}
-      {edited}
-    </button>
+    <td className={cn("r", clickable && "rcell")}>
+      {clickable ? (
+        <button
+          type="button"
+          className="rc"
+          data-opens={`${vehicle.id}|${cell.date}`}
+          title={`${vehicle.registration}, ${formats.formatWeekdayDate(cell.date)}`}
+          aria-label={`${vehicle.registration}, ${formats.formatWeekdayDate(cell.date)}: ${cellState(formats, cell)}`}
+          onClick={(event) => onOpen(vehicle, cell.date, event.currentTarget)}
+        >
+          {content}
+        </button>
+      ) : (
+        content
+      )}
+    </td>
   );
 });

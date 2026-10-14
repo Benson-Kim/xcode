@@ -6,7 +6,6 @@ import type { Period } from "@xcode/shared/periods";
 import {
   pettyCashEntriesPath,
   pettyCashOverviewPath,
-  type PettyCashEntry,
   type PettyCashEntryPage,
   type PettyCashKind,
   type PettyCashOverview,
@@ -37,7 +36,7 @@ import { EntriesTable, selectable } from "./EntriesTable";
 import { EntryDialog, type EntryDialogState } from "./EntryDialog";
 import { FigureCards } from "./FigureCards";
 import { FiltersBar, type StatusFilter } from "./FiltersBar";
-import { RemoveDialog, SendBackDialog } from "./ReasonDialogs";
+import { ReasonDialog, type ReasonState } from "./ReasonDialogs";
 import type { EntryActions } from "./RowActions";
 import { BULK, useApprovals } from "./useApprovals";
 import { useSelection } from "./useSelection";
@@ -75,8 +74,7 @@ export function PettyCashPage({
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("");
   const [entryDialog, setEntryDialog] = useState<EntryDialogState | null>(null);
-  const [sendingBack, setSendingBack] = useState<PettyCashEntry | null>(null);
-  const [removing, setRemoving] = useState<PettyCashEntry | null>(null);
+  const [reasoning, setReasoning] = useState<ReasonState | null>(null);
   const { can } = useSession();
   const exporter = useReportExport();
 
@@ -129,7 +127,9 @@ export function PettyCashPage({
           page: paging.page,
           pageSize: paging.pageSize,
           kind: KINDS[tab],
-          ...(tab === "expenses" && status !== "all" ? { status } : {}),
+          ...(tab === "expenses" && status !== "all"
+            ? { status: status as PettyCashStatus }
+            : {}),
         })
       : null,
   );
@@ -152,8 +152,7 @@ export function PettyCashPage({
   function finish(message: string, toasted?: string) {
     setNotice(message);
     setEntryDialog(null);
-    setSendingBack(null);
-    setRemoving(null);
+    setReasoning(null);
     if (toasted) toast(toasted);
     refresh();
   }
@@ -175,9 +174,11 @@ export function PettyCashPage({
   const actions: EntryActions = {
     busyId,
     onApprove: (entry) => void approve(entry),
-    onSendBack: setSendingBack,
+    onSendBack: (entry) => setReasoning({ action: "sendBack", entry }),
+    onReject: (entry) => setReasoning({ action: "reject", entry }),
+    onReopen: (entry) => setReasoning({ action: "reopen", entry }),
     onEdit: (entry) => setEntryDialog({ kind: entry.kind, entry }),
-    onRemove: setRemoving,
+    onRemove: (entry) => setReasoning({ action: "remove", entry }),
   };
 
   const holderName = holderId
@@ -314,7 +315,8 @@ export function PettyCashPage({
             searching={Boolean(query)}
             loading={loading}
             failed={Boolean(list.error)}
-            actions={actions}
+            canDelete={Boolean(permissions?.canDeleteCash)}
+            onRemove={actions.onRemove}
           />
         )}
       </div>
@@ -334,6 +336,7 @@ export function PettyCashPage({
           businessDate={businessDate}
           permissions={permissions}
           holderId={holderId}
+          holders={known?.holders}
           floats={known?.floats}
           onSaved={saved}
           onConflict={conflict}
@@ -341,24 +344,18 @@ export function PettyCashPage({
         />
       )}
 
-      <SendBackDialog
-        entry={sendingBack}
+      <ReasonDialog
+        state={reasoning}
         onDone={saved}
         onConflict={conflict}
-        onClose={() => setSendingBack(null)}
-      />
-
-      <RemoveDialog
-        entry={removing}
-        onDone={saved}
-        onConflict={conflict}
-        onClose={() => setRemoving(null)}
+        onClose={() => setReasoning(null)}
       />
     </>
   );
 }
 
-// What this person may record in the view shown: the actions on the headline card.
+// What this person may record in the view shown: the actions on the headline card. Spending needs a float of their own
+// or the right to add for another manager.
 function RecordButtons({
   tab,
   permissions,
@@ -369,14 +366,15 @@ function RecordButtons({
   onRecord: (kind: PettyCashKind) => void;
 }) {
   if (tab === "expenses")
-    return permissions.canSpend ? (
+    return permissions.canSpend &&
+      (permissions.holderId || permissions.canSpendOther) ? (
       <Button tone="primary" onClick={() => onRecord("expense")}>
         Record spending
       </Button>
     ) : null;
   return (
     <>
-      {(permissions.canSpend || permissions.canIssue) && (
+      {permissions.canCredit && (
         <Button tone="outline" onClick={() => onRecord("credit")}>
           Credit note
         </Button>

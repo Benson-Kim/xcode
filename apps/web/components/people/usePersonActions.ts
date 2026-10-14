@@ -1,8 +1,6 @@
 import { useState } from "react";
 
-import { formatPhone } from "@xcode/shared/format";
-
-import { type LifecycleAction, peopleApi } from "../../lib/endpoints/people";
+import { peopleApi } from "../../lib/endpoints/people";
 import type { Person } from "../../lib/types";
 import { useToast } from "../ui";
 import { type Errors, personPayload, validatePerson } from "./model";
@@ -10,18 +8,20 @@ import type { PersonFormState } from "./usePersonForm";
 
 export function usePersonActions({
   person,
+  today,
   onSaved,
+  onChanged,
 }: {
   person?: Person;
-  onSaved: () => void;
+  today: string;
+  onSaved: (name: string, isNew: boolean) => void;
+  // A sign-in action acted at once: the pane and the list read the person again.
+  onChanged?: () => void;
 }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [saveError, setSaveError] = useState("");
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const [removeReason, setRemoveReason] = useState("");
-  const [removeError, setRemoveError] = useState("");
 
   async function save(pf: PersonFormState, rolesLoaded: boolean) {
     const { form, permissions } = pf;
@@ -29,6 +29,7 @@ export function usePersonActions({
       rolesLoaded,
       assignableCount: pf.assignable.length,
       permissions,
+      today,
     });
     setErrors(next);
     setSaveError("");
@@ -43,12 +44,7 @@ export function usePersonActions({
     setBusy(true);
     try {
       await peopleApi.save(person, body);
-      toast(
-        person
-          ? `Changes saved for ${name}.`
-          : `${name} added. They sign in with ${formatPhone(body.phoneNumber)} and set a PIN with an email code.`,
-      );
-      onSaved();
+      onSaved(name, !person);
     } catch (value) {
       setSaveError((value as Error).message);
     } finally {
@@ -56,50 +52,43 @@ export function usePersonActions({
     }
   }
 
-  async function lifecycle(action: LifecycleAction) {
-    if (!person) return;
-    if (action === "deactivate" && !confirmRemove)
-      return setConfirmRemove(true);
-    // Said beside the reason field before asking the server, which needs one too.
-    if (action === "deactivate" && !removeReason.trim())
-      return setRemoveError("Give a reason for removing access.");
-    setRemoveError("");
+  // The sign-in actions act at once and are logged; they do not wait for Save.
+  async function act(work: () => Promise<unknown>, done: string) {
     setBusy(true);
+    setSaveError("");
     try {
-      await peopleApi.lifecycle(person.id, action, {
-        version: person.version,
-        ...(action === "deactivate" ? { reason: removeReason.trim() } : {}),
-      });
-      toast(
-        action === "sign-out"
-          ? `${person.firstName} is signed out of every device.`
-          : action === "activate"
-            ? "Access given back."
-            : `Access removed for ${person.firstName} ${person.lastName}.`,
-      );
-      if (action === "sign-out") setBusy(false);
-      else onSaved();
+      await work();
+      toast(done);
+      onChanged?.();
     } catch (value) {
       setSaveError((value as Error).message);
-      if (action !== "deactivate") setConfirmRemove(false);
+    } finally {
       setBusy(false);
     }
-  }
-
-  function changeRemoveReason(value: string) {
-    setRemoveReason(value);
-    setRemoveError("");
   }
 
   return {
     busy,
     errors,
     saveError,
-    confirmRemove,
-    removeReason,
-    changeRemoveReason,
-    removeError,
     save,
-    lifecycle,
+    pinReset: () =>
+      person &&
+      act(
+        () => peopleApi.pinReset(person.id),
+        `${person.firstName} must set a new PIN at the next sign in`,
+      ),
+    removeDevice: (deviceId: string) =>
+      person &&
+      act(() => peopleApi.removeDevice(person.id, deviceId), "Removed"),
+    removeAllDevices: () =>
+      person &&
+      act(
+        () =>
+          peopleApi.lifecycle(person.id, "sign-out", {
+            version: person.version,
+          }),
+        "Removed",
+      ),
   };
 }

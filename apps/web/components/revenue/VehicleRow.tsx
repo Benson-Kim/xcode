@@ -1,12 +1,27 @@
 import { memo } from "react";
 
-import { percentText } from "@xcode/shared/format";
-import type { RevenueVehicle } from "@xcode/shared/revenue";
+import { gapText, type RevenueVehicle } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
 import { DayCell } from "./DayCell";
 import { RegPlate } from "./RegPlate";
 import type { OpenDay } from "./useCaptureFlow";
+
+// The gap to target as the design's chip: a signed figure, green at or above target, amber up to the band below
+// it, red beyond (v2.31). Nothing while no target counts yet.
+export function GapChip({
+  gap,
+  band,
+}: {
+  gap: number | null | undefined;
+  band: "pos" | "amb" | "neg" | null | undefined;
+}) {
+  const formats = useFormats();
+  if (gap === null || gap === undefined || !band) return null;
+  return (
+    <span className={`gap ${band}`}>{gapText(gap, formats.formatNumber)}</span>
+  );
+}
 
 export const VehicleRow = memo(function VehicleRow({
   vehicle,
@@ -29,34 +44,20 @@ export const VehicleRow = memo(function VehicleRow({
       {/* A row header; the design's cell type and case, not a column heading's. */}
       <th scope="row" className="font-normal tracking-normal normal-case">
         <RegPlate>{vehicle.registration}</RegPlate>
-        <small className="block text-xs font-semibold text-slate">
-          {vehicle.companyName}
-        </small>
       </th>
       {vehicle.days.map((day) => (
-        <td key={day.date} className="r">
-          <DayCell
-            vehicle={vehicle}
-            cell={day}
-            today={today}
-            canCapture={canCapture}
-            onOpen={onOpenDay}
-          />
-        </td>
+        <DayCell
+          key={day.date}
+          vehicle={vehicle}
+          cell={day}
+          today={today}
+          canCapture={canCapture}
+          onOpen={onOpenDay}
+        />
       ))}
       <td className="r tot">{formats.formatNumber(vehicle.totalAmount)}</td>
-      <td>
-        {vehicle.percent !== null && (
-          <div className="prog">
-            <div className="t" aria-hidden="true">
-              <i
-                className={vehicle.percent >= 100 ? "full" : undefined}
-                style={{ width: `${Math.min(vehicle.percent, 100)}%` }}
-              />
-            </div>
-            <span>{percentText(vehicle.percent)}</span>
-          </div>
-        )}
+      <td className="r">
+        <GapChip gap={vehicle.gap} band={vehicle.gapBand} />
       </td>
     </tr>
   );
