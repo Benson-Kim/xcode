@@ -31,7 +31,7 @@ loading `.env` everywhere is not carried over).
 | `XCODE_ALLOWED_HOSTS` | list | `*` | production must list hosts; `*` refused in production (development and testing keep it); the health probes and `/metrics` are exempt (callers use the address) |
 | `XCODE_MAIL_BACKEND` | `log` \| `smtp` | `smtp` | `log` refused in production |
 | `XCODE_EMAIL_HOST` | string | empty | required when the backend is `smtp`; checked at startup, not first send |
-| `XCODE_EMAIL_PORT` | int | 587 | outside development 465 or 587, unless `XCODE_EMAIL_TLS=false` to a relay on this machine |
+| `XCODE_EMAIL_PORT` | int | 587 | any port; 465 is implicit TLS and every other port requires STARTTLS (2525 where a host blocks 465 and 587), so mail goes out in plaintext only with `XCODE_EMAIL_TLS=false` to a relay on this machine |
 | `XCODE_EMAIL_FROM` | string | empty | required when the backend is `smtp` |
 | `XCODE_EMAIL_USERNAME` | string | empty | SMTP login, optional |
 | `XCODE_EMAIL_PASSWORD` | string | empty | secret; the summary shows only set or unset |

@@ -300,16 +300,6 @@ class Settings(BaseSettings):
         if self.email_timeout_seconds <= 0:
             errors.append("XCODE_EMAIL_TIMEOUT_SECONDS must be positive")
         if (
-            self.mail_backend == "smtp"
-            and self.email_tls
-            and self.email_port not in (465, 587)
-            and self.env is not Environment.development
-        ):
-            errors.append(
-                "XCODE_EMAIL_PORT must be 465 or 587 outside development "
-                "(any port only with XCODE_EMAIL_TLS=false to a relay on this machine)"
-            )
-        if (
             not self.email_tls
             and self.env is not Environment.development
             and not is_local_host(self.email_host)

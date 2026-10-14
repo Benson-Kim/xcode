@@ -20,9 +20,11 @@ def test_port_465_uses_implicit_tls() -> None:
     assert mailer._start_tls is False
 
 
-def test_plaintext_port_refused_outside_development() -> None:
-    with pytest.raises(MailDeliveryError):
-        SmtpMailer(host="h", port=25, sender="a@b.co")
+@pytest.mark.parametrize("port", [25, 2525])
+def test_any_other_port_requires_starttls_outside_development(port: int) -> None:
+    mailer = SmtpMailer(host="h", port=port, sender="a@b.co")
+    assert mailer._start_tls is True
+    assert mailer._use_tls is False
 
 
 def test_plaintext_port_allowed_in_development() -> None:
@@ -87,6 +89,20 @@ async def test_a_starttls_mailer_refuses_a_relay_without_tls() -> None:
     finally:
         relay.close()
         await relay.wait_closed()
+
+
+async def test_mail_on_a_port_other_than_465_or_587_never_goes_out_in_plaintext() -> None:
+    received: list[bytes] = []
+    relay = await _relay_without_tls(received)
+    port = relay.sockets[0].getsockname()[1]
+    try:
+        mailer = SmtpMailer(host="127.0.0.1", port=port, sender="a@b.co")
+        with pytest.raises(MailDeliveryError):
+            await mailer.send(MailMessage(to="c@d.co", subject="s", text="Your code is 123456."))
+    finally:
+        relay.close()
+        await relay.wait_closed()
+    assert received == []
 
 
 @pytest.mark.parametrize("host", ["smtp.example.com", "10.0.0.5", "127.0.0.1.example.com"])

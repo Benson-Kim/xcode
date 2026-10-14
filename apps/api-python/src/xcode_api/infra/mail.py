@@ -79,8 +79,9 @@ class LogMailer:
 
 
 class SmtpMailer:
-    """Sends via SMTP. STARTTLS on port 587, implicit TLS on 465, plaintext refused unless
-    development. Delivery failures raise :class:`MailDeliveryError`.
+    """Sends via SMTP. Implicit TLS on port 465, STARTTLS required on any other port (587, or
+    2525 where a host blocks the standard ports), plaintext refused unless development or a
+    relay on this machine. Delivery failures raise :class:`MailDeliveryError`.
     """
 
     def __init__(
@@ -106,10 +107,6 @@ class SmtpMailer:
         if not tls and not (allow_plaintext or is_local_host(host)):
             raise MailDeliveryError(
                 "SMTP without TLS is refused outside development, except to a relay on this machine"
-            )
-        if tls and port not in (465, 587) and not allow_plaintext:
-            raise MailDeliveryError(
-                "plaintext SMTP is refused outside development (use port 587 or 465)"
             )
         if tls and port not in (465, 587) and allow_plaintext:
             self._use_tls = False

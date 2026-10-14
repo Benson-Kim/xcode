@@ -333,8 +333,10 @@ def test_email_without_tls_is_allowed_for_a_relay_on_this_machine(host: str) -> 
 
 
 @pytest.mark.parametrize("port", [25, 2525])
-def test_an_smtp_port_without_tls_is_refused_at_startup_outside_development(port: int) -> None:
-    _expect_error("XCODE_EMAIL_PORT", email_port=port)
+def test_any_smtp_port_with_tls_is_allowed_outside_development(port: int) -> None:
+    settings = _settings(email_port=port)
+    assert settings.email_tls is True
+    assert settings.email_port == port
 
 
 def test_any_smtp_port_is_allowed_for_a_relay_on_this_machine_without_tls() -> None:
