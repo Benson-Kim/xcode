@@ -37,6 +37,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin xcode
 
 COPY --from=builder /opt/venv /opt/venv
+# pip is a build tool and nothing installs at runtime; its vendored urllib3, msgpack and pkg_resources are what the
+# image scan flags, so neither the venv nor the base image keeps it.
+RUN /opt/venv/bin/python -m pip uninstall --yes pip \
+    && /usr/local/bin/python -m pip uninstall --yes pip
 # The migration runner needs the SQL files at runtime (db migrate/routines/verify).
 COPY db /app/db
 
