@@ -1,0 +1,51 @@
+name: migration-web
+
+# The migration instance's web (https://xcode.mgr.priori.co.ke, on the cPanel account) is built from this branch and
+# published as the release "migration-web". The account installs it from cron with deploy/cpanel/update.sh and
+# XCODE_WEB_ROOT=$HOME/xcode-mgr-web. Its API runs on the droplet; the pull request's CI runs the checks.
+on:
+  push:
+    branches: [fix/web-dropdowns]
+    paths:
+      - "apps/web/**"
+      - "packages/shared/**"
+      - "deploy/cpanel/**"
+      - "package-lock.json"
+      - ".github/workflows/migration-web.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migration-web
+  cancel-in-progress: false
+
+env:
+  API_URL: https://api.xcode.mgr.priori.co.ke
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w apps/web
+        env:
+          NEXT_OUTPUT: standalone
+      - run: bash deploy/cpanel/package.sh "$GITHUB_SHA" "$API_URL" "$RUNNER_TEMP/web"
+      - name: Publish for the cPanel account to install
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete migration-web --yes --cleanup-tag || true
+          gh release create migration-web "$RUNNER_TEMP/web/xcode-web.tar.gz" "$RUNNER_TEMP/web/xcode-web.tar.gz.sha256" \
+            --target "$GITHUB_SHA" --prerelease --title "Migration web" \
+            --notes "Web build of $GITHUB_SHA for https://xcode.mgr.priori.co.ke, against $API_URL."

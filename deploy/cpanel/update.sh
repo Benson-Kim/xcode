@@ -1,12 +1,13 @@
 #!/bin/bash
-# Installs the newest staging web build on the cPanel account. Runs from cron every few minutes:
+# Installs the newest web build on the cPanel account. Runs from cron every few minutes:
 #   */5 * * * * bash $HOME/xcode-web/update.sh >> $HOME/xcode-web/logs/update.log 2>&1
 # The staging deploy publishes the build on GitHub (release "staging-web"). This only downloads: nothing needs to
-# reach into the account, so the host's bot protection never stands in the way.
+# reach into the account, so the host's bot protection never stands in the way. Another build (the migration
+# instance's "migration-web") installs into its own folder with XCODE_RELEASE_BASE and XCODE_WEB_ROOT.
 set -euo pipefail
 
 BASE="${XCODE_RELEASE_BASE:-https://github.com/Benson-Kim/xcode/releases/download/staging-web}"
-ROOT="$HOME/xcode-web"
+ROOT="${XCODE_WEB_ROOT:-$HOME/xcode-web}"
 WORK="$ROOT/.update"
 log() { echo "$(date -u +%FT%TZ) $*"; }
 
