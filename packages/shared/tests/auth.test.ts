@@ -5,6 +5,7 @@ import {
   createAuthClient,
   pauseSeconds,
   pinHelp,
+  pinProblemText,
   validatePin,
 } from "@xcode/shared/auth";
 
@@ -220,5 +221,21 @@ describe("answers the client cannot trust", () => {
       response: { status: "invalid_pin", minimumPinLength: 6 },
       message: pinHelp(6),
     });
+  });
+});
+
+describe("pinProblemText", () => {
+  it("names the length, a PIN equal to the old one, and a weak PIN", () => {
+    expect(pinProblemText("length")).toBe("The PIN is 4 digits.");
+    expect(pinProblemText("unchanged")).toBe(
+      "Choose a PIN different from the old one.",
+    );
+    expect(pinProblemText("unchanged", true)).toBe(
+      "Choose a PIN different from the current one.",
+    );
+    expect(pinProblemText("weak")).toBe(
+      "Choose a PIN that is harder to guess.",
+    );
+    expect(pinProblemText(null)).toBe("Choose a PIN that is harder to guess.");
   });
 });

@@ -147,8 +147,8 @@ jobs:
           psql -h localhost -U postgres -d xcode -v ON_ERROR_STOP=1 -f db/roles/010_roles.sql
           psql -h localhost -U postgres -d xcode -v ON_ERROR_STOP=1 -f db/roles/900_local_dev.sql
           psql -h localhost -U postgres -d xcode -v ON_ERROR_STOP=1 -c "ALTER DATABASE xcode OWNER TO xcode_owner"
-          psql -h localhost -U xcode_owner -d xcode -v ON_ERROR_STOP=1 -f db/roles/020_schemas.sql
-          psql -h localhost -U xcode_owner -d xcode -v ON_ERROR_STOP=1 -f db/roles/030_grants.sql
+          PGPASSWORD=xcode_owner psql -h localhost -U xcode_owner -d xcode -v ON_ERROR_STOP=1 -f db/roles/020_schemas.sql
+          PGPASSWORD=xcode_owner psql -h localhost -U xcode_owner -d xcode -v ON_ERROR_STOP=1 -f db/roles/030_grants.sql
       - name: Migrate, status and verify a fresh database
         run: |
           xcode-api db migrate

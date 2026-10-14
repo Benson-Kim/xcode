@@ -63,12 +63,12 @@ date.
 
 | Fact | Question | Command (run in the account's terminal or over SSH) | Measured |
 |---|---|---|---|
-| PostgreSQL version | 39 | `psql -Atc "select version()"` and `ls /usr/pgsql-*/bin 2>/dev/null; rpm -qa \| grep -i postgresql` | not yet |
-| The five roles can exist (`NOLOGIN`, no `BYPASSRLS`, connection limits, per-role settings) | 40 | as the cPanel database user: `psql -c "select rolcreaterole, rolsuper from pg_roles where rolname = current_user"`; then try `psql -v ON_ERROR_STOP=1 -f db/roles/010_roles.sql` in a scratch database | not yet |
-| How an ASGI app runs with its lifespan | 41 | `ls ~/virtualenv 2>/dev/null; cloudlinux-selector get --json --interpreter python 2>/dev/null`; whether a long-running `xcode-api serve` is allowed (a managed process or cron `@reboot`) rather than Passenger's WSGI | not yet |
-| Python versions offered | 42 | `ls /opt/alt/ \| grep python; /opt/alt/python313/bin/python3 --version` | not yet |
-| Thread budget under load | 43 | `ps -L -u $(whoami) \| wc -l` before and while the API serves a load test; `cat /proc/$(pgrep -f "xcode-api serve")/status \| grep Threads` | not yet |
-| Where secrets live | 44 | whether the account offers per-application environment variables outside the web root; `ls -la ~` for any `.env` beside the web | not yet |
+| PostgreSQL version | 39 | `psql -Atc "select version()"` and `ls /usr/pgsql-*/bin 2>/dev/null; rpm -qa \| grep -i postgresql` | 2026-10-14: only the `psql` 13.23 client (`/bin/psql`); no server binaries for the account; the server's own version not read (no login tried) |
+| The five roles can exist (`NOLOGIN`, no `BYPASSRLS`, connection limits, per-role settings) | 40 | as the cPanel database user: `psql -c "select rolcreaterole, rolsuper from pg_roles where rolname = current_user"`; then try `psql -v ON_ERROR_STOP=1 -f db/roles/010_roles.sql` in a scratch database | 2026-10-14: no (cPanel creates the database users; no `initdb`/`pg_ctl`, so no private cluster either): the database does not go on this host |
+| How an ASGI app runs with its lifespan | 41 | `ls ~/virtualenv 2>/dev/null; cloudlinux-selector get --json --interpreter python 2>/dev/null`; whether a long-running `xcode-api serve` is allowed (a managed process or cron `@reboot`) rather than Passenger's WSGI | 2026-10-14: Python apps run under Passenger WSGI (`cloudlinux-selector`); a cron `flock -n` line already keeps a long-running `redis-server` alive, so `serve` can run the same way; `ss` shows nothing inside CageFS |
+| Python versions offered | 42 | `ls /opt/alt/ \| grep python; /opt/alt/python313/bin/python3 --version` | 2026-10-14: 2.7 and 3.3 to 3.13 (`/opt/alt/python313`: 3.13.16) |
+| Thread budget under load | 43 | `ps -L -u $(whoami) \| wc -l` before and while the API serves a load test; `cat /proc/$(pgrep -f "xcode-api serve")/status \| grep Threads` | 2026-10-14 21:30 EAT, idle: 55 threads, of which four `next-server` processes take 11 each; `ulimit -u` unlimited (the cap is CloudLinux's) |
+| Where secrets live | 44 | whether the account offers per-application environment variables outside the web root; `ls -la ~` for any `.env` beside the web | 2026-10-14: one account (`priori`) holds the staging web, other companies' apps and their per-app environment variables (`cloudlinux-selector get --json` prints them: never run it in a shared transcript) |
 | How a release is proven authentic | 45 | the installer's verification step (`ssh-keygen -Y verify` against a pinned public key, or none today) | not yet |
 
 Until these are measured, the defaults of those questions stand: the database does not go on
