@@ -48,8 +48,8 @@ export async function downloadReport(path: string, fileName: string) {
   saveBlob(await response.blob(), safeFileName(fileName));
 }
 
-// Export for the Reports page: one download at a time, and the reason when one fails. The file is named after the
-// report and, for a dated one, its period.
+// Export for the Reports page and the screens that offer one: one download at a time, and the reason when one fails.
+// The file is named after the report or screen and, for a dated one, its period.
 export function useReportExport() {
   const formats = useFormats();
   const [exporting, setExporting] = useState(false);
@@ -58,7 +58,7 @@ export function useReportExport() {
   async function run(
     path: string,
     label: string,
-    period: Period | null,
+    period: Pick<Period, "from" | "to"> | null,
     format: ReportExportFormat,
   ) {
     setExporting(true);

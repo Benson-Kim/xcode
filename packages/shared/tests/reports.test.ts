@@ -5,8 +5,11 @@ import {
   PETTY_CASH_REPORTS,
   REPORTS_ACCESS_PATH,
   UNDATED_REPORTS,
+  expenseExportPath,
+  pettyCashExportPath,
   reportExportPath,
   reportPath,
+  revenueExportPath,
 } from "../src/reports";
 
 describe("the catalog", () => {
@@ -108,5 +111,62 @@ describe("paths", () => {
     expect(
       reportExportPath("fleet", "investment", { q: "", format: "xlsx" }),
     ).toBe("setup/reports/fleet/investment/export?format=xlsx");
+  });
+});
+
+describe("screen exports", () => {
+  it("asks for the revenue week with the query names the API reads", () => {
+    expect(
+      revenueExportPath({
+        weekStart: "2026-10-12",
+        companyId: "c1",
+        format: "xlsx",
+      }),
+    ).toBe(
+      "setup/revenue/export?weekStart=2026-10-12&companyId=c1&format=xlsx",
+    );
+    expect(revenueExportPath({ weekStart: "2026-10-12", format: "pdf" })).toBe(
+      "setup/revenue/export?weekStart=2026-10-12&format=pdf",
+    );
+  });
+
+  it("asks for the central expenses of a period, its source and search", () => {
+    expect(
+      expenseExportPath({
+        from: "2026-10-01",
+        to: "2026-10-31",
+        source: "pc",
+        q: "fuel tank",
+        format: "pdf",
+      }),
+    ).toBe(
+      "setup/expenses/export?from=2026-10-01&to=2026-10-31&source=pc&q=fuel+tank&format=pdf",
+    );
+  });
+
+  it("asks for the petty-cash view of one holder, leaving empty filters out", () => {
+    expect(
+      pettyCashExportPath({
+        from: "2026-10-05",
+        to: "2026-10-11",
+        holderId: "h1",
+        view: "expenses",
+        status: "waiting",
+        q: "",
+        format: "xlsx",
+      }),
+    ).toBe(
+      "setup/pettycash/export?from=2026-10-05&to=2026-10-11&holderId=h1&view=expenses&status=waiting&format=xlsx",
+    );
+    expect(
+      pettyCashExportPath({
+        from: "2026-10-05",
+        to: "2026-10-11",
+        view: "cash",
+        format: "pdf",
+      }),
+    ).toBe(
+      "setup/pettycash/export?from=2026-10-05&to=2026-10-11&view=cash&format=pdf",
+    );
   });
 });

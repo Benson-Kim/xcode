@@ -36,7 +36,7 @@ public static class PettyCashReports
         vehicleId is { } id && data.Vehicles.TryGetValue(id, out var vehicle) ? vehicle.Registration : "";
 
     private static string Describe(PettyCashReportRow row) =>
-        row.Kind == PettyCashKind.Credit ? $"Credit note to {row.Payee}" : row.ItemName ?? "";
+        row.Kind == PettyCashKind.Credit ? row.Payee is null ? "Credit note" : $"Credit note to {row.Payee}" : row.ItemName ?? "";
 
     private static IEnumerable<PettyCashReportRow> InPeriod(PettyCashReportData data) =>
         data.Rows.Where(r => r.Date >= data.From && r.Date <= data.To);

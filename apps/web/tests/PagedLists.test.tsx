@@ -64,7 +64,7 @@ it("pages PSV companies on the server, 25 to a page", async () => {
   );
 });
 
-it("pages People and access on the server, filters included", async () => {
+it("pages People and access on the server", async () => {
   const api = fakeApi();
   const people = Array.from({ length: 60 }, (_, index) =>
     personFixture({
@@ -99,21 +99,6 @@ it("pages People and access on the server, filters included", async () => {
   expect(reads(api, "setup/people").at(-1)).toBe(
     "setup/people?page=2&pageSize=25",
   );
-
-  // A filter goes to the server, which counts and pages the matches from the first page.
-  fireEvent.change(screen.getByLabelText("Role"), {
-    target: { value: "Fleet manager" },
-  });
-  expect(await screen.findByText("Showing 1–25 of 30")).toBeInTheDocument();
-  expect(reads(api, "setup/people").at(-1)).toBe(
-    "setup/people?role=Fleet+manager&page=1&pageSize=25",
-  );
-  expect(
-    screen.getByRole("button", { name: "View Person40 Test" }),
-  ).toBeInTheDocument();
-  expect(
-    screen.queryByRole("button", { name: "View Person39 Test" }),
-  ).toBeNull();
 });
 
 it("pages Scheduled expenses and savings on the server", async () => {
@@ -139,6 +124,16 @@ it("pages Scheduled expenses and savings on the server", async () => {
   }));
   api.on("setup/recurring*", paged(items));
   api.on("setup/recurring/vehicle-options", [200, []]);
+  api.on("setup/recurring/summary", [
+    200,
+    {
+      from: "2026-10-01",
+      to: "2026-10-31",
+      costsDue: 0,
+      saved: 0,
+      savingsBalance: 0,
+    },
+  ]);
   renderInApp(
     <RecurringPage canManage />,
     { permissions: ["commitments.view", "commitments.manage"] },

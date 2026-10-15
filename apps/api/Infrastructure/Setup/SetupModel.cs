@@ -37,6 +37,13 @@ public sealed partial class AuthDb
 
           var item = model.Entity<RecurringItem>();
           item.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(item);
+          item.Ignore(x => x.PausedFrom);
+
+          var pause = model.Entity<RecurringPause>();
+          pause.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(pause);
+          pause.HasIndex(x => new { x.OrganizationId, x.ItemId, x.From });
+          pause.HasOne<RecurringItem>().WithMany(x => x.Pauses).HasForeignKey(x => new { x.OrganizationId, x.ItemId }).OnDelete(DeleteBehavior.Restrict);
+          pause.Ignore(x => x.Open);
 
           var version = model.Entity<RecurringVersion>();
           version.HasKey(x => new { x.OrganizationId, x.Id }); Tenant(version);

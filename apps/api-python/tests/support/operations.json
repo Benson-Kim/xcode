@@ -1,0 +1,839 @@
+[
+ {
+  "id": "S01",
+  "section": "2.2",
+  "method": "get",
+  "path": "/setup/access/catalog",
+  "operationId": "GetAccessCatalog",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S02",
+  "section": "2.2",
+  "method": "get",
+  "path": "/setup/access/roles",
+  "operationId": "ListAccessRoles",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S03",
+  "section": "2.2",
+  "method": "get",
+  "path": "/setup/access/scope-options",
+  "operationId": "GetAccessScopeOptions",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S04",
+  "section": "2.2",
+  "method": "get",
+  "path": "/setup/access/me",
+  "operationId": "GetMyAccessScope",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S05",
+  "section": "2.2",
+  "method": "get",
+  "path": "/setup/people",
+  "operationId": "ListPeople",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S06",
+  "section": "2.2",
+  "method": "get",
+  "path": "/setup/people/{id}",
+  "operationId": "GetPerson",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S07",
+  "section": "2.2",
+  "method": "post",
+  "path": "/setup/people",
+  "operationId": "CreatePerson",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S08",
+  "section": "2.2",
+  "method": "put",
+  "path": "/setup/people/{id}",
+  "operationId": "UpdatePerson",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S09",
+  "section": "2.2",
+  "method": "post",
+  "path": "/setup/people/{id}/activate",
+  "operationId": "ActivatePerson",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S10",
+  "section": "2.2",
+  "method": "post",
+  "path": "/setup/people/{id}/deactivate",
+  "operationId": "DeactivatePerson",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S11",
+  "section": "2.2",
+  "method": "post",
+  "path": "/setup/people/{id}/sign-out",
+  "operationId": "SignOutPerson",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S12",
+  "section": "2.3",
+  "method": "get",
+  "path": "/setup/companies",
+  "operationId": "ListSetupCompanies",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S13",
+  "section": "2.3",
+  "method": "post",
+  "path": "/setup/companies",
+  "operationId": "CreateSetupCompany",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S14",
+  "section": "2.3",
+  "method": "put",
+  "path": "/setup/companies/{id}",
+  "operationId": "RenameSetupCompany",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S15",
+  "section": "2.3",
+  "method": "post",
+  "path": "/setup/companies/{id}/archive",
+  "operationId": "ArchiveSetupCompany",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S16",
+  "section": "2.3",
+  "method": "post",
+  "path": "/setup/companies/{id}/restore",
+  "operationId": "RestoreSetupCompany",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S17",
+  "section": "2.3",
+  "method": "get",
+  "path": "/setup/vehicles",
+  "operationId": "ListSetupVehicles",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S18",
+  "section": "2.3",
+  "method": "post",
+  "path": "/setup/vehicles",
+  "operationId": "CreateSetupVehicle",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S19",
+  "section": "2.3",
+  "method": "put",
+  "path": "/setup/vehicles/{id}",
+  "operationId": "UpdateSetupVehicle",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S20",
+  "section": "2.3",
+  "method": "get",
+  "path": "/setup/vehicles/company-options",
+  "operationId": "ListVehicleCompanyOptions",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S21",
+  "section": "2.3",
+  "method": "post",
+  "path": "/setup/vehicles/{id}/retire",
+  "operationId": "RetireSetupVehicle",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S22",
+  "section": "2.3",
+  "method": "post",
+  "path": "/setup/vehicles/{id}/restore",
+  "operationId": "RestoreSetupVehicle",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S23",
+  "section": "2.3",
+  "method": "get",
+  "path": "/setup/vehicles/{id}/report",
+  "operationId": "GetSetupVehicleReport",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S24",
+  "section": "2.4",
+  "method": "get",
+  "path": "/setup/recurring",
+  "operationId": "ListSetupRecurring",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S25",
+  "section": "2.4",
+  "method": "get",
+  "path": "/setup/recurring/vehicle-options",
+  "operationId": "ListRecurringVehicleOptions",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S26",
+  "section": "2.4",
+  "method": "post",
+  "path": "/setup/recurring",
+  "operationId": "CreateSetupRecurring",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S27",
+  "section": "2.4",
+  "method": "put",
+  "path": "/setup/recurring/{id}",
+  "operationId": "ReviseSetupRecurring",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S28",
+  "section": "2.4",
+  "method": "post",
+  "path": "/setup/recurring/{id}/stop",
+  "operationId": "StopSetupRecurring",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S29",
+  "section": "2.4",
+  "method": "post",
+  "path": "/setup/recurring/{id}/restore",
+  "operationId": "CancelSetupRecurringStop",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S30",
+  "section": "2.5",
+  "method": "get",
+  "path": "/setup/history",
+  "operationId": "ListSetupHistory",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S31",
+  "section": "2.6",
+  "method": "get",
+  "path": "/setup/expense-categories",
+  "operationId": "ListExpenseCategories",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S32",
+  "section": "2.6",
+  "method": "get",
+  "path": "/setup/expense-items/options",
+  "operationId": "ListExpenseItemOptions",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S33",
+  "section": "2.6",
+  "method": "post",
+  "path": "/setup/expense-categories",
+  "operationId": "CreateExpenseCategory",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S34",
+  "section": "2.6",
+  "method": "put",
+  "path": "/setup/expense-categories/{id}",
+  "operationId": "UpdateExpenseCategory",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S35",
+  "section": "2.6",
+  "method": "post",
+  "path": "/setup/expense-categories/{id}/stop",
+  "operationId": "StopExpenseCategory",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S36",
+  "section": "2.6",
+  "method": "post",
+  "path": "/setup/expense-categories/{id}/restore",
+  "operationId": "RestoreExpenseCategory",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S37",
+  "section": "2.6",
+  "method": "post",
+  "path": "/setup/expense-categories/{id}/items",
+  "operationId": "CreateExpenseItem",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S38",
+  "section": "2.6",
+  "method": "put",
+  "path": "/setup/expense-items/{id}",
+  "operationId": "RenameExpenseItem",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S39",
+  "section": "2.6",
+  "method": "post",
+  "path": "/setup/expense-items/{id}/stop",
+  "operationId": "StopExpenseItem",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S40",
+  "section": "2.6",
+  "method": "post",
+  "path": "/setup/expense-items/{id}/restore",
+  "operationId": "RestoreExpenseItem",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S41",
+  "section": "2.7",
+  "method": "get",
+  "path": "/setup/vehicles/{id}/investment",
+  "operationId": "GetVehicleInvestment",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S42",
+  "section": "2.7",
+  "method": "post",
+  "path": "/setup/vehicles/{id}/investment",
+  "operationId": "AddVehicleInvestment",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S43",
+  "section": "2.7",
+  "method": "put",
+  "path": "/setup/investment/{id}",
+  "operationId": "UpdateVehicleInvestment",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S44",
+  "section": "2.7",
+  "method": "delete",
+  "path": "/setup/investment/{id}",
+  "operationId": "DeleteVehicleInvestment",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "R01",
+  "section": "2.8",
+  "method": "get",
+  "path": "/setup/revenue",
+  "operationId": "GetRevenueWeek",
+  "tag": "Revenue",
+  "planned": false
+ },
+ {
+  "id": "R02",
+  "section": "2.8",
+  "method": "get",
+  "path": "/setup/revenue/dashboard",
+  "operationId": "GetRevenueDashboard",
+  "tag": "Revenue",
+  "planned": false
+ },
+ {
+  "id": "R03",
+  "section": "2.8",
+  "method": "put",
+  "path": "/setup/revenue/{vehicleId}/{date}",
+  "operationId": "SaveRevenue",
+  "tag": "Revenue",
+  "planned": false
+ },
+ {
+  "id": "O01",
+  "section": "2.9",
+  "method": "get",
+  "path": "/setup/organization/settings",
+  "operationId": "GetOrganizationSettings",
+  "tag": "Organization",
+  "planned": false
+ },
+ {
+  "id": "O02",
+  "section": "2.9",
+  "method": "put",
+  "path": "/setup/organization/settings/{section}",
+  "operationId": "UpdateOrganizationSettings",
+  "tag": "Organization",
+  "planned": false
+ },
+ {
+  "id": "O03",
+  "section": "2.9",
+  "method": "put",
+  "path": "/setup/organization/logo",
+  "operationId": "UpdateOrganizationLogo",
+  "tag": "Organization",
+  "planned": false
+ },
+ {
+  "id": "O04",
+  "section": "2.9",
+  "method": "delete",
+  "path": "/setup/organization/logo",
+  "operationId": "DeleteOrganizationLogo",
+  "tag": "Organization",
+  "planned": false
+ },
+ {
+  "id": "O05",
+  "section": "2.9",
+  "method": "get",
+  "path": "/setup/appearance",
+  "operationId": "GetAppearance",
+  "tag": "Organization",
+  "planned": false
+ },
+ {
+  "id": "O06",
+  "section": "2.9",
+  "method": "get",
+  "path": "/setup/preferences",
+  "operationId": "GetUserPreferences",
+  "tag": "Organization",
+  "planned": false
+ },
+ {
+  "id": "O07",
+  "section": "2.9",
+  "method": "put",
+  "path": "/setup/preferences",
+  "operationId": "UpdateUserPreferences",
+  "tag": "Organization",
+  "planned": false
+ },
+ {
+  "id": "P01",
+  "section": "2.11",
+  "method": "get",
+  "path": "/setup/pettycash/overview",
+  "operationId": "GetPettyCashOverview",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P02",
+  "section": "2.11",
+  "method": "get",
+  "path": "/setup/pettycash/entries",
+  "operationId": "ListPettyCashEntries",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P03",
+  "section": "2.11",
+  "method": "get",
+  "path": "/setup/pettycash/options",
+  "operationId": "GetPettyCashOptions",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P04",
+  "section": "2.11",
+  "method": "get",
+  "path": "/setup/pettycash/dashboard",
+  "operationId": "GetPettyCashDashboard",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P05",
+  "section": "2.11",
+  "method": "post",
+  "path": "/setup/pettycash/entries",
+  "operationId": "CreatePettyCashEntry",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P06",
+  "section": "2.11",
+  "method": "put",
+  "path": "/setup/pettycash/entries/{id}",
+  "operationId": "UpdatePettyCashEntry",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P07",
+  "section": "2.11",
+  "method": "post",
+  "path": "/setup/pettycash/entries/{id}/approve",
+  "operationId": "ApprovePettyCashEntry",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P08",
+  "section": "2.11",
+  "method": "post",
+  "path": "/setup/pettycash/entries/{id}/send-back",
+  "operationId": "SendBackPettyCashEntry",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P09",
+  "section": "2.11",
+  "method": "post",
+  "path": "/setup/pettycash/entries/{id}/remove",
+  "operationId": "RemovePettyCashEntry",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P10",
+  "section": "2.11",
+  "method": "post",
+  "path": "/setup/pettycash/approve-day",
+  "operationId": "ApprovePettyCashDay",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P11",
+  "section": "2.11",
+  "method": "post",
+  "path": "/setup/pettycash/approve",
+  "operationId": "ApprovePettyCashEntries",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P12",
+  "section": "2.11",
+  "method": "post",
+  "path": "/setup/pettycash/entries/{id}/reject",
+  "operationId": "RejectPettyCashEntry",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "P13",
+  "section": "2.11",
+  "method": "post",
+  "path": "/setup/pettycash/entries/{id}/reopen",
+  "operationId": "ReopenPettyCashEntry",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "S45",
+  "section": "2.12.2",
+  "method": "post",
+  "path": "/setup/people/{id}/pin-reset",
+  "operationId": "RequirePersonPinReset",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S46",
+  "section": "2.12.2",
+  "method": "post",
+  "path": "/setup/people/{id}/trusted-devices/{deviceId}/remove",
+  "operationId": "RemovePersonDevice",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S47",
+  "section": "2.12.3",
+  "method": "get",
+  "path": "/setup/vehicles/{id}/targets",
+  "operationId": "ListVehicleTargets",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S48",
+  "section": "2.12.3",
+  "method": "post",
+  "path": "/setup/vehicles/{id}/targets",
+  "operationId": "SaveVehicleTargets",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S49",
+  "section": "2.12.3",
+  "method": "post",
+  "path": "/setup/vehicle-targets/{id}/remove",
+  "operationId": "RemoveVehicleTargets",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S50",
+  "section": "2.12.3",
+  "method": "get",
+  "path": "/setup/expense-main-categories",
+  "operationId": "ListExpenseMainCategories",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S51",
+  "section": "2.12.3",
+  "method": "post",
+  "path": "/setup/expense-main-categories",
+  "operationId": "CreateExpenseMainCategory",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S52",
+  "section": "2.12.3",
+  "method": "put",
+  "path": "/setup/expense-main-categories/{id}",
+  "operationId": "RenameExpenseMainCategory",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "E01",
+  "section": "2.13.1",
+  "method": "get",
+  "path": "/setup/expenses/ledger",
+  "operationId": "GetExpenseLedger",
+  "tag": "Central expenses",
+  "planned": false
+ },
+ {
+  "id": "E02",
+  "section": "2.13.1",
+  "method": "get",
+  "path": "/setup/expenses/export",
+  "operationId": "ExportExpenseLedger",
+  "tag": "Central expenses",
+  "planned": false
+ },
+ {
+  "id": "E03",
+  "section": "2.13.1",
+  "method": "get",
+  "path": "/setup/expenses/options",
+  "operationId": "GetExpenseOptions",
+  "tag": "Central expenses",
+  "planned": false
+ },
+ {
+  "id": "E04",
+  "section": "2.13.1",
+  "method": "post",
+  "path": "/setup/expenses/entries",
+  "operationId": "RecordExpense",
+  "tag": "Central expenses",
+  "planned": false
+ },
+ {
+  "id": "E05",
+  "section": "2.13.1",
+  "method": "put",
+  "path": "/setup/expenses/entries/{id}",
+  "operationId": "ChangeExpense",
+  "tag": "Central expenses",
+  "planned": false
+ },
+ {
+  "id": "E06",
+  "section": "2.13.1",
+  "method": "post",
+  "path": "/setup/expenses/entries/{id}/remove",
+  "operationId": "RemoveExpense",
+  "tag": "Central expenses",
+  "planned": false
+ },
+ {
+  "id": "G01",
+  "section": "2.13.2",
+  "method": "get",
+  "path": "/setup/reports",
+  "operationId": "GetReportsAccess",
+  "tag": "Reports",
+  "planned": false
+ },
+ {
+  "id": "G02",
+  "section": "2.13.2",
+  "method": "get",
+  "path": "/setup/reports/fleet/{report}",
+  "operationId": "GetFleetReport",
+  "tag": "Reports",
+  "planned": false
+ },
+ {
+  "id": "G03",
+  "section": "2.13.2",
+  "method": "get",
+  "path": "/setup/reports/pettycash/{report}",
+  "operationId": "GetPettyCashReport",
+  "tag": "Reports",
+  "planned": false
+ },
+ {
+  "id": "G04",
+  "section": "2.13.2",
+  "method": "get",
+  "path": "/setup/reports/{group}/{report}/export",
+  "operationId": "ExportReport",
+  "tag": "Reports",
+  "planned": false
+ },
+ {
+  "id": "D01",
+  "section": "2.13.3",
+  "method": "get",
+  "path": "/setup/revenue/day",
+  "operationId": "GetRevenueDay",
+  "tag": "Revenue",
+  "planned": false
+ },
+ {
+  "id": "D02",
+  "section": "2.13.3",
+  "method": "put",
+  "path": "/setup/revenue/day/{date}",
+  "operationId": "SaveRevenueDay",
+  "tag": "Revenue",
+  "planned": false
+ },
+ {
+  "id": "X02",
+  "section": "2.13.3",
+  "method": "get",
+  "path": "/setup/revenue/export",
+  "operationId": "ExportRevenueWeek",
+  "tag": "Revenue",
+  "planned": false
+ },
+ {
+  "id": "X03",
+  "section": "2.13.4",
+  "method": "get",
+  "path": "/setup/pettycash/export",
+  "operationId": "ExportPettyCash",
+  "tag": "Petty cash",
+  "planned": false
+ },
+ {
+  "id": "S53",
+  "section": "2.13.4",
+  "method": "get",
+  "path": "/setup/recurring/summary",
+  "operationId": "GetSetupRecurringSummary",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S54",
+  "section": "2.13.4",
+  "method": "get",
+  "path": "/setup/recurring/{id}/runs",
+  "operationId": "GetSetupRecurringRuns",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S55",
+  "section": "2.13.4",
+  "method": "post",
+  "path": "/setup/recurring/{id}/pause",
+  "operationId": "PauseSetupRecurring",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S56",
+  "section": "2.13.4",
+  "method": "post",
+  "path": "/setup/recurring/{id}/resume",
+  "operationId": "ResumeSetupRecurring",
+  "tag": "Setup",
+  "planned": false
+ }
+]

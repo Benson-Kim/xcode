@@ -1,12 +1,18 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 
+import { startOfWeek } from "@xcode/shared/dates";
+import { revenueExportPath } from "@xcode/shared/reports";
+
+import { useResource } from "../lib/data";
 import { useFormats } from "../lib/formats";
 import { useSession } from "../lib/session-context";
+import type { MyScope } from "../lib/types";
+import { ExportMenu } from "./reports/ExportMenu";
+import { useReportExport } from "./reports/exportReport";
+import { captureStart, DEFAULT_LOW_DAY_THRESHOLD } from "./revenue/capture";
 import { CaptureDialog } from "./revenue/CaptureDialog";
-import { captureDayFor, weekStartFor } from "./revenue/fleetDay";
-import { FleetDayDialog } from "./revenue/FleetDayDialog";
 import { useCaptureFlow } from "./revenue/useCaptureFlow";
 import { useGridRows } from "./revenue/useGridRows";
 import { useWeekGrid } from "./revenue/useWeekGrid";
@@ -18,13 +24,13 @@ import {
   LoadingRegion,
   PageHeader,
   TableRowsSkeleton,
-  useToast,
 } from "./ui";
 
+// The week grid (v2.30): one row a vehicle, one column a day, then Week total and Gap to target. A tap on a cell
+// opens a pop up for that vehicle and day; "Capture revenue" opens the oldest missing day, or today.
 export function RevenuePage() {
   const { can } = useSession();
   const formats = useFormats();
-  const toast = useToast();
   const canView = can("revenue.view");
   const canCapture = can("revenue.capture");
   const gridRef = useRef<HTMLDivElement>(null);
@@ -33,18 +39,20 @@ export function RevenuePage() {
   const grid = useWeekGrid(canView);
   const { week, data, today } = grid;
   const rows = useGridRows(data, bodyRef);
+  // The earliest day this person may still change (the back-dating limit, v2.32), for the pop up's date control.
+  const scope = useResource<MyScope>(canView ? "setup/access/me" : null);
+  const earliest = scope.data?.earliest ?? null;
+  const threshold = data?.lowDayThreshold ?? DEFAULT_LOW_DAY_THRESHOLD;
   const flow = useCaptureFlow({
     data,
     canCapture,
-    today,
     reload: week.reload,
     markStale: grid.markStale,
     gridRef,
     vehicles: rows.vehicles,
     rows: rows.rows,
   });
-  // The day Capture revenue is open on, or null while it is closed.
-  const [capturing, setCapturing] = useState<string | null>(null);
+  const exporter = useReportExport();
 
   if (!canView) {
     return (
@@ -53,6 +61,16 @@ export function RevenuePage() {
         description="Your access does not include revenue records."
       />
     );
+  }
+
+  function capture(from: HTMLElement) {
+    if (!data) return;
+    const start = captureStart(data, earliest);
+    if (!start) return;
+    // The grid moves to that day's week; the pop up reads the day from it, or from the vehicle's own week meanwhile.
+    const weekStart = startOfWeek(start.date, formats.firstDayOfWeek());
+    if (weekStart !== data.weekStart) grid.setWeekStart(weekStart);
+    flow.open({ vehicleId: start.vehicleId, date: start.date, done: [] }, from);
   }
 
   return (
@@ -65,7 +83,7 @@ export function RevenuePage() {
               tone="primary"
               disabled={grid.stale || !data}
               aria-busy={grid.stale ? true : undefined}
-              onClick={() => data && setCapturing(captureDayFor(data))}
+              onClick={(event) => capture(event.currentTarget)}
             >
               Capture revenue
             </Button>
@@ -77,10 +95,33 @@ export function RevenuePage() {
         shown={grid.shown}
         data={data}
         companyId={grid.companyId}
+        search={grid.search}
+        exportMenu={
+          (can("revenue.export") || can("reports.export")) && (
+            <ExportMenu
+              disabled={exporter.exporting || !data}
+              onExport={(format) =>
+                data &&
+                void exporter.run(
+                  revenueExportPath({
+                    weekStart: data.weekStart,
+                    companyId: grid.companyId || undefined,
+                    format,
+                  }),
+                  "Revenue",
+                  { from: data.weekStart, to: data.weekThrough },
+                  format,
+                )
+              }
+            />
+          )
+        }
         onWeek={grid.setWeekStart}
         onCompany={grid.setCompanyId}
+        onSearch={grid.setSearch}
       />
 
+      {exporter.error && <Banner>{exporter.error}</Banner>}
       {week.error && <Banner>{week.error}</Banner>}
 
       {!data ? (
@@ -101,6 +142,7 @@ export function RevenuePage() {
           days={grid.days}
           today={today}
           canCapture={canCapture}
+          searching={grid.searching}
           grid={rows}
           gridRef={gridRef}
           bodyRef={bodyRef}
@@ -108,29 +150,11 @@ export function RevenuePage() {
         />
       )}
 
-      <CaptureDialog flow={flow} canChooseReason={can("revenue.no_earnings")} />
-      <FleetDayDialog
-        date={capturing}
+      <CaptureDialog
+        flow={flow}
         today={today}
-        companyId={grid.companyId}
-        companyName={
-          data?.companies.find((company) => company.id === grid.companyId)
-            ?.name ?? ""
-        }
-        canChooseReason={can("revenue.no_earnings")}
-        onDate={setCapturing}
-        onClose={() => setCapturing(null)}
-        onSaved={(date) => {
-          setCapturing(null);
-          toast(`Saved ${formats.formatWeekdayDate(date)}`);
-          // The grid moves to the saved day's week and reads it again.
-          const start = data ? weekStartFor(date, data.weekStart) : "";
-          if (data && start !== data.weekStart) grid.setWeekStart(start);
-          else {
-            grid.markStale();
-            week.reload();
-          }
-        }}
+        earliest={earliest}
+        threshold={threshold}
       />
     </>
   );

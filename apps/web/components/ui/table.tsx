@@ -5,7 +5,13 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "./cn";
 import { TableRowsSkeleton } from "./skeleton";
 
-export type Column = { label: string; numeric?: boolean; hidden?: boolean };
+export type Column = {
+  label: string;
+  numeric?: boolean;
+  hidden?: boolean;
+  // A narrow column, such as the one holding a checkbox, in pixels.
+  width?: number;
+};
 
 // A list (.tbl > .scroll > table). Straight on the sheet it runs edge to edge, its first and last columns on the
 // page's side margin; in a pop up it is a bordered card (.mb .tbl). Both come from the design's stylesheet. A table
@@ -50,6 +56,7 @@ export function DataTable({
                   key={column.label || index}
                   scope="col"
                   className={cn(column.numeric && "r")}
+                  style={column.width ? { width: column.width } : undefined}
                 >
                   {column.hidden ? (
                     <span className="sr-only">{column.label}</span>

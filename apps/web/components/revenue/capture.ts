@@ -1,4 +1,4 @@
-import { entryText, openingFor, type Opening } from "@xcode/shared/capture";
+import { entryText } from "@xcode/shared/capture";
 import type { Formatter } from "@xcode/shared/format";
 import {
   awaitsCapture,
@@ -8,47 +8,39 @@ import {
   type RevenueCell,
   type RevenueReason,
   type RevenueVehicle,
+  type RevenueWeek,
   type SaveRevenue,
 } from "@xcode/shared/revenue";
 
 export const isReason = (value: string | null): value is RevenueReason =>
   REVENUE_REASONS.includes(value as RevenueReason);
 
-// The day being captured, the vehicle's earliest gap before it (a hint, never a requirement), and the vehicles already
-// done for that day in this run, so a grid that has not reloaded yet never sends capture back to them.
+// The fleet's low-day threshold until the week says otherwise (a system setting, v2.29).
+export const DEFAULT_LOW_DAY_THRESHOLD = 4000;
+
+// The day being captured, and the vehicles already done for that day in this run, so a grid that has not reloaded
+// yet never sends capture back to them.
 export type Capture = {
   vehicleId: string;
   date: string;
-  gap: string | null;
   done: string[];
 };
 
-// A tap opens the day that was tapped; an earlier gap is only mentioned.
 export function captureAt(
-  vehicle: RevenueVehicle,
-  at: Opening,
+  vehicle: Pick<RevenueVehicle, "id">,
+  date: string,
   done: string[] = [],
 ): Capture {
-  return { vehicleId: vehicle.id, date: at.date, gap: at.earlier, done };
+  return { vehicleId: vehicle.id, date, done };
 }
-
-export function openAt(
-  vehicle: RevenueVehicle,
-  day: string,
-  businessDate: string,
-  done: string[] = [],
-): Capture {
-  return captureAt(vehicle, openingFor(vehicle, day, { businessDate }), done);
-}
-
-// The gentle line under the date when the vehicle has an earlier day with no record.
-export const gapHint = (formats: Formatter, gap: string) =>
-  `No record yet from ${formats.formatWeekdayDate(gap)}. You can fill it when you have it.`;
 
 export function entryLabel(
   formats: Formatter,
   entry: Pick<RevenueCell, "amount" | "reason" | "note">,
 ) {
+  // A low day shows the amount with its reason: "KES 2,500, Garage".
+  if (entry.amount !== null && entry.reason)
+    return `${formats.kes(entry.amount)}, ${entry.reason}`;
   const text = entryText(formats, entry);
   if (text === null) return "No record";
   return entry.amount === null && entry.note ? `${text}: ${entry.note}` : text;
@@ -64,27 +56,45 @@ export function cellState(formats: Formatter, cell: RevenueCell) {
 type Typed = {
   amount: string;
   reason: RevenueReason | "";
-  note: string;
-  canChooseReason: boolean;
+  threshold: number;
+  formats: Pick<Formatter, "kes">;
 };
 
-// What the person typed or picked as a record to save, or what is wrong with it.
+// What the person typed or picked as a record to save, or what is wrong with it. A day below the threshold cannot
+// be saved without a reason; at or above it, no reason is kept (v2.29).
 export function readEntry({
   amount,
   reason,
-  note,
-  canChooseReason,
+  threshold,
+  formats,
 }: Typed): SaveRevenue | string {
   const parsedAmount = parseRevenueAmount(amount);
   if (!parsedAmount.ok) return parsedAmount.error;
-  if (parsedAmount.amount !== null)
-    return { amount: parsedAmount.amount, reason: null, note: null };
-  if (!canChooseReason) return "Enter the revenue.";
-  if (!reason) return "Enter the revenue or pick a reason.";
-  if (reason === "Other" && !note.trim()) return "Say what happened.";
-  return {
-    amount: null,
-    reason,
-    note: reason === "Other" ? note.trim() : null,
-  };
+  const value = parsedAmount.amount;
+  if (value !== null && value >= threshold)
+    return { amount: value, reason: null, note: null };
+  if (!reason)
+    return value !== null
+      ? `Choose the reason. Revenue is below ${formats.kes(threshold)}.`
+      : "Enter the revenue, or choose the reason for no revenue.";
+  return { amount: value, reason, note: null };
+}
+
+// Where "Capture revenue" opens: the oldest missing day, or today, on the first vehicle with no record for it
+// (v2.30). Never before the earliest day the person may still change.
+export function captureStart(
+  week: RevenueWeek,
+  earliest: string | null | undefined,
+): { vehicleId: string; date: string } | null {
+  let date = week.firstGap?.date ?? week.businessDate;
+  if (earliest && date < earliest) date = earliest;
+  const first = week.vehicles[0];
+  if (!first) return null;
+  if (week.firstGap && week.firstGap.date === date)
+    return { vehicleId: week.firstGap.vehicleId, date };
+  const open =
+    week.vehicles.find((vehicle) =>
+      vehicle.days.some((day) => day.date === date && awaitsCapture(day)),
+    ) ?? first;
+  return { vehicleId: open.id, date };
 }

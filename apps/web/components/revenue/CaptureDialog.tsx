@@ -1,3 +1,5 @@
+import { vehicleLabel } from "@xcode/shared/revenue";
+
 import { revenueApi } from "../../lib/endpoints/revenue";
 import { FormDialog } from "../pettycash/DialogFooter";
 import { Banner, ListSkeleton, LoadingRegion } from "../ui";
@@ -6,25 +8,35 @@ import type { useCaptureFlow } from "./useCaptureFlow";
 
 export function CaptureDialog({
   flow,
-  canChooseReason,
+  today,
+  earliest,
+  threshold,
 }: {
   flow: ReturnType<typeof useCaptureFlow>;
-  canChooseReason: boolean;
+  today: string;
+  earliest: string | null;
+  threshold: number;
 }) {
   const { capture, vehicle, cell, elsewhere } = flow;
   return (
-    <FormDialog open={capture !== null} title={flow.title} onClose={flow.close}>
+    <FormDialog
+      open={capture !== null}
+      size="sm"
+      title={vehicle ? vehicleLabel(vehicle) : flow.title}
+      onClose={flow.close}
+    >
       {capture &&
         (vehicle && cell ? (
           <CaptureForm
             key={`${capture.vehicleId}:${capture.date}`}
             vehicle={vehicle}
             cell={cell}
-            gap={capture.gap}
-            canChooseReason={canChooseReason}
+            today={today}
+            earliest={earliest}
+            threshold={threshold}
+            onShiftDay={flow.shiftDay}
             onCancel={flow.close}
-            onDone={() => flow.advance(capture)}
-            onOpenGap={flow.openGap}
+            onDone={(wasNew) => flow.advance(capture, wasNew)}
             reload={async () =>
               (
                 await revenueApi.vehicleWeek(capture.vehicleId, capture.date)

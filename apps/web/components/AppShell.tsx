@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 
+import type { TrustedDevice } from "@xcode/shared/auth";
 import { weekdayIndex, weekdayName } from "@xcode/shared/dates";
 import {
   createFormatter,
@@ -67,6 +68,7 @@ import {
   floatFigures,
   type PettyCashCardFigures,
 } from "./pettycash/dashboardCards";
+import { ChangePinDialog, TrustedDevicesDialog } from "./ProfileDialogs";
 import { shiftDate } from "./revenueFormat";
 import type { HeroSlots } from "./ui";
 import {
@@ -310,7 +312,13 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileAt, setProfileAt] = useState<HTMLElement | null>(null);
   const [accessOpen, setAccessOpen] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
+  const [devicesOpen, setDevicesOpen] = useState(false);
   const [mini, setMini] = useState(false);
+  // The person's trusted devices, for the count on the menu and the "Trusted devices" pop up.
+  const devices = useResource<TrustedDevice[]>(
+    session ? "auth/trusted-devices" : null,
+  );
 
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
@@ -385,7 +393,16 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
       session={session}
       displayName={displayName}
       anchor={profileAt}
+      deviceCount={devices.data?.length}
       onClose={closeProfile}
+      onChangePin={() => {
+        setProfileAt(null);
+        setPinOpen(true);
+      }}
+      onDevices={() => {
+        setProfileAt(null);
+        setDevicesOpen(true);
+      }}
       onAccess={() => {
         setProfileAt(null);
         setAccessOpen(true);
@@ -445,6 +462,20 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                 open={accessOpen}
                 onClose={() => setAccessOpen(false)}
               />
+              {pinOpen && (
+                <ChangePinDialog open onClose={() => setPinOpen(false)} />
+              )}
+              {devicesOpen && (
+                <TrustedDevicesDialog
+                  open
+                  devices={devices.data}
+                  loading={devices.loading}
+                  error={devices.error}
+                  onChanged={devices.reload}
+                  onClose={() => setDevicesOpen(false)}
+                  onSignedOut={onSignOut}
+                />
+              )}
             </div>
           </ToastProvider>
         </AppearanceProvider>
@@ -601,7 +632,7 @@ function MainMenu({
         </button>
       </div>
       {NAV_SECTIONS.map(navSection)}
-      <div className="ver">XCODE Web v2.28</div>
+      <div className="ver">XCODE Web v2.33</div>
     </nav>
   );
 }
@@ -646,8 +677,14 @@ function Page({
     );
   if (view === "expenses")
     return <ExpenseCategoriesPage canManage={can("expenses.setup")} />;
-  if (view === "recurring")
-    return <RecurringPage canManage={can("commitments.manage")} {...params} />;
+  if (view === "recurring" || view === "savings")
+    return (
+      <RecurringPage
+        kind={view === "savings" ? "saving" : "expense"}
+        canManage={can("commitments.manage")}
+        {...params}
+      />
+    );
   if (view === "people")
     return <PeopleAccessView canManageAccess={can("access.manage")} />;
   if (view === "history") return <HistoryPage />;
@@ -1186,13 +1223,13 @@ function AccessDialog({
     <Dialog open={open} title="Your access" onClose={onClose}>
       <dl className="m-0 mb-2 grid gap-2">
         <div className="flex flex-col">
-          <dt className="text-[13px] text-grey">Role</dt>
+          <dt className="flab">Role</dt>
           <dd className="m-0 font-semibold">
             {session?.role || "Not assigned"}
           </dd>
         </div>
         <div className="flex flex-col">
-          <dt className="text-[13px] text-grey">Can see</dt>
+          <dt className="flab">Can see</dt>
           <dd className="m-0 font-semibold">
             {scope.loading ? (
               <Skeleton className="mt-1 h-5 w-40" />
@@ -1273,7 +1310,10 @@ function ProfileMenu({
   session,
   displayName,
   anchor,
+  deviceCount,
   onClose,
+  onChangePin,
+  onDevices,
   onAccess,
   onPreferences,
   onSignOut,
@@ -1281,7 +1321,10 @@ function ProfileMenu({
   session: Session | null;
   displayName: string;
   anchor: HTMLElement;
+  deviceCount?: number;
   onClose: () => void;
+  onChangePin: () => void;
+  onDevices: () => void;
   onAccess: () => void;
   onPreferences: () => void;
   onSignOut: () => void;
@@ -1320,17 +1363,21 @@ function ProfileMenu({
           {formats.formatDateOnly(today)}
         </div>
       )}
-      <button type="button" role="menuitem" className="btn" onClick={onAccess}>
-        Your access
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        className="btn"
-        onClick={onPreferences}
-      >
-        Your preferences
-      </button>
+      <div className="plist">
+        <button type="button" role="menuitem" onClick={onChangePin}>
+          Change PIN
+        </button>
+        <button type="button" role="menuitem" onClick={onDevices}>
+          Trusted devices
+          {deviceCount !== undefined && <small>{deviceCount}</small>}
+        </button>
+        <button type="button" role="menuitem" onClick={onAccess}>
+          Your access
+        </button>
+        <button type="button" role="menuitem" onClick={onPreferences}>
+          Your preferences
+        </button>
+      </div>
       <button type="button" role="menuitem" className="btn" onClick={onSignOut}>
         Sign out
       </button>

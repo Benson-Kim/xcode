@@ -192,13 +192,16 @@ it("records one expense on one vehicle with a fresh id and the whole total", asy
   const { api } = renderPage();
   const dialog = await openRecord();
   expect(save(dialog)).toBeDisabled();
-  expect(within(dialog).getByLabelText("Date")).toHaveValue(BUSINESS_DATE);
+  // The date comes first and opens on today: no day after it.
+  expect(
+    within(dialog).getByRole("button", { name: "Next day" }),
+  ).toBeDisabled();
 
   fillPurchase(dialog, "4", "3500");
   expect(within(dialog).getByText("KES 14,000")).toBeInTheDocument();
   expect(save(dialog)).toBeDisabled();
   pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
-  changeTo(within(dialog).getByLabelText("Note"), "Front pair");
+  expect(within(dialog).queryByLabelText("Note")).not.toBeInTheDocument();
   expect(save(dialog)).toBeEnabled();
   const before = ledgerReads(api).length;
   fireEvent.click(save(dialog));
@@ -213,7 +216,7 @@ it("records one expense on one vehicle with a fresh id and the whole total", asy
       expenseItemId: "i1",
       units: 4,
       unitAmount: 3500,
-      note: "Front pair",
+      note: null,
       allocations: [{ vehicleId: "v1", amount: 14000 }],
     },
   ]);
@@ -246,11 +249,14 @@ it("takes part of a unit and refuses units or a cost that cannot be", async () =
   changeTo(within(dialog).getByLabelText("Unit cost, KES"), "12.345");
   expect(save(dialog)).toBeDisabled();
   changeTo(within(dialog).getByLabelText("Unit cost, KES"), "10");
-  changeTo(within(dialog).getByLabelText("Date"), "2026-10-10");
+  // The date never goes past today: the control has no day after it.
   expect(
-    within(dialog).getByText("The date cannot be after today."),
-  ).toBeInTheDocument();
-  expect(save(dialog)).toBeDisabled();
+    within(dialog).getByRole("button", { name: "Next day" }),
+  ).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Previous day" }));
+  expect(
+    within(dialog).getByRole("button", { name: "Next day" }),
+  ).toBeEnabled();
   expect(api.sent("POST setup/expenses/entries")).toEqual([]);
 });
 
@@ -374,11 +380,10 @@ it("opens a central row for change with its values, and sends the version it was
   );
   expect(within(dialog).getByLabelText("Qty")).toHaveValue("4");
   expect(within(dialog).getByLabelText("Unit cost, KES")).toHaveValue("3500");
-  expect(within(dialog).getByLabelText("Date")).toHaveValue("2026-10-07");
+  expect(within(dialog).getByText("Wed 7 Oct 2026")).toBeInTheDocument();
   expect(within(dialog).getByLabelText("Vehicle")).toHaveValue(
     "KDA 482M, Rongai Express",
   );
-  expect(within(dialog).getByLabelText("Note")).toHaveValue("Front pair");
   expect(
     within(dialog).queryByRole("button", { name: "Split across vehicles" }),
   ).not.toBeInTheDocument();
@@ -397,25 +402,10 @@ it("opens a central row for change with its values, and sends the version it was
       expenseItemId: "i1",
       units: 4,
       unitAmount: 3600,
-      note: "Front pair",
+      note: null,
       version: 3,
     },
   ]);
-});
-
-it("says that changing a shared purchase's item, quantity or cost takes the row out of the purchase", async () => {
-  renderPage();
-  fireEvent.click(
-    await screen.findByRole("button", {
-      name: "Edit KDB 100X, Diesel, KES 2,500",
-    }),
-  );
-  const dialog = await screen.findByRole("dialog", { name: "Edit expense" });
-  expect(
-    within(dialog).getByText(
-      /shared by 3 vehicles\. Changing the item, quantity or unit cost takes it out of that purchase/,
-    ),
-  ).toBeInTheDocument();
 });
 
 it("explains a conflict on the page, closes the form and loads the ledger again", async () => {
@@ -718,13 +708,14 @@ const before = (first: Element, second: Element) =>
     first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING,
   );
 
-it("lays the record form out as the design does: the date beside the vehicle, the item, quantity beside unit cost, total, then the note", async () => {
+it("lays the record form out as the design does: the date first, the vehicle, the item, quantity beside unit cost, then the total", async () => {
   renderPage();
   const dialog = await openRecord();
   const field = (label: string) => within(dialog).getByLabelText(label);
-  const pair = field("Date").closest(".mrow2");
-  expect(pair).not.toBeNull();
-  expect(field("Vehicle").closest(".mrow2")).toBe(pair);
+  const date = within(dialog)
+    .getByRole("button", { name: "Previous day" })
+    .closest(".mstep")!;
+  expect(date).not.toBeNull();
   const row = field("Qty").closest(".mrow");
   expect(row).not.toBeNull();
   expect(field("Unit cost, KES").closest(".mrow")).toBe(row);
@@ -732,32 +723,30 @@ it("lays the record form out as the design does: the date beside the vehicle, th
   const total = within(dialog).getByText("Total amount").parentElement!;
   expect(total).toHaveClass("mtot");
   const order = [
-    field("Date"),
+    date,
     field("Vehicle"),
     field("Item"),
     field("Qty"),
     field("Unit cost, KES"),
     total,
-    field("Note"),
   ];
   order.slice(1).forEach((element, index) => {
     expect(before(order[index], element)).toBe(true);
   });
+  expect(within(dialog).queryByLabelText("Note")).toBeNull();
+  expect(within(dialog).queryByText(/minus sign/)).toBeNull();
   expect(within(dialog).queryByText(/^Recorded by/)).not.toBeInTheDocument();
 });
 
-it("turns the vehicle into the split rows under the total, as the design does, ahead of the note", async () => {
+it("turns the vehicle into the split rows under the total, as the design does", async () => {
   renderPage();
   const dialog = await openRecord();
-  const note = within(dialog).getByLabelText("Note");
   fireEvent.click(
     within(dialog).getByRole("button", { name: "Split across vehicles" }),
   );
   expect(within(dialog).queryByLabelText("Vehicle")).toBeNull();
-  expect(within(dialog).getByLabelText("Date").closest(".mrow2")).toBeNull();
   const first = within(dialog).getByLabelText("Vehicle 1");
   expect(before(within(dialog).getByText("Total amount"), first)).toBe(true);
-  expect(before(first, note)).toBe(true);
   expect(
     before(first, within(dialog).getByRole("button", { name: /^Save/ })),
   ).toBe(true);
@@ -797,4 +786,44 @@ it("searches the item by typing, and takes the source from its list", async () =
   await waitFor(() =>
     expect(ledgerReads(api).at(-1)).toContain("source=pettycash"),
   );
+});
+
+it("exports the ledger as listed, with its source and search, to someone with reports.export", async () => {
+  URL.createObjectURL = vi.fn(() => "blob:ledger");
+  URL.revokeObjectURL = vi.fn();
+  const saved: string[] = [];
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+  const api = serveExpenses();
+  api.on("setup/expenses/export*", [200, {}]);
+  renderPage(api, ["expenses.view", "reports.export"]);
+  await screen.findByRole("row", { name: /Tyres/ });
+  choose(screen.getByLabelText("Source"), "Petty cash");
+  changeTo(screen.getByLabelText("Search"), "diesel");
+  await waitFor(() => expect(ledgerReads(api).at(-1)).toContain("q=diesel"));
+
+  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "PDF" }));
+
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(
+    api.calls
+      .map((call) => call.path)
+      .filter((path) => path.startsWith("setup/expenses/export")),
+  ).toEqual([
+    `setup/expenses/export?${WEEK}&source=pettycash&q=diesel&format=pdf`,
+  ]);
+  expect(saved[0]).toBe("Central expenses 5-11 Oct 2026.pdf");
+  click.mockRestore();
+});
+
+it("offers no Export without reports.export", async () => {
+  renderPage();
+  await screen.findByRole("row", { name: /Tyres/ });
+  expect(
+    screen.queryByRole("button", { name: "Export" }),
+  ).not.toBeInTheDocument();
 });

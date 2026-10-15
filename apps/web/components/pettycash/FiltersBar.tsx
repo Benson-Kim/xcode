@@ -2,22 +2,22 @@
 
 import type { ReactNode } from "react";
 
-import {
-  PETTY_CASH_STATUS_LABELS,
-  PETTY_CASH_STATUSES,
-  type PettyCashHolder,
-  type PettyCashStatus,
-} from "@xcode/shared/pettyCash";
+import type { PettyCashHolder } from "@xcode/shared/pettyCash";
 
 import { SelectInput, TextInput } from "../ui";
+import {
+  ENTRY_STATUS_LABELS,
+  ENTRY_STATUSES,
+  type EntryStatus,
+} from "./status";
 
-export type StatusFilter = PettyCashStatus | "all";
+export type StatusFilter = EntryStatus | "all";
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All statuses" },
-  ...PETTY_CASH_STATUSES.map((value) => ({
+  ...ENTRY_STATUSES.map((value) => ({
     value,
-    label: PETTY_CASH_STATUS_LABELS[value],
+    label: ENTRY_STATUS_LABELS[value],
   })),
 ];
 
@@ -81,7 +81,7 @@ export function FiltersBar({
         type="search"
         aria-label="Search"
         className="srch"
-        placeholder="Search vehicle, item or note"
+        placeholder="Search"
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
       />

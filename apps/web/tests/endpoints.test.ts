@@ -33,6 +33,7 @@ const personBody: SavePersonRequest = {
   vehicleIds: [],
   permissions: ["revenue.view"],
   approvalLimit: null,
+  backLimit: { mode: "days", count: 7, from: null },
   version: undefined,
 };
 
@@ -158,6 +159,20 @@ describe("recurring endpoints", () => {
       method: "POST",
       path: "setup/recurring/r1/stop",
       body: { confirmed: true, reason: "loan paid off" },
+    });
+  });
+
+  it("pauses and resumes with a bodyless POST", async () => {
+    await recurringApi.pause("r1");
+    expect(lastCall()).toMatchObject({
+      method: "POST",
+      path: "setup/recurring/r1/pause",
+    });
+    expect(lastInit().body).toBeUndefined();
+    await recurringApi.resume("r1");
+    expect(lastCall()).toMatchObject({
+      method: "POST",
+      path: "setup/recurring/r1/resume",
     });
   });
 

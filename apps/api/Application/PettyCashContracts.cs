@@ -55,8 +55,9 @@ public sealed record PettyCashPermissionsDto(Guid? HolderId, bool CanSpend, bool
 public sealed record PettyCashHolderDto(Guid Id, string Name, bool Active);
 
 // The figures for a day or a week. MoneyOut is Expenses plus CreditNotes; ClosingBalance is OpeningBalance + CashReceived - MoneyOut.
+// Waiting and WaitingCount are the expenses and credit notes in the period still waiting for approval.
 public sealed record PettyCashFiguresDto(decimal OpeningBalance, decimal CashReceived, decimal Expenses, decimal CreditNotes,
-    decimal MoneyOut, decimal ClosingBalance);
+    decimal MoneyOut, decimal ClosingBalance, decimal Waiting = 0, int WaitingCount = 0);
 
 // The float to date. Waiting, Approved and SentBack split expenses and credit notes by status.
 public sealed record PettyCashFloatDto(Guid HolderId, string Name, bool Active, decimal CashReceived, decimal CreditNotes, decimal Expenses,
@@ -96,7 +97,11 @@ public sealed record PettyCashSaved(Guid Id, long Version, string? Status, decim
 public sealed record ReviewPettyCashEntry(long Version);
 public sealed record SendBackPettyCashEntry(long Version, string? Comment);
 public sealed record RemovePettyCashEntry(long Version, string? Reason);
-public sealed record ApprovePettyCashDay(DateOnly Date, Guid? HolderId = null);
+// To approves every day from Date through To.
+public sealed record ApprovePettyCashDay(DateOnly Date, Guid? HolderId = null, DateOnly? To = null);
+// The entries chosen in the list, each at the version shown.
+public sealed record ApprovePettyCashEntries(IReadOnlyList<ReviewedPettyCashEntry>? Entries);
+public sealed record ReviewedPettyCashEntry(Guid Id, long Version);
 public sealed record PettyCashDayApproved(int Approved, decimal Total, int Skipped);
 
 public sealed record PettyCashDashboardFloat(decimal Balance, int WaitingCount, decimal WaitingTotal, int SentBackCount, decimal ApprovedThisMonth);
@@ -158,8 +163,11 @@ public interface IPettyCashRepository
     Task<PettyCashEntry?> Entry(SetupActor actor, Guid id, CancellationToken ct);
     // Any entry with this id in the organization, removed or not; a retried create looks for its own.
     Task<PettyCashEntry?> AnyEntry(Guid id, CancellationToken ct);
-    // Waiting expenses and credit notes the actor can see; a date narrows them to one day.
-    Task<IReadOnlyList<PettyCashEntry>> Waiting(SetupActor actor, IReadOnlyCollection<Guid> holderIds, DateOnly? date, bool track, CancellationToken ct);
+    // Waiting expenses and credit notes the actor can see; from and through narrow them to those days.
+    Task<IReadOnlyList<PettyCashEntry>> Waiting(SetupActor actor, IReadOnlyCollection<Guid> holderIds, DateOnly? from, DateOnly? through, bool track,
+        CancellationToken ct);
+    // The entries with these ids the actor can see and that are not removed, tracked for a change.
+    Task<IReadOnlyList<PettyCashEntry>> Entries(SetupActor actor, IReadOnlyCollection<Guid> ids, CancellationToken ct);
     // A vehicle in the actor's scope, with its away periods so FleetVehicle.ActiveOn reads them.
     Task<FleetVehicle?> Vehicle(SetupActor actor, Guid id, CancellationToken ct);
     Task<IReadOnlyDictionary<Guid, string>> Names(IEnumerable<Guid> userIds, CancellationToken ct);

@@ -68,9 +68,7 @@ public sealed record PettyCashLine(PettyCashKind Kind, DateOnly Date, Guid? Vehi
             case PettyCashKind.Credit:
                 if (VehicleId is not null || ExpenseItemId is not null)
                     throw new ArgumentException("A credit note is not recorded against a vehicle.");
-                if (CleanPayee is null)
-                    throw new ArgumentException("Say who was paid.");
-                if (CleanPayee.Length > PayeeLength)
+                if (CleanPayee is { Length: > PayeeLength })
                     throw new ArgumentException($"The payee must be at most {PayeeLength} characters.");
                 if (CleanNote is null)
                     throw new ArgumentException("Say why the money was paid.");

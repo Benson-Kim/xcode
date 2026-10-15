@@ -1,4 +1,5 @@
 using Auth.Application.CentralExpenses;
+using Auth.Application.Reports;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Api;
@@ -34,6 +35,11 @@ public static class CentralExpenseEndpoints
                 useCases.Ledger(from, to, source, q, page, pageSize, ct))
             .Produces<ExpenseLedgerDto>()
             .WithName("GetExpenseLedger");
+
+        group.MapGet("/export", async (ScreenExports exports, CancellationToken ct, DateOnly? from = null, DateOnly? to = null,
+                    string? source = null, string? q = null, string? format = null) =>
+                (await exports.Expenses(from, to, source, q, format, ct)).AsFile())
+            .ProducesExport("ExportExpenseLedger");
 
         group.MapGet("/options", (CentralExpenseUseCases useCases, CancellationToken ct, DateOnly? date = null) => useCases.Options(date, ct))
             .Produces<ExpenseOptionsDto>()

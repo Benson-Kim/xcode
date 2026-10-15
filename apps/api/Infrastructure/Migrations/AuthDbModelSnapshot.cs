@@ -1012,6 +1012,30 @@ namespace Auth.Api.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Auth.Domain.Setup.RecurringPause", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("From")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("Through")
+                        .HasColumnType("date");
+
+                    b.HasKey("OrganizationId", "Id");
+
+                    b.HasIndex("OrganizationId", "ItemId", "From");
+
+                    b.ToTable("RecurringPause");
+                });
+
             modelBuilder.Entity("Auth.Domain.Setup.RecurringVersion", b =>
                 {
                     b.Property<Guid>("OrganizationId")
@@ -1675,6 +1699,21 @@ namespace Auth.Api.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Auth.Domain.Setup.RecurringPause", b =>
+                {
+                    b.HasOne("Auth.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Domain.Setup.RecurringItem", null)
+                        .WithMany("Pauses")
+                        .HasForeignKey("OrganizationId", "ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Auth.Domain.Setup.RecurringVersion", b =>
                 {
                     b.HasOne("Auth.Domain.Setup.ExpenseBucketLookup", null)
@@ -1862,6 +1901,8 @@ namespace Auth.Api.Infrastructure.Migrations
 
             modelBuilder.Entity("Auth.Domain.Setup.RecurringItem", b =>
                 {
+                    b.Navigation("Pauses");
+
                     b.Navigation("Versions");
                 });
 

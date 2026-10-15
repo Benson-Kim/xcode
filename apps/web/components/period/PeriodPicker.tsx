@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { EXPENSE_MAX_DAYS } from "@xcode/shared/expenses";
 import {
@@ -29,6 +30,7 @@ import {
   ErrorText,
   cn,
   controlClass,
+  popLayer,
   useAnchoredPosition,
   useDismiss,
 } from "../ui";
@@ -85,7 +87,8 @@ export function PeriodPicker({
   onChange: (period: Period) => void;
 }) {
   const formats = useFormats();
-  const [open, setOpen] = useState(false);
+  const [layer, setLayer] = useState<HTMLElement | null>(null);
+  const open = layer !== null;
   const wrapper = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -97,10 +100,10 @@ export function PeriodPicker({
       : formats.formatDateRange(period.from, period.to);
 
   const close = useCallback((returnFocus: boolean) => {
-    setOpen(false);
+    setLayer(null);
     if (returnFocus) trigger.current?.focus();
   }, []);
-  useDismiss(open, wrapper, close);
+  useDismiss(open, wrapper, close, panel);
   useAnchoredPosition(open, wrapper, panel);
 
   function choose(next: Period) {
@@ -125,7 +128,9 @@ export function PeriodPicker({
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         title="Choose dates"
-        onClick={() => setOpen((current) => !current)}
+        onClick={(event) =>
+          setLayer(open ? null : popLayer(event.currentTarget))
+        }
         className="d"
       >
         <span aria-live="polite">{label}</span>
@@ -139,16 +144,18 @@ export function PeriodPicker({
       >
         ›
       </button>
-      {open && (
-        <PeriodPanel
-          panelRef={panel}
-          id={panelId}
-          period={period}
-          businessDate={businessDate}
-          firstDayOfWeek={firstDayOfWeek}
-          onChoose={choose}
-        />
-      )}
+      {layer &&
+        createPortal(
+          <PeriodPanel
+            panelRef={panel}
+            id={panelId}
+            period={period}
+            businessDate={businessDate}
+            firstDayOfWeek={firstDayOfWeek}
+            onChoose={choose}
+          />,
+          layer,
+        )}
     </div>
   );
 }

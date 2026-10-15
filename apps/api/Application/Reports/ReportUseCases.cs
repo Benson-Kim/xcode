@@ -44,28 +44,41 @@ public sealed class ReportUseCases(ISetupExecution execution, IReportRepository 
         string? q, string? format, CancellationToken ct) =>
         execution.Write(ExportPermission, async actor =>
         {
-            var pdf = format?.Trim() switch
-            {
-                null or "" or "xlsx" => false,
-                "pdf" => true,
-                _ => throw new ArgumentException("Choose Excel (xlsx) or PDF.")
-            };
+            var pdf = IsPdf(format);
             var text = Search(q, 1, 1);
             var table = await Build(actor, group, report, from, to, holderId, companyId, ct);
-            var rows = Tables.Search(table, text);
-            var period = Period(table);
-            var document = new ReportDocument(table, rows, await reports.OrganizationName(ct), period,
-                await Filters(actor, group, holderId, companyId, text, ct),
-                (await pettyCash.Names([actor.UserId], ct)).GetValueOrDefault(actor.UserId, ""), actor.Today, await setup.Currency(ct));
-            var (bytes, kind, extension, contentType) = pdf
-                ? (writer.Write(document), "PDF", "pdf", "application/pdf")
-                : (ReportWorkbook.Write(document), "Excel", "xlsx", ReportWorkbook.ContentType);
-            var searched = string.IsNullOrEmpty(text) ? "" : $", searched for \"{text}\"";
-            await setup.RecordChange(actor, "reports", Guid.NewGuid(), null,
-                new { group, report, table.From, table.To, holderId, companyId, q = text, Rows = rows.Count, Format = extension },
-                SetupPagination.Automatic($"Exported {table.Title}{(period is null ? "" : $" for {period}")}{searched} to {kind}"), ct);
-            return new ReportExport(bytes, $"{table.Title}{(period is null ? "" : $" {period}")}.{extension}", contentType);
+            return await File(actor, table, Tables.Search(table, text), await Filters(actor, group, holderId, companyId, text, ct), text, pdf,
+                (rows, extension) => new { group, report, table.From, table.To, holderId, companyId, q = text, Rows = rows, Format = extension }, ct);
         }, ct);
+
+    // A screen's table (Revenue, Central expenses, Petty cash) as the screen lists it, already narrowed by its own filters
+    // and search, which `filters` words for the file's subtitle.
+    public Task<ReportExport> ExportScreen(ReportTable table, string filters, string? search, string? format, CancellationToken ct) =>
+        execution.Write(ExportPermission, actor => File(actor, table, table.Rows, filters, search, IsPdf(format),
+            (rows, extension) => new { group = table.Group, report = table.Report, table.From, table.To, filters, q = search, Rows = rows,
+                Format = extension }, ct), ct);
+
+    public static bool IsPdf(string? format) => format?.Trim() switch
+    {
+        null or "" or "xlsx" => false,
+        "pdf" => true,
+        _ => throw new ArgumentException("Choose Excel (xlsx) or PDF.")
+    };
+
+    private async Task<ReportExport> File(SetupActor actor, ReportTable table, IReadOnlyList<IReadOnlyList<object?>> rows, string filters,
+        string? text, bool pdf, Func<int, string, object> snapshot, CancellationToken ct)
+    {
+        var period = Period(table);
+        var document = new ReportDocument(table, rows, await reports.OrganizationName(ct), period, filters,
+            (await pettyCash.Names([actor.UserId], ct)).GetValueOrDefault(actor.UserId, ""), actor.Today, await setup.Currency(ct));
+        var (bytes, kind, extension, contentType) = pdf
+            ? (writer.Write(document), "PDF", "pdf", "application/pdf")
+            : (ReportWorkbook.Write(document), "Excel", "xlsx", ReportWorkbook.ContentType);
+        var searched = string.IsNullOrEmpty(text) ? "" : $", searched for \"{text}\"";
+        await setup.RecordChange(actor, "reports", Guid.NewGuid(), null, snapshot(rows.Count, extension),
+            SetupPagination.Automatic($"Exported {table.Title}{(period is null ? "" : $" for {period}")}{searched} to {kind}"), ct);
+        return new ReportExport(bytes, $"{table.Title}{(period is null ? "" : $" {period}")}.{extension}", contentType);
+    }
 
     // What narrowed the report, in words, for the file's subtitle.
     private async Task<string> Filters(SetupActor actor, string group, Guid? holderId, Guid? companyId, string? text, CancellationToken ct)

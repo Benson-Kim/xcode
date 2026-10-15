@@ -2,6 +2,7 @@ import { expect, expectTypeOf, it, vi } from "vitest";
 
 import {
   awaitsCapture,
+  gapText,
   isRecorded,
   loadWholeWeek,
   mergeWeekPages,
@@ -15,6 +16,7 @@ import {
   type RevenueVehicle,
   type RevenueWeek,
   type StatusMeta,
+  vehicleLabel,
   WeekChangedError,
 } from "@xcode/shared/revenue";
 
@@ -219,4 +221,21 @@ it("labels the days that have nothing else to show", () => {
 it("treats a day with no cell as neither recorded nor waiting", () => {
   expect(isRecorded(undefined)).toBe(false);
   expect(awaitsCapture(undefined)).toBe(false);
+});
+
+it("writes the gap signed, with a true minus and no words", () => {
+  const formatNumber = (amount: number) => amount.toLocaleString("en-US");
+  expect(gapText(3050, formatNumber)).toBe("+3,050");
+  expect(gapText(-16100, formatNumber)).toBe("−16,100");
+  expect(gapText(0, formatNumber)).toBe("0");
+});
+
+it("labels a vehicle with its fleet number once one is set", () => {
+  expect(vehicleLabel({ registration: "KDG 412M", fleetNumber: "14" })).toBe(
+    "KDG 412M · 14",
+  );
+  expect(vehicleLabel({ registration: "KDG 412M", fleetNumber: null })).toBe(
+    "KDG 412M",
+  );
+  expect(vehicleLabel({ registration: "KDG 412M" })).toBe("KDG 412M");
 });

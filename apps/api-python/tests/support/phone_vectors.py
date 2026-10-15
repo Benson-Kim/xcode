@@ -1,0 +1,51 @@
+"""Phone-number vectors shared by ``PhoneNumber.parse`` and ``identity.normalize_phone``, so
+the Python twin and the routine are proven to agree on the same table."""
+
+from __future__ import annotations
+
+ARABIC_INDIC_ZERO = chr(0x0660)
+ARABIC_INDIC_ONE = chr(0x0661)
+FULLWIDTH_ZERO = chr(0xFF10)
+MATHEMATICAL_BOLD_ZERO = chr(0x1D7CE)
+NO_BREAK_SPACE = chr(0x00A0)
+NARROW_NO_BREAK_SPACE = chr(0x202F)
+LEFT_TO_RIGHT_EMBEDDING = chr(0x202A)
+POP_DIRECTIONAL_FORMATTING = chr(0x202C)
+LEFT_TO_RIGHT_MARK = chr(0x200E)
+ZERO_WIDTH_SPACE = chr(0x200B)
+EN_DASH = chr(0x2013)
+SUPERSCRIPT_TWO = chr(0x00B2)
+
+PHONE_VECTORS: tuple[tuple[str, str | None], ...] = (
+    ("254712345678", "+254712345678"),
+    ("+254712345678", "+254712345678"),
+    ("0712345678", "+254712345678"),
+    ("712345678", "+254712345678"),
+    ("+254 712 345 678", "+254712345678"),
+    ("0712-345-678", "+254712345678"),
+    ("(0712) 345678", "+254712345678"),
+    ("254112345678", "+254112345678"),
+    ("0112345678", "+254112345678"),
+    ("112345678", "+254112345678"),
+    ("+0712345678", "+254712345678"),
+    ("254712345", None),
+    ("0812345678", None),
+    ("07123456789", None),
+    ("25471234567", None),
+    ("+255712345678", None),
+    (ARABIC_INDIC_ZERO + "712345678", None),
+    ("07" + ARABIC_INDIC_ONE + "2345678", None),
+    (FULLWIDTH_ZERO + "712345678", None),
+    (MATHEMATICAL_BOLD_ZERO + "712345678", None),
+    ("0712345678" + ARABIC_INDIC_ZERO, None),
+    ("0712" + NO_BREAK_SPACE + "345678", "+254712345678"),
+    ("+254" + NARROW_NO_BREAK_SPACE + "712" + NARROW_NO_BREAK_SPACE + "345678", "+254712345678"),
+    (LEFT_TO_RIGHT_EMBEDDING + "+254 712 345 678" + POP_DIRECTIONAL_FORMATTING, "+254712345678"),
+    (LEFT_TO_RIGHT_MARK + "0712345678", "+254712345678"),
+    ("0712" + ZERO_WIDTH_SPACE + "345678", "+254712345678"),
+    ("0712" + EN_DASH + "345" + EN_DASH + "678", "+254712345678"),
+    ("0712" + SUPERSCRIPT_TWO + "345678", "+254712345678"),
+    ("", None),
+    ("   ", None),
+    ("not a number", None),
+)

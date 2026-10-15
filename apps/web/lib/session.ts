@@ -52,6 +52,31 @@ export async function restoreSession() {
   }
 }
 
+// The signed-in person, or null without a session: the sign-in screens greet them by name when the PIN is asked
+// again after a while without activity.
+export async function readSession(): Promise<{
+  firstName: string;
+  lastName: string;
+  role: string;
+} | null> {
+  try {
+    const response = await fetchRefreshingOnce("/api/auth/session");
+    if (!response.ok) return null;
+    const session = (await response.json()) as {
+      firstName?: string;
+      lastName?: string;
+      role?: string;
+    };
+    return {
+      firstName: session.firstName ?? "",
+      lastName: session.lastName ?? "",
+      role: session.role ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function onSessionExpired(listener: () => void) {
   window.addEventListener(SESSION_EXPIRED, listener);
   return () => window.removeEventListener(SESSION_EXPIRED, listener);

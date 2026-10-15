@@ -1,0 +1,196 @@
+{
+  "groups": [
+    {
+      "name": "Dashboard",
+      "items": [
+        {"key": "dash.net", "prototype": "dash.net", "label": "See revenue, money out and net", "needs": ["revenue.view"], "section": null},
+        {"key": "dash.gaps", "prototype": "dash.gaps", "label": "See capture gaps", "needs": ["revenue.view"], "section": null},
+        {"key": "dash.pettycash", "prototype": "dash.pc", "label": "See petty cash position", "needs": ["pettycash.view"], "section": null}
+      ]
+    },
+    {
+      "name": "Revenue",
+      "items": [
+        {"key": "revenue.view", "prototype": "rev.view", "label": "View revenue", "needs": [], "section": null},
+        {"key": "revenue.capture", "prototype": "rev.capture", "label": "Capture revenue", "needs": ["revenue.view"], "section": null},
+        {"key": "revenue.correct", "prototype": "rev.edit", "label": "Change revenue already saved", "needs": ["revenue.view"], "section": null},
+        {"key": "revenue.export", "prototype": "rev.export", "label": "Export revenue", "needs": ["revenue.view"], "section": null}
+      ]
+    },
+    {
+      "name": "Central expenses",
+      "items": [
+        {"key": "expenses.view", "prototype": "exp.view", "label": "View central expenses", "needs": [], "section": null},
+        {"key": "expenses.capture", "prototype": "exp.add", "label": "Record an expense", "needs": ["expenses.view"], "section": null},
+        {"key": "expenses.correct", "prototype": "exp.edit", "label": "Edit an expense", "needs": ["expenses.view"], "section": null},
+        {"key": "expenses.export", "prototype": "exp.export", "label": "Export central expenses", "needs": ["expenses.view"], "section": null}
+      ]
+    },
+    {
+      "name": "Petty cash",
+      "items": [
+        {"key": "pettycash.view", "prototype": "pc.see", "label": "View petty cash", "needs": [], "section": "View"},
+        {"key": "pettycash.view_all", "prototype": "pc.view", "label": "See every manager's float", "needs": ["pettycash.view"], "section": "View"},
+        {"key": "pettycash.reports", "prototype": "pc.reports", "label": "View petty cash reports", "needs": ["pettycash.view"], "section": "View"},
+        {"key": "pettycash.export", "prototype": "pc.export", "label": "Export petty cash", "needs": ["pettycash.view"], "section": "View"},
+        {"key": "pettycash.spend", "prototype": "pc.spend", "label": "Add an expense", "needs": ["pettycash.view"], "section": "Expenses"},
+        {"key": "pettycash.spend_other", "prototype": "pc.spend_other", "label": "Add for another manager", "needs": ["pettycash.view"], "section": "Expenses"},
+        {"key": "pettycash.edit_own", "prototype": "pc.edit_own", "label": "Edit own expense", "needs": ["pettycash.view"], "section": "Expenses"},
+        {"key": "pettycash.edit", "prototype": "pc.edit", "label": "Edit any expense", "needs": ["pettycash.view"], "section": "Expenses"},
+        {"key": "pettycash.delete_own", "prototype": "pc.delete_own", "label": "Delete own expense", "needs": ["pettycash.view"], "section": "Expenses"},
+        {"key": "pettycash.delete", "prototype": "pc.delete", "label": "Delete any expense", "needs": ["pettycash.view"], "section": "Expenses"},
+        {"key": "pettycash.delete_approved", "prototype": "pc.delete_approved", "label": "Delete after approval", "needs": ["pettycash.view"], "section": "Expenses"},
+        {"key": "pettycash.send_back", "prototype": "pc.sendback", "label": "Send an expense back", "needs": ["pettycash.view"], "section": "Approval"},
+        {"key": "pettycash.approve_item", "prototype": "pc.approve_item", "label": "Approve an expense", "needs": ["pettycash.view"], "section": "Approval"},
+        {"key": "pettycash.approve_day", "prototype": "pc.approve_day", "label": "Approve a whole day", "needs": ["pettycash.approve_item"], "section": "Approval"},
+        {"key": "pettycash.reject", "prototype": "pc.reject", "label": "Reject an expense", "needs": ["pettycash.view"], "section": "Approval"},
+        {"key": "pettycash.reopen", "prototype": "pc.reopen", "label": "Reopen an approved or rejected expense", "needs": ["pettycash.view"], "section": "Approval"},
+        {"key": "pettycash.issue", "prototype": "pc.issue", "label": "Issue cash", "needs": ["pettycash.view"], "section": "Cash"},
+        {"key": "pettycash.issue_negative", "prototype": "pc.negative", "label": "Issue cash to a float below zero", "needs": ["pettycash.issue"], "section": "Cash"},
+        {"key": "pettycash.credit", "prototype": "pc.credit", "label": "Record a credit note", "needs": ["pettycash.view"], "section": "Cash"},
+        {"key": "pettycash.delete_cash", "prototype": "pc.cash_delete", "label": "Delete a cash entry", "needs": ["pettycash.view"], "section": "Cash"}
+      ]
+    },
+    {
+      "name": "Scheduled expenses",
+      "items": [
+        {"key": "scheduled.view", "prototype": "sched.view", "label": "View scheduled expenses", "needs": [], "section": null},
+        {"key": "scheduled.add", "prototype": "sched.add", "label": "Add a scheduled expense", "needs": ["scheduled.view"], "section": null},
+        {"key": "scheduled.edit", "prototype": "sched.edit", "label": "Edit a scheduled expense", "needs": ["scheduled.view"], "section": null},
+        {"key": "scheduled.pause", "prototype": "sched.pause", "label": "Pause or resume", "needs": ["scheduled.view"], "section": null}
+      ]
+    },
+    {
+      "name": "Savings",
+      "items": [
+        {"key": "savings.view", "prototype": "sav.view", "label": "View savings", "needs": [], "section": null},
+        {"key": "savings.add", "prototype": "sav.add", "label": "Add a saving", "needs": ["savings.view"], "section": null},
+        {"key": "savings.edit", "prototype": "sav.edit", "label": "Edit a saving", "needs": ["savings.view"], "section": null},
+        {"key": "savings.pause", "prototype": "sav.pause", "label": "Pause or resume", "needs": ["savings.view"], "section": null}
+      ]
+    },
+    {
+      "name": "Reports",
+      "items": [
+        {"key": "reports.view", "prototype": "rep.view", "label": "View reports", "needs": [], "section": null},
+        {"key": "reports.investment", "prototype": "rep.invest", "label": "See the investment report", "needs": ["reports.view"], "section": null},
+        {"key": "reports.export", "prototype": "rep.export", "label": "Export reports", "needs": ["reports.view"], "section": null}
+      ]
+    },
+    {
+      "name": "PSV companies",
+      "items": [
+        {"key": "companies.view", "prototype": "see.companies", "label": "View companies", "needs": [], "section": null},
+        {"key": "companies.add", "prototype": "co.add", "label": "Add a company", "needs": ["companies.view"], "section": null},
+        {"key": "companies.edit", "prototype": "co.edit", "label": "Edit a company", "needs": ["companies.view"], "section": null}
+      ]
+    },
+    {
+      "name": "Vehicles",
+      "items": [
+        {"key": "vehicles.view", "prototype": "see.vehicles", "label": "View vehicles", "needs": [], "section": null},
+        {"key": "vehicles.add", "prototype": "veh.add", "label": "Add a vehicle", "needs": ["vehicles.view"], "section": null},
+        {"key": "vehicles.edit", "prototype": "veh.edit", "label": "Edit a vehicle", "needs": ["vehicles.view"], "section": null},
+        {"key": "vehicles.target", "prototype": "veh.target", "label": "Set targets", "needs": ["vehicles.view"], "section": null}
+      ]
+    },
+    {
+      "name": "Expense items",
+      "items": [
+        {"key": "catalog.view", "prototype": "see.items", "label": "View items and categories", "needs": [], "section": null},
+        {"key": "catalog.add", "prototype": "item.add", "label": "Add an item or category", "needs": ["catalog.view"], "section": null},
+        {"key": "catalog.edit", "prototype": "item.edit", "label": "Edit an item or category", "needs": ["catalog.view"], "section": null},
+        {"key": "catalog.stop", "prototype": "item.stop", "label": "Stop or resume an item", "needs": ["catalog.view"], "section": null}
+      ]
+    },
+    {
+      "name": "People and access",
+      "items": [
+        {"key": "people.view", "prototype": "see.people", "label": "View people", "needs": [], "section": null},
+        {"key": "people.add", "prototype": "ppl.add", "label": "Add a person", "needs": ["people.view"], "section": null},
+        {"key": "people.edit", "prototype": "ppl.edit", "label": "Edit a person and their access", "needs": ["people.view"], "section": null},
+        {"key": "people.block", "prototype": "ppl.block", "label": "Block or unblock a person", "needs": ["people.view"], "section": null},
+        {"key": "people.sign_in", "prototype": "ppl.signin", "label": "Reset a PIN and remove devices", "needs": ["people.view"], "section": null}
+      ]
+    },
+    {
+      "name": "Change log",
+      "items": [
+        {"key": "audit.view", "prototype": "set.log", "label": "View the change log", "needs": [], "section": null}
+      ]
+    }
+  ],
+  "retired": [
+    {"key": "dash.capture", "group": "Dashboard", "label": "See today's capture for my vehicles", "sources": ["dash.gaps"]},
+    {"key": "dash.float", "group": "Dashboard", "label": "See my petty cash float", "sources": ["dash.pettycash"]},
+    {"key": "dash.revenue", "group": "Dashboard", "label": "See revenue totals", "sources": ["dash.net"]},
+    {"key": "dash.costs", "group": "Dashboard", "label": "See cost totals", "sources": ["dash.net"]},
+    {"key": "dash.commitments", "group": "Dashboard", "label": "See renewals due", "sources": ["dash.net"]},
+    {"key": "dash.investment", "group": "Dashboard", "label": "See money invested and how much is back", "sources": ["reports.investment"]},
+    {"key": "dash.edits", "group": "Dashboard", "label": "See records edited after capture", "sources": ["dash.net"]},
+    {"key": "revenue.no_earnings", "group": "Revenue", "label": "Record a no earnings reason", "sources": ["revenue.capture", "revenue.correct"]},
+    {"key": "expenses.setup", "group": "Expenses", "label": "Set up expense categories and items", "sources": ["catalog.add", "catalog.edit", "catalog.stop"]},
+    {"key": "bills.view", "group": "Office bills", "label": "View office bills", "sources": []},
+    {"key": "bills.capture", "group": "Office bills", "label": "Capture office bills", "sources": []},
+    {"key": "bills.approve", "group": "Office bills", "label": "Approve office bills", "sources": []},
+    {"key": "commitments.view", "group": "Scheduled expenses and savings", "label": "View scheduled expenses and savings", "sources": ["scheduled.view", "savings.view"]},
+    {"key": "commitments.manage", "group": "Scheduled expenses and savings", "label": "Set up, change and stop scheduled expenses and savings", "sources": ["scheduled.add", "scheduled.edit", "scheduled.pause", "savings.add", "savings.edit", "savings.pause"]},
+    {"key": "companies.manage", "group": "Setup", "label": "Set up PSV companies", "sources": ["companies.add", "companies.edit"]},
+    {"key": "vehicles.manage", "group": "Setup", "label": "Set up vehicles and weekly targets", "sources": ["vehicles.add", "vehicles.edit", "vehicles.target"]},
+    {"key": "invest.view", "group": "Setup", "label": "See what was invested in a vehicle", "sources": ["reports.investment"]},
+    {"key": "invest.manage", "group": "Setup", "label": "Record what was invested in a vehicle", "sources": ["vehicles.edit"]},
+    {"key": "people.manage", "group": "Setup", "label": "Add people, choose their role and what they can see, remove access", "sources": ["people.add", "people.edit", "people.block", "people.sign_in"]},
+    {"key": "access.manage", "group": "Setup", "label": "Change single permissions and approval limits for a person", "sources": ["people.edit"]}
+  ],
+  "hidden": [
+    {"key": "organization.manage", "group": "Setup", "label": "Manage organization settings"}
+  ],
+  "role_defaults": {
+    "Owner": {"all_except": [], "hidden": ["organization.manage"]},
+    "Office admin": ["dash.net", "dash.gaps", "revenue.view", "revenue.correct", "revenue.export", "expenses.view", "expenses.capture", "expenses.correct", "expenses.export", "scheduled.view", "scheduled.add", "scheduled.edit", "scheduled.pause", "savings.view", "savings.add", "savings.edit", "savings.pause", "reports.view", "reports.investment", "reports.export", "companies.view", "companies.add", "companies.edit", "vehicles.view", "vehicles.add", "vehicles.edit", "vehicles.target", "catalog.view", "catalog.add", "catalog.edit", "catalog.stop", "people.view", "people.add", "people.edit", "people.block", "people.sign_in", "audit.view"],
+    "Fleet manager": ["dash.net", "dash.gaps", "dash.pettycash", "revenue.view", "revenue.capture", "revenue.correct", "expenses.view", "pettycash.view", "pettycash.spend", "pettycash.edit_own", "reports.view"],
+    "Revenue clerk": ["dash.gaps", "revenue.view", "revenue.capture"]
+  },
+  "translations": {
+    "dash.capture": ["dash.gaps"],
+    "dash.float": ["dash.pettycash"],
+    "dash.pettycash": ["dash.pettycash"],
+    "dash.revenue": ["dash.net"],
+    "dash.net": ["dash.net"],
+    "dash.costs": ["dash.net"],
+    "dash.commitments": ["dash.net"],
+    "dash.edits": ["dash.net"],
+    "dash.gaps": ["dash.gaps"],
+    "dash.investment": ["reports.investment"],
+    "revenue.view": ["revenue.view"],
+    "revenue.capture": ["revenue.capture"],
+    "revenue.correct": ["revenue.correct"],
+    "revenue.no_earnings": [],
+    "expenses.view": ["expenses.view"],
+    "expenses.capture": ["expenses.capture"],
+    "expenses.correct": ["expenses.correct"],
+    "expenses.setup": ["catalog.view", "catalog.add", "catalog.edit", "catalog.stop"],
+    "pettycash.spend": ["pettycash.spend", "pettycash.edit_own"],
+    "pettycash.view_all": ["pettycash.view_all"],
+    "pettycash.approve_item": ["pettycash.approve_item"],
+    "pettycash.approve_day": ["pettycash.approve_day"],
+    "pettycash.issue": ["pettycash.issue"],
+    "pettycash.issue_negative": ["pettycash.issue_negative"],
+    "bills.view": [],
+    "bills.capture": [],
+    "bills.approve": [],
+    "commitments.view": ["scheduled.view", "savings.view"],
+    "commitments.manage": ["scheduled.add", "scheduled.edit", "scheduled.pause", "savings.add", "savings.edit", "savings.pause"],
+    "reports.view": ["reports.view"],
+    "reports.export": ["reports.export", "revenue.export", "expenses.export", "pettycash.export"],
+    "companies.manage": ["companies.view", "companies.add", "companies.edit"],
+    "vehicles.manage": ["vehicles.view", "vehicles.add", "vehicles.edit", "vehicles.target"],
+    "invest.view": ["reports.view", "reports.investment", "vehicles.view"],
+    "invest.manage": ["vehicles.edit"],
+    "people.view": ["people.view"],
+    "people.manage": ["people.add", "people.edit", "people.block", "people.sign_in"],
+    "access.manage": ["people.edit"],
+    "audit.view": ["audit.view"],
+    "organization.manage": []
+  }
+}

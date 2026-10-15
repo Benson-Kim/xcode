@@ -2,25 +2,23 @@
 
 import { useEffect, useState } from "react";
 
-import { plural } from "@xcode/shared/format";
 import type { Period } from "@xcode/shared/periods";
 import {
   pettyCashEntriesPath,
   pettyCashOverviewPath,
-  type PettyCashDayApproved,
-  type PettyCashEntry,
   type PettyCashEntryPage,
   type PettyCashKind,
   type PettyCashOverview,
   type PettyCashPermissions,
-  type PettyCashSaved,
   type PettyCashStatus,
 } from "@xcode/shared/pettyCash";
 
 import { useAppearance } from "../../lib/appearance";
 import { useResource } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
+import { useSession } from "../../lib/session-context";
 import { PeriodPicker } from "../period/PeriodPicker";
+import { useReportExport } from "../reports/exportReport";
 import { BandSkeleton } from "../revenue/RegPlate";
 import {
   Banner,
@@ -32,16 +30,16 @@ import {
   usePaging,
   useToast,
 } from "../ui";
+import { ApproveButton, PettyCashExport } from "./BarActions";
 import { CashTable } from "./CashTable";
-import { EntriesTable } from "./EntriesTable";
+import { EntriesTable, selectable } from "./EntriesTable";
 import { EntryDialog, type EntryDialogState } from "./EntryDialog";
 import { FigureCards } from "./FigureCards";
 import { FiltersBar, type StatusFilter } from "./FiltersBar";
-import { FloatsTable } from "./FloatsTable";
-import { entryLabel } from "./labels";
-import { RemoveDialog, SendBackDialog } from "./ReasonDialogs";
-import { entryPath, failureMessage, isConflict, sendJson } from "./request";
+import { ReasonDialog, type ReasonState } from "./ReasonDialogs";
 import type { EntryActions } from "./RowActions";
+import { BULK, useApprovals } from "./useApprovals";
+import { useSelection } from "./useSelection";
 import { ViewPills } from "./ViewPills";
 
 type Tab = "expenses" | "cash";
@@ -50,6 +48,11 @@ const TABS: { value: Tab; label: string }[] = [
   { value: "expenses", label: "Expenses" },
   { value: "cash", label: "Cash received" },
 ];
+
+const KINDS: Record<Tab, PettyCashKind | PettyCashKind[]> = {
+  expenses: "expense",
+  cash: ["cash", "credit"],
+};
 
 export function PettyCashPage({
   initialStatus,
@@ -70,10 +73,10 @@ export function PettyCashPage({
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("");
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [entryDialog, setEntryDialog] = useState<EntryDialogState | null>(null);
-  const [sendingBack, setSendingBack] = useState<PettyCashEntry | null>(null);
-  const [removing, setRemoving] = useState<PettyCashEntry | null>(null);
+  const [reasoning, setReasoning] = useState<ReasonState | null>(null);
+  const { can } = useSession();
+  const exporter = useReportExport();
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 300);
@@ -103,7 +106,6 @@ export function PettyCashPage({
     unit: chosen?.unit ?? "day",
   };
   const oneDay = range ? range.from === range.to : true;
-  const date = range && oneDay ? range.from : null;
   // A new entry opens on today when what is shown contains it, otherwise on its last day.
   const formDate =
     businessDate &&
@@ -124,93 +126,59 @@ export function PettyCashPage({
           q: query || undefined,
           page: paging.page,
           pageSize: paging.pageSize,
-          ...(tab === "cash"
-            ? { kind: "cash" as const }
-            : {
-                kind: ["expense", "credit"] as const,
-                ...(status === "all" ? {} : { status }),
-              }),
+          kind: KINDS[tab],
+          ...(tab === "expenses" && status !== "all"
+            ? { status: status as PettyCashStatus }
+            : {}),
         })
       : null,
   );
   if (list.data) paging.stepBack(list.data.total);
+  const otherTab: Tab = tab === "expenses" ? "cash" : "expenses";
+  const other = useCount(range, holderId, query, KINDS[otherTab]);
+  const selection = useSelection(
+    `${range?.from}|${range?.to}|${holderId}|${query}|${tab}|${status}|${paging.page}|${paging.pageSize}`,
+  );
   const items = list.data?.items ?? [];
   const loading = range === null ? !overview.error : list.loading;
 
   function refresh() {
     overview.reload();
     list.reload();
+    other.reload();
   }
 
-  function conflict(message: string) {
+  // A refusal keeps the explanation on the page; a save says so in a toast. Either closes the dialogs and reloads.
+  function finish(message: string, toasted?: string) {
     setNotice(message);
     setEntryDialog(null);
-    setSendingBack(null);
-    setRemoving(null);
+    setReasoning(null);
+    if (toasted) toast(toasted);
     refresh();
   }
+  const conflict = (message: string) => finish(message);
+  const saved = (message: string) => finish("", message);
 
-  function saved(message: string) {
-    setNotice("");
-    setEntryDialog(null);
-    setSendingBack(null);
-    setRemoving(null);
-    toast(message);
-    refresh();
-  }
+  const { busyId, approve, approveMany } = useApprovals({
+    refresh,
+    onNotice: setNotice,
+    onBulkDone: selection.clear,
+  });
 
-  async function approve(entry: PettyCashEntry) {
-    setBusyId(entry.id);
-    setNotice("");
-    try {
-      await sendJson<PettyCashSaved>("POST", entryPath(entry.id, "approve"), {
-        version: entry.version,
-      });
-      toast(`Approved ${entryLabel(formats, entry)}.`);
-      refresh();
-    } catch (reason) {
-      setNotice(failureMessage(reason));
-      if (isConflict(reason)) refresh();
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function approveDay() {
-    if (!date) return;
-    setBusyId("day");
-    setNotice("");
-    try {
-      const result = await sendJson<PettyCashDayApproved>(
-        "POST",
-        "setup/pettycash/approve-day",
-        {
-          date,
-          ...(holderId ? { holderId } : {}),
-        },
-      );
-      const skipped = result.skipped
-        ? ` ${plural(result.skipped, "entry was", "entries were")} left for someone else to approve.`
-        : "";
-      toast(
-        result.approved
-          ? `Approved ${plural(result.approved, "entry", "entries")}, ${formats.kes(result.total)}.${skipped}`
-          : `Nothing to approve on this day.${skipped}`,
-      );
-      refresh();
-    } catch (reason) {
-      setNotice(failureMessage(reason));
-    } finally {
-      setBusyId(null);
-    }
-  }
+  const ticked = items.filter(
+    (entry) => selectable(entry) && selection.ids.includes(entry.id),
+  );
+  const canTick = Boolean(permissions?.canApproveItem);
+  const waiting = overview.data?.figures;
 
   const actions: EntryActions = {
     busyId,
     onApprove: (entry) => void approve(entry),
-    onSendBack: setSendingBack,
+    onSendBack: (entry) => setReasoning({ action: "sendBack", entry }),
+    onReject: (entry) => setReasoning({ action: "reject", entry }),
+    onReopen: (entry) => setReasoning({ action: "reopen", entry }),
     onEdit: (entry) => setEntryDialog({ kind: entry.kind, entry }),
-    onRemove: setRemoving,
+    onRemove: (entry) => setReasoning({ action: "remove", entry }),
   };
 
   const holderName = holderId
@@ -269,7 +237,10 @@ export function PettyCashPage({
             options={TABS}
             value={tab}
             onChange={setTab}
-            count={list.data?.total}
+            counts={{
+              [tab]: list.data?.total,
+              [otherTab]: other.data?.total,
+            }}
           />
         }
         holders={permissions?.canViewAll ? known?.holders : undefined}
@@ -280,17 +251,36 @@ export function PettyCashPage({
         search={search}
         onSearchChange={setSearch}
         actions={
-          permissions?.canApproveDay && oneDay ? (
-            <Button
-              tone="ok"
-              disabled={busyId === "day"}
-              onClick={() => void approveDay()}
-            >
-              Approve day
-            </Button>
-          ) : undefined
+          range && (
+            <>
+              {can("reports.export") && (
+                <PettyCashExport
+                  exporter={exporter}
+                  tab={tab}
+                  range={range}
+                  holderId={holderId}
+                  status={status}
+                  query={query}
+                />
+              )}
+              {tab === "expenses" && (
+                <ApproveButton
+                  ticked={canTick ? ticked : []}
+                  canApproveDay={Boolean(permissions?.canApproveDay)}
+                  range={range}
+                  holderId={holderId}
+                  figures={waiting}
+                  busy={busyId === BULK}
+                  onApprove={(path, body, nothing) =>
+                    void approveMany(path, body, nothing)
+                  }
+                />
+              )}
+            </>
+          )
         }
       />
+      {exporter.error && <Banner>{exporter.error}</Banner>}
 
       {list.error && <Banner>{list.error}</Banner>}
 
@@ -308,22 +298,26 @@ export function PettyCashPage({
             loading={loading}
             failed={Boolean(list.error)}
             actions={actions}
+            selection={
+              canTick
+                ? {
+                    ids: selection.ids,
+                    onToggle: (e) => selection.toggle(e.id),
+                  }
+                : undefined
+            }
           />
         ) : (
-          <>
-            <CashTable
-              entries={items}
-              total={list.data?.total ?? 0}
-              days={!oneDay}
-              loading={loading}
-              failed={Boolean(list.error)}
-              actions={actions}
-            />
-            <FloatsTable
-              floats={overview.data?.floats}
-              loading={!overview.data && !overview.error}
-            />
-          </>
+          <CashTable
+            entries={items}
+            total={list.data?.total ?? 0}
+            days={!oneDay}
+            searching={Boolean(query)}
+            loading={loading}
+            failed={Boolean(list.error)}
+            canDelete={Boolean(permissions?.canDeleteCash)}
+            onRemove={actions.onRemove}
+          />
         )}
       </div>
 
@@ -342,30 +336,26 @@ export function PettyCashPage({
           businessDate={businessDate}
           permissions={permissions}
           holderId={holderId}
+          holders={known?.holders}
+          floats={known?.floats}
           onSaved={saved}
           onConflict={conflict}
           onClose={() => setEntryDialog(null)}
         />
       )}
 
-      <SendBackDialog
-        entry={sendingBack}
+      <ReasonDialog
+        state={reasoning}
         onDone={saved}
         onConflict={conflict}
-        onClose={() => setSendingBack(null)}
-      />
-
-      <RemoveDialog
-        entry={removing}
-        onDone={saved}
-        onConflict={conflict}
-        onClose={() => setRemoving(null)}
+        onClose={() => setReasoning(null)}
       />
     </>
   );
 }
 
-// What this person may record in the view shown: the actions on the headline card.
+// What this person may record in the view shown: the actions on the headline card. Spending needs a float of their own
+// or the right to add for another manager.
 function RecordButtons({
   tab,
   permissions,
@@ -376,14 +366,15 @@ function RecordButtons({
   onRecord: (kind: PettyCashKind) => void;
 }) {
   if (tab === "expenses")
-    return permissions.canSpend ? (
+    return permissions.canSpend &&
+      (permissions.holderId || permissions.canSpendOther) ? (
       <Button tone="primary" onClick={() => onRecord("expense")}>
         Record spending
       </Button>
     ) : null;
   return (
     <>
-      {(permissions.canSpend || permissions.canIssue) && (
+      {permissions.canCredit && (
         <Button tone="outline" onClick={() => onRecord("credit")}>
           Credit note
         </Button>
@@ -394,5 +385,27 @@ function RecordButtons({
         </Button>
       )}
     </>
+  );
+}
+
+// How many entries of the other tab match the same days, manager and search, for its pill.
+function useCount(
+  range: { from: string; to: string } | null,
+  holderId: string,
+  query: string,
+  kind: PettyCashKind | PettyCashKind[],
+) {
+  return useResource<PettyCashEntryPage>(
+    range
+      ? pettyCashEntriesPath({
+          from: range.from,
+          to: range.to,
+          holderId: holderId || undefined,
+          q: query || undefined,
+          page: 1,
+          pageSize: 1,
+          kind,
+        })
+      : null,
   );
 }

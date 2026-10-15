@@ -22,8 +22,9 @@ export function Dialog({
   open: boolean;
   title: string;
   // No size is the design's standard pop up (520px). sm is its short forms (430px), md fits a table, such as a
-  // day's revenue for every vehicle, and lg is for the big forms.
-  size?: "sm" | "md" | "lg";
+  // day's revenue for every vehicle, lg is for the big forms, tg the targets pop up with its history (820px) and
+  // xl the person pop up with its side menu (1100px).
+  size?: "sm" | "md" | "lg" | "tg" | "xl";
   // A line under the title, such as who recorded what is being changed.
   subtitle?: string;
   onClose: () => void;

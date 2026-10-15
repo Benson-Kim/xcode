@@ -5,6 +5,8 @@ import { Fragment, type ReactNode } from "react";
 import type { PettyCashEntry } from "@xcode/shared/pettyCash";
 
 import { useFormats } from "../../lib/formats";
+import { longDay } from "./labels";
+import { statusOf } from "./status";
 
 export type DayGroup = {
   date: string;
@@ -12,7 +14,8 @@ export type DayGroup = {
   total: number;
 };
 
-// The entries under their days, in the order the days first appear, with what each day came to.
+// The entries under their days, in the order the days first appear, with what each day came to (a rejected expense
+// is not part of it).
 export function groupByDay(entries: PettyCashEntry[]): DayGroup[] {
   const days = new Map<string, DayGroup>();
   for (const entry of entries) {
@@ -22,7 +25,8 @@ export function groupByDay(entries: PettyCashEntry[]): DayGroup[] {
       total: 0,
     };
     day.entries.push(entry);
-    day.total = Math.round((day.total + entry.total) * 100) / 100;
+    if (statusOf(entry) !== "rejected")
+      day.total = Math.round((day.total + entry.total) * 100) / 100;
     days.set(entry.date, day);
   }
   return [...days.values()];
@@ -43,7 +47,7 @@ export function DayRow({
     <tr className="grp" data-day={date}>
       <td colSpan={span}>
         <div>
-          <span>{formats.formatWeekdayDate(date)}</span>
+          <span>{longDay(formats, date)}</span>
           <span>{note}</span>
         </div>
       </td>

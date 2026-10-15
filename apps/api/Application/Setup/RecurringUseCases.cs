@@ -13,6 +13,34 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
             return repository.Recurring(actor, filter, page, pageSize, ct);
         }, ct);
 
+    // The last ten run dates, with what each vehicle got.
+    public Task<RecurringRunsDto> Runs(Guid id, CancellationToken ct) =>
+        execution.Read(PermissionKeys.CommitmentsView, async actor =>
+            await repository.RecurringRuns(actor, id, 10, ct) ?? throw new KeyNotFoundException(), ct);
+
+    public Task<RecurringSummaryDto> Summary(CancellationToken ct) =>
+        execution.Read(PermissionKeys.CommitmentsView, actor => repository.RecurringSummary(actor, ct), ct);
+
+    public Task<Guid> Pause(Guid id, CancellationToken ct) => Toggle(id, "Paused", (item, today) => item.Pause(today), ct);
+
+    public Task<Guid> Resume(Guid id, CancellationToken ct) => Toggle(id, "Resumed", (item, today) => item.Resume(today), ct);
+
+    // Pausing and resuming ask for no typed reason, like cancelling a stop; who may do it is checked as for stopping.
+    private Task<Guid> Toggle(Guid id, string done, Func<RecurringItem, DateOnly, bool> change, CancellationToken ct) =>
+        execution.Write(PermissionKeys.CommitmentsManage, async actor =>
+        {
+            var item = await repository.RecurringItem(actor, id, ct) ?? throw new KeyNotFoundException();
+            var latest = item.Versions.OrderByDescending(v => v.Revision).First();
+            var visible = await repository.VehiclesById(actor, latest.Allocations.Select(a => a.VehicleId), ct);
+            if (latest.Allocations.Any(share => !visible.ContainsKey(share.VehicleId)))
+                throw new UnauthorizedAccessException();
+            var before = Snapshot(item);
+            if (change(item, actor.Today))
+                await repository.RecordChange(actor, "recurring", item.Id, before, Snapshot(item),
+                    SetupPagination.Automatic($"{done} {latest.Name} from {actor.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}"), ct);
+            return item.Id;
+        }, ct);
+
     public Task<IReadOnlyList<VehicleOption>> VehicleOptions(CancellationToken ct) =>
         execution.Read(PermissionKeys.CommitmentsManage, actor => repository.VehicleOptions(actor, ct), ct);
 
@@ -143,6 +171,8 @@ public sealed class RecurringUseCases(ISetupExecution execution, ISetupRepositor
     {
         item.Id,
         item.StoppedFrom,
+        item.PausedFrom,
+        Pauses = item.Pauses.OrderBy(p => p.From).Select(p => new { p.From, p.Through }).ToArray(),
         Versions = item.Versions.Select(v => new
         {
             v.Id,

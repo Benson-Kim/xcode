@@ -2,145 +2,217 @@ import { Fragment } from "react";
 
 import { plural } from "@xcode/shared/format";
 
+import { useFormats } from "../../lib/formats";
 import type { ScopeOptions } from "../../lib/types";
-import { Choice, ChoiceGroup, ErrorText, Hint, ListSkeleton } from "../ui";
-import { keptCounts, type PersonForm, scopeGroups } from "./model";
-import { FormSection, SectionLabel } from "./PersonCards";
+import { ListSkeleton } from "../ui";
+import {
+  backLimitText,
+  earliestAllowed,
+  type Errors,
+  keptCounts,
+  readBackLimit,
+  scopeGroups,
+} from "./model";
+import type { PersonFormState } from "./usePersonForm";
 
-type Props = {
-  form: PersonForm;
-  setField: <K extends keyof PersonForm>(key: K, value: PersonForm[K]) => void;
-  toggleScope: (
-    key: "companyIds" | "vehicleIds",
-    id: string,
-    checked: boolean,
-  ) => void;
-  scopeOptions?: ScopeOptions;
-  selectedRole: string;
-  editable: boolean;
-  error?: string;
-};
-
-const SCOPE_MODES = [
-  { value: "all", label: "All companies" },
-  { value: "companies", label: "Chosen companies" },
-  { value: "vehicles", label: "Chosen vehicles" },
-];
-
-const kept = (count: number, one: string, many: string, why: string) =>
-  `Also ${plural(count, `${one} that is`, `${many} that are`)} not listed here: ${why}, or outside what you can see. ${count === 1 ? "It is" : "They are"} kept as ${count === 1 ? "it is" : "they are"}.`;
-
-function CompanyChoices({
-  form,
-  toggleScope,
-  options,
+// The "Vehicles and dates" pane (v2.32): the vehicles the person can see, and how far back they may change records.
+export function VehiclesAndDatesPane({
+  pf,
+  scopeOptions,
+  fullScope,
   editable,
-}: Pick<Props, "form" | "toggleScope" | "editable"> & {
-  options: ScopeOptions;
+  today,
+  errors,
+}: {
+  pf: PersonFormState;
+  scopeOptions?: ScopeOptions;
+  // Whether the editor sees every vehicle: only then can "All vehicles" be given.
+  fullScope: boolean;
+  editable: boolean;
+  today: string;
+  errors: Errors;
 }) {
-  const keptCompanies = keptCounts(form, options).companies;
+  const { formatDateOnly } = useFormats();
+  const { form, setField } = pf;
+  const all = form.scopeMode === "all";
+  const limit = readBackLimit(form);
+  const earliest = today ? earliestAllowed(limit, today) : "";
   return (
-    <ChoiceGroup label="Companies they can see">
-      {options.companies.map((company) => (
-        <Choice
-          key={company.id}
-          label={company.name}
-          checked={form.companyIds.includes(company.id)}
-          disabled={!editable}
-          onChange={(event) =>
-            toggleScope("companyIds", company.id, event.target.checked)
-          }
-        />
-      ))}
-      {!options.companies.length && (
-        <Hint>There are no companies in your own scope to choose from.</Hint>
-      )}
-      {keptCompanies > 0 && (
-        <Hint>{kept(keptCompanies, "company", "companies", "archived")}</Hint>
-      )}
-    </ChoiceGroup>
+    <>
+      <div className="pblock">
+        <div className="pbh">
+          <b>Vehicles this person can see</b>
+          {fullScope ? (
+            <label className="mck">
+              <input
+                type="checkbox"
+                id="pAll"
+                checked={all}
+                disabled={!editable}
+                onChange={(event) => pf.setAllVehicles(event.target.checked)}
+              />
+              All vehicles
+            </label>
+          ) : all ? (
+            <span className="hint">All vehicles</span>
+          ) : null}
+        </div>
+        {(fullScope || !all) &&
+          (!scopeOptions ? (
+            <div role="status" aria-busy="true">
+              <span className="sr-only">Loading the vehicles</span>
+              <ListSkeleton rows={2} />
+            </div>
+          ) : (
+            <VehicleTicks
+              pf={pf}
+              options={scopeOptions}
+              editable={editable}
+              hidden={all}
+            />
+          ))}
+        {errors.scope && <div className="ferr">{errors.scope}</div>}
+      </div>
+      <div className="pblock">
+        <div className="pbh">
+          <b>How far back this person can change records</b>
+          <span className="hint" id="pBackOut">
+            {earliest ? `Today, from ${formatDateOnly(earliest)}` : "Any date"}
+          </span>
+        </div>
+        <div className="mrow2">
+          <div className="f">
+            <label htmlFor="pBack">Limit</label>
+            <select
+              className="inp"
+              id="pBack"
+              value={form.backMode}
+              disabled={!editable}
+              onChange={(event) =>
+                setField("backMode", event.target.value as typeof form.backMode)
+              }
+            >
+              <option value="none">No rolling limit</option>
+              <option value="days">A number of days back</option>
+              <option value="months">A number of months back</option>
+            </select>
+          </div>
+          {form.backMode !== "none" && (
+            <div className="f">
+              <label htmlFor="pBackN">
+                {form.backMode === "months" ? "Months" : "Days"}
+              </label>
+              <input
+                className="inp num"
+                id="pBackN"
+                inputMode="numeric"
+                value={form.backCount}
+                disabled={!editable}
+                onChange={(event) =>
+                  setField(
+                    "backCount",
+                    event.target.value.replace(/[^0-9]/g, ""),
+                  )
+                }
+              />
+            </div>
+          )}
+        </div>
+        <div className="f">
+          <div className="flabrow">
+            <label className="mck">
+              <input
+                type="checkbox"
+                id="pBackOn"
+                checked={form.backFromOn}
+                disabled={!editable}
+                onChange={(event) =>
+                  setField("backFromOn", event.target.checked)
+                }
+              />
+              Never before a date
+            </label>
+          </div>
+          {form.backFromOn && (
+            <input
+              className="inp"
+              id="pBackDt"
+              type="date"
+              aria-label="Never before"
+              max={today || undefined}
+              value={form.backFrom}
+              disabled={!editable}
+              onChange={(event) => setField("backFrom", event.target.value)}
+            />
+          )}
+        </div>
+        <span className="sr-only">{backLimitText(limit, formatDateOnly)}</span>
+        {errors.backLimit && <div className="ferr">{errors.backLimit}</div>}
+      </div>
+    </>
   );
 }
 
-function VehicleChoices({
-  form,
-  toggleScope,
+function VehicleTicks({
+  pf,
   options,
   editable,
-}: Pick<Props, "form" | "toggleScope" | "editable"> & {
+  hidden,
+}: {
+  pf: PersonFormState;
   options: ScopeOptions;
+  editable: boolean;
+  hidden: boolean;
 }) {
-  const keptVehicles = keptCounts(form, options).vehicles;
+  const { form } = pf;
+  const kept = keptCounts(form, options).vehicles;
+  const ticked = (id: string) =>
+    form.scopeMode === "vehicles" && form.vehicleIds.includes(id);
   return (
-    <div role="group" aria-label="Vehicles they can see" className="vgrid">
+    <div
+      role="group"
+      aria-label="Vehicles this person can see"
+      className="vgrid"
+      id="pRegs"
+      hidden={hidden}
+    >
+      {form.scopeMode === "companies" && (
+        <span className="hint" style={{ gridColumn: "1 / -1" }}>
+          Sees every vehicle of{" "}
+          {plural(form.companyIds.length, "company", "companies")}. Tick
+          vehicles to choose them one by one.
+        </span>
+      )}
       {scopeGroups(options).map((company) => (
         <Fragment key={company.id || "other"}>
           <span className="cogrp">{company.name}</span>
-          <ChoiceGroup className="checks">
+          <div className="checks">
             {company.vehicles.map((vehicle) => (
-              <Choice
-                key={vehicle.id}
-                label={vehicle.registration}
-                checked={form.vehicleIds.includes(vehicle.id)}
-                disabled={!editable}
-                onChange={(event) =>
-                  toggleScope("vehicleIds", vehicle.id, event.target.checked)
-                }
-              />
+              <label key={vehicle.id} className="ck">
+                <input
+                  type="checkbox"
+                  className="pv"
+                  checked={ticked(vehicle.id)}
+                  disabled={!editable}
+                  onChange={(event) =>
+                    pf.toggleVehicle(vehicle.id, event.target.checked)
+                  }
+                />
+                {vehicle.registration}
+              </label>
             ))}
-          </ChoiceGroup>
+          </div>
         </Fragment>
       ))}
       {!options.vehicles.length && (
-        <Hint>There are no vehicles in your own scope to choose from.</Hint>
+        <span className="hint">No vehicle in your own access to choose.</span>
       )}
-      {keptVehicles > 0 && (
-        <Hint>
-          {kept(keptVehicles, "vehicle", "vehicles", "out of the fleet")}
-        </Hint>
+      {kept > 0 && (
+        <span className="hint" style={{ gridColumn: "1 / -1" }}>
+          {plural(kept, "vehicle", "vehicles")} outside your access or the fleet{" "}
+          {kept === 1 ? "stays as it is" : "stay as they are"}.
+        </span>
       )}
     </div>
-  );
-}
-
-export function ScopeCard(props: Props) {
-  const { form, setField, scopeOptions, selectedRole, editable } = props;
-  return (
-    <FormSection>
-      <SectionLabel
-        title="What they can see"
-        description="Every number, list and report is limited to this."
-      />
-      <ChoiceGroup role="radiogroup" label="What they can see">
-        {SCOPE_MODES.map((option) => (
-          <Choice
-            key={option.value}
-            type="radio"
-            name="person-scope"
-            label={option.label}
-            checked={form.scopeMode === option.value}
-            disabled={!editable || selectedRole === "Owner"}
-            onChange={() => setField("scopeMode", option.value)}
-          />
-        ))}
-      </ChoiceGroup>
-      {form.scopeMode !== "all" && !scopeOptions ? (
-        <div role="status" aria-busy="true">
-          <span className="sr-only">Loading what they can see</span>
-          <ListSkeleton rows={2} />
-        </div>
-      ) : form.scopeMode === "companies" && scopeOptions ? (
-        <CompanyChoices {...props} options={scopeOptions} />
-      ) : form.scopeMode === "vehicles" && scopeOptions ? (
-        <VehicleChoices {...props} options={scopeOptions} />
-      ) : (
-        <Hint>
-          {selectedRole === "Owner"
-            ? "The owner always sees every company."
-            : "Includes any company added later."}
-        </Hint>
-      )}
-      {props.error && <ErrorText>{props.error}</ErrorText>}
-    </FormSection>
   );
 }

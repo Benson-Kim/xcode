@@ -232,6 +232,10 @@ public sealed class SetupRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsC
                 AllocationCount = v.Allocations.Count()
             }).ToListAsync(ct);
         rows = [.. rows.OrderBy(v => ids.IndexOf(v.ItemId))];
+        var pausedFrom = (await db.Set<RecurringPause>().AsNoTracking().Where(p => ids.Contains(p.ItemId) && p.Through == null)
+                .Select(p => new { p.ItemId, p.From }).ToListAsync(ct))
+            .GroupBy(p => p.ItemId).ToDictionary(g => g.Key, g => g.Min(p => p.From));
+        var saved = (await PostedToDate(actor, [.. rows.Where(v => v.Kind == RecurringKind.Savings).Select(v => v.ItemId)], ct)).Postings;
         var allocationVehicleIds = rows.SelectMany(v => v.Allocations).Select(a => a.VehicleId).Distinct().ToList();
         var allocationVehicles = await db.Set<FleetVehicle>().AsNoTracking()
             .Where(v => allocationVehicleIds.Contains(v.Id))
@@ -249,12 +253,77 @@ public sealed class SetupRepository(AuthDb db, IUnitOfWork unitOfWork, SettingsC
             return new RecurringDto(v.ItemId, v.Id, v.Revision, v.Name, v.Kind,
                 allocations.Sum(a => a.Amount), v.Frequency, v.Day, v.LastDay, v.Start, v.End, v.StoppedFrom,
                 allocations, v.Allocations.Count != v.AllocationCount, v.ExpenseItemId, v.ExpenseItemName,
-                ExpenseBuckets.Of(v.Kind, v.Bucket), v.Note, v.Month, allocations.Where(a => a.Active).Sum(a => a.Amount));
+                ExpenseBuckets.Of(v.Kind, v.Bucket), v.Note, v.Month, allocations.Where(a => a.Active).Sum(a => a.Amount),
+                pausedFrom.TryGetValue(v.ItemId, out var paused) ? paused : null, LastRun(saved[v.ItemId]),
+                saved[v.ItemId].Count(p => p.Date == LastRun(saved[v.ItemId])),
+                v.Kind == RecurringKind.Savings ? saved[v.ItemId].Sum(p => p.Amount) : null);
         }).ToList(), page, pageSize, total);
     }
 
+    private static DateOnly? LastRun(IEnumerable<FleetPosting> runs) => runs.Select(p => (DateOnly?)p.Date).Max();
+
+    // What these items have posted on the actor's vehicles up to today, by item, as the reports count it, and those vehicles.
+    private async Task<(ILookup<Guid, FleetPosting> Postings, IReadOnlyDictionary<Guid, string> Registrations)> PostedToDate(SetupActor actor,
+        IReadOnlyCollection<Guid> itemIds, CancellationToken ct)
+    {
+        var none = (Array.Empty<FleetPosting>().ToLookup(p => p.Id), (IReadOnlyDictionary<Guid, string>)new Dictionary<Guid, string>());
+        if (itemIds.Count == 0) return none;
+        var versions = db.Set<RecurringVersion>().Where(v => itemIds.Contains(v.ItemId));
+        var starts = await versions.Select(v => v.Start).ToListAsync(ct);
+        var vehicles = await VisibleVehicles(actor).AsNoTracking()
+            .Where(vehicle => versions.Any(v => v.Allocations.Any(a => a.VehicleId == vehicle.Id))).ToListAsync(ct);
+        if (starts.Count == 0 || starts.Min() > actor.Today || vehicles.Count == 0) return none;
+        var posted = await postings.Scheduled(actor, vehicles, starts.Min(), actor.Today, ct);
+        return (posted.Where(p => itemIds.Contains(p.Id)).ToLookup(p => p.Id), vehicles.ToDictionary(v => v.Id, v => v.Registration));
+    }
+
+    public async Task<RecurringRunsDto?> RecurringRuns(SetupActor actor, Guid id, int count, CancellationToken ct)
+    {
+        var item = await VisibleRecurring(actor).AsNoTracking().Where(i => i.Id == id)
+            .Select(i => new
+            {
+                Latest = i.Versions.OrderByDescending(v => v.Revision).Select(v => new { v.Name, v.Kind }).First(),
+                Start = i.Versions.OrderBy(v => v.Start).Select(v => v.Start).First()
+            })
+            .SingleOrDefaultAsync(ct);
+        if (item is null) return null;
+        var (posted, registrations) = await PostedToDate(actor, [id], ct);
+        var runs = posted[id].GroupBy(p => p.Date).OrderByDescending(g => g.Key).ToList();
+        return new RecurringRunsDto(id, item.Latest.Name, item.Latest.Kind, item.Start, runs.Sum(g => g.Sum(p => p.Amount)), runs.Count,
+            [.. runs.Take(count).Select(g => new RecurringRunDto(g.Key, g.Sum(p => p.Amount),
+                [.. g.Select(p => new RecurringRunShareDto(p.VehicleId, registrations.GetValueOrDefault(p.VehicleId, ""), p.Amount))
+                    .OrderBy(s => s.Registration, StringComparer.Ordinal)]))]);
+    }
+
+    public async Task<RecurringSummaryDto> RecurringSummary(SetupActor actor, CancellationToken ct)
+    {
+        var today = actor.Today;
+        var from = new DateOnly(today.Year, today.Month, 1);
+        var to = from.AddMonths(1).AddDays(-1);
+        var vehicles = await VisibleVehicles(actor).AsNoTracking().ToListAsync(ct);
+        var items = await VisibleRecurring(actor).AsNoTracking()
+            .Include(i => i.Versions).ThenInclude(v => v.Allocations).Include(i => i.Pauses).ToListAsync(ct);
+        if (vehicles.Count == 0 || items.Count == 0) return new(from, to, 0m, 0m, 0m);
+        var savingsStart = items.SelectMany(i => i.Versions).Where(v => v.Kind == RecurringKind.Savings).Select(v => (DateOnly?)v.Start).Min();
+        var first = savingsStart is { } start && start < from ? start : from;
+        var posted = first <= today ? await postings.Scheduled(actor, vehicles, first, today, ct) : [];
+        // Days after today are not posted yet: they count from each schedule as the postings will, on each vehicle's days.
+        var fleet = vehicles.ToDictionary(v => v.Id);
+        var coming = today < to
+            ? items.SelectMany(i => i.DueBetween(today.AddDays(1), to)).Where(due => due.Version.Kind == RecurringKind.Cost)
+                .SelectMany(due => due.Version.Allocations.Where(a => fleet.TryGetValue(a.VehicleId, out var vehicle)
+                    && FleetVehicle.ActiveOn(vehicle.JoinedOn, vehicle.LeftOn, due.Date)))
+                .Sum(a => a.Amount)
+            : 0m;
+        return new(from, to,
+            posted.Where(p => p.Kind == RecurringKind.Cost && p.Date >= from).Sum(p => p.Amount) + coming,
+            posted.Where(p => p.Kind == RecurringKind.Savings && p.Date >= from).Sum(p => p.Amount),
+            posted.Where(p => p.Kind == RecurringKind.Savings).Sum(p => p.Amount));
+    }
+
     public Task<RecurringItem?> RecurringItem(SetupActor actor, Guid id, CancellationToken ct)
-        => VisibleRecurring(actor).Include(i => i.Versions).ThenInclude(v => v.Allocations).SingleOrDefaultAsync(i => i.Id == id, ct);
+        => VisibleRecurring(actor).Include(i => i.Versions).ThenInclude(v => v.Allocations).Include(i => i.Pauses)
+            .SingleOrDefaultAsync(i => i.Id == id, ct);
 
     public async Task<VehicleReport> Report(SetupActor actor, FleetVehicle vehicle, DateOnly from, DateOnly through, CancellationToken ct)
     {

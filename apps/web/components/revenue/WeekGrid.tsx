@@ -1,15 +1,13 @@
 import type { RefObject } from "react";
 
 import type { WeekDay } from "@xcode/shared/dates";
-import { percentText } from "@xcode/shared/format";
 import type { RevenueWeek } from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
 import { cn } from "../ui";
-import { DAY_COLUMN } from "./styles";
 import type { OpenDay } from "./useCaptureFlow";
 import type { useGridRows } from "./useGridRows";
-import { VehicleRow } from "./VehicleRow";
+import { GapChip, VehicleRow } from "./VehicleRow";
 
 type Rows = ReturnType<typeof useGridRows>;
 
@@ -27,6 +25,7 @@ export function WeekGrid({
   days,
   today,
   canCapture,
+  searching,
   grid,
   gridRef,
   bodyRef,
@@ -36,14 +35,14 @@ export function WeekGrid({
   days: WeekDay[];
   today: string;
   canCapture: boolean;
+  searching: boolean;
   grid: Rows;
   gridRef: RefObject<HTMLDivElement | null>;
   bodyRef: RefObject<HTMLTableSectionElement | null>;
   onOpenDay: OpenDay;
 }) {
   const formats = useFormats();
-  const { vehicles, expanded, windowed, rowIndex, rowCount, rows, toggle } =
-    grid;
+  const { vehicles, windowed, rowIndex, rowCount, rows } = grid;
   return (
     <div id="revT" ref={gridRef} tabIndex={-1}>
       <div className="tbl">
@@ -63,7 +62,7 @@ export function WeekGrid({
               {vehicles.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="empty">
-                    No vehicles.
+                    {searching ? "No vehicle matches." : "No vehicles."}
                   </td>
                 </tr>
               ) : (
@@ -73,15 +72,12 @@ export function WeekGrid({
                     <VehicleRow
                       key={item.id}
                       vehicle={item}
-                      isOpen={expanded.has(item.id)}
-                      days={days}
                       today={today}
                       canCapture={canCapture}
                       rowIndex={
                         windowed ? rowIndex[rows.start + offset] : undefined
                       }
                       measure={rows.measure}
-                      onToggle={toggle}
                       onOpenDay={onOpenDay}
                     />
                   ))}
@@ -120,7 +116,7 @@ function GridHead({
             key={date}
             scope="col"
             aria-current={date === today ? "date" : undefined}
-            className={cn("r", date === today && "today", DAY_COLUMN)}
+            className={cn("r", date === today && "today")}
           >
             {`${shortName} ${dayOfMonth}`}
             {date === today && <span className="sr-only">, today</span>}
@@ -129,7 +125,9 @@ function GridHead({
         <th scope="col" className="r">
           Week total
         </th>
-        <th scope="col">vs expected</th>
+        <th scope="col" className="r">
+          Gap to target
+        </th>
       </tr>
     </thead>
   );
@@ -148,12 +146,14 @@ function GridTotals({
       <tr aria-rowindex={rowIndex}>
         <td>{`${data.vehicles.length} vehicle${data.vehicles.length === 1 ? "" : "s"}`}</td>
         {(data.dayTotals ?? []).map(({ date, amount }) => (
-          <td key={date} className={cn("r", DAY_COLUMN)}>
+          <td key={date} className="r">
             {amount ? formats.formatNumber(amount) : ""}
           </td>
         ))}
         <td className="r">{formats.formatNumber(data.totalAmount)}</td>
-        <td>{data.percent === null ? "" : percentText(data.percent)}</td>
+        <td className="r">
+          <GapChip gap={data.gap} band={data.gapBand} />
+        </td>
       </tr>
     </tfoot>
   );

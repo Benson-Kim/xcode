@@ -123,6 +123,14 @@ public static class SetupEndpoints
         group.MapGet("/recurring", (RecurringUseCases useCases, CancellationToken ct, int page = 1, int pageSize = 25, string? kind = null,
                 Guid? companyId = null, string? status = null) => useCases.List(RecurringFilter.Of(kind, companyId, status), page, pageSize, ct))
             .Produces<Page<RecurringDto>>().WithName("ListSetupRecurring");
+        group.MapGet("/recurring/summary", (RecurringUseCases useCases, CancellationToken ct) => useCases.Summary(ct))
+            .Produces<RecurringSummaryDto>().WithName("GetSetupRecurringSummary");
+        group.MapGet("/recurring/{id:guid}/runs", (Guid id, RecurringUseCases useCases, CancellationToken ct) => useCases.Runs(id, ct))
+            .Produces<RecurringRunsDto>().WithName("GetSetupRecurringRuns");
+        group.MapPost("/recurring/{id:guid}/pause", async (Guid id, RecurringUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Pause(id, ct))))
+            .Produces<IdResponse>().WithName("PauseSetupRecurring");
+        group.MapPost("/recurring/{id:guid}/resume", async (Guid id, RecurringUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Resume(id, ct))))
+            .Produces<IdResponse>().WithName("ResumeSetupRecurring");
         group.MapGet("/recurring/vehicle-options", (RecurringUseCases useCases, CancellationToken ct) => useCases.VehicleOptions(ct))
             .Produces<IReadOnlyList<VehicleOption>>().WithName("ListRecurringVehicleOptions");
         group.MapPost("/recurring", async (SaveRecurring input, RecurringUseCases useCases, CancellationToken ct) => Results.Ok(new IdResponse(await useCases.Save(null, input, ct))))

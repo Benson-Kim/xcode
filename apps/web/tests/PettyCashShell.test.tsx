@@ -57,6 +57,7 @@ const card = (name: string) => screen.getByRole("article", { name });
 const menu = () => within(screen.getByRole("navigation", { name: "Main" }));
 
 it.each([
+  "pettycash.view",
   "pettycash.spend",
   "pettycash.view_all",
   "pettycash.approve_item",

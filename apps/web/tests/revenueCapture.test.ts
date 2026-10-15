@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import { createFormatter } from "@xcode/shared/format";
-import type { RevenueCell, RevenueVehicle } from "@xcode/shared/revenue";
+import type {
+  RevenueCell,
+  RevenueVehicle,
+  RevenueWeek,
+} from "@xcode/shared/revenue";
 
 import {
   captureAt,
-  gapHint,
+  captureStart,
   cellState,
   entryLabel,
   isReason,
-  openAt,
   readEntry,
 } from "../components/revenue/capture";
 
@@ -30,16 +33,23 @@ const cell = (patch: Partial<RevenueCell>): RevenueCell =>
   }) as RevenueCell;
 
 const vehicle = (
+  id: string,
   days: Partial<RevenueCell>[],
-  earliestMissing: string | null,
+  earliestMissing: string | null = null,
 ): RevenueVehicle =>
   ({
-    id: "v1",
+    id,
     joinedOn: "2026-01-01",
     leftOn: null,
     earliestMissing,
     days: days.map(cell),
   }) as unknown as RevenueVehicle;
+
+const week = (
+  vehicles: RevenueVehicle[],
+  over: Partial<RevenueWeek> = {},
+): RevenueWeek =>
+  ({ businessDate: WED, vehicles, firstGap: null, ...over }) as RevenueWeek;
 
 describe("isReason", () => {
   it.each([
@@ -54,78 +64,20 @@ describe("isReason", () => {
 });
 
 describe("captureAt", () => {
-  const v = vehicle([], null);
-
-  it("opens the day as tapped, with no gap to mention", () => {
-    expect(captureAt(v, { date: WED, earlier: null })).toEqual({
+  it("opens the day as tapped and carries the vehicles already done", () => {
+    expect(captureAt(vehicle("v1", []), WED)).toEqual({
       vehicleId: "v1",
       date: WED,
-      gap: null,
       done: [],
     });
-  });
-
-  it("keeps the earlier gap as a hint and the done list", () => {
-    expect(captureAt(v, { date: WED, earlier: MON }, ["v0"])).toEqual({
-      vehicleId: "v1",
-      date: WED,
-      gap: MON,
-      done: ["v0"],
-    });
-  });
-});
-
-describe("gapHint", () => {
-  it("says there is no record yet and that it can wait", () => {
-    expect(gapHint(formats, MON)).toBe(
-      "No record yet from Mon 28 Sep 2026. You can fill it when you have it.",
-    );
-  });
-});
-
-describe("openAt", () => {
-  const gaps = vehicle(
-    [
-      { date: MON, status: "missing" },
-      { date: TUE, status: "missing" },
-      { date: WED, status: "missing" },
-    ],
-    MON,
-  );
-
-  it("opens the day that was tapped, never an earlier gap, and mentions the gap", () => {
-    expect(openAt(gaps, WED, WED)).toEqual({
-      vehicleId: "v1",
-      date: WED,
-      gap: MON,
-      done: [],
-    });
-  });
-
-  it("opens the earliest gap as tapped, with nothing to mention", () => {
-    expect(openAt(gaps, MON, WED)).toMatchObject({ date: MON, gap: null });
-  });
-
-  it("opens a recorded day as tapped, mentioning what is missing before it", () => {
-    const recorded = vehicle(
-      [
-        { date: MON, status: "missing" },
-        { date: TUE, status: "amount", amount: 900 },
-      ],
-      MON,
-    );
-    expect(openAt(recorded, TUE, WED)).toMatchObject({ date: TUE, gap: MON });
-  });
-
-  it("carries the vehicles already done", () => {
-    expect(openAt(gaps, MON, WED, ["v9"]).done).toEqual(["v9"]);
+    expect(captureAt(vehicle("v1", []), WED, ["v0"]).done).toEqual(["v0"]);
   });
 });
 
 describe("entryLabel", () => {
   it.each([
-    [{ amount: 850, reason: null, note: null }, "KES 850"],
-    [{ amount: 850, reason: null, note: "ignored" }, "KES 850"],
+    [{ amount: 8500, reason: null, note: null }, "KES 8,500"],
+    [{ amount: 2500, reason: "Garage", note: null }, "KES 2,500, Garage"],
     [{ amount: null, reason: "Garage", note: null }, "Garage"],
     [{ amount: null, reason: "Other", note: "Flat tyre" }, "Other: Flat tyre"],
     [{ amount: null, reason: null, note: null }, "No record"],
@@ -137,15 +89,15 @@ describe("entryLabel", () => {
 describe("cellState", () => {
   it.each([
     [{ status: "missing" }, "Missing"],
-    [{ status: "amount", amount: 850 }, "KES 850"],
+    [{ status: "amount", amount: 8500 }, "KES 8,500"],
+    [
+      { status: "amount", amount: 1800, reason: "No Crew" },
+      "KES 1,800, No Crew",
+    ],
     [{ status: "reason", reason: "Arrest" }, "Arrest"],
     [
-      { status: "amount", amount: 850, editedAfterCapture: true },
-      "KES 850, edited after capture",
-    ],
-    [
-      { status: "missing", editedAfterCapture: true },
-      "Missing, edited after capture",
+      { status: "amount", amount: 8500, editedAfterCapture: true },
+      "KES 8,500, edited after capture",
     ],
   ] as const)("%j -> %s", (patch, expected) => {
     expect(cellState(formats, cell(patch))).toBe(expected);
@@ -153,50 +105,90 @@ describe("cellState", () => {
 });
 
 describe("readEntry", () => {
-  const typed = { amount: "", reason: "" as const, note: "" };
+  const typed = { amount: "", reason: "" as const, threshold: 4000, formats };
 
-  it("reads an amount whatever the reason", () => {
-    expect(
-      readEntry({ ...typed, amount: "1,200", canChooseReason: false }),
-    ).toEqual({ amount: 1200, reason: null, note: null });
-  });
-
-  it("refuses a malformed amount with the amount message", () => {
-    expect(
-      readEntry({ ...typed, amount: "12x", canChooseReason: true }),
-    ).toMatch(/positive amount/);
-  });
-
-  it("asks for revenue when the person cannot pick a reason", () => {
-    expect(readEntry({ ...typed, canChooseReason: false })).toBe(
-      "Enter the revenue.",
-    );
-  });
-
-  it("asks for a reason when nothing is entered", () => {
-    expect(readEntry({ ...typed, canChooseReason: true })).toBe(
-      "Enter the revenue or pick a reason.",
-    );
-  });
-
-  it("wants a note for Other and trims it", () => {
-    const other = { ...typed, reason: "Other" as const, canChooseReason: true };
-    expect(readEntry(other)).toBe("Say what happened.");
-    expect(readEntry({ ...other, note: "  Flat tyre " })).toEqual({
-      amount: null,
-      reason: "Other",
-      note: "Flat tyre",
+  it("keeps an amount at or above the threshold without a reason, whatever was picked", () => {
+    expect(readEntry({ ...typed, amount: "4,000", reason: "Garage" })).toEqual({
+      amount: 4000,
+      reason: null,
+      note: null,
+    });
+    expect(readEntry({ ...typed, amount: "12,500.50" })).toEqual({
+      amount: 12500.5,
+      reason: null,
+      note: null,
     });
   });
 
-  it("drops the note for any other reason", () => {
+  it("refuses a malformed amount with the amount message", () => {
+    expect(readEntry({ ...typed, amount: "12x" })).toMatch(/positive amount/);
+  });
+
+  it("asks for the reason when the amount is below the threshold", () => {
+    expect(readEntry({ ...typed, amount: "3,999" })).toBe(
+      "Choose the reason. Revenue is below KES 4,000.",
+    );
+    expect(readEntry({ ...typed, amount: "3999", reason: "Garage" })).toEqual({
+      amount: 3999,
+      reason: "Garage",
+      note: null,
+    });
+  });
+
+  it("asks for the revenue or a reason when nothing is entered, and takes a reason alone as a no revenue day", () => {
+    expect(readEntry(typed)).toBe(
+      "Enter the revenue, or choose the reason for no revenue.",
+    );
+    expect(readEntry({ ...typed, reason: "Other" })).toEqual({
+      amount: null,
+      reason: "Other",
+      note: null,
+    });
+  });
+
+  it("uses the fleet's own threshold", () => {
+    expect(readEntry({ ...typed, amount: "4,500", threshold: 5000 })).toBe(
+      "Choose the reason. Revenue is below KES 5,000.",
+    );
+  });
+});
+
+describe("captureStart", () => {
+  it("opens the oldest missing day on the vehicle that misses it", () => {
     expect(
-      readEntry({
-        amount: "",
-        reason: "Garage",
-        note: "left over",
-        canChooseReason: true,
-      }),
-    ).toEqual({ amount: null, reason: "Garage", note: null });
+      captureStart(
+        week([vehicle("v1", []), vehicle("v2", [])], {
+          firstGap: { vehicleId: "v2", date: MON },
+        }),
+        null,
+      ),
+    ).toEqual({ vehicleId: "v2", date: MON });
+  });
+
+  it("opens today on the first vehicle with no record for it when nothing is missing", () => {
+    expect(
+      captureStart(
+        week([
+          vehicle("v1", [{ date: WED, status: "amount", amount: 9000 }]),
+          vehicle("v2", [{ date: WED, status: "missing" }]),
+        ]),
+        null,
+      ),
+    ).toEqual({ vehicleId: "v2", date: WED });
+  });
+
+  it("never opens before the earliest day the person may change", () => {
+    expect(
+      captureStart(
+        week([vehicle("v1", [{ date: TUE, status: "missing" }])], {
+          firstGap: { vehicleId: "v1", date: MON },
+        }),
+        TUE,
+      ),
+    ).toEqual({ vehicleId: "v1", date: TUE });
+  });
+
+  it("has nowhere to open without a vehicle", () => {
+    expect(captureStart(week([]), null)).toBeNull();
   });
 });

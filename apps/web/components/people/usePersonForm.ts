@@ -10,7 +10,7 @@ import type {
 import {
   APPROVALS,
   assignableRoles,
-  changesFromRole,
+  FLOAT_RIGHT,
   initialForm,
   type PersonForm,
   roleDefaults,
@@ -25,7 +25,6 @@ export function usePersonForm(
 ) {
   const { session } = useSession();
   const [form, setForm] = useState(() => initialForm(person));
-  const [permissionNote, setPermissionNote] = useState("");
 
   const all = (groups ?? []).flatMap((group) => group.items);
   const label = (key: string) =>
@@ -42,33 +41,30 @@ export function usePersonForm(
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function setPermission(key: string, checked: boolean) {
+    setField(
+      "permissions",
+      checked
+        ? withNeeds(permissions, key, all)
+        : withoutDependents(permissions, key, all),
+    );
+  }
+
   function togglePermission(item: Permission, checked: boolean) {
-    const next = checked
-      ? withNeeds(permissions, item.key, all)
-      : withoutDependents(permissions, item.key, all);
-    const added = next.filter(
-      (key) => !permissions.includes(key) && key !== item.key,
-    );
-    const removed = permissions.filter(
-      (key) => !next.includes(key) && key !== item.key,
-    );
-    setPermissionNote(
-      added.length
-        ? `Also ticked, because it is needed: ${added.map(label).join(", ")}.`
-        : removed.length
-          ? `Also unticked, because it needs this: ${removed.map(label).join(", ")}.`
-          : "",
-    );
+    setPermission(item.key, checked);
+  }
+
+  // The module's "All" box: every right of the module, or none of them.
+  function setModule(group: PermissionGroup, checked: boolean) {
+    let next = permissions;
+    for (const item of group.items)
+      next = checked
+        ? withNeeds(next, item.key, all)
+        : withoutDependents(next, item.key, all);
     setField("permissions", next);
   }
 
-  function resetPermissions() {
-    setPermissionNote("");
-    setField("permissions", null);
-  }
-
   function changeRole(role: string) {
-    setPermissionNote("");
     setForm((current) => ({
       ...current,
       role,
@@ -77,16 +73,26 @@ export function usePersonForm(
     }));
   }
 
-  function toggleScope(
-    key: "companyIds" | "vehicleIds",
-    id: string,
-    checked: boolean,
-  ) {
+  // Ticking a vehicle puts the person on chosen vehicles; "All vehicles" takes them off any list.
+  function toggleVehicle(id: string, checked: boolean) {
+    setForm((current) => {
+      const chosen = current.scopeMode === "vehicles" ? current.vehicleIds : [];
+      return {
+        ...current,
+        scopeMode: "vehicles",
+        companyIds: [],
+        vehicleIds: checked
+          ? [...chosen, id]
+          : chosen.filter((value) => value !== id),
+      };
+    });
+  }
+
+  function setAllVehicles(all: boolean) {
     setForm((current) => ({
       ...current,
-      [key]: checked
-        ? [...current[key], id]
-        : current[key].filter((value) => value !== id),
+      scopeMode: all ? "all" : "vehicles",
+      vehicleIds: all ? [] : current.vehicleIds,
     }));
   }
 
@@ -98,13 +104,14 @@ export function usePersonForm(
     selectedRole,
     defaults,
     permissions,
-    changes: changesFromRole(permissions, defaults),
     needsLimit: permissions.some((key) => APPROVALS.includes(key)),
-    permissionNote,
+    holdsFloat: permissions.includes(FLOAT_RIGHT),
+    setFloat: (holds: boolean) => setPermission(FLOAT_RIGHT, holds),
     togglePermission,
-    resetPermissions,
+    setModule,
     changeRole,
-    toggleScope,
+    toggleVehicle,
+    setAllVehicles,
   };
 }
 

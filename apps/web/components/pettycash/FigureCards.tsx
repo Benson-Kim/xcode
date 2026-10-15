@@ -4,7 +4,7 @@ import type { PettyCashOverview } from "@xcode/shared/pettyCash";
 
 import { useFormats } from "../../lib/formats";
 import { BandSkeleton } from "../revenue/RegPlate";
-import { BandFigure, BandOp, BandTerm } from "../ui";
+import { BandFigure, BandTerm } from "../ui";
 
 // Cash balance = Opening balance + Cash issued - Expenses - Credit notes, as the terms of the headline card.
 export function FigureCards({
@@ -32,13 +32,13 @@ export function FigureCards({
         value={formats.formatNumber(figures.closingBalance)}
         negative={figures.closingBalance < 0}
       />
-      <BandOp>=</BandOp>
       <BandTerm
+        op="="
         label="Opening balance"
         value={formats.formatNumber(figures.openingBalance)}
       />
-      <BandOp>+</BandOp>
       <BandTerm
+        op="+"
         label="Cash issued"
         value={
           figures.cashReceived < 0
@@ -46,13 +46,13 @@ export function FigureCards({
             : formats.formatNumber(figures.cashReceived)
         }
       />
-      <BandOp>&minus;</BandOp>
       <BandTerm
+        op={"−"}
         label="Expenses"
         value={formats.formatNumber(figures.expenses)}
       />
-      <BandOp>&minus;</BandOp>
       <BandTerm
+        op={"−"}
         label="Credit notes"
         value={formats.formatNumber(figures.creditNotes)}
       />

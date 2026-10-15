@@ -69,21 +69,32 @@ public sealed class PettyCashUseCases(ISetupExecution execution, IPettyCashRepos
 
     public Task<Page<PettyCashEntryDto>> Entries(DateOnly? from, DateOnly? to, Guid? holderId, string? kind, string? status, string? q,
         int page, int pageSize, CancellationToken ct) =>
-        execution.ReadAny(ReadPermissions, async actor =>
+        execution.ReadAny(ReadPermissions, actor =>
         {
             SetupPagination.Validate(page, pageSize);
-            var text = q?.Trim();
-            if (from is not null && to is not null && from > to)
-                throw new ArgumentException("The first date cannot be after the last date.");
-            if (text?.Length > 200)
-                throw new ArgumentException("Search for 200 characters or fewer.");
-            var filter = new PettyCashFilter(from, to, holderId, PettyCashWords.ParseKinds(kind), PettyCashWords.ParseStatus(status),
-                string.IsNullOrEmpty(text) ? null : text);
-            var selected = Selected(await VisibleHolders(actor, ct), holderId);
-            var rows = await repository.Entries(actor, [.. selected.Select(h => h.Id)], filter, page, pageSize, ct);
-            var limit = await repository.ApprovalLimit(actor.UserId, ct);
-            return new Page<PettyCashEntryDto>([.. rows.Items.Select(r => Dto(actor, r, limit))], rows.PageNumber, rows.PageSize, rows.Total);
+            return EntriesPage(actor, from, to, holderId, kind, status, q, page, pageSize, ct);
         }, ct);
+
+    // Every entry the list shows for these filters, as one page of up to `limit` entries, for an export.
+    public Task<Page<PettyCashEntryDto>> AllEntries(DateOnly? from, DateOnly? to, Guid? holderId, string? kind, string? status, string? q,
+        int limit, CancellationToken ct) =>
+        execution.ReadAny(ReadPermissions, actor => EntriesPage(actor, from, to, holderId, kind, status, q, 1, limit, ct), ct);
+
+    private async Task<Page<PettyCashEntryDto>> EntriesPage(SetupActor actor, DateOnly? from, DateOnly? to, Guid? holderId, string? kind,
+        string? status, string? q, int page, int pageSize, CancellationToken ct)
+    {
+        var text = q?.Trim();
+        if (from is not null && to is not null && from > to)
+            throw new ArgumentException("The first date cannot be after the last date.");
+        if (text?.Length > 200)
+            throw new ArgumentException("Search for 200 characters or fewer.");
+        var filter = new PettyCashFilter(from, to, holderId, PettyCashWords.ParseKinds(kind), PettyCashWords.ParseStatus(status),
+            string.IsNullOrEmpty(text) ? null : text);
+        var selected = Selected(await VisibleHolders(actor, ct), holderId);
+        var rows = await repository.Entries(actor, [.. selected.Select(h => h.Id)], filter, page, pageSize, ct);
+        var limit = await repository.ApprovalLimit(actor.UserId, ct);
+        return new Page<PettyCashEntryDto>([.. rows.Items.Select(r => Dto(actor, r, limit))], rows.PageNumber, rows.PageSize, rows.Total);
+    }
 
     public Task<PettyCashOptionsDto> Options(DateOnly? date, CancellationToken ct) =>
         execution.ReadAny(ChangePermissions, async actor =>
@@ -114,7 +125,7 @@ public sealed class PettyCashUseCases(ISetupExecution execution, IPettyCashRepos
                 var limit = await repository.ApprovalLimit(actor.UserId, ct);
                 var holders = await VisibleHolders(actor, ct);
                 var names = holders.ToDictionary(h => h.Id, h => h.Name);
-                var waiting = await repository.Waiting(actor, [.. holders.Select(h => h.Id)], null, false, ct);
+                var waiting = await repository.Waiting(actor, [.. holders.Select(h => h.Id)], null, null, false, ct);
                 var byHolder = waiting
                     .GroupBy(e => e.HolderId)
                     .Select(g => new PettyCashDashboardHolder(g.Key, names.GetValueOrDefault(g.Key, ""), g.Count(), g.Sum(e => e.Total), g.Min(e => e.Date)))
@@ -231,10 +242,10 @@ public sealed class PettyCashUseCases(ISetupExecution execution, IPettyCashRepos
     public Task<PettyCashDayApproved> ApproveDay(ApprovePettyCashDay input, CancellationToken ct) =>
         execution.Write(ApproveWholeDay, async actor =>
         {
-            var day = Day(actor, input.Date);
+            var (from, to) = input.To is null ? (Day(actor, input.Date), Day(actor, input.Date)) : Range(actor, input.Date, input.To);
             var selected = Selected(await VisibleHolders(actor, ct), input.HolderId);
             var limit = await repository.ApprovalLimit(actor.UserId, ct);
-            var waiting = await repository.Waiting(actor, [.. selected.Select(h => h.Id)], day, true, ct);
+            var waiting = await repository.Waiting(actor, [.. selected.Select(h => h.Id)], from, to, true, ct);
             var approved = waiting.Where(e => CanReview(actor, e, limit)).ToList();
             var labels = await Labels(approved, ct);
             foreach (var entry in approved)
@@ -245,6 +256,41 @@ public sealed class PettyCashUseCases(ISetupExecution execution, IPettyCashRepos
             }
             return new PettyCashDayApproved(approved.Count, approved.Sum(e => e.Total), waiting.Count - approved.Count);
         }, ct);
+
+    // The entries ticked in the list, all or none. One already approved is skipped; one changed since it was shown is
+    // a conflict, so nobody approves an amount they did not see.
+    public Task<PettyCashDayApproved> ApproveEntries(ApprovePettyCashEntries input, CancellationToken ct) =>
+        execution.Write(ApproveItem, async actor =>
+        {
+            var asked = (input.Entries ?? []).DistinctBy(e => e.Id).ToList();
+            if (asked.Count == 0)
+                throw new ArgumentException("Choose the entries to approve.");
+            if (asked.Count > MaxApproved)
+                throw new ArgumentException($"Approve at most {MaxApproved} entries at a time.");
+            var found = (await repository.Entries(actor, [.. asked.Select(e => e.Id)], ct)).ToDictionary(e => e.Id);
+            var limit = await repository.ApprovalLimit(actor.UserId, ct);
+            var approved = new List<PettyCashEntry>();
+            foreach (var request in asked)
+            {
+                var entry = found.GetValueOrDefault(request.Id) ?? throw new KeyNotFoundException();
+                if (entry.Status == PettyCashStatus.Approved) continue;
+                AuthorizeReview(actor, entry, limit);
+                if (request.Version != entry.Version)
+                    throw await Conflict(actor, entry.Id, ct);
+                approved.Add(entry);
+            }
+            var labels = await Labels(approved, ct);
+            foreach (var entry in approved)
+            {
+                var before = Snapshot(entry);
+                entry.Approve(clock.UtcNow, actor.UserId);
+                await repository.RecordChange(actor, entry, before, Snapshot(entry), SetupPagination.Automatic($"Approved {Describe(entry, labels)}"), ct);
+            }
+            return new PettyCashDayApproved(approved.Count, approved.Sum(e => e.Total), asked.Count - approved.Count);
+        }, ct);
+
+    // One page of the list at most.
+    private const int MaxApproved = 100;
 
     private static bool Holds(SetupActor actor, string permission) => actor.Permissions.Contains(permission);
 
@@ -393,7 +439,9 @@ public sealed class PettyCashUseCases(ISetupExecution execution, IPettyCashRepos
         var within = tallies.Where(t => t.Period == PettyCashTally.Within).ToList();
         var opening = Sum(before, PettyCashKind.Cash) - Sum(before, PettyCashKind.Credit) - Sum(before, PettyCashKind.Expense);
         var (cash, expenses, credit) = (Sum(within, PettyCashKind.Cash), Sum(within, PettyCashKind.Expense), Sum(within, PettyCashKind.Credit));
-        return new PettyCashFiguresDto(opening, cash, expenses, credit, expenses + credit, opening + cash - expenses - credit);
+        var waiting = within.Where(t => t.Kind != PettyCashKind.Cash && t.Status == PettyCashStatus.Waiting).ToList();
+        return new PettyCashFiguresDto(opening, cash, expenses, credit, expenses + credit, opening + cash - expenses - credit,
+            waiting.Sum(t => t.Total), waiting.Sum(t => t.Count));
     }
 
     private static PettyCashFloatDto Float(PettyCashHolderDto holder, IReadOnlyList<PettyCashTally> tallies)
@@ -445,7 +493,9 @@ public sealed class PettyCashUseCases(ISetupExecution execution, IPettyCashRepos
         {
             PettyCashKind.Expense => $"{holder}'s petty cash spending on {labels.Registrations.GetValueOrDefault(entry.VehicleId!.Value, "a vehicle")} " +
                 $"for {entry.Date.ToString("d MMM yyyy", CultureInfo.InvariantCulture)}",
-            PettyCashKind.Credit => $"{holder}'s petty cash credit note paying {entry.Payee}",
+            PettyCashKind.Credit => entry.Payee is null
+                ? $"{holder}'s petty cash credit note, {entry.Note}"
+                : $"{holder}'s petty cash credit note paying {entry.Payee}",
             _ => entry.Total < 0 ? $"petty cash taken back from {holder}" : $"petty cash given to {holder}"
         };
     }

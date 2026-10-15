@@ -76,6 +76,35 @@ export function requestId() {
   return crypto.randomUUID();
 }
 
+// The device's name as the person will recognise it in their trusted devices and in the code email: the browser
+// and the system, "Chrome on Windows". Never the raw user agent.
+export function deviceNameFrom(userAgent: string | null): string {
+  const ua = userAgent ?? "";
+  const browser = /Edg\//.test(ua)
+    ? "Edge"
+    : /OPR\//.test(ua)
+      ? "Opera"
+      : /Firefox\//.test(ua)
+        ? "Firefox"
+        : /Chrome\//.test(ua)
+          ? "Chrome"
+          : /Safari\//.test(ua)
+            ? "Safari"
+            : "Browser";
+  const system = /Windows/.test(ua)
+    ? "Windows"
+    : /iPhone|iPad/.test(ua)
+      ? "iPhone"
+      : /Android/.test(ua)
+        ? "Android"
+        : /Mac OS X/.test(ua)
+          ? "Mac"
+          : /Linux/.test(ua)
+            ? "Linux"
+            : "";
+  return system ? `${browser} on ${system}` : browser;
+}
+
 export function logProxyError(id: string, operation: string, error: unknown) {
   console.error(
     JSON.stringify({

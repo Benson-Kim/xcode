@@ -2,77 +2,129 @@
 
 import { useState } from "react";
 
-import { plural } from "@xcode/shared/format";
+import { MONTH_NAMES } from "@xcode/shared/dates";
 
 import { useAppearance } from "../../lib/appearance";
 import { streamError, useResource, useStreamedList } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
-import type { ExpenseItemOption } from "../../lib/types";
+import { useSession } from "../../lib/session-context";
+import type { ExpenseItemOption, MyScope } from "../../lib/types";
 import { RecurringEditor } from "../RecurringEditor";
 import {
-  recurringFrequency,
-  recurringMonthlyEstimate,
-  recurringNextPosting,
-} from "../recurringPresentation";
-import {
+  BandFigure,
+  BandStats,
   Banner,
   Button,
-  CellNote,
   DataTable,
   Dialog,
   FormSkeleton,
-  PageHeader,
+  HeroBand,
   ListPager,
-  RowAction,
-  RowActionGroup,
-  SelectInput,
-  StatusBadge,
-  Tabs,
-  Td,
-  Toolbar,
-  Tr,
+  PageHeader,
 } from "../ui";
 import { usePagedList } from "../usePagedList";
-import {
-  costBucket,
-  expenseBucketNames,
-  type RecurringItem,
-  RegPlate,
-  type VehicleOption,
-} from "./shared";
+import { RecurringRow, SavingsFooter } from "./RecurringRows";
+import { RecurringRunsDialog } from "./RecurringRunsDialog";
+import type { RecurringItem, RecurringSummary, VehicleOption } from "./shared";
+import { useRecurringPause } from "./useRecurringPause";
 
-type Filter = "all" | "cost" | "savings";
-type Status = "all" | "running" | "stopped";
+const columns = (savings: boolean) =>
+  savings
+    ? [
+        { label: "Saving" },
+        { label: "Vehicles" },
+        { label: "Per vehicle", numeric: true },
+        { label: "Runs" },
+        { label: "Last run" },
+        { label: "Balance", numeric: true },
+        { label: "Status" },
+        { label: "Actions", numeric: true },
+      ]
+    : [
+        { label: "Item" },
+        { label: "Vehicles" },
+        { label: "Amount per vehicle", numeric: true },
+        { label: "Each run", numeric: true },
+        { label: "Runs" },
+        { label: "Next run" },
+        { label: "Status" },
+        { label: "Actions", numeric: true },
+      ];
 
-function listPath(kind: Filter, companyId: string, status: Status) {
-  const query = new URLSearchParams();
-  if (kind !== "all") query.set("kind", kind);
-  if (companyId !== "all") query.set("companyId", companyId);
-  if (status !== "all") query.set("status", status);
-  return `setup/recurring${query.toString() ? `?${query}` : ""}`;
+// "October 2026", from the summary's month.
+function monthLabel(from: string | undefined) {
+  if (!from) return "";
+  return `${MONTH_NAMES[Number(from.slice(5, 7)) - 1]} ${from.slice(0, 4)}`;
 }
 
+function activeFleet(vehicles: VehicleOption[] | undefined) {
+  if (!vehicles) return null;
+  return new Set(
+    vehicles
+      .filter((vehicle) => vehicle.active !== false)
+      .map((vehicle) => vehicle.id),
+  );
+}
+
+function MissingItemDialog({
+  title,
+  error,
+  loading,
+  onClose,
+}: {
+  title: string;
+  error: string;
+  loading: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open size="md" title={title} onClose={onClose}>
+      {error || !loading ? (
+        <Banner>{error || "This item is no longer in your list."}</Banner>
+      ) : (
+        <FormSkeleton cards={3} label="Loading the scheduled item" />
+      )}
+    </Dialog>
+  );
+}
+
+// Scheduled expenses and Savings are two pages on one model (v2.30). The page sets the kind and which rights
+// apply: scheduled.* for expenses, savings.* for savings. Each has its own headline bar.
 export function RecurringPage({
-  canManage,
+  kind = "expense",
+  canManage = false,
   openItem,
   newForVehicle,
 }: {
-  canManage: boolean;
+  kind?: "expense" | "saving";
+  // The released key commitments.manage, which still grants everything here.
+  canManage?: boolean;
   openItem?: string;
   newForVehicle?: string;
 }) {
+  const { can } = useSession();
   const { appearance } = useAppearance();
-  const [filter, setFilter] = useState<Filter>("cost");
-  const [companyFilter, setCompanyFilter] = useState("all");
-  const [status, setStatus] = useState<Status>("all");
+  const { formatNumber } = useFormats();
+  const savings = kind === "saving";
+  const prefix = savings ? "savings" : "scheduled";
+  const canAdd = can(`${prefix}.add`) || canManage;
+  const canEdit = can(`${prefix}.edit`) || canManage;
+  const canPause = can(`${prefix}.pause`) || canManage;
+  const [runsFor, setRunsFor] = useState<RecurringItem | null>(null);
   const [editing, setEditing] = useState<string | null>(
     newForVehicle ? "new" : (openItem ?? null),
   );
   // The list comes a server page at a time, filtered by the server. An item opened from elsewhere that is not on the
   // page shown is looked for in the whole list.
   const paged = usePagedList<RecurringItem>(
-    listPath(filter, companyFilter, status),
+    `setup/recurring?kind=${savings ? "savings" : "cost"}`,
   );
+  const summary = useResource<RecurringSummary>("setup/recurring/summary");
+  const reloadAll = () => {
+    paged.reload();
+    summary.reload();
+  };
+  const pause = useRecurringPause(reloadAll);
   const missing =
     editing !== null &&
     editing !== "new" &&
@@ -81,18 +133,19 @@ export function RecurringPage({
     missing ? "setup/recurring" : null,
   );
   const recurring = missing ? streamed : paged;
-  // Viewing needs only commitments access: shares carry their registration and costs their item's name. The vehicle
-  // picker is for editors; the expense item picker loads once an editor opens.
   const options = useResource<VehicleOption[]>(
-    canManage ? "setup/recurring/vehicle-options" : null,
+    canAdd || canEdit ? "setup/recurring/vehicle-options" : null,
+  );
+  const mine = useResource<MyScope>(
+    canAdd || canEdit ? "setup/access/me" : null,
   );
   const expenseItems = useResource<ExpenseItemOption[]>(
-    canManage && editing ? "setup/expense-items/options" : null,
+    !savings && (canAdd || canEdit) && editing
+      ? "setup/expense-items/options"
+      : null,
   );
   const items = recurring.items;
 
-  // An existing item opens as soon as the page holding it arrives; a new one opens straight away. The vehicle
-  // picker fills in when its own request lands.
   const editedItem =
     editing && editing !== "new"
       ? items.find((candidate) => candidate.id === editing)
@@ -101,39 +154,32 @@ export function RecurringPage({
   const editor = !editing ? null : editing === "new" || editedItem ? (
     <RecurringEditor
       item={editedItem}
-      vehiclesLoading={canManage && options.loading}
+      kind={savings ? 2 : 1}
+      vehiclesLoading={options.loading}
       vehicles={editorVehicles(options.data ?? [], editedItem)}
       expenseItems={expenseItems.data}
+      fullScope={mine.data?.allCompanies ?? false}
       loadError={options.error || expenseItems.error}
       preselectVehicle={editing === "new" ? newForVehicle : undefined}
-      startKind={filter === "savings" ? 2 : 1}
-      canEdit={canManage && !editedItem?.partial}
+      canEdit={(editedItem ? canEdit : canAdd) && !editedItem?.partial}
       onCancel={() => setEditing(null)}
       onSaved={() => {
         setEditing(null);
         recurring.reload();
         if (recurring !== paged) paged.reload();
+        summary.reload();
       }}
     />
   ) : (
-    <Dialog
-      open
-      size="lg"
-      title="Scheduled expense"
+    <MissingItemDialog
+      title={savings ? "Saving" : "Scheduled expense"}
+      error={recurring.error}
+      loading={stillLoading}
       onClose={() => setEditing(null)}
-    >
-      {recurring.error || !stillLoading ? (
-        <Banner>
-          {recurring.error || "This item is no longer in your list."}
-        </Banner>
-      ) : (
-        <FormSkeleton cards={3} label="Loading the scheduled item" />
-      )}
-    </Dialog>
+    />
   );
 
-  // Due dates count from the organization's business date, never the computer clock. Until the appearance has
-  // loaded, next postings wait for it.
+  // Due dates count from the organization's business date, never the computer clock.
   const today = appearance?.businessDate;
   const hasActiveVehicle = (item: RecurringItem) =>
     item.allocations.some((allocation) => allocation.active !== false);
@@ -145,315 +191,106 @@ export function RecurringPage({
     (today && item.end && item.end < today)
       ? 1
       : 0;
-  // Companies come from the vehicle options, which only editors load: allocations carry no company.
-  const companies = [
-    ...new Map(
-      (options.data ?? []).map((vehicle) => [
-        vehicle.companyId,
-        vehicle.companyName,
-      ]),
-    ).entries(),
-  ].sort((left, right) => left[1].localeCompare(right[1]));
-  // The server filters and puts running items first; within the page they read by name.
+  // The server puts running items first; within the page they read by name.
   const visible = [...paged.items].sort(
     (left, right) =>
       finished(left) - finished(right) || left.name.localeCompare(right.name),
   );
-  const savings = filter === "savings";
-  const fleet = options.data
-    ? new Set(
-        options.data
-          .filter((vehicle) => vehicle.active !== false)
-          .map((vehicle) => vehicle.id),
-      )
-    : null;
+  const fleet = activeFleet(options.data);
+  const month = monthLabel(summary.data?.from);
+  const counts = {
+    running:
+      (savings ? summary.data?.runningSavings : summary.data?.runningCosts) ??
+      paged.items.filter((item) => !item.pausedFrom && !finished(item)).length,
+    paused:
+      (savings ? summary.data?.pausedSavings : summary.data?.pausedCosts) ??
+      paged.items.filter((item) => item.pausedFrom).length,
+  };
   return (
     <>
       <PageHeader
-        title="Scheduled expenses"
+        title={savings ? "Savings" : "Scheduled expenses"}
         actions={
-          canManage ? (
+          canAdd ? (
             <Button tone="primary" onClick={() => setEditing("new")}>
               {savings ? "New saving" : "New scheduled expense"}
             </Button>
           ) : undefined
         }
       />
-      {(paged.error || options.error) && (
-        <Banner>{streamError(paged) || options.error}</Banner>
-      )}
-      <Tabs
-        id="recurring"
-        label="Show"
-        options={[
-          { value: "cost", label: "Scheduled expenses" },
-          { value: "savings", label: "Savings" },
-        ]}
-        value={savings ? "savings" : "cost"}
-        onChange={setFilter}
-      >
-        <RecurringFilters
-          companies={companies}
-          companyFilter={companyFilter}
-          setCompanyFilter={setCompanyFilter}
-          status={status}
-          setStatus={setStatus}
-        />
-        <DataTable
-          columns={[
-            { label: savings ? "Saving" : "Item" },
-            { label: "Vehicles" },
-            {
-              label: savings ? "Per vehicle" : "Amount per vehicle",
-              numeric: true,
-            },
-            { label: "Each run", numeric: true },
-            { label: "Runs" },
-            { label: "Next run" },
-            { label: "Status" },
-            { label: "Actions", numeric: true },
-          ]}
-          loading={paged.loading}
-          pendingRows={paged.pendingRows}
-          loadingLabel="Loading scheduled expenses and savings"
-          isEmpty={!visible.length}
-          failed={Boolean(paged.error)}
-          emptyMessage="Nothing scheduled."
-        >
-          {visible.map((item) => (
-            <RecurringRow
-              key={item.id}
-              item={item}
-              today={today}
-              stopped={stopped(item)}
-              active={hasActiveVehicle(item)}
-              fleet={fleet}
-              canEdit={canManage && !item.partial}
-              onOpen={() => setEditing(item.id)}
+      <HeroBand>
+        {summary.data ? (
+          <>
+            <BandFigure
+              label={savings ? "Savings balance" : `Due in ${month}`}
+              value={formatNumber(
+                savings ? summary.data.savingsBalance : summary.data.costsDue,
+              )}
             />
-          ))}
-        </DataTable>
-      </Tabs>
+            <BandStats
+              items={[
+                ...(savings
+                  ? [
+                      {
+                        label: `Saved in ${month}`,
+                        value: formatNumber(summary.data.saved),
+                      },
+                    ]
+                  : []),
+                { label: "Running", value: String(counts.running) },
+                { label: "Paused", value: String(counts.paused) },
+              ]}
+            />
+          </>
+        ) : (
+          <BandFigure label={savings ? "Savings balance" : "Due"} value="" />
+        )}
+      </HeroBand>
+      {(paged.error || options.error || pause.error || summary.error) && (
+        <Banner>
+          {streamError(paged) || options.error || pause.error || summary.error}
+        </Banner>
+      )}
+      <DataTable
+        columns={columns(savings)}
+        loading={paged.loading}
+        pendingRows={paged.pendingRows}
+        loadingLabel={
+          savings ? "Loading savings" : "Loading scheduled expenses"
+        }
+        isEmpty={!visible.length}
+        failed={Boolean(paged.error)}
+        emptyMessage={savings ? "No savings yet." : "Nothing scheduled."}
+        footer={
+          savings && visible.length ? (
+            <SavingsFooter rows={visible} />
+          ) : undefined
+        }
+      >
+        {visible.map((item) => (
+          <RecurringRow
+            key={item.id}
+            item={item}
+            savings={savings}
+            today={today}
+            stopped={stopped(item)}
+            active={hasActiveVehicle(item)}
+            fleet={fleet}
+            canEdit={canEdit && !item.partial}
+            canPause={canPause && !item.partial}
+            busy={pause.busyId !== null}
+            onOpen={() => setEditing(item.id)}
+            onRuns={() => setRunsFor(item)}
+            onPause={() => void pause.toggle(item)}
+          />
+        ))}
+      </DataTable>
       <ListPager list={paged} />
       {editor}
-    </>
-  );
-}
-
-function RecurringFilters({
-  companies,
-  companyFilter,
-  setCompanyFilter,
-  status,
-  setStatus,
-}: {
-  companies: [string, string][];
-  companyFilter: string;
-  setCompanyFilter: (value: string) => void;
-  status: Status;
-  setStatus: (value: Status) => void;
-}) {
-  return (
-    <Toolbar>
-      {companies.length > 1 && (
-        <>
-          <label htmlFor="recurring-company" className="sr-only">
-            Company
-          </label>
-          <SelectInput
-            id="recurring-company"
-            density="compact"
-            inline
-            value={companyFilter}
-            onChange={(event) => setCompanyFilter(event.target.value)}
-          >
-            <option value="all">All companies</option>
-            {companies.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
-              </option>
-            ))}
-          </SelectInput>
-        </>
+      {runsFor && (
+        <RecurringRunsDialog item={runsFor} onClose={() => setRunsFor(null)} />
       )}
-      <label htmlFor="recurring-status" className="sr-only">
-        Show
-      </label>
-      <SelectInput
-        id="recurring-status"
-        density="compact"
-        inline
-        value={status}
-        onChange={(event) => setStatus(event.target.value as Status)}
-      >
-        <option value="all">All</option>
-        <option value="running">Running</option>
-        <option value="stopped">Stopped</option>
-      </SelectInput>
-    </Toolbar>
-  );
-}
-
-function RecurringStatus({
-  item,
-  today,
-  stopped,
-  active,
-  next,
-}: {
-  item: RecurringItem;
-  today?: string;
-  stopped: boolean;
-  active: boolean;
-  next: string | null;
-}) {
-  const { formatDateOnly } = useFormats();
-  const futureStop =
-    item.stoppedFrom && today && item.stoppedFrom > today
-      ? item.stoppedFrom
-      : null;
-  if (stopped) return <StatusBadge tone="off">Stopped</StatusBadge>;
-  if (!active) return <StatusBadge tone="off">No active vehicles</StatusBadge>;
-  if (futureStop)
-    return (
-      <StatusBadge tone="warn">Stops {formatDateOnly(futureStop)}</StatusBadge>
-    );
-  if (today && !next) return <StatusBadge tone="neutral">Finished</StatusBadge>;
-  return <StatusBadge tone="ok">Running</StatusBadge>;
-}
-
-function RecurringRow({
-  item,
-  today,
-  stopped,
-  active,
-  fleet,
-  canEdit,
-  onOpen,
-}: {
-  item: RecurringItem;
-  today?: string;
-  stopped: boolean;
-  active: boolean;
-  fleet: Set<string> | null;
-  canEdit: boolean;
-  onOpen: () => void;
-}) {
-  const { formatDateOnly, formatNumber, kes } = useFormats();
-  const next =
-    stopped || !active || !today ? null : recurringNextPosting(item, today);
-  const outOfFleetCount = item.allocations.filter(
-    (allocation) => allocation.active === false,
-  ).length;
-  // What posts now. `amount` is the saved total, which still counts vehicles not in the fleet today.
-  const posting = item.activeAmount ?? item.amount;
-  const posted = item.allocations.filter(
-    (allocation) => allocation.active !== false,
-  );
-  const shares = posted.length ? posted : item.allocations;
-  const share =
-    shares.length &&
-    shares.every((allocation) => allocation.amount === shares[0].amount)
-      ? formatNumber(shares[0].amount)
-      : "Varies";
-  const action = canEdit ? "Edit" : "Open";
-  const postingNote = [
-    item.partial ? "Your vehicles' share." : "",
-    posting !== item.amount
-      ? `${kes(item.amount)} in total, with ${outOfFleetCount === 1 ? "1 share for a vehicle" : `${outOfFleetCount} shares for vehicles`} not in the fleet today.`
-      : "",
-    `About ${kes(recurringMonthlyEstimate(posting, item.frequency))} a month`,
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return (
-    <Tr>
-      <Td label="Item" className="item nw" title={itemNote(item)}>
-        {item.name}
-      </Td>
-      <Td label="Vehicles" className="nw">
-        <RecurringVehicles
-          item={item}
-          fleet={fleet}
-          outOfFleetCount={outOfFleetCount}
-        />
-      </Td>
-      <Td label="Amount per vehicle" numeric>
-        {share}
-      </Td>
-      <Td label="Each run" numeric className="tot" title={postingNote}>
-        {formatNumber(posting)}
-      </Td>
-      <Td label="Runs" className="nw">
-        {recurringFrequency(item)}
-        <CellNote>
-          {item.end
-            ? `${formatDateOnly(item.start)} to ${formatDateOnly(item.end)}`
-            : `From ${formatDateOnly(item.start)}, no end date`}
-        </CellNote>
-      </Td>
-      <Td label="Next run" className="nw">
-        {next ? formatDateOnly(next) : !today ? "—" : ""}
-      </Td>
-      <Td label="Status" className="nw">
-        <RecurringStatus
-          item={item}
-          today={today}
-          stopped={stopped}
-          active={active}
-          next={next}
-        />
-      </Td>
-      <Td numeric>
-        <RowActionGroup>
-          <RowAction aria-label={`${action} ${item.name}`} onClick={onOpen}>
-            {action}
-          </RowAction>
-        </RowActionGroup>
-      </Td>
-    </Tr>
-  );
-}
-
-// One plate for one vehicle, "All vehicles" when it covers every active vehicle the viewer can see, else a count
-// with the registrations on hover.
-function RecurringVehicles({
-  item,
-  fleet,
-  outOfFleetCount,
-}: {
-  item: RecurringItem;
-  fleet: Set<string> | null;
-  outOfFleetCount: number;
-}) {
-  const registrations = item.allocations
-    .map((allocation) => allocation.registration)
-    .filter((registration): registration is string => Boolean(registration));
-  const covered = new Set(
-    item.allocations
-      .filter((allocation) => allocation.active !== false)
-      .map((allocation) => allocation.vehicleId),
-  );
-  const everyVehicle =
-    !item.partial &&
-    fleet !== null &&
-    fleet.size > 1 &&
-    [...fleet].every((id) => covered.has(id));
-  const title = [
-    registrations.join(", "),
-    outOfFleetCount ? `${outOfFleetCount} not in the fleet today` : "",
-    item.partial ? "plus vehicles you can't see" : "",
-  ]
-    .filter(Boolean)
-    .join("; ");
-  if (item.allocations.length === 1 && !item.partial && registrations.length)
-    return <RegPlate>{registrations[0]}</RegPlate>;
-  return (
-    <span title={title || undefined}>
-      {everyVehicle
-        ? "All vehicles"
-        : plural(item.allocations.length, "vehicle", "vehicles")}
-    </span>
+    </>
   );
 }
 
@@ -475,13 +312,4 @@ function editorVehicles(
         active: allocation.active !== false,
       })),
   ];
-}
-
-// The note and, for a cost, the bucket it counts under (a cost saved without one counts as a recurring charge).
-function itemNote(item: RecurringItem) {
-  const bucket = costBucket(item);
-  const text = [item.note, bucket ? expenseBucketNames[bucket] : null]
-    .filter(Boolean)
-    .join(". ");
-  return text || undefined;
 }

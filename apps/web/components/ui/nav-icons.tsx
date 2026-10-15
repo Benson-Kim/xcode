@@ -61,6 +61,12 @@ const PATHS: Record<string, ReactNode> = {
   centralexpenses: (
     <path d="M4 5a2 2 0 012-2h13v14H6a2 2 0 00-2 2V5zM4 19a2 2 0 002 2h13v-4M9 7h6M9 11h4" />
   ),
+  savings: (
+    <>
+      <ellipse cx="12" cy="6.5" rx="7" ry="3" />
+      <path d="M5 6.5v5.5c0 1.7 3.1 3 7 3s7-1.3 7-3V6.5M5 12v5.5c0 1.7 3.1 3 7 3s7-1.3 7-3V12" />
+    </>
+  ),
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   chevron: <path d="M6 9l6 6 6-6" />,
 };

@@ -96,6 +96,11 @@ export interface RevenueCompanyOption {
   name: string;
 }
 
+// The gap to target as a colour: green at or above target, amber up to the band below it, red beyond (v2.31).
+export type GapBand = "pos" | "amb" | "neg";
+
+// expected is the day's own target (the figure for that weekday of the target set in force). A cell may carry both
+// an amount and a reason: a day below the low-day threshold is saved with one (v2.29).
 export interface RevenueCell {
   date: string;
   status: RevenueStatus;
@@ -120,6 +125,32 @@ export interface RevenueVehicle {
   totalAmount: number;
   totalExpected: number;
   percent: number | null;
+  // v2.29 to v2.31: the fleet number, the signed gap against the target of the days that count so far, its colour,
+  // and the days below the threshold (low days plus no-revenue days).
+  fleetNumber?: string | null;
+  gap?: number | null;
+  gapBand?: GapBand | null;
+  belowThresholdDays?: number;
+}
+
+// The gap as the design writes it: a signed figure with no words, "+3,050", "−16,100", "0".
+export function gapText(
+  gap: number,
+  formatNumber: (amount: number) => string,
+): string {
+  if (gap > 0) return `+${formatNumber(gap)}`;
+  if (gap < 0) return `−${formatNumber(-gap)}`;
+  return "0";
+}
+
+// "KDG 412M · 14", or the registration alone until a fleet number is set (v2.29).
+export function vehicleLabel(vehicle: {
+  registration: string;
+  fleetNumber?: string | null;
+}): string {
+  return vehicle.fleetNumber
+    ? `${vehicle.registration} · ${vehicle.fleetNumber}`
+    : vehicle.registration;
 }
 
 export interface RevenueDayTotal {
@@ -149,6 +180,14 @@ export interface RevenueWeek {
   truncated?: boolean;
   dayTotals?: RevenueDayTotal[];
   firstGap?: RevenueGap | null;
+  // v2.29 to v2.31: the fleet's low-day threshold and amber band (settings), the week's signed gap and colour,
+  // the days below the threshold and the missing days.
+  lowDayThreshold?: number;
+  gapAmberPercent?: number;
+  gap?: number | null;
+  gapBand?: GapBand | null;
+  belowThresholdDays?: number;
+  missingDays?: number;
 }
 
 export const REVENUE_WEEK_PAGE_SIZE = 100;

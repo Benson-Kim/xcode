@@ -9,6 +9,7 @@ import {
 } from "@xcode/shared/expenses";
 import { presetPeriod, type Period } from "@xcode/shared/periods";
 import { canSee, NAV } from "@xcode/shared/permissions";
+import { expenseExportPath } from "@xcode/shared/reports";
 
 import { useAppearance } from "../../lib/appearance";
 import { useResource } from "../../lib/data";
@@ -16,6 +17,8 @@ import { useFormats } from "../../lib/formats";
 import { useSession } from "../../lib/session-context";
 import { useDebounced } from "../../lib/useDebounced";
 import { PeriodPicker } from "../period/PeriodPicker";
+import { ExportMenu } from "../reports/ExportMenu";
+import { useReportExport } from "../reports/exportReport";
 import { BandSkeleton } from "../revenue/RegPlate";
 import {
   Banner,
@@ -56,6 +59,7 @@ export function CentralExpensesPage({
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<ExpenseDialogState>(null);
   const [removing, setRemoving] = useState<ExpenseLedgerRow | null>(null);
+  const exporter = useReportExport();
 
   const query = useDebounced(search.trim());
 
@@ -135,23 +139,22 @@ export function CentralExpensesPage({
           ) : undefined
         }
         tools={
-          <>
-            <SourceSelect value={source} onChange={setSource} />
-            <input
-              type="search"
-              aria-label="Search"
-              className="inp srch"
-              placeholder="Search vehicle, item or note"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </>
+          <LedgerTools
+            source={source}
+            onSource={setSource}
+            search={search}
+            onSearch={setSearch}
+            exporter={can("reports.export") ? exporter : undefined}
+            period={period}
+            query={query}
+          />
         }
       >
         {figures ? <FigureCards figures={figures} /> : <BandSkeleton />}
       </HeroBand>
 
       {notice && <Banner>{notice}</Banner>}
+      {exporter.error && <Banner>{exporter.error}</Banner>}
 
       {ledger.error && !known && (
         <RetryBanner onRetry={ledger.reload}>{ledger.error}</RetryBanner>
@@ -202,6 +205,80 @@ export function CentralExpensesPage({
         onConflict={done}
         onClose={() => setRemoving(null)}
       />
+    </>
+  );
+}
+
+// Export of the ledger as listed: the same period, source and search.
+function LedgerExport({
+  exporter,
+  period,
+  source,
+  query,
+}: {
+  exporter: ReturnType<typeof useReportExport>;
+  period: Period;
+  source: SourceFilter;
+  query: string;
+}) {
+  return (
+    <ExportMenu
+      disabled={exporter.exporting}
+      onExport={(format) =>
+        void exporter.run(
+          expenseExportPath({
+            from: period.from,
+            to: period.to,
+            source: source === "all" ? undefined : source,
+            q: query || undefined,
+            format,
+          }),
+          "Central expenses",
+          period,
+          format,
+        )
+      }
+    />
+  );
+}
+
+// The band's source choice and search, then the export for someone who may export.
+function LedgerTools({
+  source,
+  onSource,
+  search,
+  onSearch,
+  exporter,
+  period,
+  query,
+}: {
+  source: SourceFilter;
+  onSource: (value: SourceFilter) => void;
+  search: string;
+  onSearch: (value: string) => void;
+  exporter?: ReturnType<typeof useReportExport>;
+  period: Period | null;
+  query: string;
+}) {
+  return (
+    <>
+      <SourceSelect value={source} onChange={onSource} />
+      <input
+        type="search"
+        aria-label="Search"
+        className="inp srch"
+        placeholder="Search"
+        value={search}
+        onChange={(event) => onSearch(event.target.value)}
+      />
+      {exporter && period && (
+        <LedgerExport
+          exporter={exporter}
+          period={period}
+          source={source}
+          query={query}
+        />
+      )}
     </>
   );
 }

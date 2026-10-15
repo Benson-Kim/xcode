@@ -1,12 +1,10 @@
 import { apiRequest } from "../data";
-import type { Person } from "../types";
+import type { BackLimit, Person } from "../types";
 
 export const PEOPLE_PATH = "setup/people";
 export const ROLES_PATH = "setup/access/roles";
 export const CATALOG_PATH = "setup/access/catalog";
 export const SCOPE_PATH = "setup/access/scope-options";
-export const RECENT_CHANGES_PATH =
-  "setup/history?pageSize=3&includeTotal=false";
 
 export const personPath = (id: string) => `${PEOPLE_PATH}/${id}`;
 
@@ -21,6 +19,8 @@ export type SavePersonRequest = {
   vehicleIds: string[];
   permissions: string[];
   approvalLimit: number | null;
+  // How far back the person may change records (v2.32).
+  backLimit: BackLimit;
   version: number | undefined;
 };
 
@@ -34,9 +34,17 @@ export const peopleApi = {
       method: person ? "PUT" : "POST",
       body: JSON.stringify(body),
     }),
+  // Block, unblock, and "Remove all" trusted devices (which also ends every session).
   lifecycle: (id: string, action: LifecycleAction, body?: LifecycleRequest) =>
     apiRequest(`${personPath(id)}/${action}`, {
       method: "POST",
       ...(action === "sign-out" ? {} : { body: JSON.stringify(body) }),
+    }),
+  // "Make [name] reset the PIN": removes their devices and forces a new PIN at the next sign in (v2.33).
+  pinReset: (id: string) =>
+    apiRequest(`${personPath(id)}/pin-reset`, { method: "POST" }),
+  removeDevice: (id: string, deviceId: string) =>
+    apiRequest(`${personPath(id)}/trusted-devices/${deviceId}/remove`, {
+      method: "POST",
     }),
 };

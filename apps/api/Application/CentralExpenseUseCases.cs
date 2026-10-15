@@ -17,83 +17,93 @@ public sealed class CentralExpenseUseCases(ISetupExecution execution, ICentralEx
     // are worked out from the schedules, are held here. The page is found from per-day counts of both, so the stored rows
     // read are the page's own and the number of reads does not depend on how many rows the period holds.
     public Task<ExpenseLedgerDto> Ledger(DateOnly? from, DateOnly? to, string? source, string? q, int page, int pageSize, CancellationToken ct) =>
-        execution.Read(View, async actor =>
+        execution.Read(View, actor =>
         {
             SetupPagination.Validate(page, pageSize);
-            var start = from ?? throw new ArgumentException("Choose the first and the last date.");
-            var end = to ?? throw new ArgumentException("Choose the first and the last date.");
-            if (start > end)
-                throw new ArgumentException("The first date cannot be after the last date.");
-            if (end.DayNumber - start.DayNumber > 366)
-                throw new ArgumentException("Choose a period of at most 367 days.");
-            var only = PostingSources.Parse(source);
-            var text = q?.Trim();
-            if (text?.Length > 200)
-                throw new ArgumentException("Search for 200 characters or fewer.");
-
-            // Nothing is posted after the business date.
-            var through = end < actor.Today ? end : actor.Today;
-            if (through < start)
-                return new ExpenseLedgerDto(actor.Today, start, end, Permissions(actor), new(0m, 0m, 0m, 0m), [], page, pageSize, 0, 0m);
-
-            var vehicles = await repository.Vehicles(actor, start, through, ct);
-            var registrations = vehicles.ToDictionary(v => v.Id, v => v.Registration);
-            IReadOnlyList<FleetPosting> everyScheduled = vehicles.Count == 0
-                ? []
-                : [.. (await postings.Scheduled(actor, vehicles, start, through, ct)).Where(p => p.Kind == RecurringKind.Cost)];
-            var totals = await repository.StoredTotals(actor, start, through, ct);
-            decimal Stored(PostingSource sourceOf) => totals.Where(t => t.Source == sourceOf).Sum(t => t.Total);
-            var (central, pettyCash, scheduledSum) = (Stored(PostingSource.Central), Stored(PostingSource.PettyCash), everyScheduled.Sum(p => p.Amount));
-            var figures = new ExpenseFiguresDto(central + pettyCash + scheduledSum, central, pettyCash, scheduledSum);
-
-            // Scheduled rows have no recorder or holder, so only what they show is searched.
-            var scheduled = only is null or PostingSource.Scheduled
-                ? everyScheduled.Where(p => string.IsNullOrEmpty(text) || Matches(p, text, registrations[p.VehicleId], NoNames)).ToList()
-                : [];
-            var scheduledByDay = scheduled.GroupBy(p => p.Date).ToDictionary(g => g.Key, g => g
-                .OrderBy(p => registrations[p.VehicleId], StringComparer.Ordinal).ThenBy(RowId, StringComparer.Ordinal).ToList());
-            var filter = new LedgerFilter(start, through, only, string.IsNullOrEmpty(text) ? null : text);
-            var days = only == PostingSource.Scheduled ? [] : await repository.StoredDays(actor, filter, ct);
-            var storedByDay = days.ToDictionary(d => d.Date);
-
-            // Each day lists its stored rows, then its scheduled ones. Walking the days newest first finds the part of the
-            // page that is stored (a contiguous run of the stored rows) and the scheduled rows that fall in the page.
-            var (low, high) = ((page - 1) * pageSize, page * pageSize);
-            int? skip = null;
-            var take = 0;
-            var position = 0;
-            var storedBefore = 0;
-            var pageScheduled = new List<FleetPosting>();
-            foreach (var day in storedByDay.Keys.Union(scheduledByDay.Keys).OrderByDescending(d => d))
-            {
-                var storedCount = storedByDay.TryGetValue(day, out var tally) ? tally.Count : 0;
-                var scheduledOfDay = scheduledByDay.GetValueOrDefault(day) ?? [];
-                var (storedStart, scheduledStart) = (position, position + storedCount);
-                var dayEnd = scheduledStart + scheduledOfDay.Count;
-                var (storedFrom, storedTo) = (Math.Max(low, storedStart), Math.Min(high, scheduledStart));
-                if (storedFrom < storedTo)
-                {
-                    skip ??= storedBefore + storedFrom - storedStart;
-                    take = storedBefore + storedTo - storedStart - skip.Value;
-                }
-                var (scheduledFrom, scheduledTo) = (Math.Max(low, scheduledStart), Math.Min(high, dayEnd));
-                if (scheduledFrom < scheduledTo)
-                    pageScheduled.AddRange(scheduledOfDay.Skip(scheduledFrom - scheduledStart).Take(scheduledTo - scheduledFrom));
-                storedBefore += storedCount;
-                position = dayEnd;
-                if (position >= high) break;
-            }
-
-            var stored = skip is null ? [] : await repository.StoredRows(actor, filter, skip.Value, take, ct);
-            var entries = stored.Select(r => (Posting: Posting(r), r.Registration))
-                .Concat(pageScheduled.Select(p => (Posting: p, Registration: registrations[p.VehicleId])))
-                .OrderByDescending(e => e.Posting.Date).ThenBy(e => e.Posting.Source)
-                .ToList();
-            var names = await repository.Names(PeopleOf(entries.Select(e => e.Posting)), ct);
-            return new ExpenseLedgerDto(actor.Today, start, end, Permissions(actor), figures,
-                [.. entries.Select(e => Row(actor, e.Posting, e.Registration, names))], page, pageSize,
-                days.Sum(d => d.Count) + scheduled.Count, days.Sum(d => d.Total) + scheduled.Sum(p => p.Amount));
+            return LedgerPage(actor, from, to, source, q, page, pageSize, ct);
         }, ct);
+
+    // Every row the ledger lists for these filters, as one page of up to `limit` rows, for an export.
+    public Task<ExpenseLedgerDto> AllRows(DateOnly? from, DateOnly? to, string? source, string? q, int limit, CancellationToken ct) =>
+        execution.Read(View, actor => LedgerPage(actor, from, to, source, q, 1, limit, ct), ct);
+
+    private async Task<ExpenseLedgerDto> LedgerPage(SetupActor actor, DateOnly? from, DateOnly? to, string? source, string? q, int page,
+        int pageSize, CancellationToken ct)
+    {
+        var start = from ?? throw new ArgumentException("Choose the first and the last date.");
+        var end = to ?? throw new ArgumentException("Choose the first and the last date.");
+        if (start > end)
+            throw new ArgumentException("The first date cannot be after the last date.");
+        if (end.DayNumber - start.DayNumber > 366)
+            throw new ArgumentException("Choose a period of at most 367 days.");
+        var only = PostingSources.Parse(source);
+        var text = q?.Trim();
+        if (text?.Length > 200)
+            throw new ArgumentException("Search for 200 characters or fewer.");
+
+        // Nothing is posted after the business date.
+        var through = end < actor.Today ? end : actor.Today;
+        if (through < start)
+            return new ExpenseLedgerDto(actor.Today, start, end, Permissions(actor), new(0m, 0m, 0m, 0m), [], page, pageSize, 0, 0m);
+
+        var vehicles = await repository.Vehicles(actor, start, through, ct);
+        var registrations = vehicles.ToDictionary(v => v.Id, v => v.Registration);
+        IReadOnlyList<FleetPosting> everyScheduled = vehicles.Count == 0
+            ? []
+            : [.. (await postings.Scheduled(actor, vehicles, start, through, ct)).Where(p => p.Kind == RecurringKind.Cost)];
+        var totals = await repository.StoredTotals(actor, start, through, ct);
+        decimal Stored(PostingSource sourceOf) => totals.Where(t => t.Source == sourceOf).Sum(t => t.Total);
+        var (central, pettyCash, scheduledSum) = (Stored(PostingSource.Central), Stored(PostingSource.PettyCash), everyScheduled.Sum(p => p.Amount));
+        var figures = new ExpenseFiguresDto(central + pettyCash + scheduledSum, central, pettyCash, scheduledSum);
+
+        // Scheduled rows have no recorder or holder, so only what they show is searched.
+        var scheduled = only is null or PostingSource.Scheduled
+            ? everyScheduled.Where(p => string.IsNullOrEmpty(text) || Matches(p, text, registrations[p.VehicleId], NoNames)).ToList()
+            : [];
+        var scheduledByDay = scheduled.GroupBy(p => p.Date).ToDictionary(g => g.Key, g => g
+            .OrderBy(p => registrations[p.VehicleId], StringComparer.Ordinal).ThenBy(RowId, StringComparer.Ordinal).ToList());
+        var filter = new LedgerFilter(start, through, only, string.IsNullOrEmpty(text) ? null : text);
+        var days = only == PostingSource.Scheduled ? [] : await repository.StoredDays(actor, filter, ct);
+        var storedByDay = days.ToDictionary(d => d.Date);
+
+        // Each day lists its stored rows, then its scheduled ones. Walking the days newest first finds the part of the
+        // page that is stored (a contiguous run of the stored rows) and the scheduled rows that fall in the page.
+        var (low, high) = ((page - 1) * pageSize, page * pageSize);
+        int? skip = null;
+        var take = 0;
+        var position = 0;
+        var storedBefore = 0;
+        var pageScheduled = new List<FleetPosting>();
+        foreach (var day in storedByDay.Keys.Union(scheduledByDay.Keys).OrderByDescending(d => d))
+        {
+            var storedCount = storedByDay.TryGetValue(day, out var tally) ? tally.Count : 0;
+            var scheduledOfDay = scheduledByDay.GetValueOrDefault(day) ?? [];
+            var (storedStart, scheduledStart) = (position, position + storedCount);
+            var dayEnd = scheduledStart + scheduledOfDay.Count;
+            var (storedFrom, storedTo) = (Math.Max(low, storedStart), Math.Min(high, scheduledStart));
+            if (storedFrom < storedTo)
+            {
+                skip ??= storedBefore + storedFrom - storedStart;
+                take = storedBefore + storedTo - storedStart - skip.Value;
+            }
+            var (scheduledFrom, scheduledTo) = (Math.Max(low, scheduledStart), Math.Min(high, dayEnd));
+            if (scheduledFrom < scheduledTo)
+                pageScheduled.AddRange(scheduledOfDay.Skip(scheduledFrom - scheduledStart).Take(scheduledTo - scheduledFrom));
+            storedBefore += storedCount;
+            position = dayEnd;
+            if (position >= high) break;
+        }
+
+        var stored = skip is null ? [] : await repository.StoredRows(actor, filter, skip.Value, take, ct);
+        var entries = stored.Select(r => (Posting: Posting(r), r.Registration))
+            .Concat(pageScheduled.Select(p => (Posting: p, Registration: registrations[p.VehicleId])))
+            .OrderByDescending(e => e.Posting.Date).ThenBy(e => e.Posting.Source)
+            .ToList();
+        var names = await repository.Names(PeopleOf(entries.Select(e => e.Posting)), ct);
+        return new ExpenseLedgerDto(actor.Today, start, end, Permissions(actor), figures,
+            [.. entries.Select(e => Row(actor, e.Posting, e.Registration, names))], page, pageSize,
+            days.Sum(d => d.Count) + scheduled.Count, days.Sum(d => d.Total) + scheduled.Sum(p => p.Amount));
+    }
 
     public Task<ExpenseOptionsDto> Options(DateOnly? date, CancellationToken ct) =>
         execution.ReadAny(ChangePermissions, async actor =>

@@ -3,7 +3,7 @@
 import type { KeyboardEvent } from "react";
 
 // Mutually exclusive views as a pill track that behaves as tabs: arrow keys, Home and End move between them.
-// `count` shows beside the chosen view's name, which stays the tab's accessible name.
+// `counts` show beside each view's name, which stays the tab's accessible name.
 export function ViewPills<T extends string>({
   id,
   panelId = `${id}-panel`,
@@ -11,7 +11,7 @@ export function ViewPills<T extends string>({
   options,
   value,
   onChange,
-  count,
+  counts,
 }: {
   id: string;
   // The tab panel the views control.
@@ -20,7 +20,7 @@ export function ViewPills<T extends string>({
   options: { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
-  count?: number;
+  counts?: Partial<Record<T, number>>;
 }) {
   function move(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const last = options.length - 1;
@@ -59,9 +59,9 @@ export function ViewPills<T extends string>({
           onKeyDown={(event) => move(event, index)}
         >
           {option.label}
-          {option.value === value && count !== undefined && (
+          {counts?.[option.value] !== undefined && (
             <span aria-hidden="true" className="q n">
-              {count}
+              {counts[option.value]}
             </span>
           )}
         </button>
