@@ -1,7 +1,9 @@
-"""The App Review login: ``api.ops_review_account_create`` works only in an organization flagged
-as demo and only for the operator; its code is a digest no routine but that one writes, and
-``identity.matching_code`` takes it for a new device only while the code the PIN step issued
-to that device is live; a sign-in with it is in the sign-in history like any other."""
+"""The App Review login: ``api.ops_review_account_create``, for the operator only, makes the
+login an Owner of the one organization flagged as demo, first creating that organization with
+its sample fleet beside any real one, which it leaves alone; its code is a digest no routine but
+that one writes, and ``identity.matching_code`` takes it for a new device only while the code
+the PIN step issued to that device is live; a sign-in with it is in the sign-in history like any
+other."""
 
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from psycopg.types.json import Jsonb
 
 from xcode_api.db.migrate import find_db_dir
 
+from ..support.rows import seed_organization
 from ..support.scenario import (
     EMAIL,
     NEW_CODE_HASH,
@@ -45,6 +48,18 @@ ROLE_OF = (
     "ON r.organization_id = pr.organization_id AND r.id = pr.role_id WHERE pr.user_id = %s"
 )
 REVIEW_ACTIONS = "SELECT count(*) FROM ops.operator_actions WHERE action = 'review-account'"
+REVIEW_ROWS = "SELECT count(*) FROM identity.review_accounts"
+RESULT_KEYS = {"user_id", "organization_id", "created_user", "created_organization"}
+ORGANIZATION_STATE = (
+    "SELECT to_jsonb(o) AS organization, "
+    "(SELECT count(*) FROM tenancy.memberships AS m WHERE m.organization_id = o.id) AS members, "
+    "(SELECT count(*) FROM setup.expense_categories AS c WHERE c.organization_id = o.id) "
+    "AS categories, "
+    "(SELECT count(*) FROM setup.psv_companies AS p WHERE p.organization_id = o.id) AS companies, "
+    "(SELECT count(*) FROM setup.fleet_vehicles AS v WHERE v.organization_id = o.id) AS vehicles, "
+    "(SELECT count(*) FROM revenue.records AS r WHERE r.organization_id = o.id) AS revenue "
+    "FROM tenancy.organizations AS o WHERE o.id = %s"
+)
 
 
 def _create(
@@ -87,6 +102,23 @@ def _demo(operator: Conn, owner: Conn) -> Account:
     return account
 
 
+def _seeding(operator: Conn) -> None:
+    # Creating the demo organization writes six weeks of history in one call, as the CLI allows.
+    operator.execute("SET statement_timeout = '120s'")
+
+
+def _state(owner: Conn, organization_id: UUID) -> dict[str, Any]:
+    row = owner.execute(ORGANIZATION_STATE, (organization_id,)).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def _nothing_created(owner: Conn, review_rows: int = 0) -> None:
+    assert _one(owner, REVIEW_ROWS) == review_rows
+    assert _one(owner, "SELECT count(*) FROM identity.users WHERE email = %s", (REVIEW_EMAIL,)) == 0
+    assert _one(owner, REVIEW_ACTIONS) == 0
+
+
 def _review_hash(owner: Conn, user_id: UUID) -> str | None:
     row = owner.execute(
         "SELECT code_hash FROM identity.review_accounts WHERE user_id = %s", (user_id,)
@@ -101,18 +133,50 @@ def test_an_organization_is_not_demo_unless_the_seed_says_so(
     assert _one(owner_conn, "SELECT bool_or(demo) FROM tenancy.organizations") is False
 
 
-def test_outside_a_demo_organization_nothing_is_created(
+def test_without_a_demo_organization_one_is_made_beside_the_real_one(
     operator_conn: Conn, owner_conn: Conn
 ) -> None:
-    assert _refused(operator_conn) == ("XC403", "review_demo_only")
-    make_account(operator_conn, owner_conn)
-    assert _refused(operator_conn) == ("XC403", "review_demo_only")
-    assert _one(owner_conn, "SELECT count(*) FROM identity.review_accounts") == 0
-    assert (
-        _one(owner_conn, "SELECT count(*) FROM identity.users WHERE email = %s", (REVIEW_EMAIL,))
-        == 0
-    )
-    assert _one(owner_conn, REVIEW_ACTIONS) == 0
+    real = make_account(operator_conn, owner_conn)
+    before = _state(owner_conn, real.organization_id)
+    _seeding(operator_conn)
+    result = _create(operator_conn)
+    assert set(result) == RESULT_KEYS
+    assert (result["created_user"], result["created_organization"]) == (True, True)
+    demo_id, user_id = UUID(result["organization_id"]), UUID(result["user_id"])
+    assert demo_id != real.organization_id
+    assert _state(owner_conn, real.organization_id) == before
+    demo = _state(owner_conn, demo_id)
+    assert (demo["organization"]["slug"], demo["organization"]["demo"]) == ("demo-fleet", True)
+    assert min(demo["categories"], demo["companies"], demo["vehicles"], demo["revenue"]) > 0
+    assert _one(owner_conn, ROLE_OF, (user_id,)) == "Owner"
+    memberships = "SELECT array_agg(organization_id) FROM tenancy.memberships WHERE user_id = %s"
+    assert _one(owner_conn, memberships, (user_id,)) == [demo_id]
+    assert _review_hash(owner_conn, user_id) == REVIEW_CODE_HASH
+
+    again = _create(operator_conn, pin_hash=NEW_PIN_HASH, code_hash=NEW_CODE_HASH)
+    assert (UUID(again["organization_id"]), again["created_organization"]) == (demo_id, False)
+    assert _state(owner_conn, demo_id)["vehicles"] == demo["vehicles"]
+    assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations WHERE demo") == 1
+
+
+def test_an_empty_database_gets_only_the_demo_organization(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    _seeding(operator_conn)
+    result = _create(operator_conn)
+    assert result["created_organization"] is True
+    assert _one(owner_conn, "SELECT array_agg(demo) FROM tenancy.organizations") == [True]
+
+
+def test_two_demo_organizations_are_refused_and_nothing_is_created(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    seed_organization(owner_conn)
+    seed_organization(owner_conn)
+    owner_conn.execute("UPDATE tenancy.organizations SET demo = true")
+    review_rows = _one(owner_conn, REVIEW_ROWS)
+    assert _refused(operator_conn) == ("XC409", "organization_not_single")
+    _nothing_created(owner_conn, review_rows)
 
 
 def test_a_demo_organization_gets_an_owner_login_holding_the_digest(
@@ -120,8 +184,8 @@ def test_a_demo_organization_gets_an_owner_login_holding_the_digest(
 ) -> None:
     owner = _demo(operator_conn, owner_conn)
     result = _create(operator_conn)
-    assert set(result) == {"user_id", "organization_id", "created_user"}
-    assert result["created_user"] is True
+    assert set(result) == RESULT_KEYS
+    assert (result["created_user"], result["created_organization"]) == (True, False)
     assert UUID(result["organization_id"]) == owner.organization_id
     user_id = UUID(result["user_id"])
     row = user_row(owner_conn, user_id)
@@ -183,6 +247,12 @@ def test_the_email_of_a_person_who_is_not_a_review_login_is_refused(
     assert _refused(operator_conn, email=EMAIL) == ("XC409", "people_contact_taken")
     assert user_row(owner_conn, owner.user_id)["pin_hash"] == PIN_HASH
     assert _review_hash(owner_conn, owner.user_id) is None
+
+
+def test_another_persons_phone_is_refused(operator_conn: Conn, owner_conn: Conn) -> None:
+    owner = _demo(operator_conn, owner_conn)
+    assert _refused(operator_conn, phone=owner.phone) == ("XC409", "people_contact_taken")
+    _nothing_created(owner_conn)
 
 
 def test_a_renewal_with_another_phone_is_refused(operator_conn: Conn, owner_conn: Conn) -> None:
@@ -277,7 +347,11 @@ def test_the_demo_seed_flags_its_organization(operator_conn: Conn, owner_conn: C
 
 _ROUTINES = find_db_dir() / "routines"
 _WRITES_REVIEW = re.compile(r"(INSERT\s+INTO|UPDATE)\s+identity\.review_accounts\b", re.IGNORECASE)
-_WRITES_DEMO = re.compile(r"\bdemo\s*=\s*true\b", re.IGNORECASE)
+_WRITES_DEMO = re.compile(
+    r"\bdemo\s*=\s*true\b|INSERT\s+INTO\s+tenancy\.organizations\s*\([^)]*\bdemo\b",
+    re.IGNORECASE,
+)
+_CALLS_DEMO_ORGANIZATION = re.compile(r"(?<!FUNCTION )\bops\.seed_demo_organization\s*\(")
 
 
 def _writers(pattern: re.Pattern[str]) -> set[str]:
@@ -293,5 +367,12 @@ def test_only_the_operator_routine_writes_a_review_code() -> None:
     assert _writers(_WRITES_REVIEW) == {"ops_review_account_create.sql"}
 
 
-def test_only_the_demo_seed_sets_the_demo_flag() -> None:
-    assert _writers(_WRITES_DEMO) == {"ops_seed_demo.sql"}
+def test_only_the_demo_seeds_set_the_demo_flag() -> None:
+    assert _writers(_WRITES_DEMO) == {"seed_demo_organization.sql", "ops_seed_demo.sql"}
+
+
+def test_only_the_seed_and_the_review_login_create_the_demo_organization() -> None:
+    assert _writers(_CALLS_DEMO_ORGANIZATION) == {
+        "ops_seed_demo.sql",
+        "ops_review_account_create.sql",
+    }

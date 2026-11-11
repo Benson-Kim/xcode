@@ -718,9 +718,9 @@ class SeededDemo:
 
 @dataclass(frozen=True, slots=True)
 class ReviewAccountCreation:
-    """``api.ops_review_account_create``: the App Review login of the demo organization, with
-    the hash of its PIN and the keyed digest of its fixed new-device code; both replace any
-    earlier ones."""
+    """``api.ops_review_account_create``: the App Review login of the demo organization
+    (created with made-up data when the database has none), with the hash of its PIN and the
+    keyed digest of its fixed new-device code; both replace any earlier ones."""
 
     operator: str
     request_id: str
@@ -736,3 +736,4 @@ class CreatedReviewAccount:
     user_id: UUID
     organization_id: UUID
     created_user: bool
+    created_organization: bool

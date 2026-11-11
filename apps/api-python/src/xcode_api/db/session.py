@@ -66,7 +66,8 @@ async def call[T](
     """Call ``api.<routine>(...)`` in one transaction and return its adapted rows.
 
     ``timeout_seconds`` replaces the role's ``statement_timeout`` for this transaction only;
-    the development demo seed is the one caller that needs longer than its role allows.
+    the demo seed and the App Review login, which may seed the demo organization's history,
+    are the callers that need longer than their role allows.
     """
     if not _ROUTINE_NAME.match(routine):
         raise ValueError(f"illegal routine name: {routine!r}")

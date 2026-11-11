@@ -25,6 +25,7 @@ from ..support.scenario import (
     Conn,
     build_fleet,
     call,
+    digest,
     live_tokens,
     make_account,
     provision,
@@ -474,6 +475,73 @@ def test_provision_refuses_a_database_with_two_organizations(
     assert (error.sqlstate, error.diag.message_primary) == ("XC409", "organization_not_single")
 
 
+REVIEW_EMAIL = "app.review@example.com"
+REVIEW_PHONE = "0798765432"
+
+
+def _provision_refused(operator: Conn, email: str, phone: str) -> tuple[str | None, str | None]:
+    error = _refused(
+        operator,
+        "ops_provision_user",
+        "test-operator",
+        "req",
+        email,
+        phone,
+        None,
+        None,
+        None,
+        None,
+        T0,
+    )
+    return error.sqlstate, error.diag.message_primary
+
+
+def test_provision_works_in_the_real_organization_beside_a_demo_one(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    real = make_account(operator_conn, owner_conn)
+    demo = seed_organization(owner_conn).org
+    owner_conn.execute("UPDATE tenancy.organizations SET demo = true WHERE id = %s", (demo,))
+    result = provision(operator_conn, email="new@example.com", phone="0733000000")
+    assert (UUID(result["organization_id"]), result["created_organization"]) == (
+        real.organization_id,
+        False,
+    )
+
+
+def test_provision_beside_only_a_demo_organization_creates_the_real_one(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    demo = seed_organization(owner_conn).org
+    owner_conn.execute("UPDATE tenancy.organizations SET demo = true")
+    result = provision(operator_conn)
+    assert result["created_organization"] is True
+    assert UUID(result["organization_id"]) != demo
+    assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations WHERE NOT demo") == 1
+
+
+def test_provision_refuses_the_review_login_and_the_demo_organizations_people(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    make_account(operator_conn, owner_conn)
+    owner_conn.execute("UPDATE tenancy.organizations SET demo = true")
+    call(
+        operator_conn,
+        "ops_review_account_create",
+        "test-operator",
+        "req-review",
+        REVIEW_EMAIL,
+        REVIEW_PHONE,
+        PIN_HASH,
+        digest("code:424242"),
+        T0,
+    )
+    taken = ("XC409", "people_contact_taken")
+    assert _provision_refused(operator_conn, REVIEW_EMAIL, REVIEW_PHONE) == taken
+    assert _provision_refused(operator_conn, EMAIL, PHONE) == taken
+    assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations") == 1
+
+
 def test_remove_user_bumps_the_version_and_revokes_tokens_but_not_devices(
     operator_conn: Conn, owner_conn: Conn
 ) -> None:
@@ -666,6 +734,7 @@ SEED_TABLES = (
 SEED_HELPERS = {
     "seed_catalogue",
     "seed_companies",
+    "seed_demo_organization",
     "seed_demo_user",
     "seed_fleet",
     "seed_fleet_setup",
