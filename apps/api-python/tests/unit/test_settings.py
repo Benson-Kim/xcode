@@ -282,7 +282,7 @@ def test_each_variable_reaches_its_setting(
 @pytest.mark.usefixtures("development_environment")
 def test_token_and_runtime_defaults() -> None:
     s = load_settings()
-    # The .NET API's Jwt:Issuer and Jwt:Audience (apps/api/appsettings.json).
+    # The issuer and audience of the tokens the released clients already hold.
     assert (s.auth_issuer, s.auth_audience) == ("xcode-api", "xcode-clients")
     assert s.database_operator_url == ""
     assert s.metrics_enabled is False

@@ -1,13 +1,14 @@
-# xcode-api (Python + PostgreSQL rewrite of `apps/api`)
+# xcode-api (the API: Python on PostgreSQL)
 
-Status: in conversion. `docs/` holds the complete specification and the agent prompts
+Status: the only API since 2026-11-11, when the .NET API it replaced was removed from the
+repository; staging and the migration instance both run it. `docs/` holds the complete specification and the agent prompts
 (`docs/prompts/`, in order) for converting the .NET API to Python with business rules in
 PostgreSQL routines. Prompts 00 to 08 and 07b are implemented (bootstrap, PostgreSQL
 foundation, schema, identity and tenancy, auth, access and people, setup, revenue, the design
 notes v2.29 to v2.33, petty cash); 08b (expenses and reports), 09 (operability) and 10 (data
 migration) are being built. The status per prompt and the .NET drift register are in
-`docs/prompts/README.md`; the operator's procedures are `deploy/runbook.md`. When the
-conversion is accepted the folder is renamed to `apps/api` and the .NET project retired.
+`docs/prompts/README.md`; the operator's procedures are `deploy/runbook.md`, and
+`deploy/install-release.sh` installs the staging release on its droplet.
 
 ## Reading order
 

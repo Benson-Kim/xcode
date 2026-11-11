@@ -11,10 +11,8 @@
 **/*.tsbuildinfo
 **/bin
 **/obj
-apps/api
 apps/api-python
 apps/mobile/**
 !apps/mobile/package.json
-tests
 docs
 design

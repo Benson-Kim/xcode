@@ -2,7 +2,7 @@
 
 ## Repository
 
-Monorepo: .NET 10 API (`apps/api/`), Next.js 16 web (`apps/web/`), Expo 57 / React Native 0.86 mobile (`apps/mobile/`), shared TypeScript package (`packages/shared/`). npm workspaces at the root; .NET projects standalone. API tests in `tests/api/` (xUnit, SQLite in-memory).
+Monorepo: Python API (`apps/api-python/`, FastAPI on PostgreSQL 16+, with its own README, docs and tests), Next.js 16 web (`apps/web/`), Expo 57 / React Native 0.86 mobile (`apps/mobile/`), shared TypeScript package (`packages/shared/`). npm workspaces at the root; the API is a standalone Python project.
 
 Remediation program status, verified findings per phase and the phase prompts live in `.claude/remediation/` — read its `README.md` before any remediation work.
 
@@ -15,24 +15,18 @@ Remediation program status, verified findings per phase and the phase prompts li
 | Web tests | `npm run test:web` |
 | Mobile tests | `npm run test:mobile` |
 | Lint-rule tests | `npm run test:lint-rules` (module boundaries, toolchain pins) |
-| API tests (local) | `npm run test:api` |
-| API tests (SQL Server) | `npm run test:api:sqlserver` (needs `SQLSERVER_TEST_CONNECTION`) |
-| API tests (targeted) | `dotnet test tests/api/ --filter "FullyQualifiedName~ClassOrTest"` |
+| API checks | from `apps/api-python`: `ruff check .`, `ruff format --check .`, `mypy`, `pytest -n auto` (needs `XCODE_TEST_DATABASE_URL`) |
 | All typechecks | `npm run typecheck` (shared, web, mobile) |
 | Shared typecheck | `npm run typecheck:shared` |
 | Web typecheck | `npm run typecheck:web` |
 | Mobile typecheck | `npm run typecheck:mobile` |
 | Format | `npm run format:check` (CI); `npm run format` rewrites |
 | Lint | `npm run lint` (0 errors; warnings: the known `<img>` in OrganizationSettingsView.tsx and the over-150-line functions the README lists) |
-| API build | `cd apps/api && dotnet build` |
 
-Full validation = `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:api`: the same scripts CI runs (`.github/workflows/ci.yml`). The mobile typecheck is not optional: a type error survived two phases because it was skipped.
+Full validation = `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm test` and the API checks: the same steps CI runs (`.github/workflows/ci.yml`, which calls `xcode-api.yml`). The mobile typecheck is not optional: a type error survived two phases because it was skipped.
 
 API test practicalities:
-- The full suite takes 10–12 minutes. Run targeted classes first, the full suite once at the end.
-- `SqlServerTests` needs `SQLSERVER_TEST_CONNECTION`; its failure without one is environmental.
-- When another session may be building, isolate output: `dotnet test tests/api/Auth.Tests.csproj --artifacts-path <scratchpad>/artifacts`.
-- `--blame` names the test that was running if the host dies. A crash with no running test usually means the process was killed from outside.
+- Database tests run against the server `XCODE_TEST_DATABASE_URL` names: the local PostgreSQL service (Docker is not installed). Run targeted files first, the full suite once at the end.
 
 ## Working in a shared tree
 
@@ -40,7 +34,7 @@ Several sessions may edit this worktree at the same time (one phase each). Befor
 - Edit existing files with small, targeted replacements and re-read right before editing. Never overwrite a whole file you did not just read.
 - Never revert, "tidy" or reformat changes you did not make, even if they look unfinished.
 - Before fixing a failing test, attribute it: check the test file's and the code's modification times and diffs. Report other sessions' in-flight breakage instead of fixing it.
-- Never kill `dotnet`/`testhost`/`node` processes you did not start. Check their command line first.
+- Never kill `python`/`pytest`/`node` processes you did not start. Check their command line first.
 - Never use bare `git stash`/`git stash pop`.
 
 ## Remediation execution rules
@@ -61,17 +55,13 @@ Several sessions may edit this worktree at the same time (one phase each). Befor
 
 ## Known traps (each one cost a previous session time)
 
-- **SQLite Guids:** the SQLite test database stores Guids as uppercase TEXT and compares case-sensitively. Never embed `'{guid}'` in raw test SQL; use the `DatabaseProbe.Interleave` idioms in `ChangeLogAndScopeTests`.
-- **Migrations:** `MigrationSnapshotTests` fails on any model change that lacks a migration. Add one with `dotnet ef migrations add <Name>`; never hand-edit the snapshot. Tests build the schema with `EnsureCreated`, so only `SqlServerTests` proves a migration actually applies. Data backfills need SQL; expose it as a `public const` and test it on SQLite, like `NormalizeSecurityPolicy.ClampSql`.
-- **Concurrency tokens:** an `IsConcurrencyToken()` property that never changes is inert. RevenueRecord and Membership bump `Version` in domain methods; User and RefreshToken are bumped by `AuthDb.BumpVersions()`.
 - **React Native runtime:** Hermes has no WebCrypto, Node APIs or DOM, and jest (Node) hides that. Do not add fakes to `apps/mobile/tests/setup.ts` for APIs a phone lacks. The offline PIN check (`src/lib/storage.ts`, version 3) is HMAC-SHA256 of salt and PIN under a random 32-byte key kept as its own SecureStore item (`xcode.pin-key`, this device only), built from two native `expo-crypto` `digest` calls, so it takes milliseconds. Never go back to hashing rounds in JS: Hermes has no JIT, 100k rounds of PBKDF2 took seconds per PIN entry, and rounds cannot protect a 4 to 6 digit PIN anyway; the key and the offline try limit do. Checks of older versions are dropped on read and the next online unlock saves a new one. A check stamped with the same user and `SecurityVersion` (read from the access token) is kept. The jest mock of `digest` is Node's real SHA-256.
 - **Formatting:** `createFormatter(formats)` provided through `useFormats()` (`apps/web/lib/formats.ts`, `apps/mobile/src/lib/formats.ts`). Non-component helpers take a `Formatter` argument. No module-level mutable formatter state (it leaks across SSR requests).
 - **Auth lockout model:**
   - Wrong PINs on a trusted device pause the account (policy threshold and minutes).
   - Wrong PINs on untrusted devices hit a per-account cap, `SignInService.UntrustedAttemptLimit`. Past the cap, untrusted devices get the same answer as an unknown number.
   - The cap resets only on a PIN change (`User.SetPin`) or a verified new device. `ClearLockout` never resets it, and `SessionTokens.Issue` does not clear lockout (callers do).
-- **Byte-for-byte checks:** AuthTests' `Seen` compares whole responses. Any new per-request header (for example `X-Request-ID`) must be excluded there.
-- **Caches:** any cache touching auth or permissions needs explicit invalidation on SecurityVersion change and revocation, plus a test that a revoked token stops working immediately. `VehicleReportTests` asserts exact query counts; change them deliberately.
+- **Caches:** any cache touching auth or permissions needs explicit invalidation on SecurityVersion change and revocation, plus a test that a revoked token stops working immediately. The API tests assert statement budgets (`statement_counter`); change them deliberately.
 - **Next.js 16:** it differs from training data. Read `apps/web/node_modules/next/dist/docs/` before using an unfamiliar API.
 - **Machine load:** with several sessions running suites, tests with 1–4 s waits can time out. Re-run the single file before diagnosing.
 

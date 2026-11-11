@@ -37,8 +37,6 @@ mv "$WORK/new/app" "$ROOT/app"
 cp "$WORK/new/start.js" "$ROOT/start.js"
 # Replaced by a rename, never in place: bash is still reading this file.
 cp "$WORK/new/update.sh" "$ROOT/update.sh.next" && mv "$ROOT/update.sh.next" "$ROOT/update.sh"
-# The API no longer runs here; start.js stops a copy that is still running.
-rm -rf "$ROOT/api"
 touch "$ROOT/tmp/restart.txt"
 echo "$wanted" > "$WORK/installed"
 log "installed $(tr -d '\n' < "$ROOT/app/release.json")"

@@ -16,8 +16,6 @@ permissions:
 
 env:
   CI: "true"
-  DOTNET_NOLOGO: "true"
-  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
   NEXT_TELEMETRY_DISABLED: "1"
 
 jobs:
@@ -51,81 +49,13 @@ jobs:
       - run: npm ci
       - run: npm run test:mobile
 
+  # The API's own workflow: lint, types, tests on PostgreSQL, audit, a fresh database verified and seeded, the
+  # migration tool and the image scan. Its image job asks for packages: write, used only to push on a release tag.
   api:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-          cache: true
-          cache-dependency-path: "**/packages.lock.json"
-      # Locked mode: a packages.lock.json out of step with its project fails the restore.
-      - run: npm run restore:api
-      - run: npm run build:api -- -c Release --no-restore
-      - run: npm run test:api -- -c Release --no-build --blame-hang-timeout 10m --logger "trx;LogFileName=api.trx"
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: api-test-results
-          path: tests/api/TestResults
-
-  # Migrations meet a real SQL Server only here: the api job's tests build their schema on SQLite with EnsureCreated.
-  api-sqlserver:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      SQLSERVER_TEST_CONNECTION: "Server=localhost,1433;Database=XCodeCiTests;User Id=sa;Password=CiOnly_Sql_2026;Encrypt=True;TrustServerCertificate=True"
-    services:
-      mssql:
-        image: mcr.microsoft.com/mssql/server:2022-latest
-        env:
-          ACCEPT_EULA: "Y"
-          # A throwaway for this job's private container, not a secret.
-          MSSQL_SA_PASSWORD: CiOnly_Sql_2026
-        ports:
-          - 1433:1433
-        options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P CiOnly_Sql_2026 -Q 'SELECT 1' -b"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 12
-          --health-start-period 20s
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-          cache: true
-          cache-dependency-path: "**/packages.lock.json"
-      - run: npm run restore:api
-      - run: npm run build:api -- -c Release --no-restore
-      - name: Every migration applies to an empty SQL Server database
-        run: npm run test:api:sqlserver -- -c Release --no-build
-      - name: Build the API image
-        run: docker build -t xcode-api:ci apps/api
-      - name: The image migrates with --migrate, a second run is a no-op, and the migrated API reports ready
-        env:
-          ASPNETCORE_ENVIRONMENT: Production
-          ConnectionStrings__Auth: "Server=localhost,1433;Database=XCodeCiDeploy;User Id=sa;Password=CiOnly_Sql_2026;Encrypt=True;TrustServerCertificate=True"
-          Auth__SigningKey: ci-only-signing-key-0123456789-abcdefghij
-          Email__Host: localhost
-          Email__From: ci@example.test
-        run: |
-          settings="-e ASPNETCORE_ENVIRONMENT -e ConnectionStrings__Auth -e Auth__SigningKey -e Email__Host -e Email__From"
-          docker run --rm --network host $settings xcode-api:ci --migrate
-          docker run --rm --network host $settings xcode-api:ci --migrate
-          docker run -d --name api --network host $settings xcode-api:ci
-          curl --retry 20 --retry-delay 2 --retry-all-errors -fsS http://localhost:8080/health/ready
-      - if: failure()
-        run: docker logs api || true
+    uses: ./.github/workflows/xcode-api.yml
+    permissions:
+      contents: read
+      packages: write
 
   web-image:
     runs-on: ubuntu-latest
@@ -150,81 +80,16 @@ jobs:
       - if: failure()
         run: docker logs web || true
 
-  # The MonsterASP upload, against an SFTP server on the runner with a password login, so it is proven before develop.
-  deploy-scripts:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-      - name: An SFTP server on the runner
-        run: |
-          sudo mkdir -p /etc/ssh/sshd_config.d
-          echo "PasswordAuthentication yes" | sudo tee /etc/ssh/sshd_config.d/00-ci.conf
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq lftp openssh-server
-          sudo systemctl restart ssh
-          sudo useradd -m xcodesite
-          # A throwaway for this job's local server, not a secret.
-          echo "xcodesite:CiOnly_Sftp_2026" | sudo chpasswd
-          sudo -u xcodesite mkdir -p /home/xcodesite/wwwroot/logs
-          for i in $(seq 1 30); do ssh-keyscan -T 2 localhost > /dev/null 2>&1 && break; sleep 1; done
-      - name: upload.sh copies the API, writes its web.config and brings the site back, twice
-        env:
-          SFTP_HOST: localhost
-          SFTP_PORT: "22"
-          SFTP_USER: xcodesite
-          SFTP_PASSWORD: CiOnly_Sftp_2026
-          ConnectionStrings__Auth: Server=db.example.test;Database=ci
-          Auth__SigningKey: ci-only-signing-key
-          Email__Host: localhost
-          Email__From: ci@example.test
-          Cors__Origins__0: https://web.example.test
-        run: |
-          export SFTP_KNOWN_HOSTS="$(ssh-keyscan localhost 2> /dev/null)"
-          api="$RUNNER_TEMP/api"
-          mkdir -p "$api/runtimes/linux"
-          echo first > "$api/Auth.Api.dll"
-          echo symbols > "$api/Auth.Api.pdb"
-          echo native > "$api/runtimes/linux/native.so"
-          echo stale > "$api/web.config"
-          bash deploy/monsterasp/upload.sh "$api"
-          echo second-build > "$api/Auth.Api.dll"
-          bash deploy/monsterasp/upload.sh "$api"
-          site=/home/xcodesite/wwwroot
-          sudo grep -qx second-build "$site/Auth.Api.dll"
-          sudo test -f "$site/runtimes/linux/native.so"
-          sudo test -d "$site/logs"
-          sudo grep -q 'name="Auth__SigningKey" value="ci-only-signing-key"' "$site/web.config"
-          sudo grep -q 'name="Cors__Origins__0" value="https://web.example.test"' "$site/web.config"
-          sudo test ! -e "$site/Auth.Api.pdb"
-          sudo test ! -e "$site/app_offline.htm"
-      - name: A wrong host key stops the upload before anything is sent
-        env:
-          SFTP_HOST: localhost
-          SFTP_USER: xcodesite
-          SFTP_PASSWORD: CiOnly_Sftp_2026
-          ConnectionStrings__Auth: Server=db.example.test;Database=ci
-          Auth__SigningKey: ci-only-signing-key
-          Email__Host: localhost
-          Email__From: ci@example.test
-          Cors__Origins__0: https://web.example.test
-        run: |
-          ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/other"
-          export SFTP_KNOWN_HOSTS="localhost $(cut -d' ' -f1,2 "$RUNNER_TEMP/other.pub")"
-          if bash deploy/monsterasp/upload.sh "$RUNNER_TEMP/api"; then echo "::error::uploaded to an unknown host"; exit 1; fi
-          sudo test ! -e /home/xcodesite/wwwroot/app_offline.htm
-
-  # Staging: a push to develop that passes every job above deploys. The API goes to MonsterASP, beside its database.
-  # The web build and the Android app are published as GitHub releases; the cPanel account installs the web build
-  # itself (deploy/cpanel/update.sh), so nothing has to reach into the account past its bot protection.
+  # Staging: a push to develop that passes every job above deploys. Nothing reaches into a host: the API, the web build
+  # and the Android app are published as GitHub releases, and the droplet (apps/api-python/deploy/install-release.sh)
+  # and the cPanel account (deploy/cpanel/update.sh) install them themselves.
   deploy-api:
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    needs: [js, mobile, api, api-sqlserver, web-image, deploy-scripts]
+    needs: [js, mobile, api, web-image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
     environment:
       name: staging
       url: ${{ vars.WEB_URL }}
@@ -241,40 +106,33 @@ jobs:
           case "$API_URL" in https://*) ;; *) echo "::error::API_URL must start with https://"; exit 1 ;; esac
           curl -sS -o /dev/null --max-time 60 "$API_URL/health"
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-          cache: true
-          cache-dependency-path: "**/packages.lock.json"
-      - run: dotnet publish apps/api/Auth.Api.csproj -c Release -p:RestoreLockedMode=true -o "$RUNNER_TEMP/api"
-      - name: Migrate the staging database
-        working-directory: ${{ runner.temp }}/api
+      - name: Package the API source of this commit
+        run: |
+          name="xcode-api-${GITHUB_SHA::12}.tar.gz"
+          git archive --format=tar.gz -o "$RUNNER_TEMP/$name" "$GITHUB_SHA:apps/api-python"
+          (cd "$RUNNER_TEMP" && sha256sum "$name" > xcode-api.tar.gz.sha256)
+          echo "ARCHIVE=$name" >> "$GITHUB_ENV"
+      - name: Publish for the droplet to install
         env:
-          ASPNETCORE_ENVIRONMENT: Production
-          ConnectionStrings__Auth: ${{ secrets.DB_CONNECTION }}
-          Auth__SigningKey: ${{ secrets.AUTH_SIGNING_KEY }}
-          Email__Host: ${{ secrets.SMTP_HOST }}
-          Email__From: ${{ secrets.SMTP_FROM }}
-        run: dotnet Auth.Api.dll --migrate
-      - run: sudo apt-get install -y -qq lftp
-      - name: Upload to MonsterASP
-        env:
-          SFTP_HOST: ${{ secrets.SFTP_HOST }}
-          SFTP_PORT: ${{ secrets.SFTP_PORT }}
-          SFTP_USER: ${{ secrets.SFTP_USER }}
-          SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
-          SFTP_KNOWN_HOSTS: ${{ secrets.SFTP_KNOWN_HOSTS }}
-          ConnectionStrings__Auth: ${{ secrets.DB_CONNECTION }}
-          Auth__SigningKey: ${{ secrets.AUTH_SIGNING_KEY }}
-          Email__Host: ${{ secrets.SMTP_HOST }}
-          Email__Port: ${{ secrets.SMTP_PORT }}
-          Email__From: ${{ secrets.SMTP_FROM }}
-          Email__Username: ${{ secrets.SMTP_USER }}
-          Email__Password: ${{ secrets.SMTP_PASSWORD }}
-          Cors__Origins__0: ${{ vars.WEB_URL }}
-        run: bash deploy/monsterasp/upload.sh "$RUNNER_TEMP/api"
-      - name: The API is up and reaches its database
-        run: curl --retry 30 --retry-delay 5 --retry-all-errors -fsS --max-time 30 "$API_URL/health/ready"
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete staging-api --yes --cleanup-tag || true
+          gh release create staging-api "$RUNNER_TEMP/$ARCHIVE" "$RUNNER_TEMP/xcode-api.tar.gz.sha256" \
+            --target "$GITHUB_SHA" --prerelease --title "Staging API" \
+            --notes "API source of $GITHUB_SHA. The staging droplet installs it within a few minutes (apps/api-python/deploy/install-release.sh)."
+      # The droplet looks every two minutes and names the commit it runs at /release once that build is ready.
+      - name: The API runs this commit and reaches its database
+        run: |
+          want="${GITHUB_SHA::12}"
+          for _ in $(seq 1 45); do
+            if [ "$(curl -fsS --max-time 10 "$API_URL/release" 2> /dev/null)" = "$want" ]; then
+              curl --retry 10 --retry-delay 5 --retry-all-errors -fsS --max-time 30 "$API_URL/health/ready"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::the staging droplet has not installed $want after 15 minutes (journalctl -u xcode-stg-update there)"
+          exit 1
 
   deploy-web:
     needs: deploy-api

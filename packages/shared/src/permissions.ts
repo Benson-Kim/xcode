@@ -1,6 +1,6 @@
 import { PETTY_CASH_PERMISSIONS } from "./pettyCash";
 
-// Keep PERMISSION_KEYS equal to PermissionCatalog (apps/api/Application/AccessContracts.cs); tests/api/PermissionKeysTests.cs fails on drift.
+// Keep PERMISSION_KEYS equal to the API's catalogue; apps/api-python/tests/unit/test_permission_keys.py fails on drift.
 // These are the keys of the released clients (XCODE Mobile v2.11); the Python API still derives them from the rights.
 export const PERMISSION_KEYS = [
   "dash.capture",

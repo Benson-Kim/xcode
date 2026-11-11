@@ -1,16 +1,12 @@
 name: xcode-api
 
+# Pull requests and pushes to develop and master run it from ci.yml (job api), which holds the staging deploy until
+# it passes; a release tag runs it alone to push the image.
 on:
   push:
-    paths:
-      - "apps/api-python/**"
-      - ".github/workflows/xcode-api.yml"
     tags:
       - "xcode-api-v*"
-  pull_request:
-    paths:
-      - "apps/api-python/**"
-      - ".github/workflows/xcode-api.yml"
+  workflow_call:
 
 # Actions are pinned by commit; the tag each commit had on 2026-10-12 is in the comment.
 permissions:

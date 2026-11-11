@@ -1,12 +1,11 @@
 # Multi-platform authentication application
 
-.NET 10 API (`apps/api`), Next.js web (`apps/web`), Expo/React Native mobile (`apps/mobile`) and a shared TypeScript package (`packages/shared`) in one npm-workspaces repository. The API tests are in `tests/api`.
+Python API (`apps/api-python`, FastAPI on PostgreSQL), Next.js web (`apps/web`), Expo/React Native mobile (`apps/mobile`) and a shared TypeScript package (`packages/shared`) in one npm-workspaces repository. The API has its own README, tests and CI workflow (`.github/workflows/xcode-api.yml`).
 
 ## Requirements
 
 - Node.js at the version in `.nvmrc`.
-- .NET 10 SDK.
-- SQL Server, only to run the API against a real database or the `SqlServer` test category.
+- For the API: Python 3.13 and PostgreSQL 16 or later (see `apps/api-python/README.md`).
 
 ## Commands
 
@@ -18,10 +17,8 @@ Run these from the repository root after `npm ci`. Each is a step in CI, so a gr
 | `npm run lint` | ESLint, including the module-boundary rules | js |
 | `npm run typecheck` | `tsc --noEmit` in shared, web and mobile | js |
 | `npm test` | lint-rule fixtures, then the shared, web and mobile tests | js, mobile |
-| `npm run test:api` | the API tests except the `SqlServer` category (about 10 minutes) | api |
-| `npm run test:api:sqlserver` | every migration against SQL Server; needs `SQLSERVER_TEST_CONNECTION` | api-sqlserver |
 
-Each part also runs alone: `test:lint-rules`, `test:shared`, `test:web`, `test:mobile`, `typecheck:shared`, `typecheck:web`, `typecheck:mobile`. `restore:api` restores the API and its tests from their NuGet lock files (`--locked-mode`) and `build:api` builds both; extra arguments pass through, for example `npm run test:api -- -c Release --no-build`.
+Each part also runs alone: `test:lint-rules`, `test:shared`, `test:web`, `test:mobile`, `typecheck:shared`, `typecheck:web`, `typecheck:mobile`. The API's checks run from `apps/api-python`: `ruff check .`, `ruff format --check .`, `mypy` and `pytest -n auto` (with `XCODE_TEST_DATABASE_URL`).
 
 ## Toolchain
 
@@ -43,44 +40,20 @@ Each part also runs alone: `test:lint-rules`, `test:shared`, `test:web`, `test:m
 
 - `js`: `npm ci`, which fails when `package-lock.json` disagrees with any workspace's `package.json`; then format, lint, typecheck, the lint-rule fixtures, the shared tests with their coverage thresholds, and the web tests.
 - `mobile`: the jest suite.
-- `api`: a locked-mode restore, a build, and the API tests except the `SqlServer` category.
-- `api-sqlserver`: a SQL Server service container. The `SqlServer` tests apply every migration to an empty database. Then the API image is built and run twice with `--migrate`; the second run must change nothing. Finally the image is started against the migrated database until `/health/ready` answers.
+- `api`: the API workflow (`xcode-api.yml`): lint, types, tests on PostgreSQL, the dependency audit, a fresh database migrated, verified and seeded, the migration tool, and the image scan.
 - `web-image`: builds the web image and checks that it serves the sign-in page with its Content-Security-Policy.
 
 ## Deploying
 
-Build both images from the repository root:
+Staging deploys itself when a push to `develop` passes every job. Nothing reaches into a host: each one installs the build CI publishes as a GitHub release.
 
-```sh
-docker build -t xcode-api apps/api
-docker build -t xcode-web -f apps/web/Dockerfile .
-```
+- API (`deploy-api`): release `staging-api`, the API source of that commit and its checksum. A timer on the staging droplet runs `apps/api-python/deploy/install-release.sh`, which builds the release, migrates and verifies the database, switches over and restarts, and goes back to the previous build if the new one is not ready. The job waits until `$API_URL/release` names the commit and the API is ready.
+- Web (`deploy-web`): release `staging-web`, installed by the cPanel account's cron (`deploy/cpanel/update.sh`).
+- Android (`android`): release `staging-android`, an APK built against the staging API.
 
-For each release:
-
-1. Run the new API image once with `--migrate`, with the production settings below, before any replica of it starts. It applies pending migrations and exits. A non-zero exit stops the release.
-
-   ```sh
-   docker run --rm -e ConnectionStrings__Auth=... -e Auth__SigningKey=... -e Email__Host=... -e Email__From=... xcode-api --migrate
-   ```
-
-2. Start the API replicas. Outside local development, starting the API never creates or migrates the schema.
-3. Start the web replicas.
-
-The API image listens on port 8080. Point liveness probes at `/health/live` and readiness probes at `/health/ready`, which checks the database.
-
-## API settings
-
-Environment variables, in ASP.NET Core's `Section__Key` form:
-
-- `ConnectionStrings__Auth`: the SQL Server connection string.
-- `Auth__SigningKey`: at least 32 random bytes. Changing it signs everyone out.
-- `Email__Host`, `Email__From`, and optionally `Email__Port` (587), `Email__Username` and `Email__Password`: the SMTP server that sends sign-in codes.
-- `Cors__Origins__0`, `Cors__Origins__1`, ...: browser origins allowed to call the API directly.
-- `ForwardedHeaders__KnownProxies__0`, ...: the IP addresses whose `X-Forwarded-For` is believed (loopback when unset). Include the web server's address when it runs on another host.
-- `RateLimiting__AuthPermitLimit`: sign-in requests per client per minute (30).
+The API image and its settings are described in `apps/api-python/deploy/README.md` and `apps/api-python/docs/08-operability.md`. Migrations are a deploy step (`xcode-api db migrate`); starting the API never creates or migrates the schema.
 
 ## Web server settings
 
 - `API_URL`: where the web proxy reaches the API (default `http://localhost:5000`). Production requires it, over HTTPS unless it names `localhost` or `127.0.0.1`. It is read per request, so one web image serves any environment.
-- `TRUSTED_PROXY_HOPS`: how many trusted reverse proxies sit in front of the web server (a non-negative integer). Production must set it, `0` for none: the web server refuses to start without it, since a proxy left uncounted would give every browser the proxy's address and one shared sign-in limit. Development and tests default to `0`. The sign-in rate limit is per client, and Next.js keeps any `X-Forwarded-For` a client sends, so the proxy only names the client from the entry the outermost trusted proxy appended: the Nth from the right. At `0` no client address is forwarded and the API sees one shared address for the web server (safe, but one limit for everyone). `X-Real-IP` and `Forwarded` are never used. The API believes the forwarded address only from `ForwardedHeaders:KnownProxies` (loopback when unset).
+- `TRUSTED_PROXY_HOPS`: how many trusted reverse proxies sit in front of the web server (a non-negative integer). Production must set it, `0` for none: the web server refuses to start without it, since a proxy left uncounted would give every browser the proxy's address and one shared sign-in limit. Development and tests default to `0`. The sign-in rate limit is per client, and Next.js keeps any `X-Forwarded-For` a client sends, so the proxy only names the client from the entry the outermost trusted proxy appended: the Nth from the right. At `0` no client address is forwarded and the API sees one shared address for the web server (safe, but one limit for everyone). `X-Real-IP` and `Forwarded` are never used. The API believes the forwarded address only from the proxies in `XCODE_TRUSTED_PROXIES`.

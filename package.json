@@ -19,10 +19,6 @@
     "lint": "eslint .",
     "format": "prettier --write \"{apps/web,apps/mobile,packages/shared,eslint-rules,.github}/**/*.{ts,tsx,js,mjs,cjs,json,css,yml}\" \"*.{mjs,json,yml}\"",
     "format:check": "prettier --check \"{apps/web,apps/mobile,packages/shared,eslint-rules,.github}/**/*.{ts,tsx,js,mjs,cjs,json,css,yml}\" \"*.{mjs,json,yml}\"",
-    "restore:api": "dotnet restore tests/api/Auth.Tests.csproj --locked-mode",
-    "build:api": "dotnet build tests/api/Auth.Tests.csproj",
-    "test:api": "dotnet test tests/api/Auth.Tests.csproj --filter \"Category!=SqlServer\"",
-    "test:api:sqlserver": "dotnet test tests/api/Auth.Tests.csproj --filter \"Category=SqlServer\"",
     "dev:web": "npm run dev -w @xcode/web",
     "build:web": "npm run build -w @xcode/web",
     "dev:mobile": "npm run start -w @xcode/mobile"

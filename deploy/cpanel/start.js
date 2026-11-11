@@ -1,6 +1,5 @@
 // cPanel (Passenger) startup file: runs the Next.js web server. The API runs on its own host, named in
-// app/release.json, which the staging deploy writes. An API process an earlier version started on this account is
-// stopped, so it no longer counts against the account's process limit.
+// app/release.json, which the staging deploy writes.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -16,26 +15,6 @@ const log = (...parts) =>
     `${new Date().toISOString()} [${process.pid}] ${parts.join(" ")}\n`,
   );
 
-function stopOldApis() {
-  let entries = [];
-  try {
-    entries = fs.readdirSync("/proc");
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (!/^\d+$/.test(entry)) continue;
-    try {
-      const command = fs
-        .readFileSync(`/proc/${entry}/cmdline`, "utf8")
-        .split("\0")[0];
-      if (!command.endsWith("/xcode-web/api/Auth.Api")) continue;
-      process.kill(Number(entry), "SIGTERM");
-      log(`stopped old API process ${entry}`);
-    } catch {}
-  }
-}
-
 const release = JSON.parse(
   fs.readFileSync(path.join(root, "app", "release.json"), "utf8"),
 );
@@ -45,7 +24,6 @@ process.env.NODE_ENV = "production";
 // (0) unless the account's own environment sets it.
 if (!process.env.TRUSTED_PROXY_HOPS?.trim())
   process.env.TRUSTED_PROXY_HOPS = "0";
-if (process.platform !== "win32") stopOldApis();
 log(
   `node ${process.version} starting web ${release.commit} against ${release.apiUrl}`,
 );
