@@ -385,3 +385,18 @@ it("returns to sign-in when the session can no longer be refreshed", async () =>
   ).toBeInTheDocument();
   expect(screen.getByLabelText("Mobile number")).toBeInTheDocument();
 });
+
+it("points to the invitation email when the number's first-setup code is in it", async () => {
+  vi.mocked(authApi).mockResolvedValueOnce({
+    status: "verification_required",
+    purpose: "first_setup",
+    maskedEmail: "a***@example.com",
+    invitation: true,
+  });
+  await renderPanel();
+  typeNumber();
+  expect(
+    await screen.findByText(/Use the code in your XCODE invitation email/),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Code sent to/)).toBeNull();
+});

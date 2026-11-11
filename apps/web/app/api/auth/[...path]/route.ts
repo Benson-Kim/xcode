@@ -55,8 +55,15 @@ const PURPOSES: readonly string[] = ["first_setup", "new_device", "pin_reset"];
 const INVITE_PROBLEMS: readonly string[] = ["expired", "used", "revoked"];
 
 // The code an accepted invitation link mints lives in a cookie, so browser JS never holds it, as long as the code does
-// on the server. Only pin/new sends it upstream.
+// on the server. It is bound to the number it was redeemed for: only pin/new for that number sends or spends it, so a
+// second invitation opened in this browser replaces the first one's code but never hands it to the first one's PIN.
 const inviteCodeSeconds = 10 * 60;
+const digitsOf = (phoneNumber: string) => phoneNumber.replace(/\D/g, "");
+
+function inviteCodeFor(jar: CookieJar, phoneNumber: string) {
+  const [number, code] = (readCookie(jar, "invite") ?? "").split(".");
+  return code && number === digitsOf(phoneNumber) ? code : undefined;
+}
 
 // Calls that mark this browser as a trusted device when they succeed (the released routes).
 const trustingOperations = new Set([
@@ -332,7 +339,7 @@ export async function POST(
           token: trustToken,
           name: deviceNameFrom(request.headers.get("user-agent")),
           refreshToken: readCookie(jar, "refresh") ?? "",
-          inviteCode: readCookie(jar, "invite"),
+          inviteCode: inviteCodeFor(jar, phoneNumber),
         }),
       ),
       signal: AbortSignal.timeout(15_000),
@@ -364,6 +371,7 @@ export async function POST(
         triesLeft:
           typeof result.triesLeft === "number" ? result.triesLeft : undefined,
         pinProblem: str(result.pinProblem) || undefined,
+        invitation: result.invitation === true ? true : undefined,
         inviteProblem: INVITE_PROBLEMS.includes(str(result.inviteProblem) ?? "")
           ? (result.inviteProblem as InviteProblem)
           : undefined,
@@ -374,11 +382,16 @@ export async function POST(
 
     const minted = str(result.code);
     if (redeems && response.ok && minted && /^\d{6}$/.test(minted))
-      writeCookie(output, "invite", minted, inviteCodeSeconds);
+      writeCookie(
+        output,
+        "invite",
+        `${digitsOf(phoneNumber)}.${minted}`,
+        inviteCodeSeconds,
+      );
     // The minted code is spent by a new PIN, and useless once pin/new refuses it.
     if (
       operation === "pin/new" &&
-      readCookie(jar, "invite") &&
+      inviteCodeFor(jar, phoneNumber) &&
       (response.ok || response.status === 401)
     )
       writeCookie(output, "invite", "", 0);

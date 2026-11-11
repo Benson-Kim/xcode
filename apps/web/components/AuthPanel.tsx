@@ -73,6 +73,8 @@ export function AuthPanel() {
   const [pinLocked, setPinLocked] = useState(false);
   const [purpose, setPurpose] = useState<CodePurpose>("new_device");
   const [maskedEmail, setMaskedEmail] = useState("");
+  // No code was sent: the first-setup code is in the invitation email.
+  const [inInvitation, setInInvitation] = useState(false);
   const [trust, setTrust] = useState(true);
   const [message, setMessage] = useState("");
   const [note, setNote] = useState("");
@@ -219,9 +221,15 @@ export function AuthPanel() {
     verifiedCode.current = "";
   }
 
-  function toCode(next: CodePurpose, email?: string | null, demo?: string) {
+  function toCode(
+    next: CodePurpose,
+    email?: string | null,
+    demo?: string,
+    invitation = false,
+  ) {
     setPurpose(next);
     setMaskedEmail(email ?? "");
+    setInInvitation(invitation);
     setDevelopmentCode(demo ?? "");
     setCode("");
     setStep("code");
@@ -245,6 +253,7 @@ export function AuthPanel() {
           result.purpose ?? "first_setup",
           result.maskedEmail,
           result.developmentCode ?? "",
+          result.invitation === true,
         );
     }, "PIN");
   }
@@ -300,6 +309,7 @@ export function AuthPanel() {
         purpose,
       });
       setCode("");
+      setInInvitation(false);
       setDevelopmentCode(result.developmentCode ?? "");
       setNote("A new code has been sent.");
     }, "code");
@@ -518,7 +528,21 @@ export function AuthPanel() {
         <>
           <h1 id="auth-title">{titles[purpose]}</h1>
           <div className="sito">
-            Code sent to <b>{maskedEmail || "your email"}</b>
+            {inInvitation ? (
+              <>
+                Use the code in your XCODE invitation email
+                {maskedEmail ? (
+                  <>
+                    {" "}
+                    to <b>{maskedEmail}</b>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <>
+                Code sent to <b>{maskedEmail || "your email"}</b>
+              </>
+            )}
           </div>
           <div className="f">
             <label htmlFor="siCode">6 digit code</label>

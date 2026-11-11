@@ -88,7 +88,7 @@ it("sends redeem the link token, the number and this browser's device, and keeps
   });
   expect(text).not.toContain(code);
   const cookie = result.cookies.get("__Host-invite");
-  expect(cookie?.value).toBe(code);
+  expect(cookie?.value).toBe(`0733520614.${code}`);
   expect(cookie?.httpOnly).toBe(true);
   expect(cookie?.sameSite).toBe("strict");
   expect(cookie?.secure).toBe(true);
@@ -141,7 +141,7 @@ it("passes why a matching link was refused, and nothing it does not know", async
 
 it("spends the minted code on the first PIN and then forgets it", async () => {
   const code = minted();
-  jar.set("__Host-invite", code);
+  jar.set("__Host-invite", `0733520614.${code}`);
   const fetcher = upstream({
     status: "authenticated",
     accessToken: "access-value",
@@ -168,7 +168,7 @@ it("spends the minted code on the first PIN and then forgets it", async () => {
 
 it("forgets the minted code when pin/new refuses it, and never sends it for a PIN reset", async () => {
   const code = minted();
-  jar.set("__Host-invite", code);
+  jar.set("__Host-invite", `0733520614.${code}`);
   vi.stubGlobal(
     "fetch",
     upstream({ status: "authentication_failed", triesLeft: null }, 401),
@@ -189,6 +189,38 @@ it("forgets the minted code when pin/new refuses it, and never sends it for a PI
     pin: "5826",
   });
   expect(JSON.parse(fetcher.mock.calls[0][1].body).code).toBe("");
+});
+
+it("keeps a code minted for another number out of this number's PIN step, and keeps it for that number", async () => {
+  jar.set("__Host-invite", `0711000111.${minted()}`);
+  const fetcher = upstream({ status: "authentication_failed" }, 401);
+  vi.stubGlobal("fetch", fetcher);
+
+  const result = await post("pin/new", {
+    phoneNumber: "0733520614",
+    purpose: "first_setup",
+    pin: "5826",
+  });
+
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).code).toBe("");
+  expect(result.cookies.get("__Host-invite")).toBeUndefined();
+});
+
+it("passes on that the first-setup code is in the invitation email", async () => {
+  vi.stubGlobal(
+    "fetch",
+    upstream(
+      {
+        status: "verification_required",
+        purpose: "first_setup",
+        maskedEmail: "a***@example.com",
+        invitation: true,
+      },
+      202,
+    ),
+  );
+  const result = await post("start", { phoneNumber: "0733520614" });
+  expect(await result.json()).toMatchObject({ invitation: true });
 });
 
 it("refuses a POST from another site, or with no Origin unless the browser says it is same-origin", async () => {
