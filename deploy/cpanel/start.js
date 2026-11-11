@@ -41,6 +41,10 @@ const release = JSON.parse(
 );
 process.env.API_URL = release.apiUrl;
 process.env.NODE_ENV = "production";
+// A production web server refuses to start without TRUSTED_PROXY_HOPS. On this account it forwards no client address
+// (0) unless the account's own environment sets it.
+if (!process.env.TRUSTED_PROXY_HOPS?.trim())
+  process.env.TRUSTED_PROXY_HOPS = "0";
 if (process.platform !== "win32") stopOldApis();
 log(
   `node ${process.version} starting web ${release.commit} against ${release.apiUrl}`,
