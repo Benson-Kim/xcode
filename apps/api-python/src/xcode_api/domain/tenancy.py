@@ -664,6 +664,16 @@ class DeletionRecipient:
     first_name: str
 
 
+class DeletionNoticeState(StrEnum):
+    """Where one deletion notice stands: waiting for a send, sent, given up after its sends, or
+    no longer needed (the recipient lost the right to act on it, or the requester left)."""
+
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    DROPPED = "dropped"
+
+
 @dataclass(frozen=True, slots=True)
 class PendingDeletionNotice:
     """A deletion notice ``api.deletion_notice_claim`` took for another send: the notice and its

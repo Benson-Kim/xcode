@@ -31,6 +31,7 @@ from ..domain.tenancy import (
     BackLimitMode,
     ChangeLogSection,
     DatePattern,
+    DeletionNoticeState,
     LogoContentType,
     PermissionSection,
     RoleName,
@@ -214,7 +215,7 @@ INDEXES: tuple[IndexSpec, ...] = (
     IndexSpec("identity.invitations", "organization_id"),
     IndexSpec("identity.invitations", "invited_by", where="invited_by IS NOT NULL"),
     IndexSpec(
-        "tenancy.deletion_notices", "organization_id, created_at", where="(state = 'pending'::text)"
+        "tenancy.deletion_notices", "organization_id, created_at", where="state = 'pending'::text"
     ),
     IndexSpec("tenancy.deletion_notices", "organization_id, requester_id"),
     IndexSpec("tenancy.deletion_notices", "organization_id, recipient_id"),
@@ -323,6 +324,7 @@ CHECK_LIST_ENUMS: dict[str, type[Enum]] = {
     "identity.sign_in_attempts.ck_sign_in_attempts_refusal": SignInRefusal,
     "identity.invitations.ck_invitations_revoke_reason": InvitationRevokeReason,
     "identity.invitations.ck_invitations_delivery_state": InvitationDeliveryState,
+    "tenancy.deletion_notices.ck_deletion_notices_state": DeletionNoticeState,
     "tenancy.organization_localizations.ck_localizations_date_pattern": DatePattern,
     "tenancy.organization_localizations.ck_localizations_week_numbering": WeekNumbering,
     "tenancy.organization_logos.ck_logos_content_type": LogoContentType,

@@ -295,7 +295,7 @@ def test_a_lost_send_is_sent_again_after_five_minutes_until_it_is_recorded_sent(
         "requester_name": "Otto Office",
         "organization_name": _org_name(owner_conn, office.org),
     }
-    call(app_conn, "deletion_notice_result", office.org, recipient["notice_id"], True, T0)
+    call(app_conn, "deletion_notice_result", recipient["notice_id"], True, T0)
     assert _notices(owner_conn, office.org)[recipient["notice_id"]]["state"] == "sent"
     assert _claim(app_conn, office.org, T0 + timedelta(hours=1)) == []
 
@@ -314,7 +314,7 @@ def test_a_notice_no_longer_needed_is_dropped_and_one_never_sent_fails_after_fiv
         now += timedelta(minutes=6)
         claimed = _claim(app_conn, office.org, now)
         assert [n["notice_id"] for n in claimed] == [by_recipient[owner.id]]
-        call(app_conn, "deletion_notice_result", office.org, by_recipient[owner.id], False, now)
+        call(app_conn, "deletion_notice_result", by_recipient[owner.id], False, now)
 
     notices = _notices(owner_conn, office.org)
     assert notices[by_recipient[admin2.id]]["state"] == "dropped"

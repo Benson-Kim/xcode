@@ -426,9 +426,7 @@ class TenancyRepository(Protocol):
         repeat)."""
         ...
 
-    async def record_deletion_notice(
-        self, organization_id: UUID, notice_id: UUID, sent: bool, now: datetime
-    ) -> None:
+    async def record_deletion_notice(self, notice_id: UUID, sent: bool, now: datetime) -> None:
         """``api.deletion_notice_result``: ``sent``, or ``failed`` once its sends are used up,
         only while the notice is pending."""
         ...

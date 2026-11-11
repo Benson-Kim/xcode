@@ -23,10 +23,9 @@ class DeletionNotices:
         self._clock = clock
         self._notifier = notifier
 
-    def send(self, outcome: DeletionRequestOutcome, organization_id: UUID, request_id: str) -> None:
+    def send(self, outcome: DeletionRequestOutcome, request_id: str) -> None:
         for recipient in outcome.recipients:
             self._queue(
-                organization_id,
                 recipient.notice_id,
                 DeletionNotice(
                     to=recipient.email,
@@ -43,7 +42,6 @@ class DeletionNotices:
         claimed = await self._tenancy.claim_deletion_notices(self._clock.now(), limit)
         for pending in claimed:
             self._queue(
-                pending.organization_id,
                 pending.notice_id,
                 DeletionNotice(
                     to=pending.email,
@@ -54,15 +52,11 @@ class DeletionNotices:
             )
         return len(claimed)
 
-    def _queue(self, organization_id: UUID, notice_id: UUID, notice: DeletionNotice) -> None:
+    def _queue(self, notice_id: UUID, notice: DeletionNotice) -> None:
         async def sent() -> None:
-            await self._tenancy.record_deletion_notice(
-                organization_id, notice_id, True, self._clock.now()
-            )
+            await self._tenancy.record_deletion_notice(notice_id, True, self._clock.now())
 
         async def failed() -> None:
-            await self._tenancy.record_deletion_notice(
-                organization_id, notice_id, False, self._clock.now()
-            )
+            await self._tenancy.record_deletion_notice(notice_id, False, self._clock.now())
 
         self._notifier.notify(notice, on_sent=sent, on_failure=failed)

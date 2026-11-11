@@ -25,6 +25,7 @@ DEFINER_HELPERS = {
     "identity.erase_review_login",
     "identity.invitation_org",
     "tenancy.belongs_elsewhere",
+    "tenancy.deletion_notice_org",
     "tenancy.erase_person_history",
     "tenancy.organization_ids",
 }

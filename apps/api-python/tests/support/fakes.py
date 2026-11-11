@@ -2702,9 +2702,7 @@ class FakeTenancyRepository:
         recipients = tuple(DeletionRecipient(uuid4(), m.email, m.first_name) for m in others)
         return DeletionRequestOutcome(True, name, self.name, recipients)
 
-    async def record_deletion_notice(
-        self, organization_id: UUID, notice_id: UUID, sent: bool, now: datetime
-    ) -> None:
+    async def record_deletion_notice(self, notice_id: UUID, sent: bool, now: datetime) -> None:
         self.deletion_notice_results.append((notice_id, sent))
 
     async def claim_deletion_notices(

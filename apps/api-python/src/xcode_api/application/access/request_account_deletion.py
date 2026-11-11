@@ -28,5 +28,5 @@ class RequestAccountDeletion:
     async def execute(self, command: RequestAccountDeletionCommand) -> None:
         context = command.caller.context(self._clock)
         outcome = await self._tenancy.request_account_deletion(AccountDeletionRequest(context))
-        if outcome.recorded and context.organization_id is not None:
-            self._notices.send(outcome, context.organization_id, context.request_id)
+        if outcome.recorded:
+            self._notices.send(outcome, context.request_id)

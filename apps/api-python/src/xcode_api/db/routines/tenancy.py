@@ -210,10 +210,8 @@ class TenancyRoutines:
             "api.me_deletion_request",
         )
 
-    async def record_deletion_notice(
-        self, organization_id: UUID, notice_id: UUID, sent: bool, now: datetime
-    ) -> None:
-        await call(self._pool, "deletion_notice_result", organization_id, notice_id, sent, now)
+    async def record_deletion_notice(self, notice_id: UUID, sent: bool, now: datetime) -> None:
+        await call(self._pool, "deletion_notice_result", notice_id, sent, now)
 
     async def claim_deletion_notices(
         self, now: datetime, limit: int
