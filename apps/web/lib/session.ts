@@ -8,8 +8,10 @@ let refreshing: Promise<boolean> | null = null;
 // One refresh at a time: concurrent requests that hit a 401 wait on the same attempt. A refresh that a security
 // check intercepted never reached the server, so it is neither a success nor proof the session ended: it rejects
 // instead of resolving false (which would sign the person out).
-// Another tab may renew first: the server then answers refresh_superseded, and the browser holds that tab's new
-// refresh cookie once its answer lands, so the refresh is asked once more. A second loss ends the session.
+// Tabs share the refresh cookie, so they renew one at a time under a Web Lock: a tab that waited sends the cookie the
+// one before it stored. Without Web Locks another tab may still renew first: the server then answers
+// refresh_superseded, so the refresh is asked once more, after a moment for that tab's new cookie to land. A second
+// loss ends the session.
 const askRefresh = () =>
   checkedFetch("/api/auth/refresh", {
     method: "POST",
@@ -21,13 +23,24 @@ const superseded = async (response: Response) =>
   response.status === 401 &&
   (await response.json().catch(() => null))?.status === "refresh_superseded";
 
+const REFRESH_LOCK = "xcode:refresh";
+const SUPERSEDED_WAIT_MS = 300;
+
+function oneTabAtATime<T>(run: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  return locks ? locks.request(REFRESH_LOCK, run) : run();
+}
+
+async function renew() {
+  const response = await askRefresh();
+  if (response.ok) return true;
+  if (!(await superseded(response))) return false;
+  await new Promise((resolve) => setTimeout(resolve, SUPERSEDED_WAIT_MS));
+  return (await askRefresh()).ok;
+}
+
 function refreshSession() {
-  refreshing ??= askRefresh()
-    .then(
-      async (response) =>
-        response.ok ||
-        ((await superseded(response)) && (await askRefresh()).ok),
-    )
+  refreshing ??= oneTabAtATime(renew)
     .catch((error) => {
       if (error instanceof SecurityCheckError) throw error;
       return false;

@@ -109,6 +109,34 @@ it("ends the session after a second superseded refresh instead of asking again",
   expect(expired).toHaveBeenCalledOnce();
 });
 
+it("renews under one lock shared by every tab of the browser", async () => {
+  const granted: string[] = [];
+  const request = vi.fn(async (name: string, run: () => Promise<unknown>) => {
+    granted.push(name);
+    return run();
+  });
+  Object.defineProperty(navigator, "locks", {
+    value: { request },
+    configurable: true,
+  });
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(json(401))
+    .mockImplementationOnce(async () => {
+      expect(granted).toEqual(["xcode:refresh"]);
+      return json(200);
+    })
+    .mockResolvedValueOnce(json(200));
+  vi.stubGlobal("fetch", fetcher);
+
+  try {
+    expect((await fetchWithSession("/api/setup/companies")).status).toBe(200);
+  } finally {
+    Reflect.deleteProperty(navigator, "locks");
+  }
+  expect(request).toHaveBeenCalledOnce();
+});
+
 it("does not ask again after a plainly refused refresh", async () => {
   const fetcher = vi
     .fn()
