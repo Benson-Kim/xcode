@@ -1,7 +1,7 @@
 """``CreateReviewAccount`` and ``xcode-api review-account create``: the PIN and the fixed code
 reach the routine only as a PIN hash and the API's keyed digest, a drawn PIN obeys the new-PIN
-rule, a second run replaces both, and the command refuses before connecting when it could not
-produce a digest the API would match."""
+rule, a second run replaces both, the first run creates the demo organization, and the command
+refuses before connecting when it could not produce a digest the API would match."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from xcode_api.application.ops.create_review_account import (
     CreateReviewAccountCommand,
 )
 from xcode_api.cli.main import main
-from xcode_api.domain.errors import Forbidden
 from xcode_api.domain.policies import new_pin_problem
 from xcode_api.security.codes import new_pin
 from xcode_api.security.digests import KeyedDigester
@@ -98,12 +97,13 @@ async def test_a_generator_that_never_draws_an_acceptable_pin_stops() -> None:
     assert ops.review_account is None
 
 
-async def test_outside_a_demo_organization_the_refusal_is_the_routines() -> None:
-    ops = FakeOpsRepository()
-    with pytest.raises(Forbidden) as refusal:
-        await _use_case(ops, secrets.token_urlsafe(32)).execute(_command())
-    assert refusal.value.code == "review_demo_only"
-    assert ops.review_account is None
+async def test_the_first_run_creates_the_demo_organization_and_later_runs_reuse_it() -> None:
+    ops, key = FakeOpsRepository(), secrets.token_urlsafe(32)
+    first = await _use_case(ops, key).execute(_command("request-1"))
+    second = await _use_case(ops, key).execute(_command("request-2"))
+    assert first.account.created_organization is True
+    assert second.account.created_organization is False
+    assert first.account.organization_id == second.account.organization_id
 
 
 async def test_no_secret_shows_in_a_repr() -> None:

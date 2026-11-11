@@ -1,6 +1,6 @@
 -- tenancy.organization_ids() RETURNS uuid[]
--- Purpose: the ids of every organization in the database, oldest first; provisioning supports exactly one.
--- Callers: api.ops_provision_user, api.ops_remove_user, api.invite_claim_undelivered.
+-- Purpose: the ids of every organization in the database, oldest first, for the sweeps and operator routines that visit each one.
+-- Callers: api.ops_remove_user, api.ops_seed_demo, api.invite_claim_undelivered, api.deletion_notice_claim.
 -- Reads: tenancy.organizations (every organization). Writes: nothing.
 -- Raises: none.
 -- Tests: tests/db/test_ops_routines.py, tests/db/test_invitations.py.

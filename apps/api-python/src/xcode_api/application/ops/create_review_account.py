@@ -1,8 +1,8 @@
 """Create or renew the App Review login of the demo organization (``docs/08-operability.md``
 section 8). Its PIN and its fixed new-device code are drawn here, hashed as every PIN and
 code is, and returned once for the operator to hand to App Review; a second run replaces
-both. The routine refuses any organization not flagged as demo, so the login never reaches
-real data."""
+both. The routine works only in the organization flagged as demo, creating it with made-up
+data beside the real one when there is none, so the login never reaches real data."""
 
 from __future__ import annotations
 

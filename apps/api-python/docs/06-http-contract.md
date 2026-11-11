@@ -825,9 +825,10 @@ Raised to the service or the CLI only, never rendered as a sentence:
 |---|---|---|
 | `session_invalid` (`XC401`) | `api.auth_resolve_session`, every bearer route | 401 with an empty body and `WWW-Authenticate: Bearer` |
 | `rate_limit_invalid` | `api.rate_limit_hit` with bounds the service itself chose | a configuration bug: 500 |
-| `organization_not_single` (`XC409`) | `api.ops_provision_user` and `api.ops_seed_demo` when the database holds more than one organization | the CLI prints `refused: organization_not_single`, exit 1 |
+| `organization_not_single` (`XC409`) | `api.ops_provision_user` when the database holds more than one real organization, `api.ops_seed_demo` when it holds more than one organization, `api.ops_review_account_create` when it holds more than one demo organization | the CLI prints `refused: organization_not_single`, exit 1 |
 | `seed_development_only` (`XC403`) | `api.ops_seed_demo` outside `development` (the CLI refuses before connecting) | CLI `seed-demo` prints `refused: seed_development_only`, exit 1 |
 | `seed_exists` (`XC409`) | `api.ops_seed_demo` when the one organization is not the demo | CLI `seed-demo` prints `refused: seed_exists`, exit 1 |
+| `review_phone_differs` (`XC409`) | `api.ops_review_account_create` when a renewal gives another phone than the login has | CLI `review-account create` prints `refused: review_phone_differs`, exit 1 |
 
 The CLI user commands print `refused: <code>` for every refusal, including the `people_*`
 codes `api.ops_provision_user` shares with the people routines.

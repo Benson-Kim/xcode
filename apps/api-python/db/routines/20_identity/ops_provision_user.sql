@@ -1,8 +1,8 @@
 -- api.ops_provision_user(p_operator text, p_request_id text, p_email text, p_phone text, p_role text, p_first_name text, p_last_name text, p_organization_name text, p_now timestamptz) RETURNS jsonb
--- Purpose: create or re-activate a person in the database's single organization (created with defaults and seeded roles when none exists); a changed or revived existing account loses every session and device.
+-- Purpose: create or re-activate a person in the database's one real organization (created with defaults and seeded roles when none exists); a demo organization is never provisioned into, and a review login or a person of a demo organization is refused; a changed or revived existing account loses every session and device.
 -- Callers: OpsRoutines.provision_user; CLI provision-user.
--- Reads: identity.users, tenancy.organizations, tenancy.memberships, tenancy.roles, tenancy.person_roles. Writes: ops.operator_actions, tenancy.organizations and its localization, branding and security-policy rows, tenancy.roles, identity.users, tenancy.memberships, tenancy.person_roles, tenancy.data_scopes, identity.trusted_devices, identity.refresh_tokens.
--- Raises: XC422 people_email_invalid, XC422 people_phone_invalid, XC422 people_role_unknown, XC422 people_names_required, XC422 organization_name_slug, XC409 organization_not_single, XC409 people_contact_taken.
+-- Reads: identity.users, identity.review_accounts, tenancy.organizations, tenancy.memberships, tenancy.roles, tenancy.person_roles. Writes: ops.operator_actions, tenancy.organizations and its localization, branding and security-policy rows, tenancy.roles, identity.users, tenancy.memberships, tenancy.person_roles, tenancy.data_scopes, identity.trusted_devices, identity.refresh_tokens.
+-- Raises: XC422 people_email_invalid, XC422 people_phone_invalid, XC422 people_role_unknown, XC422 people_names_required, XC422 organization_name_slug, XC409 people_contact_taken, XC409 organization_not_single.
 -- Tests: tests/db/test_ops_routines.py, tests/api/test_cli.py.
 
 CREATE OR REPLACE FUNCTION api.ops_provision_user(
@@ -73,8 +73,25 @@ BEGIN
     PERFORM tenancy.refuse('organization_name_slug', 'XC422');
   END IF;
 
-  -- One organization per database: reuse it, or create it with the default settings rows.
-  v_organizations := tenancy.organization_ids();
+  IF EXISTS (
+    SELECT 1 FROM identity.users AS u WHERE u.phone_number = v_phone AND u.email <> v_email
+  ) THEN
+    PERFORM tenancy.refuse('people_contact_taken', 'XC409');
+  END IF;
+  -- The App Review login and the people of a demo organization stay out of the real one.
+  IF EXISTS (
+    SELECT 1 FROM identity.users AS u
+    WHERE u.email = v_email
+      AND (
+        EXISTS (SELECT 1 FROM identity.review_accounts AS ra WHERE ra.user_id = u.id)
+        OR identity.active_organization(u.id) = ANY (tenancy.organization_ids_where_demo(true))
+      )
+  ) THEN
+    PERFORM tenancy.refuse('people_contact_taken', 'XC409');
+  END IF;
+
+  -- One real organization per database: reuse it, or create it with the default settings rows.
+  v_organizations := tenancy.organization_ids_where_demo(false);
   IF cardinality(v_organizations) > 1 THEN
     PERFORM tenancy.refuse('organization_not_single', 'XC409');
   END IF;
@@ -95,12 +112,6 @@ BEGIN
     v_created_organization := true;
   END IF;
   PERFORM tenancy.seed_roles(v_organization_id);
-
-  IF EXISTS (
-    SELECT 1 FROM identity.users AS u WHERE u.phone_number = v_phone AND u.email <> v_email
-  ) THEN
-    PERFORM tenancy.refuse('people_contact_taken', 'XC409');
-  END IF;
 
   -- The account: created active with no PIN, or re-activated with the given number (PIN kept).
   SELECT u.id INTO v_user_id FROM identity.users AS u WHERE u.email = v_email;

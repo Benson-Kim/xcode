@@ -469,11 +469,13 @@ class FakeOpsRepository:
                 "detail": {"request_id": command.request_id},
             }
         )
-        if not self.demo_seeded:
-            raise Forbidden(code="review_demo_only")
+        created_organization = not self.demo_seeded
+        self.demo_seeded = True
         created = self.review_account is None
         self.review_account = command
-        return CreatedReviewAccount(self.review_user_id, self.organization_id, created)
+        return CreatedReviewAccount(
+            self.review_user_id, self.organization_id, created, created_organization
+        )
 
 
 # --- identity: the api.auth_* routines, in memory -----------------------------------------

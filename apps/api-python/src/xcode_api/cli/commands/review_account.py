@@ -4,8 +4,9 @@ Unlike the other operator commands it validates the API's full ``Settings``: the
 is stored as the keyed digest the API computes, so ``XCODE_AUTH_SIGNING_KEY`` must be the
 API's own (exit 2 when it is unset), and a run after that key changes is needed for the
 code to work again. Connects as ``xcode_operator`` through ``XCODE_DATABASE_OPERATOR_URL``
-(exit 2 when unset). The routine refuses any organization not flagged as demo; a refusal is
-recorded in ``ops.operator_actions`` and exits 1. The PIN and code are printed once, on
+(exit 2 when unset). The login lives in the organization flagged as demo, which the first
+run creates with made-up data when there is none; a refusal is recorded in
+``ops.operator_actions`` and exits 1. The PIN and code are printed once, on
 stdout, and never logged (``docs/08-operability.md`` section 8).
 """
 
@@ -109,9 +110,10 @@ async def create(settings: Settings, email: str, phone: str) -> int:
 
 def _report(review: ReviewAccount) -> str:
     created = "yes" if review.account.created_user else "no"
+    organization = "yes" if review.account.created_organization else "no"
     return (
         f"user_id={review.account.user_id} organization_id={review.account.organization_id} "
-        f"created_user={created}\n"
+        f"created_user={created} created_organization={organization}\n"
         f"pin={review.pin} code={review.code}\n"
         "Give both to App Review only: the code answers the new-device step after the PIN. "
         "A second run replaces both."

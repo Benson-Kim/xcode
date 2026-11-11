@@ -1,7 +1,7 @@
 -- api.ops_seed_demo(p_operator text, p_request_id text, p_environment text, p_pins jsonb, p_now timestamptz) RETURNS jsonb
--- Purpose: in a development database, create the demo organization, flagged as demo (the only way an organization gets the flag that api.ops_review_account_create needs), with its four logins, expense catalogue and six weeks of fleet history, adding only what is missing, so a second run changes nothing already there; a database holding any other organization is never seeded.
+-- Purpose: in a development database, create the demo organization through ops.seed_demo_organization (or flag an older demo-fleet organization as demo), with its four logins, expense catalogue and six weeks of fleet history, adding only what is missing, so a second run changes nothing already there; a database holding any other organization is never seeded.
 -- Callers: OpsRoutines.seed_demo; CLI seed-demo.
--- Reads: tenancy.organizations, setup.expense_categories, setup.fleet_vehicles, setup.psv_companies. Writes: ops.operator_actions, tenancy.organizations and its localization, branding and security-policy rows, tenancy.roles, and through ops.seed_demo_user, ops.seed_catalogue, ops.seed_companies and ops.seed_fleet the people, catalogue, companies, vehicles, targets, scheduled items, investments, revenue and petty-cash rows with their change log.
+-- Reads: tenancy.organizations, setup.expense_categories, setup.fleet_vehicles, setup.psv_companies. Writes: ops.operator_actions, tenancy.organizations (the demo flag), tenancy.roles, and through ops.seed_demo_organization, ops.seed_demo_user, ops.seed_catalogue, ops.seed_companies and ops.seed_fleet the people, catalogue, companies, vehicles, targets, scheduled items, investments, revenue and petty-cash rows with their change log.
 -- Raises: XC403 seed_development_only, XC409 organization_not_single, XC409 seed_exists.
 -- Tests: tests/db/test_ops_routines.py.
 -- p_pins maps a login's email to a PIN hash made by the CLI; it is set only on an account this run created, and a login missing from it has no PIN. Everything is written as the demo Owner through the business routines, at instants counted back from p_now, so the change log reads as if the organization had been used.
@@ -51,19 +51,7 @@ BEGIN
       PERFORM tenancy.refuse('seed_exists', 'XC409');
     END IF;
   ELSE
-    v_organization_id := gen_random_uuid();
-    PERFORM tenancy.enter_organization_as_operator(v_organization_id);
-    INSERT INTO tenancy.organizations (id, slug, name, created_at, updated_at)
-    VALUES (
-      v_organization_id, 'demo-fleet', 'Demo Fleet', p_now - make_interval(days => 43),
-      p_now - make_interval(days => 43)
-    );
-    INSERT INTO tenancy.organization_localizations (organization_id, created_at, updated_at)
-    VALUES (v_organization_id, p_now - make_interval(days => 43), p_now - make_interval(days => 43));
-    INSERT INTO tenancy.organization_brandings (organization_id, created_at, updated_at)
-    VALUES (v_organization_id, p_now - make_interval(days => 43), p_now - make_interval(days => 43));
-    INSERT INTO tenancy.organization_security_policies (organization_id, created_at, updated_at)
-    VALUES (v_organization_id, p_now - make_interval(days => 43), p_now - make_interval(days => 43));
+    v_organization_id := ops.seed_demo_organization(p_now - make_interval(days => 43));
     v_created := true;
   END IF;
   UPDATE tenancy.organizations SET demo = true WHERE id = v_organization_id AND NOT demo;

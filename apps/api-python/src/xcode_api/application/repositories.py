@@ -214,9 +214,10 @@ class OpsRepository(Protocol):
         ...
 
     async def provision_user(self, command: UserProvisioning) -> ProvisionedUser:
-        """``api.ops_provision_user``: create or re-activate a person in the single
-        organization; raises ``RuleViolation`` (bad email, phone, role, names) or ``Conflict``
-        (``people_contact_taken``, ``organization_not_single``)."""
+        """``api.ops_provision_user``: create or re-activate a person in the one real (not
+        demo) organization; raises ``RuleViolation`` (bad email, phone, role, names) or
+        ``Conflict`` (``people_contact_taken``, also for a review login or a person of a demo
+        organization; ``organization_not_single``)."""
         ...
 
     async def remove_user(self, command: OperatorRequest) -> RemovedUser:
@@ -246,10 +247,10 @@ class OpsRepository(Protocol):
         ...
 
     async def create_review_account(self, command: ReviewAccountCreation) -> CreatedReviewAccount:
-        """``api.ops_review_account_create``: create or renew the App Review login, only in an
-        organization flagged as demo; raises ``Forbidden`` (``review_demo_only``) anywhere
-        else, ``RuleViolation`` (bad email or phone) or ``Conflict``
-        (``people_contact_taken``, ``organization_not_single``)."""
+        """``api.ops_review_account_create``: create or renew the App Review login in the one
+        organization flagged as demo, created with made-up data when there is none; raises
+        ``RuleViolation`` (bad email or phone) or ``Conflict`` (``people_contact_taken``,
+        ``review_phone_differs``, ``organization_not_single`` for two demo organizations)."""
         ...
 
 
