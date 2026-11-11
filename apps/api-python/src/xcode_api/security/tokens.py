@@ -11,7 +11,7 @@ required, and the lifetime is checked against the caller's clock with zero leewa
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -114,6 +114,7 @@ def _claims(payload: Mapping[str, Any]) -> TokenClaims:
         user_id=user_id,
         device_id=device,
         security_version=int(version),
+        issued_at=datetime.fromtimestamp(payload["nbf"], tz=UTC),
         organization_id=organization_id,
         role=_text(payload.get("role")),
         first_name=_text(payload.get("first_name")),

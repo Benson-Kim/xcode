@@ -85,7 +85,11 @@ MESSAGES: Mapping[str, Message] = MappingProxyType(
         "people_scope_empty": _invalid("Choose at least one item in the data scope."),
         "people_scope_duplicate": _invalid("Data scope items must be distinct."),
         "people_filter_status_invalid": _invalid(
-            "Status must be active, not_signed_in, pin_reset_due, locked or blocked."
+            "Status must be active, not_signed_in, invited, invite_expired, pin_reset_due,"
+            " locked or blocked."
+        ),
+        "people_invite_not_needed": _invalid(
+            "This person has already set up their PIN and needs no invitation."
         ),
         "people_permissions_invalid": _invalid("Permissions and approval limit are invalid."),
         "people_role_unknown": _invalid("Unknown role."),
@@ -123,6 +127,11 @@ MESSAGES: Mapping[str, Message] = MappingProxyType(
         "people_self_deactivate": _invalid("You cannot deactivate your own access."),
         "people_self_sign_out": _invalid("Use sign out for your own session."),
         "people_self_sign_in": _invalid("Use the profile menu for your own PIN and devices."),
+        "people_self_erase": _invalid("You cannot erase your own details here."),
+        "people_erase_active": _invalid("Block this person before erasing their details."),
+        "people_erase_shared": _invalid(
+            "This person also belongs to another organization, so their details cannot be erased."
+        ),
         "people_back_limit_invalid": _invalid(
             "Choose how far back this person can change records: none, 0 to 3650 days or 0 to 120 months."
         ),

@@ -11,6 +11,8 @@ from enum import Enum, StrEnum
 
 from ..domain.identity import (
     CodePurpose,
+    InvitationDeliveryState,
+    InvitationRevokeReason,
     SignInOperation,
     SignInOutcome,
     SignInRefusal,
@@ -93,6 +95,8 @@ TABLES: tuple[TableSpec, ...] = (
     _identity("trusted_devices", "IU"),
     _identity("refresh_tokens", "IU"),
     _identity("sign_in_attempts", "I", TableKind.AUDIT),
+    TableSpec("identity", "invitations", ("id",), "IU"),
+    TableSpec("identity", "review_accounts", ("user_id",), "IU", tenant=False),
     TableSpec("tenancy", "organizations", ("id",), "IU"),
     _org("tenancy", "memberships", "IU", "user_id"),
     _org("tenancy", "organization_localizations", "IU"),
@@ -192,7 +196,24 @@ INDEXES: tuple[IndexSpec, ...] = (
     IndexSpec("identity.trusted_devices", "user_id, device_id", unique=True),
     IndexSpec("identity.refresh_tokens", "token_hash", unique=True),
     IndexSpec("identity.refresh_tokens", "user_id, device_id"),
+    IndexSpec(
+        "identity.invitations",
+        "user_id",
+        unique=True,
+        where="(accepted_at IS NULL) AND (revoked_at IS NULL)",
+    ),
+    IndexSpec("identity.invitations", "token_hash", unique=True),
+    IndexSpec(
+        "identity.invitations",
+        "created_at",
+        where=(
+            "(delivery_state = 'pending'::text) AND (accepted_at IS NULL) AND (revoked_at IS NULL)"
+        ),
+    ),
+    IndexSpec("identity.invitations", "organization_id"),
+    IndexSpec("identity.invitations", "invited_by", where="invited_by IS NOT NULL"),
     IndexSpec("identity.sign_in_attempts", "user_id, occurred_at DESC"),
+    IndexSpec("ops.rate_limit_windows", "window_start"),
     IndexSpec("identity.sign_in_attempts", "phone_digest, occurred_at DESC"),
     IndexSpec("tenancy.organizations", "slug", unique=True),
     IndexSpec("tenancy.memberships", "user_id", unique=True, where="active"),
@@ -294,6 +315,8 @@ CHECK_LIST_ENUMS: dict[str, type[Enum]] = {
     "identity.sign_in_attempts.ck_sign_in_attempts_operation": SignInOperation,
     "identity.sign_in_attempts.ck_sign_in_attempts_outcome": SignInOutcome,
     "identity.sign_in_attempts.ck_sign_in_attempts_refusal": SignInRefusal,
+    "identity.invitations.ck_invitations_revoke_reason": InvitationRevokeReason,
+    "identity.invitations.ck_invitations_delivery_state": InvitationDeliveryState,
     "tenancy.organization_localizations.ck_localizations_date_pattern": DatePattern,
     "tenancy.organization_localizations.ck_localizations_week_numbering": WeekNumbering,
     "tenancy.organization_logos.ck_logos_content_type": LogoContentType,

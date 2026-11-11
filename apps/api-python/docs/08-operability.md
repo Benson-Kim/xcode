@@ -22,7 +22,7 @@ loading `.env` everywhere is not carried over).
 | `XCODE_AUTH_AUDIENCE` | string | `xcode-clients` | |
 | `XCODE_AUTH_TRUST_LIFETIME_DAYS` | int or empty | empty | positive or empty (empty = no expiry) |
 | `XCODE_AUTH_PIN_ITERATIONS` | int | value from `Security.cs` (210 000) | must equal the .NET value until all hashes are upgraded; changing it is a documented migration; `Settings.for_tests()` uses `PIN_ITERATIONS_TESTING` (1 000) |
-| `XCODE_RATE_LIMIT_BACKEND` | `memory` \| `postgres` | `memory` | production with more than one replica must use `postgres` (documented, and the readiness log line states the backend) |
+| `XCODE_RATE_LIMIT_BACKEND` | `memory` \| `postgres` | `memory` | production refuses `memory` at startup (limits must hold across processes and replicas); the shared windows sweep themselves (`api.rate_limit_hit`, open question 56); the readiness log line states the backend |
 | `XCODE_RATE_LIMIT_AUTH_PER_MINUTE` | int | 30 (testing: 10000) | positive |
 | `XCODE_RATE_LIMIT_PIN_PER_ADDRESS` | int | 20 (testing: 10000) | positive; PIN checks (A01, A02, N02, N07) per client address in ten minutes |
 | `XCODE_RATE_LIMIT_PIN_PER_DEVICE` | int | 10 (testing: 10000) | positive; PIN checks per `deviceId` in ten minutes |
@@ -37,6 +37,10 @@ loading `.env` everywhere is not carried over).
 | `XCODE_EMAIL_PASSWORD` | string | empty | secret; the summary shows only set or unset |
 | `XCODE_EMAIL_TIMEOUT_SECONDS` | int | 10 | positive; bounds the SMTP operations and the new-device mail awaited before the reply (`docs/07-auth.md` section 7) |
 | `XCODE_EMAIL_TLS` | bool | true | port 465 is implicit TLS, any other port requires STARTTLS; `false` sends without TLS and is refused outside development unless `XCODE_EMAIL_HOST` is `localhost` or a loopback address literal (a relay on the same machine, as .NET's `Email:EnableSsl=false`, `Infrastructure/Security.cs` `SmtpEmailSender.UsesTls`); a host name is never resolved for this, so one that only resolves to the loopback interface still needs TLS |
+| `XCODE_PUBLIC_WEB_URL` | URL | empty | the web origin invitation links use (`{origin}/invite#{token}`), never the request's Host; `https` with no path, `http` only for localhost outside production; required in production |
+| `XCODE_APP_STORE_URL` | URL | empty | optional `https` App Store page shown in invitations |
+| `XCODE_PLAY_STORE_URL` | URL | empty | optional `https` Google Play page shown in invitations |
+| `XCODE_MIN_MOBILE_VERSION` | dotted numeric | empty | the oldest mobile build served (`1.4.0`); a request whose `X-XCODE-Client` is `mobile/<older or malformed version>` answers 426 `update_required` on every route but health (`docs/06-http-contract.md` 1.4); empty: no check. Raise it only once the store build that meets it is live |
 | `XCODE_LOG_FORMAT` | `console` \| `json` | `json` | `console` allowed in development and testing, refused in production |
 | `XCODE_LOG_LEVEL` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` \| `CRITICAL` | `INFO` | case-insensitive |
 | `XCODE_DEVELOPMENT_CODES` | bool | false | returns verification codes in responses and skips the resend cooldown; refused unless `XCODE_ENV=development` (in testing the codes are always absent, as in .NET) |
@@ -74,6 +78,9 @@ owner URL and nothing of the API's own configuration or secrets.
 - Mail: `mail.queued`, `mail.sent`, `mail.failed` (and `mail.withdraw_failed`) with recipient
   hash (SHA-256 prefix) and, for verification codes, `purpose`, `code_id` and `request_id`;
   never the address or the code (the development log mailer's `mail.body` is the exception).
+- Invitation sweep: `invitation.sweep` (INFO, `claimed`) when a run re-issued lost
+  invitations; `job.failed` (ERROR, `job=invitation_sweep`, the exception type) when a run
+  failed. The next run still happens 60 s later (`docs/07-auth.md` section 13.4).
 
 ## 3. Request id and tracing
 
@@ -102,7 +109,11 @@ the reason is logged.
 `http_requests_total{route,method,status}`, `http_request_duration_seconds{route}`,
 `db_routine_duration_seconds{routine}`, `db_pool_connections{state}`,
 `auth_refusals_total{reason}` (reason is internal: `unknown`, `paused`, `capped`,
-`wrong_pin`; never exposed per account), `mail_queue_depth`, `rate_limit_rejections_total`.
+`wrong_pin`; never exposed per account), `auth_bursts_total{kind}` (`wrong_pin` or
+`wrong_code`: one number used its last try, so a rise counts numbers under attack without a
+per-number label), `invitations_total{event}` (`sent`, `failed`, `redeemed`; the mail queue
+and the sweep report through the lifespan's binding), `mail_queue_depth`,
+`rate_limit_rejections_total`. A 426 answer is `http_requests_total{status="426"}`.
 
 - `route` is the route template (`/setup/people/{id}`); a request no route matched is counted
   as `unmatched`, so a scanner's paths never become label values. `state` is `idle`, `busy`
@@ -161,6 +172,7 @@ drains for at most `XCODE_SHUTDOWN_GRACE_SECONDS`; pool closes; exit 0.
 | `revoke-sessions --email` | bumps `security_version`, revokes refresh tokens and device trust; the user signs in again with a code | `xcode_operator` (routine `api.ops_revoke_sessions`) |
 | `account-state --email` | prints status, pause, attempt counters, trusted-device and live-token counts for a support call; never a hash | `xcode_operator` (routine `api.ops_account_state`) |
 | `seed-demo` | development only; refuses otherwise; idempotent | `xcode_operator` (routine `api.ops_seed_demo`; `docs/13-open-questions.md` question 7) |
+| `review-account create --email --phone` | the App Review login: only in an organization flagged as demo (`ops_seed_demo` sets the flag, so a review instance is its own database seeded in development and served in production; never a database holding real data). Creates or renews the person and prints a new four-digit PIN and six-digit code once; the code answers the new-device step after the PIN (it is never emailed, never settable over HTTP), and every sign-in with it is in the sign-in history. Validates the API's full settings: the code is stored as the API's keyed digest, so `XCODE_AUTH_SIGNING_KEY` must be the API's (exit 2 when unset), and the command is run again after that key changes. A second run replaces both secrets | `xcode_operator` (routine `api.ops_review_account_create`) |
 | `openapi > file` | prints the OpenAPI document for contract comparison | none |
 | `settings-check` | validates the `XCODE_*` settings of the API process and prints the startup summary (secrets shown only as set or unset); exit 2 naming every bad variable | none |
 

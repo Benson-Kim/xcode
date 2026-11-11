@@ -13,7 +13,7 @@ import getpass
 
 from ...db import migrate as runner
 from ...db.verify import run_checks
-from ...settings import CliSettings, SettingsError, load_cli_settings
+from ...settings import CliSettings, Settings, SettingsError, load_cli_settings
 
 NAME = "db"
 HELP = "migration runner: migrate, routines, status, verify, down"
@@ -37,7 +37,7 @@ def configure(parser: argparse.ArgumentParser) -> None:
     p_down.add_argument("--i-know-this-destroys-data", action="store_true", dest="confirmed")
 
 
-def resolve_operator(settings: CliSettings) -> str:
+def resolve_operator(settings: CliSettings | Settings) -> str:
     if settings.operator:
         return settings.operator
     try:

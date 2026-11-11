@@ -1,22 +1,32 @@
-"""Mail adapters: the verification message, log and SMTP mailers, and a drained queue.
+"""Mail adapters: the verification and invitation messages, log and SMTP mailers, and a
+drained queue.
 
-Log events carry the recipient hash and non-secret tags, never the address or the code; the
-log mailer writes the body only when told to (development and testing).
+Log events carry the recipient hash and non-secret tags, never the address, the code or the
+invitation token; the log mailer writes the body only when told to (development and testing).
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import html
+import unicodedata
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from email.message import EmailMessage
 from types import MappingProxyType
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiosmtplib
 import structlog
 
-from ..application.ports import Mailer, MailMessage, VerificationMail
+from ..application.ports import (
+    DeletionNotice,
+    InvitationMail,
+    Mailer,
+    MailMessage,
+    VerificationMail,
+)
 from ..domain.identity import CodePurpose
 from ..settings import is_local_host
 
@@ -34,6 +44,7 @@ PURPOSE_LABELS = MappingProxyType(
 )
 
 FailureCallback = Callable[[], Awaitable[None]]
+SuccessCallback = Callable[[], Awaitable[None]]
 
 
 def verification_message(mail: VerificationMail) -> MailMessage:
@@ -53,6 +64,151 @@ def verification_message(mail: VerificationMail) -> MailMessage:
             "request_id": mail.request_id,
         },
     )
+
+
+@dataclass(frozen=True, slots=True)
+class InvitationLinks:
+    """Where an invitation points: the web origin (``XCODE_PUBLIC_WEB_URL``, never the
+    request's Host) and the store pages, when configured."""
+
+    web_url: str
+    app_store_url: str = ""
+    play_store_url: str = ""
+
+    def invite_link(self, token: str) -> str:
+        # The token rides in the fragment, so it never reaches a server log or a Referer.
+        return f"{self.web_url}/invite#{token}"
+
+
+INVITATION_SUBJECT = "{organization} invited you to XCODE"
+
+
+def invitation_message(mail: InvitationMail, links: InvitationLinks) -> MailMessage:
+    """Text and HTML for one invitation. Every admin-typed value is folded to one line, and
+    escaped in the HTML part; no phone number is ever included."""
+    organization = _one_line(mail.organization_name)
+    first_name = _one_line(mail.first_name)
+    inviter = _one_line(mail.inviter_name or "")
+    link = links.invite_link(mail.token)
+    code = f"{mail.code[:3]} {mail.code[3:]}"
+    until = _local_time(mail)
+    added = f"{inviter or 'Someone'} added you to {organization}."
+    greeting = f"Hello {first_name}," if first_name else "Hello,"
+    stores = _store_lines(links)
+
+    text_lines = [
+        greeting,
+        "",
+        added,
+        "",
+        f"Set up my access: {link}",
+        "",
+        f"Or open the XCODE app, enter your mobile number and type {code}.",
+        "",
+        f"The link and code work until {until}.",
+    ]
+    if stores:
+        text_lines += ["", "Get the app:", *(f"{name}: {url}" for name, url in stores)]
+    text_lines += ["", _NO_PIN_BY_EMAIL]
+
+    e = _escape
+    store_html = "".join(
+        f'<p style="margin:4px 0"><a href="{e(url)}">{e(name)}</a></p>' for name, url in stores
+    )
+    body_html = (
+        '<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1f2933">'
+        f"<p>{e(greeting)}</p>"
+        f"<p>{e(added)}</p>"
+        f'<p><a href="{e(link)}" style="display:inline-block;padding:10px 18px;'
+        'background:#1f6feb;color:#ffffff;text-decoration:none;border-radius:6px">'
+        "Set up my access</a></p>"
+        "<p>Or open the XCODE app, enter your mobile number and type "
+        f"<strong>{e(code)}</strong>.</p>"
+        f"<p>The link and code work until {e(until)}.</p>"
+        f"{store_html}"
+        f'<p style="color:#52606d;font-size:13px">{e(_NO_PIN_BY_EMAIL)}</p>'
+        "</body></html>"
+    )
+    tags = {"purpose": "invitation", "invitation_id": str(mail.invitation_id)}
+    if mail.request_id:
+        tags["request_id"] = mail.request_id
+    support = _one_line(mail.support_email or "")
+    return MailMessage(
+        to=mail.to,
+        subject=INVITATION_SUBJECT.format(organization=organization),
+        text="\n".join(text_lines),
+        html=body_html,
+        reply_to=support or None,
+        tags=tags,
+    )
+
+
+_NO_PIN_BY_EMAIL = "XCODE never asks for your PIN by email. If you did not expect this, ignore it."
+
+
+DELETION_REQUEST_SUBJECT = "A member asked to delete their XCODE account"
+
+
+def deletion_request_message(notice: DeletionNotice) -> MailMessage:
+    """Tell one administrator who can block members that a member asked to delete their
+    account. Every member-typed name is folded to one line and escaped in the HTML part; no
+    address, phone number or other personal data is included."""
+    admin = _one_line(notice.recipient_first_name)
+    requester = _one_line(notice.requester_name)
+    organization = _one_line(notice.organization_name)
+    greeting = f"Hello {admin}," if admin else "Hello,"
+    asked = f"{requester or 'A member'} has asked to delete their XCODE account in {organization}."
+    guidance = (
+        "Open People in XCODE to review the request. If it is genuine, block and erase the member "
+        "there; their financial records are kept against a former member."
+    )
+    text_lines = [greeting, "", asked, "", guidance]
+    e = _escape
+    body_html = (
+        '<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1f2933">'
+        f"<p>{e(greeting)}</p>"
+        f"<p>{e(asked)}</p>"
+        f'<p style="color:#52606d">{e(guidance)}</p>'
+        "</body></html>"
+    )
+    tags = {"purpose": "deletion_request"}
+    if notice.request_id:
+        tags["request_id"] = notice.request_id
+    return MailMessage(
+        to=notice.to,
+        subject=DELETION_REQUEST_SUBJECT,
+        text="\n".join(text_lines),
+        html=body_html,
+        tags=tags,
+    )
+
+
+def _escape(value: str) -> str:
+    return html.escape(value, quote=True)
+
+
+def _one_line(value: str) -> str:
+    """Control and format characters (CR, LF, NUL, bidi overrides) become spaces, so an
+    admin-typed name can neither add a header nor reshape the message."""
+    return " ".join("".join(" " if _is_control(ch) else ch for ch in value).split())
+
+
+def _is_control(ch: str) -> bool:
+    return unicodedata.category(ch)[0] == "C"
+
+
+def _local_time(mail: InvitationMail) -> str:
+    try:
+        zone = ZoneInfo(mail.time_zone)
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("UTC")
+    moment = mail.expires_at.astimezone(zone)
+    return f"{moment:%A} {moment.day} {moment:%B %Y}, {moment:%H:%M} {moment:%Z}"
+
+
+def _store_lines(links: InvitationLinks) -> list[tuple[str, str]]:
+    stores = (("App Store", links.app_store_url), ("Google Play", links.play_store_url))
+    return [(name, url) for name, url in stores if url]
 
 
 class MailDeliveryError(Exception):
@@ -117,7 +273,11 @@ class SmtpMailer:
         email["From"] = self._sender
         email["To"] = message.to
         email["Subject"] = message.subject
+        if message.reply_to:
+            email["Reply-To"] = message.reply_to
         email.set_content(message.text)
+        if message.html is not None:
+            email.add_alternative(message.html, subtype="html")
         try:
             await aiosmtplib.send(
                 email,
@@ -137,15 +297,17 @@ class SmtpMailer:
 class _Pending:
     message: MailMessage
     on_failure: FailureCallback | None
+    on_success: SuccessCallback | None = None
 
 
 class MailQueue:
     """A bounded in-process queue drained by one background task, in order.
 
     ``enqueue`` never blocks: a full queue drops the message and logs ``mail.dropped`` at
-    ERROR. Each send is isolated; a failure logs ``mail.failed``, runs the message's
-    ``on_failure`` callback (whose own failure is logged and swallowed) and does not stop
-    the drain. ``drain`` empties the queue for shutdown within a budget.
+    ERROR (``on_failure`` does not run; a durable caller's sweep re-sends it). Each send is
+    isolated; a failure logs ``mail.failed`` and runs ``on_failure``, a success logs
+    ``mail.sent`` and runs ``on_success``. A callback's own failure is logged and swallowed,
+    and never stops the drain. ``drain`` empties the queue for shutdown within a budget.
     """
 
     def __init__(self, mailer: Mailer, *, max_pending: int = 1000) -> None:
@@ -163,10 +325,16 @@ class MailQueue:
             self._stopped.clear()
             self._task = asyncio.create_task(self._run())
 
-    def enqueue(self, message: MailMessage, *, on_failure: FailureCallback | None = None) -> None:
+    def enqueue(
+        self,
+        message: MailMessage,
+        *,
+        on_failure: FailureCallback | None = None,
+        on_success: SuccessCallback | None = None,
+    ) -> None:
         rh = recipient_hash(message.to)
         try:
-            self._queue.put_nowait(_Pending(message, on_failure))
+            self._queue.put_nowait(_Pending(message, on_failure, on_success))
         except asyncio.QueueFull:
             logger.error("mail.dropped", recipient_hash=rh, subject=message.subject, **message.tags)
             return
@@ -186,9 +354,11 @@ class MailQueue:
         except Exception as exc:
             logger.error("mail.failed", recipient_hash=rh, error=type(exc).__name__, **message.tags)
             if pending.on_failure is not None:
-                await _run_failure_callback(pending.on_failure, message.tags)
+                await _run_callback(pending.on_failure, "mail.withdraw_failed", message.tags)
         else:
             logger.info("mail.sent", recipient_hash=rh, subject=message.subject, **message.tags)
+            if pending.on_success is not None:
+                await _run_callback(pending.on_success, "mail.record_failed", message.tags)
 
     async def drain(self, timeout_seconds: float) -> None:
         """Deliver everything already queued within the budget, then stop the task."""
@@ -230,8 +400,38 @@ class VerificationMailer:
         self._queue.enqueue(verification_message(mail), on_failure=on_failure)
 
 
-async def _run_failure_callback(callback: FailureCallback, tags: Mapping[str, str]) -> None:
+class QueuedInvitationMailer:
+    """The ``InvitationMailer`` adapter: renders the invitation and queues it after the reply;
+    the callbacks record the delivery state."""
+
+    def __init__(self, queue: MailQueue, links: InvitationLinks) -> None:
+        self._queue = queue
+        self._links = links
+
+    def send_later(
+        self, mail: InvitationMail, *, on_sent: SuccessCallback, on_failure: FailureCallback
+    ) -> None:
+        self._queue.enqueue(
+            invitation_message(mail, self._links), on_failure=on_failure, on_success=on_sent
+        )
+
+
+class QueuedDeletionNotifier:
+    """The ``DeletionNotifier`` adapter: renders each notice and queues it after the reply. There
+    is no durable outbox: a dropped or failed send is logged by the queue, and the request stays
+    recorded in the change log for an administrator to see."""
+
+    def __init__(self, queue: MailQueue) -> None:
+        self._queue = queue
+
+    def notify(self, notice: DeletionNotice) -> None:
+        self._queue.enqueue(deletion_request_message(notice))
+
+
+async def _run_callback(
+    callback: Callable[[], Awaitable[None]], event: str, tags: Mapping[str, str]
+) -> None:
     try:
         await callback()
     except Exception as exc:
-        logger.error("mail.withdraw_failed", error=type(exc).__name__, **tags)
+        logger.error(event, error=type(exc).__name__, **tags)

@@ -81,11 +81,18 @@ class PersonDeviceDto(ApiModel):
     last_used_at: datetime
 
 
+class PersonInvitationDto(ApiModel):
+    state: str
+    sent_at: datetime | None
+    expires_at: datetime
+
+
 class PersonSignInDto(ApiModel):
     status: str
     lock: str | None
     last_signed_in_at: datetime | None
     email: str
+    invitation: PersonInvitationDto | None
     devices: list[PersonDeviceDto]
 
 
@@ -171,6 +178,14 @@ class PersonLifecycleRequest(ApiModel):
     """The optional body of activate and deactivate."""
 
     version: Int64 | None = None
+    reason: str | None = None
+
+
+class PersonErasureRequest(ApiModel):
+    """The body of erasure: the version the caller saw, and the typed reason the routine
+    requires."""
+
+    version: Int64
     reason: str | None = None
 
 

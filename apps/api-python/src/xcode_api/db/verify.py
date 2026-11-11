@@ -522,7 +522,7 @@ def check_declared_indexes(conn: Conn) -> list[str]:
         JOIN pg_catalog.pg_class c ON c.oid = i.indrelid
         WHERE c.relnamespace::regnamespace::text = ANY(%s)
         """,
-        (list(SPECIFIED_SCHEMAS),),
+        (sorted({spec.table.split(".")[0] for spec in INDEXES}),),
     )
     present: set[IndexSpec] = set()
     for r in rows:

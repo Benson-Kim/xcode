@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -26,6 +27,7 @@ from ..support.setup_client import (
     problem,
     statements,
 )
+from ..support.tenancy import add_company, set_scope
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -96,7 +98,7 @@ async def test_a_created_person_reads_back_in_the_wire_order(api: AuthApi, owner
         api.client.post("/setup/people", json=person(), headers=owner.headers)
     )
     created = ok(response)
-    assert count == 2
+    assert count == 3, "the third statement asks whether an invitation is due for mailing"
     response, count = await statements(
         api.client.get(f"/setup/people/{created['id']}", headers=owner.headers)
     )
@@ -118,7 +120,7 @@ async def test_a_created_person_reads_back_in_the_wire_order(api: AuthApi, owner
     assert body["scopeMode"] == "all"
     assert body["permissions"] == list(role_rights("Revenue clerk"))
     assert (body["status"], body["lastSignedInAt"], body["canChange"]) == (
-        "not_signed_in",
+        "invited",
         None,
         "7 days back",
     )
@@ -128,8 +130,13 @@ async def test_a_created_person_reads_back_in_the_wire_order(api: AuthApi, owner
         {"name": "Revenue", "held": 2, "total": 4},
     ]
     assert body["everything"] is False
-    assert body["signIn"] == {
-        "status": "not_signed_in",
+    sign_in = body["signIn"]
+    assert list(sign_in) == ["status", "lock", "lastSignedInAt", "email", "invitation", "devices"]
+    invitation = sign_in.pop("invitation")
+    assert sorted(invitation) == ["expiresAt", "sentAt", "state"]
+    assert invitation["state"] in ("pending", "sent") and invitation["expiresAt"] is not None
+    assert sign_in == {
+        "status": "invited",
         "lock": None,
         "lastSignedInAt": None,
         "email": "jane.njeri@example.com",
@@ -158,17 +165,31 @@ async def test_the_people_page_carries_its_paging_fields(api: AuthApi, owner: Me
     assert unparsable.status_code == 400
 
 
+async def one_of_each_state(api: AuthApi, owner: Member) -> tuple[str, str, str]:
+    """An invited person (just added), one not signed in with no live invitation (deactivating
+    ends it, reactivating sends none) and a blocked one."""
+    invited = await create(api, owner)
+    waiting = await create(api, owner, email="wanjiru@example.com", phoneNumber="0722000113")
+    off = await create(api, owner, email="otieno@example.com", phoneNumber="0722000112")
+    deactivate = {"version": 1, "reason": "Left the company"}
+    for person_id in (waiting, off):
+        ok(
+            await api.client.post(
+                f"/setup/people/{person_id}/deactivate", json=deactivate, headers=owner.headers
+            )
+        )
+    ok(
+        await api.client.post(
+            f"/setup/people/{waiting}/activate", json={"version": 2}, headers=owner.headers
+        )
+    )
+    return invited, waiting, off
+
+
 async def test_the_people_page_keeps_one_role_and_one_sign_in_state(
     api: AuthApi, owner: Member
 ) -> None:
-    waiting = await create(api, owner)
-    off = await create(api, owner, email="otieno@example.com", phoneNumber="0722000112")
-    deactivate = {"version": 1, "reason": "Left the company"}
-    ok(
-        await api.client.post(
-            f"/setup/people/{off}/deactivate", json=deactivate, headers=owner.headers
-        )
-    )
+    invited, waiting, off = await one_of_each_state(api, owner)
 
     async def ids(query: str) -> list[str]:
         response, count = await statements(
@@ -177,10 +198,11 @@ async def test_the_people_page_keeps_one_role_and_one_sign_in_state(
         assert count == 2
         return [item["id"] for item in ok(response)["items"]]
 
+    assert await ids("&status=invited") == [invited]
     assert await ids("&status=waiting") == [waiting]
     assert await ids("&status=none") == [off]
     assert await ids("&status=active") == [str(owner.user_id)]
-    assert await ids("&role=Revenue%20clerk") == sorted([waiting, off])
+    assert await ids("&role=Revenue%20clerk") == sorted([invited, waiting, off])
     assert await ids("&role=Revenue%20clerk&status=none") == [off]
     assert await ids("&role=all&status=all") == await ids("")
     assert await ids("&role=Driver") == []
@@ -188,21 +210,15 @@ async def test_the_people_page_keeps_one_role_and_one_sign_in_state(
         await api.client.get("/setup/people?status=asleep", headers=owner.headers),
         400,
         INVALID,
-        "Status must be active, not_signed_in, pin_reset_due, locked or blocked.",
+        "Status must be active, not_signed_in, invited, invite_expired, pin_reset_due,"
+        " locked or blocked.",
     )
 
 
 async def test_the_status_filter_accepts_the_new_and_the_legacy_words(
     api: AuthApi, owner: Member
 ) -> None:
-    waiting = await create(api, owner)
-    off = await create(api, owner, email="otieno@example.com", phoneNumber="0722000112")
-    deactivate = {"version": 1, "reason": "Left the company"}
-    ok(
-        await api.client.post(
-            f"/setup/people/{off}/deactivate", json=deactivate, headers=owner.headers
-        )
-    )
+    invited, waiting, off = await one_of_each_state(api, owner)
 
     async def ids(status: str) -> list[str]:
         page = ok(
@@ -214,8 +230,9 @@ async def test_the_status_filter_accepts_the_new_and_the_legacy_words(
 
     assert await ids("not_signed_in") == await ids("waiting") == [waiting]
     assert await ids("blocked") == await ids("none") == [off]
+    assert await ids("invited") == [invited]
     assert await ids("active") == [str(owner.user_id)]
-    assert await ids("pin_reset_due") == await ids("locked") == []
+    assert await ids("pin_reset_due") == await ids("locked") == await ids("invite_expired") == []
 
 
 @pytest.mark.parametrize(
@@ -236,6 +253,65 @@ async def test_a_malformed_person_is_refused_with_its_sentence(
 ) -> None:
     response = await api.client.post("/setup/people", json=person(**changes), headers=owner.headers)
     problem(response, status, INVALID, detail)
+
+
+async def test_a_vehicle_scope_may_be_empty_and_a_company_scope_may_not(
+    api: AuthApi, owner: Member
+) -> None:
+    person_id = await create(api, owner, scopeMode="vehicles")
+    path = f"/setup/people/{person_id}"
+    body = ok(await api.client.get(path, headers=owner.headers))
+    assert (body["scopeMode"], body["companyIds"], body["vehicleIds"]) == ("vehicles", [], [])
+    refused = await api.client.put(
+        path, json=person(scopeMode="companies", version=1), headers=owner.headers
+    )
+    problem(refused, 400, INVALID, "Choose at least one item in the data scope.")
+    ok(await api.client.put(path, json=person(version=1), headers=owner.headers))
+    emptied = person(scopeMode="vehicles", version=2)
+    ok(await api.client.put(path, json=emptied, headers=owner.headers))
+    body = ok(await api.client.get(path, headers=owner.headers))
+    assert (body["scopeMode"], body["companyIds"], body["vehicleIds"], body["version"]) == (
+        "vehicles",
+        [],
+        [],
+        3,
+    )
+
+
+async def test_only_an_editor_who_sees_every_company_may_leave_the_vehicle_list_empty(
+    api: AuthApi, owner: Member
+) -> None:
+    row = api.owner.execute("SELECT id FROM tenancy.organizations").fetchone()
+    assert row is not None
+    org = UUID(str(row["id"]))
+    alpha = add_company(api.owner, org, "Alpha Sacco")
+    office = await join(api, email="otto@example.com", phone="0733000111", role="Office admin")
+    scoped = await join(api, email="sam@example.com", phone="0733000222", role="Office admin")
+    set_scope(api.owner, scoped.user_id, org, companies=[alpha])
+    person_id = await create(api, owner, scopeMode="companies", companyIds=[str(alpha)])
+    path = f"/setup/people/{person_id}"
+    no_vehicles = person(
+        email="mary@example.com",
+        phoneNumber="0722000222",
+        role="Office admin",
+        permissions=list(role_rights("Office admin")),
+        scopeMode="vehicles",
+    )
+    sentence = "Choose at least one item in the data scope."
+    refused = await api.client.post("/setup/people", json=no_vehicles, headers=scoped.headers)
+    problem(refused, 400, INVALID, sentence)
+    emptied = person(scopeMode="vehicles", version=1)
+    refused = await api.client.put(path, json=emptied, headers=scoped.headers)
+    problem(refused, 400, INVALID, sentence)
+    created = ok(await api.client.post("/setup/people", json=no_vehicles, headers=office.headers))
+    body = ok(await api.client.get(f"/setup/people/{created['id']}", headers=office.headers))
+    assert (body["scopeMode"], body["companyIds"], body["vehicleIds"]) == ("vehicles", [], [])
+    body = ok(await api.client.get(path, headers=owner.headers))
+    assert (body["scopeMode"], body["companyIds"], body["version"]) == (
+        "companies",
+        [str(alpha)],
+        1,
+    )
 
 
 async def test_contact_details_already_in_use_are_refused(api: AuthApi, owner: Member) -> None:
@@ -272,7 +348,7 @@ async def test_an_update_needs_the_loaded_version(api: AuthApi, owner: Member) -
     renamed = person(firstName="Janet", version=1)
     response, count = await statements(api.client.put(path, json=renamed, headers=owner.headers))
     assert ok(response) == {"id": person_id}
-    assert count == 2
+    assert count == 3, "the third statement asks whether an invitation is due for mailing"
     problem(await api.client.put(path, json=renamed, headers=owner.headers), 409, STALE)
     assert ok(await api.client.get(path, headers=owner.headers))["version"] == 2
 

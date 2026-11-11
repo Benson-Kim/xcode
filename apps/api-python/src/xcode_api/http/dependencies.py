@@ -121,6 +121,29 @@ async def pin_address_limit(request: Request) -> None:
     )
 
 
+async def invite_address_limit(request: Request) -> None:
+    """The redeem throttle's address half, charged after the ``auth`` policy and before
+    pre-validation: ``auth_invite:address:<address>`` in the ten-minute PIN window."""
+    c = container(request)
+    await _charge(
+        c,
+        f"auth_invite:address:{client_address(request)}",
+        c.settings.rate_limit_pin_per_address,
+        c.clock.now(),
+    )
+
+
+async def invite_token_limit(request: Request, token_key: str) -> None:
+    """The redeem throttle's token half, charged once the body is valid:
+    ``auth_invite:token:<digest>`` in the ten-minute PIN window, so one link takes as many
+    guesses at its number as one device takes at its PIN. ``token_key`` is the token's digest,
+    never the token, so a key that reaches a log names no usable secret."""
+    c = container(request)
+    await _charge(
+        c, f"auth_invite:token:{token_key}", c.settings.rate_limit_pin_per_device, c.clock.now()
+    )
+
+
 async def _charge(c: Container, key: str, limit: int, now: datetime) -> None:
     decision = await c.rate_limiter.hit(key, limit, PIN_WINDOW_SECONDS, now)
     if not decision.allowed:

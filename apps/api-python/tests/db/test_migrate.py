@@ -23,7 +23,6 @@ from xcode_api.db.migrate import (
 from xcode_api.db.verify import run_checks
 
 from ..support.database import Harness, _with_role
-from ..support.rows import seed_organization
 
 pytestmark = pytest.mark.structure
 
@@ -565,6 +564,23 @@ def test_the_setup_migration_splits_weekly_targets_and_groups_categories_by_buck
     ) in notices
 
 
+def _seed_one_person(conn: psycopg.Connection[dict[str, object]]) -> dict[str, object]:
+    org = conn.execute(
+        "INSERT INTO tenancy.organizations (slug, name) VALUES ('ledger', 'Ledger') RETURNING id"
+    ).fetchone()
+    user = conn.execute(
+        "INSERT INTO identity.users (email, phone_number) "
+        "VALUES ('ledger@example.com', '+254722990001') RETURNING id"
+    ).fetchone()
+    assert org is not None and user is not None
+    conn.execute(
+        "INSERT INTO tenancy.memberships (organization_id, user_id, first_name, last_name) "
+        "VALUES (%s, %s, 'Lea', 'Ledger')",
+        (org["id"], user["id"]),
+    )
+    return {"org": org["id"], "user": user["id"]}
+
+
 def test_the_expenses_migration_refuses_to_reverse_over_its_change_log_rows(
     fresh_owner_url: str,
 ) -> None:
@@ -578,13 +594,13 @@ def test_the_expenses_migration_refuses_to_reverse_over_its_change_log_rows(
     try:
         with advisory_lock(conn):
             runner.migrate(to=13)
-            rows = seed_organization(conn)
-            conn.execute(log, rows.params())
+            person = _seed_one_person(conn)
+            conn.execute(log, person)
             with pytest.raises(psycopg.Error, match="centralexpenses or reports"):
                 runner.down(13, confirmed=True, env="testing")
             conn.execute("DELETE FROM tenancy.change_log WHERE section = 'reports'")
             runner.down(13, confirmed=True, env="testing")
             with pytest.raises(psycopg.errors.CheckViolation, match="ck_change_log_section"):
-                conn.execute(log, rows.params())
+                conn.execute(log, person)
     finally:
         conn.close()

@@ -32,7 +32,9 @@ class ResolveSession:
         now = self._clock.now()
         claims = self._tokens.verify(command.token, now=now)
         context = await self._identity.resolve_session(
-            SessionCheck(claims.user_id, claims.device_id, claims.security_version, now)
+            SessionCheck(
+                claims.user_id, claims.device_id, claims.security_version, claims.issued_at, now
+            )
         )
         principal = Principal(
             user_id=claims.user_id,

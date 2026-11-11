@@ -48,6 +48,7 @@ from ..support.scenario import (
 
 POLICY_PAUSE_SECONDS = 15 * 60
 YEAR = timedelta(days=365)
+GRACE = timedelta(seconds=30)
 
 
 def _counters(owner: Conn, user_id: UUID) -> tuple[int, int]:
@@ -869,7 +870,8 @@ def test_rotation_then_replay_revokes_the_devices_live_tokens(
     by_hash = {t["token_hash"]: t for t in tokens(owner_conn, account.user_id)}
     assert (by_hash[first]["revoked"], by_hash[first]["version"]) == (True, 1)
     assert by_hash[second]["revoked"] is False
-    replayed = auth.refresh(first)
+    assert by_hash[first]["rotated_at"] == T0
+    replayed = auth.refresh(first, now=T0 + GRACE)
     assert (replayed["outcome"], replayed["refusal"]) == ("refused", "token_replayed")
     by_hash = {t["token_hash"]: t for t in tokens(owner_conn, account.user_id)}
     assert by_hash[second]["revoked"] is True
@@ -877,6 +879,58 @@ def test_rotation_then_replay_revokes_the_devices_live_tokens(
     device = device_row(owner_conn, account.user_id, TRUSTED)
     assert device is not None
     assert device["revoked"] is False
+
+
+def test_a_replay_inside_the_grace_is_superseded_and_ends_nothing(
+    auth: Auth, owner_conn: Conn, account: Account
+) -> None:
+    first = store_token(owner_conn, account.user_id, TRUSTED)
+    second = new_token_hash()
+    assert auth.refresh(first, new_hash=second)["outcome"] == "authenticated"
+    replayed = auth.refresh(first, now=T0 + GRACE - timedelta(microseconds=1))
+    assert (replayed["outcome"], replayed["refusal"]) == ("refused", "refresh_superseded")
+    assert live_tokens(owner_conn, account.user_id, TRUSTED) == 1
+    by_hash = {t["token_hash"]: t for t in tokens(owner_conn, account.user_id)}
+    assert by_hash[second]["revoked"] is False
+    _assert_attempt(owner_conn, "refresh", "refused", "refresh_superseded", account.user_id)
+
+
+def test_two_refreshes_racing_on_one_device_leave_one_live_session(
+    app_url: str, owner_conn: Conn, account: Account
+) -> None:
+    token = store_token(owner_conn, account.user_id, TRUSTED)
+    with (
+        psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as first,
+        psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as second,
+    ):
+        started = threading.Event()
+        late: list[dict[str, Any]] = []
+
+        def racing_refresh() -> None:
+            started.set()
+            late.append(Auth(second).refresh(token, now=T0 + timedelta(seconds=1)))
+
+        with first.transaction():
+            won = Auth(first).refresh(token)
+            worker = threading.Thread(target=racing_refresh)
+            worker.start()
+            assert started.wait(10)
+            worker.join(0.5)
+            # The racing refresh waits on the account lock until the winner commits.
+            assert worker.is_alive()
+        worker.join(10)
+    assert won["outcome"] == "authenticated"
+    assert [(r["outcome"], r["refusal"]) for r in late] == [("refused", "refresh_superseded")]
+    assert live_tokens(owner_conn, account.user_id, TRUSTED) == 1
+
+
+def test_a_token_revoked_by_sign_out_is_a_replay_at_once(
+    auth: Auth, owner_conn: Conn, account: Account
+) -> None:
+    token = store_token(owner_conn, account.user_id, TRUSTED)
+    assert auth.sign_out(token)["outcome"] == "signed_out"
+    replayed = auth.refresh(token)
+    assert (replayed["outcome"], replayed["refusal"]) == ("refused", "token_replayed")
 
 
 def test_refresh_refuses_an_expired_token_and_writes_nothing(
@@ -978,6 +1032,25 @@ def test_sign_out_revokes_the_devices_live_tokens_only(
     assert live_tokens(owner_conn, account.user_id, "elsewhere") == 1
     assert device_row(owner_conn, account.user_id, TRUSTED)["revoked"] is False  # type: ignore[index]
     _assert_attempt(owner_conn, "sign_out", "signed_out", None, account.user_id)
+
+
+def test_sign_out_of_a_remembered_device_ends_the_access_tokens_issued_before_it(
+    auth: Auth, owner_conn: Conn, account: Account
+) -> None:
+    token = store_token(owner_conn, account.user_id, TRUSTED)
+    signed_out = T0 + timedelta(minutes=1)
+    assert auth.sign_out(token, now=signed_out)["outcome"] == "signed_out"
+    device = device_row(owner_conn, account.user_id, TRUSTED)
+    assert device is not None
+    assert (device["revoked"], device["signed_out_at"]) == (False, signed_out)
+    with pytest.raises(psycopg.Error) as caught:
+        auth.resolve(account.user_id, 0, now=signed_out, not_before=T0)
+    assert (caught.value.sqlstate, caught.value.diag.message_primary) == (
+        "XC401",
+        "session_invalid",
+    )
+    later = auth.resolve(account.user_id, 0, now=signed_out, not_before=signed_out)
+    assert later["role"] == "Owner"
 
 
 def test_signing_out_of_a_device_trusted_for_one_session_ends_its_row(

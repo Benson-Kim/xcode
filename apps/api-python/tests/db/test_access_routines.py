@@ -704,16 +704,96 @@ def test_step_4_scope_mode_must_be_known(attempt: Attempt, mode: str | None) -> 
     [
         {"scope_mode": "companies", "company_ids": []},
         {"scope_mode": "companies", "company_ids": None},
+        {"scope_mode": "companies", "company_ids": [], "vehicle_ids": [uuid4()]},
+    ],
+)
+def test_step_5_a_company_scope_needs_a_company(attempt: Attempt, fields: dict[str, Any]) -> None:
+    attempt.refused("XC422", "people_scope_empty", **fields)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
         {"scope_mode": "vehicles", "vehicle_ids": []},
         {"scope_mode": "vehicles", "vehicle_ids": None},
-        {"scope_mode": "companies", "company_ids": [], "vehicle_ids": [uuid4()]},
         {"scope_mode": "vehicles", "vehicle_ids": [], "company_ids": [uuid4()]},
     ],
 )
-def test_step_5_a_company_or_vehicle_scope_needs_an_item(
-    attempt: Attempt, fields: dict[str, Any]
+def test_step_5_the_owner_may_leave_a_vehicle_scope_empty(
+    attempt: Attempt, app_conn: Conn, owner_conn: Conn, owner: Member, fields: dict[str, Any]
 ) -> None:
-    attempt.refused("XC422", "people_scope_empty", **fields)
+    row = attempt.accepted(**fields)
+    assert row["outcome"] in ("created", "updated")
+    assert scope_rows(owner_conn, owner.org, row["id"]) == {
+        "all_companies": None,
+        "companies": [],
+        "vehicles": [],
+    }
+    document = _read(app_conn, "people_get", owner, row["id"])
+    assert (document["scope_mode"], document["company_ids"], document["vehicle_ids"]) == (
+        "vehicles",
+        [],
+        [],
+    )
+
+
+def test_step_5_a_manager_of_every_company_may_leave_a_vehicle_scope_empty(
+    app_conn: Conn, owner_conn: Conn, office: Member, yard: Yard
+) -> None:
+    fields: dict[str, Any] = {
+        "role": "Office admin",
+        "permissions": OFFICE_KEYS,
+        "scope_mode": "vehicles",
+    }
+    created = create_person(app_conn, office, **fields, vehicle_ids=[])
+    assert scope_rows(owner_conn, office.org, created["id"])["vehicles"] == []
+    row = create_person(
+        app_conn,
+        office,
+        **fields,
+        vehicle_ids=[yard.a1],
+        email="vic@example.com",
+        phone="0722000888",
+    )
+    updated = update_person(
+        app_conn,
+        office,
+        row["id"],
+        row["version"],
+        **fields,
+        vehicle_ids=[],
+        email="vic@example.com",
+        phone="0722000888",
+    )
+    assert updated["outcome"] == "updated"
+    assert scope_rows(owner_conn, office.org, row["id"]) == {
+        "all_companies": None,
+        "companies": [],
+        "vehicles": [],
+    }
+
+
+def test_step_5_an_editor_limited_to_some_companies_may_not_leave_a_vehicle_scope_empty(
+    app_conn: Conn, owner_conn: Conn, scoped: Member, yard: Yard
+) -> None:
+    fields: dict[str, Any] = {
+        "role": "Office admin",
+        "permissions": OFFICE_KEYS,
+        "scope_mode": "vehicles",
+    }
+    create_refused(app_conn, scoped, "XC422", "people_scope_empty", **fields, vehicle_ids=[])
+    row = create_person(app_conn, scoped, **fields, vehicle_ids=[yard.a1])
+    update_refused(
+        app_conn,
+        scoped,
+        row["id"],
+        row["version"],
+        "XC422",
+        "people_scope_empty",
+        **fields,
+        vehicle_ids=[],
+    )
+    assert scope_rows(owner_conn, scoped.org, row["id"])["vehicles"] == _uuids(yard.a1)
 
 
 def test_step_5_an_all_companies_scope_ignores_the_id_lists(
@@ -2221,12 +2301,14 @@ def _with_session(app: Conn, owner_conn: Conn, actor: Member, **fields: Any) -> 
 
 
 def _resolves(app: Conn, user: UUID, version: int) -> dict[str, Any]:
-    result: dict[str, Any] = call(app, "auth_resolve_session", user, DEVICE, version, T0)
+    result: dict[str, Any] = call(app, "auth_resolve_session", user, DEVICE, version, T0, T0)
     return result
 
 
 def _session_refused(app: Conn, user: UUID, version: int) -> None:
-    refused(app, "auth_resolve_session", [user, DEVICE, version, T0], "XC401", "session_invalid")
+    refused(
+        app, "auth_resolve_session", [user, DEVICE, version, T0, T0], "XC401", "session_invalid"
+    )
 
 
 def test_a_role_change_bumps_the_security_version_and_keeps_devices_and_tokens(

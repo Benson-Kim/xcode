@@ -1,5 +1,5 @@
 -- api.ops_seed_demo(p_operator text, p_request_id text, p_environment text, p_pins jsonb, p_now timestamptz) RETURNS jsonb
--- Purpose: in a development database, create the demo organization with its four logins, expense catalogue and six weeks of fleet history, adding only what is missing, so a second run changes nothing already there; a database holding any other organization is never seeded.
+-- Purpose: in a development database, create the demo organization, flagged as demo (the only way an organization gets the flag that api.ops_review_account_create needs), with its four logins, expense catalogue and six weeks of fleet history, adding only what is missing, so a second run changes nothing already there; a database holding any other organization is never seeded.
 -- Callers: OpsRoutines.seed_demo; CLI seed-demo.
 -- Reads: tenancy.organizations, setup.expense_categories, setup.fleet_vehicles, setup.psv_companies. Writes: ops.operator_actions, tenancy.organizations and its localization, branding and security-policy rows, tenancy.roles, and through ops.seed_demo_user, ops.seed_catalogue, ops.seed_companies and ops.seed_fleet the people, catalogue, companies, vehicles, targets, scheduled items, investments, revenue and petty-cash rows with their change log.
 -- Raises: XC403 seed_development_only, XC409 organization_not_single, XC409 seed_exists.
@@ -66,6 +66,7 @@ BEGIN
     VALUES (v_organization_id, p_now - make_interval(days => 43), p_now - make_interval(days => 43));
     v_created := true;
   END IF;
+  UPDATE tenancy.organizations SET demo = true WHERE id = v_organization_id AND NOT demo;
   PERFORM tenancy.seed_roles(v_organization_id);
 
   v_fleet := NOT EXISTS (

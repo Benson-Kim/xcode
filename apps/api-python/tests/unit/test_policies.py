@@ -3,6 +3,7 @@ the released routes, the dummy-hash rule and the outcome-to-envelope maps of bot
 
 from __future__ import annotations
 
+from dataclasses import replace
 from uuid import uuid4
 
 import pytest
@@ -89,12 +90,22 @@ def test_constants() -> None:
     )
 
 
-@pytest.mark.parametrize("refusal", [None, *SignInRefusal])
+_ONE_REFUSAL = [r for r in SignInRefusal if r is not SignInRefusal.REFRESH_SUPERSEDED]
+
+
+@pytest.mark.parametrize("refusal", [None, *_ONE_REFUSAL])
 def test_every_refusal_gets_the_one_refusal_object(refusal: SignInRefusal | None) -> None:
     outcome = AuthOutcome(AuthOutcomeKind.REFUSED, refusal=refusal, tries_left=3)
     assert envelope_for(outcome) is refusal_answer()
     assert refusal_answer() is refusal_answer()
     assert refusal_answer() == AuthEnvelope(EnvelopeStatus.AUTHENTICATION_FAILED)
+
+
+def test_a_refresh_racing_its_own_rotation_gets_its_own_answer() -> None:
+    outcome = AuthOutcome(
+        AuthOutcomeKind.REFUSED, refusal=SignInRefusal.REFRESH_SUPERSEDED, tries_left=3
+    )
+    assert envelope_for(outcome) == AuthEnvelope(EnvelopeStatus.REFRESH_SUPERSEDED)
 
 
 _EXPECTED = {
@@ -201,6 +212,14 @@ def test_every_step_outcome_maps_to_its_step_envelope(kind: AuthOutcomeKind) -> 
 def test_the_step_envelope_can_leave_the_masked_address_out() -> None:
     outcome = _outcome(AuthOutcomeKind.SILENT)
     assert step_envelope_for(outcome, masked=False).masked_email is None
+
+
+@pytest.mark.parametrize("kind", list(_STEP))
+def test_the_invitation_flag_reaches_only_a_verification_required_step(
+    kind: AuthOutcomeKind,
+) -> None:
+    envelope = step_envelope_for(replace(_outcome(kind), invitation=True))
+    assert envelope.invitation is (envelope.status is EnvelopeStatus.VERIFICATION_REQUIRED)
 
 
 def _state(

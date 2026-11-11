@@ -178,8 +178,12 @@ live refresh token of the user on every device; consume every unconsumed code of
 `api.auth_refresh(p_request_id, p_token_hash, p_device_id, p_new_token_hash, p_now)`, lock
 on the token's user row (advisory `device:` lock when the token is unknown): token unknown
 or its `device_id` differs -> `refused`, nothing written; user not active -> revoke every
-live token of the user -> `refused`; token already revoked (replay) -> revoke every live
-token of the user on that device -> `refused` (`token_replayed`; the device stays trusted);
+live token of the user -> `refused`; token revoked by a rotation under 30 seconds ago
+(`rotated_at`, migration 0016) -> `refused` (`refresh_superseded`), nothing revoked: two
+requests racing on one device keep the session, and the client re-reads its stored token and
+retries once (401, envelope status `refresh_superseded`); any other revoked token (replay) ->
+revoke every live token of the user on that device -> `refused` (`token_replayed`; the device
+stays trusted);
 expired, user paused, or device not trusted -> `refused`, nothing written; no membership
 or role -> `refused`, nothing written; else revoke the presented token (`version + 1`),
 insert the new one, `touch_version` -> `authenticated` with freshly read role, names,
@@ -189,8 +193,9 @@ permissions and security version (this is how clients pick up admin changes).
 
 `api.auth_sign_out(p_request_id, p_token_hash, p_device_id, p_now)`: when a token row
 matches both the digest and the device, revoke every live token of that user on that
-device; always `signed_out`. Device trust and outstanding access tokens are untouched (they
-live until `exp`).
+device; always `signed_out`. A device trusted for this session only is revoked; a remembered
+device stays trusted but gets `signed_out_at = p_now`, so the access tokens issued before
+the sign-out stop at once (3.10).
 
 ### 3.8 A12 devices/{id}/revoke (bearer; two statements)
 
@@ -207,10 +212,11 @@ Session resolution only; the body is built from the token claims.
 
 ### 3.10 Session resolution for every bearer route
 
-`api.auth_resolve_session(p_user_id, p_device_id, p_security_version, p_now)` after
-signature, lifetime, issuer and audience validation: the user exists and is active, the
-security version equals the `version` claim, and the device row is not revoked and not
-expired; otherwise `XC401` -> 401 empty body with `WWW-Authenticate: Bearer`. No cache.
+`api.auth_resolve_session(p_user_id, p_device_id, p_security_version, p_not_before, p_now)`
+after signature, lifetime, issuer and audience validation: the user exists and is active,
+the security version equals the `version` claim, the device row is not revoked and not
+expired, and the token's `nbf` (`p_not_before`) is not before the device's `signed_out_at`;
+otherwise `XC401` -> 401 empty body with `WWW-Authenticate: Bearer`. No cache.
 A pause is not checked here: tokens issued before a pause keep working; the pause blocks
 sign-in, unlock and refresh only (parity).
 
@@ -322,6 +328,7 @@ are stored and served but never read by a flow.
 | `clear-pause --email` | `api.ops_clear_pause` | clears `paused_until` and `failed_attempts`; never the untrusted cap (new; .NET had no such command) |
 | `revoke-sessions --email` | `api.ops_revoke_sessions` | security version bump; every device and token revoked (new) |
 | `account-state --email` | `api.ops_account_state` | status, pause, counters, device and token counts for a support call; never a hash (new) |
+| `review-account create --email --phone` | `api.ops_review_account_create` | the App Review login (new): only in an organization flagged as demo, so a review instance is its own database seeded with `seed-demo` and never one holding real data. Prints a new four-digit PIN and six-digit code once; the code stands in for the emailed new-device code after the PIN (`identity.matching_code`), is stored as the API's keyed digest (so the command validates the API's full settings and is run again after `XCODE_AUTH_SIGNING_KEY` changes) and nothing over HTTP sets it. A second run replaces both and ends every session |
 | startup summary | `api.meta_unassigned_user_count` (as `xcode_app`) | the warning `{n} active users have no organization membership and cannot sign in` |
 
 Every command records `ops.operator_actions` with `XCODE_OPERATOR` and prints ids and
@@ -756,3 +763,113 @@ legacy row. Unchanged from today's risk; it ends as phones move to the token (`D
   actor's membership while holding the user row
   (`tests/db/test_auth_routines.py::test_a_person_write_and_a_sign_in_event_do_not_deadlock`
   fails with `DeadlockDetected` under `FOR UPDATE`).
+
+## 13. Invitations (built 2026-11-10)
+
+Adding a person mails them an invitation: a link and a code that lead straight to "choose
+your PIN", with no second mailed code.
+
+### 13.1 The credential
+
+- One live invitation per person (`identity.invitations`, a unique index on `user_id` while
+  `accepted_at` and `revoked_at` are null), in the organization that made it.
+- The link token is 32 random bytes in base64url, made like a trusted-device token (12.8).
+  Only its SHA-256 is stored. The link is `{XCODE_PUBLIC_WEB_URL}/invite#{token}`: the
+  fragment keeps the token out of server logs and `Referer`, and the host comes from that
+  setting alone, never from `Host` or `X-Forwarded-Host`.
+- The code is six digits from the verification-code source. Only its keyed digest is stored,
+  so it is checked exactly like a mailed code.
+- It is usable while `now <= expires_at` (seven days). Five wrong guesses, of the code at N03
+  or of the number at A14, void the code. The link stays usable, bounded by the per-token
+  rate limit.
+- No GET changes state. Mail scanners fetch links ahead of the person, so only the POST of
+  A14 redeems.
+
+### 13.2 Made, replaced, revoked, accepted
+
+- `identity.invite` is the only place an invitation is made:
+  - on create (S07), always;
+  - on send again (S57, `people.sign_in`, the `people_pin_reset` checks), refused with
+    `people_invite_not_needed` once the person has a PIN, is blocked or has no active
+    membership;
+  - on an email change of a person with no PIN whose live invitation it revokes.
+  A new invitation revokes the live one (`replaced`).
+- Revoked on block (`blocked`), operator removal (`removed`), email change
+  (`email_changed`) and replacement.
+- Accepted when the first PIN is set: N06 `first_setup` sets `accepted_at` in the same
+  transaction as the PIN.
+- No backfill. Migration `0015` invites nobody; a person who existed before it gets an
+  invitation only when an admin sends one.
+
+### 13.3 Two ways in
+
+- **The link (A14 `POST /auth/invite/redeem`).**
+  - `identity.lock_account(phone, device)` runs first, then the invitation is locked by its
+    token digest. Both run in every branch.
+  - An unknown token, a wrong number and another person's token answer the same 401
+    `authentication_failed`, and the trail records `invite_invalid` with no user. A known
+    token with the wrong number counts one wrong try on that invitation.
+  - Only once both match does the answer carry `inviteProblem`: `used` (accepted, or a PIN
+    already set), `revoked` (also for an inactive person or membership) or `expired`.
+  - Success stores a `first_setup` code for this device (ten minutes, outside the code caps)
+    and answers 202 `verification_required` with that `code`, once. The client sends it to
+    N06 as if it had been mailed.
+- **The code (number first).**
+  - N01, for a person with no PIN and a usable invitation, issues and mails no code. It
+    answers `verification_required` / `first_setup`. The routine's answer has `code_issued`
+    false, no email and `invitation: true`, so the client can ask for the code from the
+    invitation. Probing an invited number sends no mail.
+  - N03 checks the device's code first, then the invitation's. A match on the invitation
+    stores a device code with the same digest, so N06 runs unchanged.
+  - A wrong guess counts on both. The result is void when the device code reaches three or
+    the invitation five, and N03 then mails its usual replacement code.
+  - An expired or voided invitation falls back to the mailed code, so nobody is stuck.
+
+### 13.4 Delivery: the invitation outbox
+
+- After commit, `InvitationDelivery.send` calls `api.invite_delivery_start`. That answers
+  only while the invitation is pending and still carries this pair's digest, so a pair the
+  routine did not use, or an invitation already accepted, revoked or expired, mails nothing.
+- The mail goes through the mail queue, and `api.invite_delivery_result` records `sent`. A
+  failure below five attempts leaves the row pending for the sweep; at five it is `failed`.
+- **The sweep.** Every 60 seconds, first after one interval, each API process runs
+  `InvitationDelivery.sweep(20)`:
+  - `api.invite_claim_undelivered` takes pending rows idle for more than five minutes,
+    `FOR UPDATE SKIP LOCKED`, so two processes never take the same row;
+  - it gives each one a fresh token and code, since the raw secrets are never stored, so the
+    link and code of any earlier mail stop working;
+  - rows at five attempts or past `expires_at` become `failed` and are not sent.
+  A failed run logs `job.failed` (`job=invitation_sweep`) and the next run still happens.
+  Shutdown stops the sweep before it drains the mail queue (`main.py`,
+  `infra/periodic.py`).
+
+### 13.5 The mail
+
+- Subject: "{Organization} invited you to XCODE". It has text and HTML parts, and every value
+  an admin controls is HTML-escaped. Control characters in header values become spaces.
+  Reply-To is the organization's support email when one is set. No phone number appears.
+- Log events carry `purpose=invitation`, `invitation_id`, `request_id` and the recipient
+  hash. They never carry the token, the code or the address.
+- Decision (2026-11-10): the development log mailer's `mail.body` (section 7) shows
+  invitation bodies, the same documented exception as codes.
+  - The log mailer is refused in production.
+  - The local check of this flow reads the link from that log.
+  - Withholding the body would push developers to fixed tokens or links saved to disk, both
+    worse.
+
+### 13.6 What the people screens read
+
+- The people status is `invited` while a live invitation is not past `expires_at`,
+  `invite_expired` after that, and otherwise the sign-in status. The people filter accepts
+  both values.
+- `signIn.invitation` is `{state, sentAt, expiresAt}` for the live invitation of this
+  organization, else null. `state` is `expired` past `expires_at`, else the delivery state:
+  `pending`, `sent` or `failed`.
+
+### 13.7 Tests
+
+- `tests/db/test_invitations.py`: the one-live index, a parallel double redeem and double
+  completion, the expiry boundary, revocation, the five-try void, and no mail from N01.
+- `tests/unit/test_invitation_mail.py`, `test_invitation_delivery.py` and
+  `test_periodic_job.py`.
+- The A14 and S57 API tests.

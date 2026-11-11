@@ -1,9 +1,9 @@
 -- api.people_list(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_page integer, p_page_size integer, p_role text, p_status text, p_now timestamptz) RETURNS jsonb
--- Purpose: one page of the people the actor may see (members with a role, tenancy.people_visible), kept to one role by name (letter case ignored, as role names are unique that way) and to one people status (identity.sign_in_status: active, not_signed_in, pin_reset_due, locked, blocked; the released words waiting and none stand for not_signed_in and blocked; blank or all keeps everyone), ordered by last name, first name and user id, as person documents; {total, items}.
+-- Purpose: one page of the people the actor may see (members with a role, tenancy.people_visible), kept to one role by name (letter case ignored, as role names are unique that way) and to one people status (identity.people_status: active, not_signed_in, invited, invite_expired, pin_reset_due, locked, blocked; the released words waiting and none stand for not_signed_in and blocked; blank or all keeps everyone), ordered by last name, first name and user id, as person documents; {total, items}.
 -- Callers: TenancyRoutines.list_people; ListPeople (GET /setup/people).
 -- Reads: tenancy.memberships, tenancy.person_roles, tenancy.roles, identity.users, and what tenancy.people_visible, tenancy.person_reach and tenancy.person_document read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 page_out_of_range via tenancy.check_page, XC422 people_filter_status_invalid (after the page check, as .NET reads the state inside the request).
--- Tests: tests/db/test_access_routines.py, tests/api/test_people.py.
+-- Tests: tests/db/test_access_routines.py, tests/db/test_invitations.py, tests/api/test_people.py.
 
 CREATE OR REPLACE FUNCTION api.people_list(
   p_actor_id uuid,
@@ -30,7 +30,8 @@ BEGIN
   PERFORM tenancy.enter_organization(p_actor_id, p_organization_id, p_request_id, 'people.view');
   PERFORM tenancy.check_page(p_page, p_page_size);
   IF p_status IS NOT NULL AND p_status NOT IN (
-    '', 'all', 'active', 'not_signed_in', 'pin_reset_due', 'locked', 'blocked', 'waiting', 'none'
+    '', 'all', 'active', 'not_signed_in', 'invited', 'invite_expired', 'pin_reset_due', 'locked',
+    'blocked', 'waiting', 'none'
   ) THEN
     PERFORM tenancy.refuse('people_filter_status_invalid', 'XC422');
   END IF;
@@ -53,9 +54,10 @@ BEGIN
     JOIN identity.users AS u
       ON u.id = m.user_id
     WHERE m.organization_id = p_organization_id
+      AND u.erased_at IS NULL
       AND m.user_id IN (SELECT visible.id FROM tenancy.people_visible(p_actor_id) AS visible (id))
       AND (coalesce(p_role, '') IN ('', 'all') OR lower(r.name) = lower(p_role))
-      AND (v_status IS NULL OR identity.sign_in_status(u, m.active) = v_status)
+      AND (v_status IS NULL OR identity.people_status(u, m.active, p_now) = v_status)
   ),
   page AS (
     SELECT listed.user_id, listed.last_name, listed.first_name
@@ -66,7 +68,7 @@ BEGIN
   )
   SELECT (SELECT count(*) FROM listed),
          (SELECT coalesce(
-                   jsonb_agg(tenancy.person_document(page.user_id, v_viewer)
+                   jsonb_agg(tenancy.person_document(page.user_id, v_viewer, p_now)
                              ORDER BY page.last_name, page.first_name, page.user_id),
                    '[]'::jsonb)
           FROM page)

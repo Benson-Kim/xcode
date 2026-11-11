@@ -38,6 +38,7 @@ from ..domain.identity import (
     CodeRequest,
     CodeResend,
     CodeWithdrawal,
+    CreatedReviewAccount,
     DemoSeeding,
     DeviceListing,
     DeviceRemoval,
@@ -51,6 +52,7 @@ from ..domain.identity import (
     PinVerdict,
     ProvisionedUser,
     RemovedUser,
+    ReviewAccountCreation,
     RevokedSessions,
     SeededDemo,
     SessionCheck,
@@ -61,6 +63,7 @@ from ..domain.identity import (
     UserLookup,
     UserProvisioning,
 )
+from ..domain.invitations import InvitationRedeem, PendingInvitation
 from ..domain.pettycash import (
     PettyCashApproved,
     PettyCashCreate,
@@ -141,7 +144,9 @@ from ..domain.setup import (
 )
 from ..domain.tenancy import (
     AccessRole,
+    AccountDeletionRequest,
     Appearance,
+    DeletionRequestOutcome,
     HistoryPage,
     HistoryQuery,
     LogoRemoval,
@@ -153,6 +158,8 @@ from ..domain.tenancy import (
     PermissionGroup,
     Person,
     PersonDeviceRemoval,
+    PersonErasure,
+    PersonInvite,
     PersonLifecycle,
     PersonPinReset,
     PersonQuery,
@@ -236,6 +243,13 @@ class OpsRepository(Protocol):
         ``Conflict`` (``seed_exists``, ``organization_not_single``) beside other data."""
         ...
 
+    async def create_review_account(self, command: ReviewAccountCreation) -> CreatedReviewAccount:
+        """``api.ops_review_account_create``: create or renew the App Review login, only in an
+        organization flagged as demo; raises ``Forbidden`` (``review_demo_only``) anywhere
+        else, ``RuleViolation`` (bad email or phone) or ``Conflict``
+        (``people_contact_taken``, ``organization_not_single``)."""
+        ...
+
 
 @runtime_checkable
 class IdentityRepository(Protocol):
@@ -253,6 +267,11 @@ class IdentityRepository(Protocol):
 
     async def start(self, command: NumberCheck) -> AuthOutcome:
         """``api.auth_start``: the number step (N01)."""
+        ...
+
+    async def invite_redeem(self, command: InvitationRedeem) -> AuthOutcome:
+        """``api.auth_invite_redeem``: the invitation link with the person's number stores the
+        given first-setup code for this device; every mismatch refuses as ``invite_invalid``."""
         ...
 
     async def sign_in(self, verdict: PinVerdict) -> AuthOutcome:
@@ -371,6 +390,11 @@ class TenancyRepository(Protocol):
         """``api.people_set_active``: activate or deactivate; ``unchanged`` when already so."""
         ...
 
+    async def erase_person(self, command: PersonErasure) -> WriteResult:
+        """``api.people_erase`` (``people.block``): erase the personal details of a blocked
+        person who belongs to this organization only; ``unchanged`` when already erased."""
+        ...
+
     async def sign_out_person(self, command: PersonSignOut) -> WriteResult:
         """``api.people_sign_out`` (``people.sign_in``): remove every trusted device and refresh
         token of the person; ``unchanged`` when none is left."""
@@ -381,9 +405,22 @@ class TenancyRepository(Protocol):
         their next sign-in a reset; ``unchanged`` without a PIN or with a reset due."""
         ...
 
+    async def invite_person(self, command: PersonInvite) -> WriteResult:
+        """``api.people_invite`` (``people.sign_in``): a new invitation for an active person
+        without a PIN, replacing the live one; ``people_invite_not_needed`` otherwise."""
+        ...
+
     async def remove_person_device(self, command: PersonDeviceRemoval) -> WriteResult:
         """``api.people_device_remove`` (``people.sign_in``): remove one live trusted device of
         the person; ``NotFound`` for any other row."""
+        ...
+
+    async def request_account_deletion(
+        self, command: AccountDeletionRequest
+    ) -> DeletionRequestOutcome:
+        """``api.me_deletion_request`` (any member): record the caller's own deletion request,
+        or do nothing when one in the last 24 hours already was, and return the administrators
+        who can block members to notify (empty on that repeat)."""
         ...
 
     async def list_history(self, query: HistoryQuery) -> HistoryPage:
@@ -759,4 +796,26 @@ class ReportsRepository(Protocol):
     async def export_pettycash(self, query: PettyCashExportQuery) -> ReportDocument:
         """``api.pettycash_export_get`` (``pettycash.export`` and ``pettycash.view``): the
         entries the Petty cash page lists, the expenses or the cash received."""
+        ...
+
+
+@runtime_checkable
+class InvitationRepository(Protocol):
+    """The invitation outbox. Each call commits on its own; none takes a raw secret."""
+
+    async def start_delivery(self, token_hash: str, now: datetime) -> PendingInvitation | None:
+        """``api.invite_delivery_start``: count one attempt and answer what to mail, or
+        ``None`` unless the invitation is pending and still carries ``token_hash``."""
+        ...
+
+    async def record_delivery(self, token_hash: str, sent: bool, now: datetime) -> None:
+        """``api.invite_delivery_result``: ``sent`` or ``failed``, only while pending with
+        that hash, so a callback made stale by a re-issue changes nothing."""
+        ...
+
+    async def claim_undelivered(
+        self, now: datetime, limit: int, token_hashes: list[str], code_hashes: list[str]
+    ) -> list[PendingInvitation]:
+        """``api.invite_claim_undelivered``: claim up to ``limit`` pending invitations whose
+        send was lost, give each the hash pair at its ``pair_index`` and count one attempt."""
         ...

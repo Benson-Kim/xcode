@@ -35,6 +35,9 @@ PERSON: dict[str, Any] = {
     "back_limit_mode": None,
     "back_limit_count": None,
     "back_limit_from": None,
+    "invite_token_hash": None,
+    "invite_code_hash": None,
+    "now": T0,
 }
 
 
@@ -291,11 +294,12 @@ def refused(
 
 _CREATE = (
     "SELECT * FROM api.people_create(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid[], "
-    "%s::uuid[], %s::text[], %s::numeric, %s, %s::integer, %s::date, %s)"
+    "%s::uuid[], %s::text[], %s::numeric, %s, %s::integer, %s::date, %s::text, %s::text, %s)"
 )
 _UPDATE = (
     "SELECT * FROM api.people_update(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid[], "
-    "%s::uuid[], %s::text[], %s::numeric, %s, %s::integer, %s::date, %s::bigint, %s)"
+    "%s::uuid[], %s::text[], %s::numeric, %s, %s::integer, %s::date, %s::bigint, %s::text, "
+    "%s::text, %s)"
 )
 
 
@@ -318,7 +322,9 @@ def _create_args(actor: Member, fields: Mapping[str, Any]) -> tuple[Any, ...]:
         p["back_limit_mode"],
         p["back_limit_count"],
         p["back_limit_from"],
-        T0,
+        p["invite_token_hash"],
+        p["invite_code_hash"],
+        p["now"],
     )
 
 
@@ -345,7 +351,9 @@ def _update_args(
         p["back_limit_count"],
         p["back_limit_from"],
         version,
-        T0,
+        p["invite_token_hash"],
+        p["invite_code_hash"],
+        p["now"],
     )
 
 

@@ -24,6 +24,8 @@ from xcode_api.domain.tenancy import (
     PeopleQuery,
     PersonDetails,
     PersonDeviceRemoval,
+    PersonErasure,
+    PersonLifecycle,
     PersonPinReset,
     PersonQuery,
     PersonSave,
@@ -295,6 +297,73 @@ class TenancyCase:
     run: Callable[[TenancyWorld], Awaitable[None]]
 
 
+async def erase_a_blocked_person(world: TenancyWorld) -> None:
+    user_id = await _create(world, jane())
+    assert user_id is not None
+    owner = world.owner
+    erase = world.repository.erase_person
+    await world.record(erase(PersonErasure(owner, owner.actor_id, 1, "Asked to be deleted")))
+    await world.record(erase(PersonErasure(owner, user_id, 1, "Asked to be deleted")))
+    await world.record(
+        world.repository.set_person_active(
+            PersonLifecycle(owner, user_id, False, 1, "Asked to leave")
+        )
+    )
+    await world.record(erase(PersonErasure(owner, user_id, 1, "Asked to be deleted")))
+    await world.record(erase(PersonErasure(owner, user_id, 2, None)))
+    await world.record(erase(PersonErasure(owner, user_id, 2, "Asked to be deleted")))
+    await world.record(erase(PersonErasure(owner, user_id, 2, None)))
+    await world.record(world.repository.get_person(PersonQuery(owner, user_id)))
+    await world.record(world.repository.list_people(PeopleQuery(owner, 1, 25)))
+    await _history(world, history(section="people"))
+
+
+async def keep_an_empty_vehicle_scope(world: TenancyWorld) -> None:
+    await _create(world, jane(scope_mode="companies"))
+    user_id = await _create(world, jane(scope_mode="vehicles"))
+    assert user_id is not None
+    await world.record(world.repository.get_person(PersonQuery(world.owner, user_id)))
+    await _update(world, user_id, jane(scope_mode="companies"), 1)
+    await _update(world, user_id, jane(), 1)
+    await _update(world, user_id, jane(scope_mode="vehicles"), 2)
+    await _update(world, user_id, jane(scope_mode="vehicles"), 3)
+    await world.record(world.repository.get_person(PersonQuery(world.owner, user_id)))
+    await _history(world, history(section="people"))
+
+
+async def leave_vehicles_empty_only_seeing_every_company(world: TenancyWorld) -> None:
+    rights = role_rights("Office admin")
+    limited = await _create(
+        world,
+        jane(
+            first_name="Vera",
+            email="vera@example.com",
+            phone_number="0722000333",
+            role="Office admin",
+            permissions=rights,
+            scope_mode="vehicles",
+        ),
+    )
+    every = await _create(
+        world,
+        jane(
+            first_name="Olga",
+            email="olga@example.com",
+            phone_number="0722000444",
+            role="Office admin",
+            permissions=rights,
+        ),
+    )
+    assert limited is not None and every is not None
+    no_vehicles = jane(role="Office admin", permissions=rights, scope_mode="vehicles")
+    create = world.repository.create_person
+    for actor_id in (limited, every):
+        editor = TenantContext(actor_id, world.owner.organization_id, "req-parity", NOW)
+        await world.record(create(PersonSave(editor, None, no_vehicles, None)))
+    await world.record(world.repository.list_people(PeopleQuery(world.owner, 1, 25)))
+    await _history(world, history(section="people"))
+
+
 CASES = (
     TenancyCase("create_and_read_a_person", create_and_read_a_person),
     TenancyCase("refuse_a_malformed_person", refuse_a_malformed_person),
@@ -304,4 +373,10 @@ CASES = (
     TenancyCase("act_on_sign_in_without_devices", act_on_sign_in_without_devices),
     TenancyCase("save_settings_sections", save_settings_sections),
     TenancyCase("page_the_change_log", page_the_change_log),
+    TenancyCase("erase_a_blocked_person", erase_a_blocked_person),
+    TenancyCase("keep_an_empty_vehicle_scope", keep_an_empty_vehicle_scope),
+    TenancyCase(
+        "leave_vehicles_empty_only_seeing_every_company",
+        leave_vehicles_empty_only_seeing_every_company,
+    ),
 )

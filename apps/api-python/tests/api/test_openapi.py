@@ -316,8 +316,10 @@ async def test_the_document_is_absent_when_disabled(
         mail_backend="smtp",
         email_host="smtp.example.com",
         email_from="noreply@example.com",
+        public_web_url="https://app.example.com",
         log_format="json",
         allowed_hosts=["api.example.com"],
+        rate_limit_backend="postgres",
     )
     assert production.openapi_is_enabled is False
 
@@ -331,7 +333,9 @@ def test_the_cli_document_passes_the_same_assertions(
         "XCODE_AUTH_SIGNING_KEY": "k" * 32,
         "XCODE_EMAIL_HOST": "smtp.example.com",
         "XCODE_EMAIL_FROM": "noreply@example.com",
+        "XCODE_PUBLIC_WEB_URL": "https://app.example.com",
         "XCODE_ALLOWED_HOSTS": "api.example.com",
+        "XCODE_RATE_LIMIT_BACKEND": "postgres",
     }.items():
         monkeypatch.setenv(name, value)
     assert main(["openapi"]) == 0

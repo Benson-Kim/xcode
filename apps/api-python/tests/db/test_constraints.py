@@ -98,6 +98,7 @@ def _constraint_names(conn: Conn, contype: str) -> set[str]:
 
 _USER = "UPDATE identity.users SET {} WHERE id = %(user)s"
 _CODE = "UPDATE identity.verification_codes SET {} WHERE id = %(code)s"
+_INVITE = "UPDATE identity.invitations SET {} WHERE id = %(invitation)s"
 _ATTEMPT = "UPDATE identity.sign_in_attempts SET {} WHERE user_id = %(user)s"
 _ORG = "UPDATE tenancy.organizations SET {} WHERE id = %(org)s"
 _MEMBER = "UPDATE tenancy.memberships SET {} WHERE organization_id = %(org)s AND user_id = %(user)s"
@@ -141,6 +142,12 @@ CHECK_CASES = [
     Case("ck_users_security_version", _set(_USER, "security_version = -1")),
     Case("ck_users_failed_attempts", _set(_USER, "failed_attempts = 6")),
     Case("ck_users_untrusted_failed_attempts", _set(_USER, "untrusted_failed_attempts = -1")),
+    Case("ck_users_erased_email", _set(_USER, "email = NULL")),
+    Case("ck_users_erased_phone_number", _set(_USER, "phone_number = NULL")),
+    Case(
+        "ck_users_erased_removed",
+        _set(_USER, "erased_at = now(), email = NULL, phone_number = NULL"),
+    ),
     Case("ck_verification_codes_purpose", _set(_CODE, "purpose = 'sign_in'")),
     Case("ck_verification_codes_device_id", _set(_CODE, "device_id = ''")),
     Case("ck_verification_codes_code_hash", _set(_CODE, "code_hash = repeat('a', 64)")),
@@ -170,6 +177,30 @@ CHECK_CASES = [
         "ck_refresh_tokens_token_hash",
         "UPDATE identity.refresh_tokens SET token_hash = 'ABC' WHERE id = %(token)s",
     ),
+    Case(
+        "ck_refresh_tokens_rotated",
+        "UPDATE identity.refresh_tokens SET rotated_at = now() WHERE id = %(token)s",
+    ),
+    Case("ck_invitations_token_hash", _set(_INVITE, "token_hash = 'ABC'")),
+    Case(
+        "ck_review_accounts_code_hash",
+        "UPDATE identity.review_accounts SET code_hash = 'ABC' WHERE user_id = %(user)s",
+    ),
+    Case("ck_invitations_code_hash", _set(_INVITE, "code_hash = repeat('a', 64)")),
+    Case("ck_invitations_lifetime", _set(_INVITE, "expires_at = created_at")),
+    Case("ck_invitations_failed_attempts", _set(_INVITE, "failed_attempts = -1")),
+    Case("ck_invitations_delivery_attempts", _set(_INVITE, "delivery_attempts = -1")),
+    Case(
+        "ck_invitations_revoke_reason",
+        _set(_INVITE, "revoked_at = now(), revoke_reason = 'expired'"),
+    ),
+    Case("ck_invitations_revoked", _set(_INVITE, "revoked_at = now()")),
+    Case(
+        "ck_invitations_one_end",
+        _set(_INVITE, "accepted_at = now(), revoked_at = now(), revoke_reason = 'blocked'"),
+    ),
+    Case("ck_invitations_delivery_state", _set(_INVITE, "delivery_state = 'queued'")),
+    Case("ck_invitations_sent", _set(_INVITE, "delivery_state = 'sent'")),
     Case("ck_sign_in_attempts_operation", _set(_ATTEMPT, "operation = 'login'")),
     Case("ck_sign_in_attempts_outcome", _set(_ATTEMPT, "outcome = 'silent'")),
     Case("ck_sign_in_attempts_refusal", _set(_ATTEMPT, "refusal = 'invalid_pin'")),
@@ -505,6 +536,18 @@ def test_money_columns_cap_at_fourteen_digits(seeded: Seeded) -> None:
 
 UNIQUE_CASES = [
     Case(
+        "uq_invitations_token",
+        "UPDATE identity.invitations SET token_hash = (SELECT token_hash FROM identity.invitations "
+        "WHERE id = %(b_invitation)s) WHERE id = %(invitation)s",
+    ),
+    Case(
+        "uq_invitations_live",
+        "INSERT INTO identity.invitations (organization_id, user_id, token_hash, code_hash, "
+        "created_at, expires_at) SELECT organization_id, user_id, repeat('B', 64), "
+        "repeat('C', 64), created_at, expires_at FROM identity.invitations "
+        "WHERE id = %(invitation)s",
+    ),
+    Case(
         "uq_users_email",
         "UPDATE identity.users SET email = (SELECT email FROM identity.users WHERE id = %(user)s) "
         "WHERE id = %(user2)s",
@@ -819,6 +862,18 @@ def test_adjacent_and_other_vehicles_away_periods_pass(seeded: Seeded) -> None:
 
 REFERENCE_CASES = [
     Case(
+        "fk_review_accounts_user",
+        "UPDATE identity.review_accounts SET user_id = gen_random_uuid() WHERE user_id = %(user)s",
+    ),
+    Case(
+        "fk_invitations_user",
+        "UPDATE identity.invitations SET user_id = gen_random_uuid() WHERE id = %(invitation)s",
+    ),
+    Case(
+        "fk_invitations_invited_by",
+        "UPDATE identity.invitations SET invited_by = gen_random_uuid() WHERE id = %(invitation)s",
+    ),
+    Case(
         "fk_verification_codes_user",
         "UPDATE identity.verification_codes SET user_id = gen_random_uuid() WHERE id = %(code)s",
     ),
@@ -930,8 +985,13 @@ def test_composite_foreign_keys_refuse_another_organizations_rows(seeded: Seeded
     """Point each tenant-to-tenant reference of an organization A row at organization B's
     row: the composite key (A, B's id) does not exist, so the row cannot cross tenants."""
     conn, mismatches = seeded.conn, []
+    conn.execute(
+        "UPDATE identity.invitations SET revoked_at = now(), revoke_reason = 'replaced' "
+        "WHERE organization_id = %(b_org)s",
+        seeded.params(),
+    )
     composite = [fk for fk in _foreign_keys(conn) if _is_composite(fk)]
-    assert len(composite) == 45
+    assert len(composite) == 46
     for fk in composite:
         columns = fk["source_columns"][1:]
         target_columns = fk["target_columns"][1:]

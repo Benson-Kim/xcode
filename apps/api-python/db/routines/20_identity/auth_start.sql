@@ -1,9 +1,9 @@
 -- api.auth_start(p_request_id text, p_phone text, p_device_id text, p_device_token_hash text, p_code_hash text, p_skip_cooldown boolean, p_now timestamptz) RETURNS jsonb
--- Purpose: N01, the number step (docs/07-auth.md 12.2), first match wins: an unknown number answers as a simulated account with a PIN (pin_locked past five recorded tries, else pin_required); a blocked person blocked; no PIN or a forced reset a first_setup or pin_reset code for this device (silent past the caps) and verification_required; locked for this device pin_locked; else pin_required. Nothing is counted.
+-- Purpose: N01, the number step (docs/07-auth.md 12.2), first match wins: an unknown number answers as a simulated account with a PIN (pin_locked past five recorded tries, else pin_required); a blocked person blocked; no PIN or a forced reset a first_setup or pin_reset code for this device (silent past the caps) and verification_required, except that a person without a PIN who has a usable invitation (identity.usable_invitation) is sent no code: verification_required, first_setup, code_issued false and invitation true (an expired or voided invitation falls through to the mailed code); locked for this device pin_locked; else pin_required. Nothing is counted.
 -- Callers: IdentityRoutines.start; the number-step use case (N01).
--- Reads: identity.users, identity.trusted_devices, identity.verification_codes, identity.sign_in_attempts, and what identity.policy_for reads. Writes: identity.verification_codes, identity.sign_in_attempts.
+-- Reads: identity.users, identity.trusted_devices, identity.verification_codes, identity.sign_in_attempts, and what identity.policy_for and identity.usable_invitation read. Writes: identity.verification_codes, identity.sign_in_attempts.
 -- Raises: none.
--- Tests: tests/db/test_auth_routines.py.
+-- Tests: tests/db/test_auth_routines.py, tests/db/test_invitations.py.
 
 CREATE OR REPLACE FUNCTION api.auth_start(
   p_request_id text,
@@ -26,6 +26,7 @@ DECLARE
   v_policy identity.policy;
   v_purpose text;
   v_code_id uuid;
+  v_invitation identity.invitations;
 BEGIN
   PERFORM set_config('xcode.request_id', coalesce(p_request_id, ''), true);
   v_user := identity.lock_account(p_phone, p_device_id);
@@ -47,9 +48,14 @@ BEGIN
 
   IF v_user.pin_hash IS NULL OR v_user.pin_reset_required THEN
     v_purpose := CASE WHEN v_user.pin_hash IS NULL THEN 'first_setup' ELSE 'pin_reset' END;
-    v_code_id := identity.issue_code(
-      v_user.id, v_purpose, p_device_id, p_code_hash, p_skip_cooldown, false, p_now
-    );
+    IF v_purpose = 'first_setup' THEN
+      v_invitation := identity.usable_invitation(v_user.id, p_now);
+    END IF;
+    IF v_invitation.id IS NULL THEN
+      v_code_id := identity.issue_code(
+        v_user.id, v_purpose, p_device_id, p_code_hash, p_skip_cooldown, false, p_now
+      );
+    END IF;
     PERFORM identity.record_attempt(
       'start', 'verification_required', NULL, v_user.id, v_digest, p_device_id, p_now
     );
@@ -59,7 +65,10 @@ BEGIN
       'code_issued', v_code_id IS NOT NULL,
       'code_id', v_code_id,
       'email', CASE WHEN v_code_id IS NOT NULL THEN v_user.email END
-    ));
+    ) || CASE
+           WHEN v_invitation.id IS NOT NULL THEN jsonb_build_object('invitation', true)
+           ELSE '{}'::jsonb
+         END);
   END IF;
 
   IF identity.locked_for(

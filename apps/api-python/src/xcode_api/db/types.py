@@ -106,7 +106,9 @@ def account_policy(document: Mapping[str, Any]) -> AccountPolicy:
 
 def auth_outcome(document: Mapping[str, Any]) -> AuthOutcome:
     """The ``jsonb`` outcome of an ``api.auth_*`` routine to :class:`AuthOutcome`."""
-    _require(document, [f.name for f in dataclasses.fields(AuthOutcome)], "api.auth_* outcome")
+    # Only api.auth_start adds "invitation", so it may be absent.
+    required = {f.name for f in dataclasses.fields(AuthOutcome)} - {"invitation"}
+    _require(document, required | ({"invitation"} & document.keys()), "api.auth_* outcome")
     permissions = document["permissions"]
     return AuthOutcome(
         outcome=AuthOutcomeKind(document["outcome"]),
@@ -130,6 +132,7 @@ def auth_outcome(document: Mapping[str, Any]) -> AuthOutcome:
         tries_left=_optional(document["tries_left"], int),
         pin_problem=_optional(document["pin_problem"], PinProblem),
         device_token_issued=document["device_token_issued"],
+        invitation=bool(document.get("invitation", False)),
     )
 
 

@@ -1,9 +1,9 @@
 -- api.ops_remove_user(p_operator text, p_request_id text, p_email text, p_now timestamptz) RETURNS jsonb
--- Purpose: mark a user removed (security version bumped, so every access token stops) and revoke every refresh token; devices and membership are left as they are.
+-- Purpose: mark a user removed (security version bumped, so every access token stops) and revoke every refresh token and the live invitation ('removed', entering each organization in turn so row-level security holds); devices and membership are left as they are.
 -- Callers: OpsRoutines.remove_user; CLI remove-user.
--- Reads: identity.users. Writes: ops.operator_actions, identity.users (status, security version, version), identity.refresh_tokens.
+-- Reads: identity.users, and what tenancy.organization_ids reads. Writes: ops.operator_actions, identity.users (status, security version, version), identity.refresh_tokens, identity.invitations.
 -- Raises: XC404 not_found.
--- Tests: tests/db/test_ops_routines.py, tests/api/test_cli.py.
+-- Tests: tests/db/test_ops_routines.py, tests/db/test_invitations.py, tests/api/test_cli.py.
 
 CREATE OR REPLACE FUNCTION api.ops_remove_user(
   p_operator text,
@@ -23,6 +23,7 @@ DECLARE
   v_user identity.users;
   v_removed boolean;
   v_tokens integer;
+  v_organization_id uuid;
 BEGIN
   PERFORM ops.record_operator_action(
     p_operator, 'remove-user', v_email, jsonb_build_object('request_id', p_request_id), p_now
@@ -39,6 +40,10 @@ BEGIN
     WHERE id = v_user.id;
     PERFORM identity.touch_version(v_user.id);
   END IF;
+  FOREACH v_organization_id IN ARRAY tenancy.organization_ids() LOOP
+    PERFORM set_config('xcode.organization_id', v_organization_id::text, true);
+    PERFORM identity.revoke_invitations(v_user.id, 'removed', p_now);
+  END LOOP;
   v_tokens := identity.revoke_tokens(v_user.id);
   RETURN jsonb_build_object('user_id', v_user.id, 'removed', v_removed, 'tokens', v_tokens);
 END;

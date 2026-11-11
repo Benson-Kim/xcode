@@ -1,4 +1,5 @@
-"""Change a person at the version the caller loaded."""
+"""Change a person at the version the caller loaded. A new email for a person still without
+a PIN re-invites them at the new address (the routine decides); that mail goes after commit."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from ...domain.values import WriteResult
 from ..caller import Caller
 from ..ports import Clock
 from ..repositories import TenancyRepository
+from .invitation_delivery import InvitationDelivery, InvitationSecrets
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,16 +23,25 @@ class UpdatePersonCommand:
 
 
 class UpdatePerson:
-    def __init__(self, tenancy: TenancyRepository, clock: Clock) -> None:
+    def __init__(
+        self,
+        tenancy: TenancyRepository,
+        clock: Clock,
+        secrets: InvitationSecrets,
+        delivery: InvitationDelivery,
+    ) -> None:
         self._tenancy = tenancy
         self._clock = clock
+        self._secrets = secrets
+        self._delivery = delivery
 
     async def execute(self, command: UpdatePersonCommand) -> WriteResult:
-        return await self._tenancy.update_person(
+        pair = self._secrets.new()
+        context = command.caller.context(self._clock)
+        result = await self._tenancy.update_person(
             PersonSave(
-                command.caller.context(self._clock),
-                command.user_id,
-                command.details,
-                command.expected_version,
+                context, command.user_id, command.details, command.expected_version, pair.hashes
             )
         )
+        await self._delivery.send(pair, request_id=context.request_id)
+        return result

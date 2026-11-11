@@ -18,6 +18,7 @@ from xcode_api.settings import Settings
 from ..support.fakes import (
     FakeExpensesRepository,
     FakeIdentityRepository,
+    FakeInvitationRepository,
     FakeOpsRepository,
     FakePettyCashRepository,
     FakeReportsRepository,
@@ -42,6 +43,7 @@ def _app_with_probe(settings: Settings, ops: FakeOpsRepository):
         revenue=FakeRevenueRepository(),
         pettycash=FakePettyCashRepository(),
         expenses=FakeExpensesRepository(),
+        invitations=FakeInvitationRepository(),
         reports=FakeReportsRepository(),
     )
     app = create_app(settings, container)
@@ -265,6 +267,7 @@ async def test_readiness_unhealthy_when_database_down(
             revenue=FakeRevenueRepository(),
             pettycash=FakePettyCashRepository(),
             expenses=FakeExpensesRepository(),
+            invitations=FakeInvitationRepository(),
             reports=FakeReportsRepository(),
         ),
     )
@@ -287,6 +290,7 @@ async def test_readiness_unhealthy_when_the_contract_version_moved(settings: Set
             revenue=FakeRevenueRepository(),
             pettycash=FakePettyCashRepository(),
             expenses=FakeExpensesRepository(),
+            invitations=FakeInvitationRepository(),
             reports=FakeReportsRepository(),
         ),
     )
@@ -341,6 +345,7 @@ async def test_openapi_absent_when_disabled(
             revenue=FakeRevenueRepository(),
             pettycash=FakePettyCashRepository(),
             expenses=FakeExpensesRepository(),
+            invitations=FakeInvitationRepository(),
             reports=FakeReportsRepository(),
         ),
     )

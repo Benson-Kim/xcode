@@ -22,6 +22,7 @@ from uuid import UUID
 
 from .errors import RuleViolation
 from .identity import SignInStatus
+from .invitations import InvitationHashes
 
 
 class Permission(StrEnum):
@@ -475,15 +476,34 @@ class PersonDevice:
     last_used_at: datetime
 
 
+class PersonInvitationState(StrEnum):
+    """A live invitation as the "Sign in" pane shows it: its delivery state, or ``expired``
+    once past its expiry."""
+
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+@dataclass(frozen=True, slots=True)
+class PersonInvitation:
+    state: PersonInvitationState
+    sent_at: datetime | None
+    expires_at: datetime
+
+
 @dataclass(frozen=True, slots=True)
 class PersonSignIn:
     """The "Sign in" pane: status, which lock holds (``every_device``, ``new_devices``),
-    the last sign-in, where codes go and the live trusted devices."""
+    the last sign-in, where codes go, the live invitation (none once accepted or revoked)
+    and the live trusted devices."""
 
     status: SignInStatus
     lock: str | None
     last_signed_in_at: datetime | None
     email: str
+    invitation: PersonInvitation | None
     devices: tuple[PersonDevice, ...]
 
 
@@ -568,12 +588,14 @@ class PersonQuery:
 
 @dataclass(frozen=True, slots=True)
 class PersonSave:
-    """Create when ``user_id`` is ``None``, else update at ``expected_version``."""
+    """Create when ``user_id`` is ``None``, else update at ``expected_version``. ``invitation``
+    carries the digests of a fresh invitation; the routine decides whether to use them."""
 
     context: TenantContext
     user_id: UUID | None
     details: PersonDetails
     expected_version: int | None
+    invitation: InvitationHashes | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -582,6 +604,17 @@ class PersonLifecycle:
     user_id: UUID
     active: bool
     expected_version: int | None
+    reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PersonErasure:
+    """Erase the name, email and mobile number of a blocked person at ``expected_version``;
+    the money and history rows keep their id."""
+
+    context: TenantContext
+    user_id: UUID
+    expected_version: int
     reason: str | None
 
 
@@ -598,10 +631,48 @@ class PersonPinReset:
 
 
 @dataclass(frozen=True, slots=True)
+class PersonInvite:
+    """``api.people_invite``: send a person a new invitation, replacing the live one."""
+
+    context: TenantContext
+    user_id: UUID
+    hashes: InvitationHashes
+
+
+@dataclass(frozen=True, slots=True)
 class PersonDeviceRemoval:
     context: TenantContext
     user_id: UUID
     device_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class AccountDeletionRequest:
+    """``api.me_deletion_request``: the caller's own "Delete my account". The subject is always
+    the context's actor, never client input, so no one can request another member's deletion."""
+
+    context: TenantContext
+
+
+@dataclass(frozen=True, slots=True)
+class DeletionRecipient:
+    """An administrator who can block members, to notify of a deletion request: the stored
+    address and the first name for the greeting."""
+
+    email: str
+    first_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeletionRequestOutcome:
+    """What ``api.me_deletion_request`` returns: whether this request was recorded (``False`` when
+    one in the last 24 hours already was), and, for the notification, the requester's and
+    organization's names and the administrators to tell (empty on a repeat)."""
+
+    recorded: bool
+    requester_name: str
+    organization_name: str
+    recipients: tuple[DeletionRecipient, ...]
 
 
 # --- change log ----------------------------------------------------------------------------

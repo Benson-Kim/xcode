@@ -1,6 +1,6 @@
 -- api.rate_limit_hit(p_key text, p_limit integer, p_window_seconds integer, p_now timestamptz)
 --   RETURNS TABLE (allowed boolean, remaining integer, retry_after_seconds integer)
--- Purpose: charge one hit against a fixed window and return the decision; backs PostgresRateLimiter.
+-- Purpose: charge one hit against a fixed window and return the decision; backs PostgresRateLimiter. Each hit also deletes at most 100 windows of any key that started over a day ago, so keys seen once do not stay for good.
 -- Callers: OpsRoutines.rate_limit_hit via PostgresRateLimiter.
 -- Reads: ops.rate_limit_windows. Writes: ops.rate_limit_windows.
 -- Raises: XC422 rate_limit_invalid (a limit or window below 1, or a key over 256 characters).
@@ -48,6 +48,16 @@ BEGIN
   DELETE FROM ops.rate_limit_windows
   WHERE key = p_key
     AND window_start < v_window_start - make_interval(secs => 2 * p_window_seconds);
+
+  DELETE FROM ops.rate_limit_windows AS w
+  WHERE (w.key, w.window_start) IN (
+    SELECT o.key, o.window_start
+    FROM ops.rate_limit_windows AS o
+    WHERE o.window_start < p_now - interval '1 day'
+    ORDER BY o.window_start
+    LIMIT 100
+    FOR UPDATE SKIP LOCKED
+  );
 
   v_retry := greatest(0, ceil(extract(epoch FROM (v_window_end - p_now)))::integer);
 

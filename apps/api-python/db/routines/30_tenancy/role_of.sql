@@ -1,6 +1,6 @@
 -- tenancy.role_of(p_user_id uuid) RETURNS text
 -- Purpose: the name of a person's role in the current organization, NULL when they have none.
--- Callers: tenancy.check_person_grant, tenancy.save_person, api.people_set_active, api.people_sign_out (the Owner rules).
+-- Callers: tenancy.check_person_grant, tenancy.save_person, api.people_set_active, api.people_sign_out, api.people_erase (the Owner rules).
 -- Reads: tenancy.person_roles, tenancy.roles. Writes: nothing.
 -- Raises: none.
 -- Tests: tests/db/test_access_routines.py.

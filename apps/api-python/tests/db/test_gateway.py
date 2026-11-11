@@ -426,7 +426,8 @@ async def test_identity_routines_map_every_outcome_with_one_statement_each(
     count = _one_statement(statement_counter, count)
     assert signed_out.outcome is AuthOutcomeKind.SIGNED_OUT
 
-    context = await identity.resolve_session(SessionCheck(account.user_id, UNTRUSTED, 1, AUTH_T0))
+    check = SessionCheck(account.user_id, UNTRUSTED, 1, AUTH_T0, AUTH_T0)
+    context = await identity.resolve_session(check)
     count = _one_statement(statement_counter, count)
     assert context == SessionContext(account.organization_id, "Owner")
 
@@ -437,7 +438,9 @@ async def test_identity_routines_map_every_outcome_with_one_statement_each(
     assert revoked.outcome is AuthOutcomeKind.DEVICE_REVOKED
 
     with pytest.raises(SessionInvalid):
-        await identity.resolve_session(SessionCheck(account.user_id, UNTRUSTED, 1, AUTH_T0))
+        await identity.resolve_session(
+            SessionCheck(account.user_id, UNTRUSTED, 1, AUTH_T0, AUTH_T0)
+        )
     assert statement_counter() == count
 
     again = await identity.request_code(

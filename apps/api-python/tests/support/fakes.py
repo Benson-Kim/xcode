@@ -57,6 +57,7 @@ from xcode_api.domain.identity import (
     CodeRequest,
     CodeResend,
     CodeWithdrawal,
+    CreatedReviewAccount,
     DemoSeeding,
     DeviceListing,
     DeviceRemoval,
@@ -71,6 +72,7 @@ from xcode_api.domain.identity import (
     PinVerdict,
     ProvisionedUser,
     RemovedUser,
+    ReviewAccountCreation,
     RevokedSessions,
     SeededDemo,
     SessionCheck,
@@ -83,6 +85,11 @@ from xcode_api.domain.identity import (
     UserLookup,
     UserProvisioning,
     UserStatus,
+)
+from xcode_api.domain.invitations import (
+    InvitationHashes,
+    InvitationRedeem,
+    PendingInvitation,
 )
 from xcode_api.domain.pettycash import (
     EntryKind,
@@ -219,12 +226,15 @@ from xcode_api.domain.setup import (
 )
 from xcode_api.domain.tenancy import (
     AccessRole,
+    AccountDeletionRequest,
     Appearance,
     AppearanceBranding,
     BackLimit,
     BackLimitMode,
     Branding,
     DatePattern,
+    DeletionRecipient,
+    DeletionRequestOutcome,
     EffectiveFormats,
     EffectiveSettings,
     HistoryEntry,
@@ -247,6 +257,8 @@ from xcode_api.domain.tenancy import (
     PersonDetails,
     PersonDevice,
     PersonDeviceRemoval,
+    PersonErasure,
+    PersonInvite,
     PersonLifecycle,
     PersonPinReset,
     PersonQuery,
@@ -311,6 +323,8 @@ class FakeOpsRepository:
         self.contract_version_calls = 0
         self.demo_seeded = False
         self.demo_pin_hashes: dict[str, str] = {}
+        self.review_account: ReviewAccountCreation | None = None
+        self.review_user_id = uuid4()
 
     async def ping(self) -> None:
         self.ping_calls += 1
@@ -445,10 +459,26 @@ class FakeOpsRepository:
         self.demo_pin_hashes = {**dict(command.pin_hashes), **self.demo_pin_hashes}
         return SeededDemo(self.organization_id, created)
 
+    async def create_review_account(self, command: ReviewAccountCreation) -> CreatedReviewAccount:
+        self.operator_actions.append(
+            {
+                "operator": command.operator,
+                "action": "review-account",
+                "target": command.email.strip().lower(),
+                "detail": {"request_id": command.request_id},
+            }
+        )
+        if not self.demo_seeded:
+            raise Forbidden(code="review_demo_only")
+        created = self.review_account is None
+        self.review_account = command
+        return CreatedReviewAccount(self.review_user_id, self.organization_id, created)
+
 
 # --- identity: the api.auth_* routines, in memory -----------------------------------------
 
 CODE_LIFETIME = timedelta(minutes=10)
+REFRESH_GRACE = timedelta(seconds=30)
 COOLDOWN = timedelta(minutes=1)
 HOURLY_CODES = 5
 DAILY_CODES = 10
@@ -592,6 +622,7 @@ class FakeToken:
     token_hash: str
     expires_at: datetime
     revoked: bool = False
+    rotated_at: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -605,6 +636,7 @@ class FakeDevice:
     remembered: bool = True
     trusted_at: datetime = T0
     last_used_at: datetime = T0
+    signed_out_at: datetime | None = None
     row_id: UUID = field(default_factory=uuid4)
 
     def live(self, now: datetime) -> bool:
@@ -627,6 +659,33 @@ class FakeAttempt:
     occurred_at: datetime
 
 
+@dataclass(slots=True)
+class FakeInvitation:
+    """An ``identity.invitations`` row as the redeem step reads it."""
+
+    user_id: UUID
+    token_hash: str
+    expires_at: datetime
+    failed_attempts: int = 0
+    accepted: bool = False
+    revoked: bool = False
+
+
+def _invite_refusal(
+    invitation: FakeInvitation, user: FakeUser, now: datetime
+) -> SignInRefusal | None:
+    """What a redeem tells once the token and the number both matched."""
+    if invitation.accepted or user.pin_hash is not None:
+        return SignInRefusal.INVITE_USED
+    if invitation.revoked:
+        return SignInRefusal.INVITE_REVOKED
+    if now > invitation.expires_at:
+        return SignInRefusal.INVITE_EXPIRED
+    if user.status is not UserStatus.ACTIVE or not user.membership:
+        return SignInRefusal.INVITE_REVOKED
+    return None
+
+
 class FakeIdentityRepository:
     """In-memory ``IdentityRepository`` with the outcomes of the ``api.auth_*`` routines.
 
@@ -646,6 +705,7 @@ class FakeIdentityRepository:
         self._tokens: list[FakeToken] = []
         self._devices: list[FakeDevice] = []
         self._unknown: list[FakeAttempt] = []
+        self._invitations: list[FakeInvitation] = []
 
     # --- arranging state --------------------------------------------------------------------
 
@@ -764,6 +824,19 @@ class FakeIdentityRepository:
         )
         return code.code_id
 
+    def add_invitation(
+        self,
+        user_id: UUID,
+        token_hash: str,
+        *,
+        expires_at: datetime,
+        accepted: bool = False,
+        revoked: bool = False,
+    ) -> None:
+        self._invitations.append(
+            FakeInvitation(user_id, token_hash, expires_at, accepted=accepted, revoked=revoked)
+        )
+
     def set_user(self, user_id: UUID, **fields: object) -> None:
         unknown = set(fields) - _USER_FIELDS
         if unknown:
@@ -776,6 +849,9 @@ class FakeIdentityRepository:
 
     def user(self, user_id: UUID) -> FakeUser:
         return replace(self._users[user_id])
+
+    def invitation(self, token_hash: str) -> FakeInvitation:
+        return replace(next(i for i in self._invitations if i.token_hash == token_hash))
 
     def codes(self, user_id: UUID) -> list[FakeCode]:
         return [replace(c) for c in self._codes if c.user_id == user_id]
@@ -821,6 +897,11 @@ class FakeIdentityRepository:
     async def start(self, command: NumberCheck) -> AuthOutcome:
         outcome = self._start(command)
         self.calls.append("start")
+        return outcome
+
+    async def invite_redeem(self, command: InvitationRedeem) -> AuthOutcome:
+        outcome = self._invite_redeem(command)
+        self.calls.append("invite_redeem")
         return outcome
 
     async def sign_in(self, verdict: PinVerdict) -> AuthOutcome:
@@ -880,6 +961,8 @@ class FakeIdentityRepository:
             device = self._device(token.user_id, command.device_id)
             if device is not None and not device.remembered:
                 device.revoked = True
+            elif device is not None and not device.revoked:
+                device.signed_out_at = command.now
             outcome = AuthOutcome(AuthOutcomeKind.SIGNED_OUT)
         else:
             outcome = AuthOutcome(AuthOutcomeKind.SIGNED_OUT, refusal=SignInRefusal.TOKEN_UNKNOWN)
@@ -946,6 +1029,7 @@ class FakeIdentityRepository:
             or user.security_version != check.security_version
             or device is None
             or not device.live(check.now)
+            or (device.signed_out_at is not None and check.not_before < device.signed_out_at)
         ):
             raise SessionInvalid
         if not user.membership:
@@ -1158,6 +1242,48 @@ class FakeIdentityRepository:
                 code.consumed = True
         return self._insert_code(
             user.user_id, purpose, device_id, code_hash, now, now + CODE_LIFETIME, False
+        )
+
+    def _invite_redeem(self, command: InvitationRedeem) -> AuthOutcome:
+        """``api.auth_invite_redeem``: an unknown token, an unknown number and another
+        person's token refuse alike; a known token with the wrong number counts a try."""
+        user = self._by_phone(command.phone)
+        invitation = next(
+            (i for i in self._invitations if i.token_hash == command.token_hash), None
+        )
+        if invitation is None or user is None or invitation.user_id != user.user_id:
+            if invitation is not None:
+                invitation.failed_attempts += 1
+            if user is None:
+                self._remember(
+                    command.phone,
+                    command.device_id,
+                    "invite_redeem",
+                    "refused",
+                    "invite_invalid",
+                    command.now,
+                )
+            return AuthOutcome(AuthOutcomeKind.REFUSED, refusal=SignInRefusal.INVITE_INVALID)
+        refusal = _invite_refusal(invitation, user, command.now)
+        if refusal is not None:
+            return AuthOutcome(AuthOutcomeKind.REFUSED, refusal=refusal)
+        for code in self._codes:
+            if code.user_id == user.user_id and code.purpose is CodePurpose.FIRST_SETUP:
+                code.consumed = True
+        stored = self._insert_code(
+            user.user_id,
+            CodePurpose.FIRST_SETUP,
+            command.device_id,
+            command.code_hash,
+            command.now,
+            command.now + CODE_LIFETIME,
+        )
+        return AuthOutcome(
+            AuthOutcomeKind.VERIFICATION_REQUIRED,
+            purpose=CodePurpose.FIRST_SETUP,
+            masked_email=mask_email(user.email),
+            code_issued=True,
+            code_id=stored.code_id,
         )
 
     @staticmethod
@@ -1801,6 +1927,7 @@ class FakeIdentityRepository:
         if policy is None:
             return self._refused(SignInRefusal.INACTIVE)
         token.revoked = True
+        token.rotated_at = command.now
         return self._issue_session(
             user, command.device_id, command.new_token_hash, policy, command.now, signing_in=False
         )
@@ -1813,16 +1940,26 @@ class FakeIdentityRepository:
             self._revoke_tokens(user.user_id)
             return self._refused(SignInRefusal.INACTIVE)
         if token.revoked:
-            self._revoke_tokens(user.user_id, command.device_id)
-            return self._refused(SignInRefusal.TOKEN_REPLAYED)
-        if now >= token.expires_at:
-            return self._refused(SignInRefusal.TOKEN_EXPIRED)
-        if user.failed_attempts >= PIN_TRIES:
-            return self._refused(SignInRefusal.LOCKED)
+            return self._replayed(user, token, command)
         device = self._device(user.user_id, command.device_id)
-        if device is None or not device.live(now):
-            return self._refused(SignInRefusal.DEVICE_UNTRUSTED)
-        return None
+        refusal = (
+            SignInRefusal.TOKEN_EXPIRED
+            if now >= token.expires_at
+            else SignInRefusal.LOCKED
+            if user.failed_attempts >= PIN_TRIES
+            else SignInRefusal.DEVICE_UNTRUSTED
+            if device is None or not device.live(now)
+            else None
+        )
+        return None if refusal is None else self._refused(refusal)
+
+    def _replayed(self, user: FakeUser, token: FakeToken, command: TokenRefresh) -> AuthOutcome:
+        # Within the grace another request renewed the session first: nothing is revoked.
+        rotated = token.rotated_at
+        if rotated is not None and command.now < rotated + REFRESH_GRACE:
+            return self._refused(SignInRefusal.REFRESH_SUPERSEDED)
+        self._revoke_tokens(user.user_id, command.device_id)
+        return self._refused(SignInRefusal.TOKEN_REPLAYED)
 
 
 # --- tenancy: access, people, the change log and organization settings, in memory -----------
@@ -1910,6 +2047,28 @@ _WEEKDAYS = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "
 
 def _compact(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+
+
+_ERASED_VALUES: Mapping[str, Any] = {
+    "FirstName": "Former",
+    "first_name": "Former",
+    "LastName": "member",
+    "last_name": "member",
+    "Name": "Former member",
+    "requester_name": "Former member",
+    "Email": None,
+    "PhoneNumber": None,
+    "email": None,
+    "phone_number": None,
+}
+
+
+def _erased_snapshot(snapshot: str | None) -> str | None:
+    """``tenancy.erased_snapshot``: the name and contact keys of a JSON object rewritten."""
+    value = None if snapshot is None else json.loads(snapshot)
+    if not isinstance(value, dict):
+        return snapshot
+    return _compact({k: _ERASED_VALUES[k] if k in _ERASED_VALUES else v for k, v in value.items()})
 
 
 def _camel(key: str) -> str:
@@ -2041,6 +2200,8 @@ class FakeMember:
     back_limit_count: int | None = None
     back_limit_from: date | None = None
     devices: list[PersonDevice] = field(default_factory=list)
+    erased: bool = False
+    in_other_organization: bool = False
 
     @property
     def status(self) -> SignInStatus:
@@ -2129,6 +2290,7 @@ class FakeTenancyRepository:
         self.logo: LogoUpload | None = None
         self.preference_rows: dict[UUID, UserPreferences] = {}
         self.log: list[HistoryEntry] = []
+        self.invitations: dict[UUID, InvitationHashes] = {}
 
     # --- arranging state --------------------------------------------------------------------
 
@@ -2225,7 +2387,8 @@ class FakeTenancyRepository:
             (
                 m
                 for m in self.members.values()
-                if (role in ("all", "") or m.role.lower() == role)
+                if not m.erased
+                and (role in ("all", "") or m.role.lower() == role)
                 and (status is None or m.status == status)
             ),
             key=lambda m: (m.last_name, m.first_name, str(m.user_id)),
@@ -2237,7 +2400,7 @@ class FakeTenancyRepository:
     async def get_person(self, query: PersonQuery) -> Person:
         self._enter(query.context, "people.view")
         member = self.members.get(query.user_id)
-        if member is None:
+        if member is None or member.erased:
             raise NotFound(code="not_found")
         live = sorted(member.devices, key=lambda d: (d.last_used_at, str(d.id)), reverse=True)
         return replace(
@@ -2247,13 +2410,14 @@ class FakeTenancyRepository:
                 lock=member.lock,
                 last_signed_in_at=member.last_signed_in_at,
                 email=member.email,
+                invitation=None,
                 devices=tuple(live),
             ),
         )
 
     async def create_person(self, command: PersonSave) -> WriteResult:
-        self._enter(command.context, "people.add")
-        fields = self._checked(command.details, self._today(command.context), creating=True)
+        editor = self._enter(command.context, "people.add")
+        fields = self._checked(command.details, self._today(command.context), editor, creating=True)
         if any(
             m.email == fields["email"] or m.phone == fields["phone"] for m in self.members.values()
         ):
@@ -2271,10 +2435,12 @@ class FakeTenancyRepository:
         return WriteResult(id=member.user_id, version=1, outcome=WriteOutcome.CREATED)
 
     async def update_person(self, command: PersonSave) -> WriteResult:
-        self._enter(command.context, "people.edit")
+        editor = self._enter(command.context, "people.edit")
         if command.user_id is None:
             raise NotFound(code="not_found")
-        fields = self._checked(command.details, self._today(command.context), creating=False)
+        fields = self._checked(
+            command.details, self._today(command.context), editor, creating=False
+        )
         member = self.members.get(command.user_id)
         if member is None:
             raise NotFound(code="not_found")
@@ -2377,6 +2543,59 @@ class FakeTenancyRepository:
         )
         return WriteResult(id=member.user_id, version=member.version, outcome=WriteOutcome.UPDATED)
 
+    async def erase_person(self, command: PersonErasure) -> WriteResult:
+        actor = self._enter(command.context, "people.block")
+        if command.user_id == command.context.actor_id:
+            raise RuleViolation(code="people_self_erase")
+        member = self.members.get(command.user_id)
+        if member is not None and member.erased:
+            return WriteResult(
+                id=member.user_id, version=member.version, outcome=WriteOutcome.UNCHANGED
+            )
+        if member is None:
+            raise NotFound(code="not_found")
+        if actor.role.lower() != "owner" and member.role.lower() == "owner":
+            raise Forbidden(code="people_owner_edit")
+        if member.active:
+            raise RuleViolation(code="people_erase_active")
+        if member.in_other_organization:
+            raise RuleViolation(code="people_erase_shared")
+        if command.expected_version != member.version:
+            raise Conflict(code="version_conflict")
+        reason = (command.reason or "").strip()
+        if not 1 <= len(reason) <= 500:
+            raise RuleViolation(code="reason_length")
+        name = f"{member.first_name} {member.last_name}"
+        self.log = [
+            replace(
+                entry,
+                reason=entry.reason.replace(name, "Former member")[:500],
+                before=_erased_snapshot(entry.before),
+                after=_erased_snapshot(entry.after),
+            )
+            if entry.entity_id == member.user_id and entry.section in ("people", "signIn")
+            else entry
+            for entry in self.log
+        ]
+        member.erased = True
+        member.first_name, member.last_name = "Former", "member"
+        member.email = member.phone = ""
+        member.has_pin = False
+        member.devices.clear()
+        member.version += 1
+        self.invitations.pop(member.user_id, None)
+        automatic = "Erased the personal details of a former member"
+        automatic += f". Reason: {reason}" + ("" if reason[-1] in ".!?" else ".")
+        self._record(
+            command.context,
+            "people",
+            member.user_id,
+            _compact({"Erased": False}),
+            _compact({"Erased": True}),
+            automatic,
+        )
+        return WriteResult(id=member.user_id, version=member.version, outcome=WriteOutcome.UPDATED)
+
     async def sign_out_person(self, command: PersonSignOut) -> WriteResult:
         member = self._sign_in_target(command.context, command.user_id, "people_self_sign_out")
         if not member.devices:
@@ -2414,6 +2633,22 @@ class FakeTenancyRepository:
         )
         return WriteResult(id=member.user_id, version=member.version, outcome=WriteOutcome.UPDATED)
 
+    async def invite_person(self, command: PersonInvite) -> WriteResult:
+        member = self._sign_in_target(command.context, command.user_id, "people_self_sign_in")
+        if member.has_pin or not member.active:
+            raise RuleViolation(code="people_invite_not_needed")
+        snapshot = member.sign_in_snapshot()
+        self.invitations[member.user_id] = command.hashes
+        self._record(
+            command.context,
+            "signIn",
+            member.user_id,
+            snapshot,
+            snapshot,
+            f"Invitation sent, {member.first_name} {member.last_name}",
+        )
+        return WriteResult(id=member.user_id, version=member.version, outcome=WriteOutcome.UPDATED)
+
     async def remove_person_device(self, command: PersonDeviceRemoval) -> WriteResult:
         member = self._sign_in_target(command.context, command.user_id, "people_self_sign_in")
         device = next((d for d in member.devices if d.id == command.device_id), None)
@@ -2430,6 +2665,37 @@ class FakeTenancyRepository:
             f"Trusted device removed, {member.first_name} {member.last_name}",
         )
         return WriteResult(id=member.user_id, version=member.version, outcome=WriteOutcome.UPDATED)
+
+    async def request_account_deletion(
+        self, command: AccountDeletionRequest
+    ) -> DeletionRequestOutcome:
+        context = command.context
+        member = self._enter(context)
+        name = f"{member.first_name} {member.last_name}"
+        reason = f"Account deletion requested, {name}"
+        since = context.now - timedelta(hours=24)
+        if any(
+            e.section == "people"
+            and e.entity_id == member.user_id
+            and e.reason == reason
+            and e.occurred_at > since
+            for e in self.log
+        ):
+            return DeletionRequestOutcome(False, name, self.name, ())
+        others = sorted(
+            (
+                m
+                for m in self.members.values()
+                if m.active and m.user_id != member.user_id and "people.block" in m.held()
+            ),
+            key=lambda m: (m.last_name, m.first_name, str(m.user_id)),
+        )
+        snapshot = _compact(
+            {"user_id": str(member.user_id), "requested_at": context.now.isoformat()}
+        )
+        self._record(context, "people", member.user_id, snapshot, snapshot, reason)
+        recipients = tuple(DeletionRecipient(m.email, m.first_name) for m in others)
+        return DeletionRequestOutcome(True, name, self.name, recipients)
 
     # --- change log -------------------------------------------------------------------------
 
@@ -2683,7 +2949,9 @@ class FakeTenancyRepository:
             raise Forbidden(code="people_owner_edit")
         return member
 
-    def _checked(self, details: PersonDetails, today: date, *, creating: bool) -> dict[str, Any]:
+    def _checked(
+        self, details: PersonDetails, today: date, editor: FakeMember, *, creating: bool
+    ) -> dict[str, Any]:
         first = (details.first_name or "").strip()
         last = (details.last_name or "").strip()
         if not first or not last or len(first) > 100 or len(last) > 100:
@@ -2694,8 +2962,7 @@ class FakeTenancyRepository:
         phone = PhoneNumber.parse(details.phone_number or "")
         if phone is None:
             raise RuleViolation(code="people_phone_invalid")
-        if details.scope_mode not in ("all", "companies", "vehicles"):
-            raise RuleViolation(code="people_scope_mode")
+        self._check_scope(details, editor)
         if not details.permissions or len(set(details.permissions)) != len(details.permissions):
             raise RuleViolation(code="people_permissions_invalid")
         role = next((n for n in role_names() if n.lower() == (details.role or "").lower()), None)
@@ -2736,6 +3003,16 @@ class FakeTenancyRepository:
             "back_limit_count": count,
             "back_limit_from": since,
         }
+
+    @staticmethod
+    def _check_scope(details: PersonDetails, editor: FakeMember) -> None:
+        if details.scope_mode not in ("all", "companies", "vehicles"):
+            raise RuleViolation(code="people_scope_mode")
+        if details.scope_mode == "companies" and not details.company_ids:
+            raise RuleViolation(code="people_scope_empty")
+        sees_every_company = editor.scope_mode == "all"
+        if details.scope_mode == "vehicles" and not details.vehicle_ids and not sees_every_company:
+            raise RuleViolation(code="people_scope_empty")
 
     def _person(self, member: FakeMember) -> Person:
         return Person(
@@ -8240,3 +8517,29 @@ class FakeReportsRepository:
             file_name=f"{table.title}{'' if period is None else ' ' + period}.{word}",
             content_type="application/pdf" if word == "pdf" else _XLSX_TYPE,
         )
+
+
+class FakeInvitationRepository:
+    """The invitation outbox in memory: ``pending`` maps a token hash to what its mail needs;
+    ``results`` records each delivery result as ``(token_hash, sent)``."""
+
+    def __init__(self) -> None:
+        self.pending: dict[str, PendingInvitation] = {}
+        self.started: list[str] = []
+        self.results: list[tuple[str, bool]] = []
+        self.claimable: list[PendingInvitation] = []
+        self.claims: list[tuple[int, list[str], list[str]]] = []
+
+    async def start_delivery(self, token_hash: str, now: datetime) -> PendingInvitation | None:
+        self.started.append(token_hash)
+        return self.pending.get(token_hash)
+
+    async def record_delivery(self, token_hash: str, sent: bool, now: datetime) -> None:
+        self.results.append((token_hash, sent))
+
+    async def claim_undelivered(
+        self, now: datetime, limit: int, token_hashes: list[str], code_hashes: list[str]
+    ) -> list[PendingInvitation]:
+        self.claims.append((limit, list(token_hashes), list(code_hashes)))
+        claimed, self.claimable = self.claimable[:limit], self.claimable[limit:]
+        return claimed

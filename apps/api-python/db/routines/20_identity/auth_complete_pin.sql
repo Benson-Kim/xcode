@@ -1,9 +1,9 @@
 -- api.auth_complete_pin(p_request_id text, p_phone text, p_device_id text, p_purpose text, p_code_hash text, p_new_pin_is_current boolean, p_checked_pin_hash text, p_pin_hash text, p_device_name text, p_trust boolean, p_device_token_hash text, p_refresh_token_hash text, p_trust_days integer, p_now timestamptz) RETURNS jsonb
--- Purpose: A06, A09 and N06: with a valid code, set the new PIN (a reset refuses the PIN being replaced as invalid_pin "unchanged" with the code kept, and a verdict on a hash replaced since the lookup with nothing changed), end every session and code, clear both lock scopes and a forced reset, remove every device on a reset, trust this device (remembered with its token unless p_trust is false; the released routes pass true and no token), log the PIN event and sign in (docs/07-auth.md 12.4, 12.9).
+-- Purpose: A06, A09 and N06: with a valid code, set the new PIN (a first PIN accepts the live invitation) (a reset refuses the PIN being replaced as invalid_pin "unchanged" with the code kept, and a verdict on a hash replaced since the lookup with nothing changed), end every session and code, clear both lock scopes and a forced reset, remove every device on a reset, trust this device (remembered with its token unless p_trust is false; the released routes pass true and no token), log the PIN event and sign in (docs/07-auth.md 12.4, 12.9).
 -- Callers: IdentityRoutines.complete_pin; the PIN completion use cases (A06, A09, N06).
--- Reads: identity.users, identity.verification_codes, identity.trusted_devices, and what identity.policy_for reads. Writes: identity.verification_codes, identity.users (PIN, counters, forced reset, security version, last sign-in, version), identity.refresh_tokens, identity.trusted_devices, identity.sign_in_attempts, and the change log through identity.log_sign_in.
+-- Reads: identity.users, identity.verification_codes, identity.invitations, identity.trusted_devices, and what identity.policy_for reads. Writes: identity.verification_codes, identity.invitations (accepted), identity.users (PIN, counters, forced reset, security version, last sign-in, version), identity.refresh_tokens, identity.trusted_devices, identity.sign_in_attempts, and the change log through identity.log_sign_in.
 -- Raises: none.
--- Tests: tests/db/test_auth_routines.py.
+-- Tests: tests/db/test_auth_routines.py, tests/db/test_invitations.py.
 
 CREATE OR REPLACE FUNCTION api.auth_complete_pin(
   p_request_id text,
@@ -101,6 +101,8 @@ BEGIN
   ELSE
     PERFORM identity.revoke_tokens(v_user.id);
     UPDATE identity.verification_codes SET consumed = true WHERE user_id = v_user.id AND NOT consumed;
+    UPDATE identity.invitations SET accepted_at = p_now
+    WHERE user_id = v_user.id AND accepted_at IS NULL AND revoked_at IS NULL;
   END IF;
   PERFORM identity.trust_device(
     v_user.id, p_device_id, p_device_name, p_device_token_hash, v_trust, p_trust_days, p_now

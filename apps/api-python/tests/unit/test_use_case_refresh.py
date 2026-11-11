@@ -28,9 +28,29 @@ async def test_rotation_returns_the_replacement_and_replay_is_refused(kit: AuthK
     assert rotated.access_token is not None
     assert kit.identity.live_tokens(user_id, TRUSTED) == 1
 
+    kit.clock.advance(31)
     replayed = await kit.refresh().execute(RefreshCommand("req-7", "presented-token", TRUSTED))
     assert replayed is refusal_answer()
     assert kit.identity.live_tokens(user_id, TRUSTED) == 0
+
+
+async def test_a_refresh_racing_its_own_rotation_is_superseded_and_revokes_nothing(
+    kit: AuthKit,
+) -> None:
+    user_id = await kit.account()
+    kit.identity.store_token(
+        user_id,
+        TRUSTED,
+        kit.digest("presented-token"),
+        expires_at=kit.clock.now() + timedelta(days=30),
+    )
+    await kit.refresh().execute(RefreshCommand("req-6", "presented-token", TRUSTED))
+    kit.clock.advance(29)
+    raced = await kit.refresh().execute(RefreshCommand("req-7", "presented-token", TRUSTED))
+
+    assert raced.status is EnvelopeStatus.REFRESH_SUPERSEDED
+    assert (raced.access_token, raced.refresh_token) == (None, None)
+    assert kit.identity.live_tokens(user_id, TRUSTED) == 1
 
 
 async def test_an_unknown_token_is_the_uniform_refusal(kit: AuthKit) -> None:

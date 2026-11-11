@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from ...domain.identity import AuthEnvelope, EnvelopeStatus, SessionView
+from ...domain.invitations import InviteProblem
 from ...domain.values import DeviceId, Email, PhoneNumber, Pin, RefreshToken, VerificationCode
 
 
@@ -105,6 +106,28 @@ class SignOutRequest(AuthRequestFields):
     """Uses ``refreshToken``, ``deviceId``."""
 
 
+class InviteRedeemRequest(AuthRequestFields):
+    """Uses ``token`` (the link token), ``phoneNumber``, ``deviceId``; ``deviceName`` is
+    accepted and bounded but not stored. Any other property is ignored."""
+
+    token: str = ""
+    device_name: str = ""
+
+    def shape_valid(self) -> bool:
+        return (
+            super().shape_valid()
+            and storable(self.token)
+            and storable(self.device_name)
+            and 1 <= len(self.token) <= INVITE_TOKEN_MAX_LENGTH
+            and self.phone_number != ""
+            and len(self.device_name) <= DEVICE_NAME_MAX_LENGTH
+        )
+
+
+INVITE_TOKEN_MAX_LENGTH = 128
+DEVICE_NAME_MAX_LENGTH = 100
+
+
 class AuthResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -127,6 +150,14 @@ class AuthResponse(BaseModel):
             masked_email=envelope.masked_email,
             minimum_pin_length=envelope.minimum_pin_length,
         )
+
+
+class InviteRedeemResponse(AuthResponse):
+    """The envelope plus the one-time setup ``code`` (202 only) and, on a 401 whose token and
+    number both matched, ``inviteProblem``. Both are null otherwise."""
+
+    code: str | None = None
+    invite_problem: InviteProblem | None = None
 
 
 class AuthSessionResponse(BaseModel):

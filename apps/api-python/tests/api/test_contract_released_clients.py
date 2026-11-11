@@ -342,6 +342,9 @@ async def test_refresh_rotates_and_sign_out_ends_the_session(api: AuthApi) -> No
         "authenticated",
     )
     assert has(rotated, "refreshToken", "str") != first["refreshToken"]
+    raced = await api.post("/auth/refresh", refreshToken=first["refreshToken"], deviceId=DEVICE)
+    assert raced.status_code == 401
+    api.clock.advance(31)
     envelope(
         await api.post("/auth/refresh", refreshToken=first["refreshToken"], deviceId=DEVICE),
         401,

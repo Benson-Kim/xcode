@@ -1,5 +1,5 @@
 -- ops.seed_demo_user(p_organization_id uuid, p_owner_id uuid, p_request_id text, p_email text, p_phone text, p_role text, p_company_id uuid, p_pin_hash text, p_at timestamptz) RETURNS uuid
--- Purpose: make sure one demo login exists and is active in the organization, adding only what is missing: the Owner (p_owner_id NULL) by plain rows, everyone else through api.people_create as that Owner; the PIN hash is set only on an account this call created, and a removed account is revived with its sessions ended.
+-- Purpose: make sure one demo login exists and is active in the organization, adding only what is missing: the Owner (p_owner_id NULL) by plain rows, everyone else through api.people_create as that Owner, with no invitation; the PIN hash is set only on an account this call created, and a removed account is revived with its sessions ended.
 -- Callers: api.ops_seed_demo.
 -- Reads: identity.users, tenancy.memberships, tenancy.roles, tenancy.person_roles, tenancy.data_scopes, tenancy.data_scope_companies. Writes: identity.users, identity.trusted_devices, identity.refresh_tokens, tenancy.memberships, tenancy.person_roles, tenancy.data_scopes, and what api.people_create writes.
 -- Raises: none.
@@ -43,7 +43,7 @@ BEGIN
         p_role,
         CASE WHEN p_company_id IS NULL THEN 'all' ELSE 'companies' END,
         CASE WHEN p_company_id IS NULL THEN '{}'::uuid[] ELSE ARRAY[p_company_id] END,
-        '{}'::uuid[], tenancy.role_permissions(p_role), NULL, NULL, NULL, NULL, p_at
+        '{}'::uuid[], tenancy.role_permissions(p_role), NULL, NULL, NULL, NULL, NULL::text, NULL::text, p_at
       );
       SELECT u.* INTO v_user FROM identity.users AS u WHERE u.email = p_email;
     END IF;

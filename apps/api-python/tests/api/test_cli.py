@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -15,6 +16,7 @@ import pytest
 
 from xcode_api.application.ops.seed_demo import DEMO_PINS
 from xcode_api.cli.main import main
+from xcode_api.security.digests import keyed_digest
 from xcode_api.security.pins import Pbkdf2PinHasher
 
 Conn = psycopg.Connection[dict[str, Any]]
@@ -244,3 +246,65 @@ def test_seed_demo_seeds_once_and_the_pins_verify(
     for email, pin in DEMO_PINS.items():
         assert asyncio.run(hasher.verify(pin, stored[email])), email
     assert stored["brian.mwangi@metrotrans.co.ke"] is None
+
+
+# --- review-account ---------------------------------------------------------------------
+
+REVIEW_EMAIL = "app.review@example.com"
+REVIEW_PHONE = "0798765432"
+
+
+def _review_env(monkeypatch: pytest.MonkeyPatch, app_url: str) -> str:
+    key = secrets.token_urlsafe(32)
+    monkeypatch.setenv("XCODE_DATABASE_URL", app_url)
+    monkeypatch.setenv("XCODE_MAIL_BACKEND", "log")
+    monkeypatch.setenv("XCODE_AUTH_SIGNING_KEY", key)
+    monkeypatch.setenv("XCODE_AUTH_PIN_ITERATIONS", "1000")
+    return key
+
+
+def _review(capsys: pytest.CaptureFixture[str]) -> tuple[int, str]:
+    return _run(
+        capsys, "review-account", "create", "--email", REVIEW_EMAIL, "--phone", REVIEW_PHONE
+    )
+
+
+@pytest.mark.usefixtures("cli")
+def test_review_account_is_refused_outside_a_demo_organization(
+    capsys: pytest.CaptureFixture[str],
+    owner_conn: Conn,
+    monkeypatch: pytest.MonkeyPatch,
+    app_url: str,
+) -> None:
+    _review_env(monkeypatch, app_url)
+    assert _run(capsys, "provision-user", "--email", EMAIL, "--phone", "0712345678")[0] == 0
+    assert _review(capsys) == (1, "refused: review_demo_only")
+    actions = _actions(owner_conn, "review-account")
+    assert [(a["operator"], a["target"], a["detail"]["refused"]) for a in actions] == [
+        (OPERATOR, REVIEW_EMAIL, "review_demo_only")
+    ]
+
+
+@pytest.mark.usefixtures("cli")
+def test_review_account_prints_a_pin_and_code_the_api_matches(
+    capsys: pytest.CaptureFixture[str],
+    owner_conn: Conn,
+    monkeypatch: pytest.MonkeyPatch,
+    app_url: str,
+) -> None:
+    key = _review_env(monkeypatch, app_url)
+    assert _run(capsys, "provision-user", "--email", EMAIL, "--phone", "0712345678")[0] == 0
+    owner_conn.execute("UPDATE tenancy.organizations SET demo = true")
+    code, out = _review(capsys)
+    assert code == 0, out
+    assert _fields(out)["created_user"] == "yes"
+    shown = dict(pair.split("=", 1) for pair in out.splitlines()[1].split())
+    row = owner_conn.execute(
+        "SELECT u.pin_hash, r.code_hash FROM identity.users u "
+        "JOIN identity.review_accounts r ON r.user_id = u.id WHERE u.email = %s",
+        (REVIEW_EMAIL,),
+    ).fetchone()
+    assert row is not None
+    assert row["code_hash"] == keyed_digest(shown["code"], key)
+    assert asyncio.run(Pbkdf2PinHasher(1000).verify(shown["pin"], row["pin_hash"]))
+    assert shown["pin"] not in row["pin_hash"]

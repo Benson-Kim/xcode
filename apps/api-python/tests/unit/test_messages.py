@@ -34,6 +34,8 @@ SERVICE_ONLY = {
     "organization_not_single",
     "seed_development_only",
     "seed_exists",
+    "review_demo_only",
+    "review_phone_differs",
 }
 SAMPLES = {
     "value": "Mars/Olympus",

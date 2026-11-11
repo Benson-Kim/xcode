@@ -33,6 +33,8 @@ SERIES = {
     "db_routine_duration_seconds",
     "db_pool_connections",
     "auth_refusals_total",
+    "auth_bursts_total",
+    "invitations_total",
     "mail_queue_depth",
     "rate_limit_rejections_total",
 }
@@ -43,6 +45,8 @@ LABELS = {
     "routine": re.compile(r"^[a-z_][a-z0-9_]*$"),
     "state": re.compile(r"^(idle|busy|waiting)$"),
     "reason": re.compile(r"^(unknown|paused|capped|wrong_pin)$"),
+    "kind": re.compile(r"^(wrong_pin|wrong_code)$"),
+    "event": re.compile(r"^(sent|failed|redeemed)$"),
     "le": re.compile(r"^([0-9.]+|\+Inf)$"),
 }
 UNKNOWN_PHONE = "0799123456"

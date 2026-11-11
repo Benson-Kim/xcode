@@ -26,6 +26,8 @@ SERVICE_ONLY = {
     "organization_not_single": "provisioning only; the CLI prints the code",
     "seed_development_only": "demo seed only; the CLI prints the code",
     "seed_exists": "demo seed only; the CLI prints the code",
+    "review_demo_only": "App Review login only; the CLI prints the code",
+    "review_phone_differs": "App Review login only; the CLI prints the code",
 }
 # Trigger functions are backstops behind the routines' own checks; a request that reaches one
 # is a routine bug and answers 500, so they have no sentence.

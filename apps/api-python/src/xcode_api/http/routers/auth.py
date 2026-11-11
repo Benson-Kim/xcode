@@ -21,6 +21,7 @@ from starlette.responses import Response
 
 from ...application.auth.complete_pin import CompletePinCommand
 from ...application.auth.get_session import GetSessionQuery
+from ...application.auth.redeem_invitation import RedeemInvitationCommand
 from ...application.auth.refresh import RefreshCommand
 from ...application.auth.request_code import RequestCodeCommand
 from ...application.auth.resolve_session import ResolvedSession
@@ -36,6 +37,8 @@ from ..dependencies import (
     container,
     current_principal,
     current_session,
+    invite_address_limit,
+    invite_token_limit,
     pin_rate_limit,
     request_id,
 )
@@ -44,6 +47,8 @@ from ..schemas.auth import (
     AuthRequestFields,
     AuthResponse,
     AuthSessionResponse,
+    InviteRedeemRequest,
+    InviteRedeemResponse,
     PinResetCodeRequest,
     PinResetCompleteRequest,
     PinResetVerifyRequest,
@@ -65,6 +70,7 @@ HTTP_STATUS = MappingProxyType(
         EnvelopeStatus.CODE_VERIFIED: 200,
         EnvelopeStatus.PAUSED: 423,
         EnvelopeStatus.AUTHENTICATION_FAILED: 401,
+        EnvelopeStatus.REFRESH_SUPERSEDED: 401,
         EnvelopeStatus.INVALID_PIN: 400,
         EnvelopeStatus.INVALID_REQUEST: 400,
         EnvelopeStatus.SIGNED_OUT: 200,
@@ -77,7 +83,7 @@ _DESCRIPTIONS = MappingProxyType(
     {
         202: "Accepted (verification_required or check_email)",
         400: "invalid_request or invalid_pin",
-        401: "authentication_failed",
+        401: "authentication_failed (refresh_superseded on a refresh racing its own rotation)",
         423: "paused",
         503: "service_unavailable",
     }
@@ -94,9 +100,10 @@ _EMPTY = MappingProxyType(
 AuthJsonResponse = JsonResponse
 
 
-def envelope_response(envelope: AuthEnvelope) -> Response:
+def envelope_response(envelope: AuthEnvelope, model: AuthResponse | None = None) -> Response:
     status = HTTP_STATUS[envelope.status]
-    body = AuthResponse.from_envelope(envelope).model_dump(mode="json", by_alias=True)
+    shown = AuthResponse.from_envelope(envelope) if model is None else model
+    body = shown.model_dump(mode="json", by_alias=True)
     headers = {"WWW-Authenticate": "Bearer"} if status == 401 else None
     return AuthJsonResponse(body, status_code=status, headers=headers)
 
@@ -207,6 +214,29 @@ async def setup_pin_verify(request: Request, body: SetupPinVerifyRequest) -> Res
 )
 async def setup_pin_complete(request: Request, body: SetupPinCompleteRequest) -> Response:
     return await _complete_pin(request, body, CodePurpose.FIRST_SETUP)
+
+
+@router.post(
+    "/auth/invite/redeem",
+    response_model=InviteRedeemResponse,
+    responses=_documented(202, 400, 401),
+    dependencies=_LIMITED,
+)
+async def invite_redeem(request: Request, body: InviteRedeemRequest) -> Response:
+    """An unknown token, a wrong number and another person's token answer the same 401;
+    ``inviteProblem`` is set only when the token and the number both matched."""
+    await invite_address_limit(request)
+    if not body.shape_valid():
+        return envelope_response(invalid_request_answer())
+    redeem = container(request).redeem_invitation
+    await invite_token_limit(request, redeem.token_key(body.token))
+    redeemed = await redeem.execute(
+        RedeemInvitationCommand(request_id(request), body.token, body.phone_number, body.device_id)
+    )
+    model = InviteRedeemResponse.from_envelope(redeemed.envelope).model_copy(
+        update={"code": redeemed.code, "invite_problem": redeemed.problem}
+    )
+    return envelope_response(redeemed.envelope, model)
 
 
 @router.post(

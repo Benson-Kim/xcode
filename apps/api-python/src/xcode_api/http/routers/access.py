@@ -11,13 +11,16 @@ from fastapi import APIRouter, Body, Depends, Path, Query
 from starlette.responses import Response
 
 from ...application.access.create_person import CreatePersonCommand
+from ...application.access.erase_person import ErasePersonCommand
 from ...application.access.get_access_catalog import GetAccessCatalogQuery
 from ...application.access.get_my_scope import GetMyScopeQuery
 from ...application.access.get_person import GetPersonQuery
 from ...application.access.get_scope_options import GetScopeOptionsQuery
+from ...application.access.invite_person import InvitePersonCommand
 from ...application.access.list_access_roles import ListAccessRolesQuery
 from ...application.access.list_people import ListPeopleQuery
 from ...application.access.remove_person_device import RemovePersonDeviceCommand
+from ...application.access.request_account_deletion import RequestAccountDeletionCommand
 from ...application.access.require_pin_reset import RequirePinResetCommand
 from ...application.access.set_person_active import SetPersonActiveCommand
 from ...application.access.sign_out_person import SignOutPersonCommand
@@ -34,6 +37,7 @@ from ..schemas.access import (
     PermissionGroup,
     PersonDetailDto,
     PersonDto,
+    PersonErasureRequest,
     PersonLifecycleRequest,
     SavePerson,
     ScopeOptions,
@@ -92,6 +96,20 @@ async def get_scope_options(caller: CallerDep, c: ContainerDep) -> Response:
 async def get_my_scope(caller: CallerDep, c: ContainerDep) -> Response:
     scope = await c.get_my_scope.execute(GetMyScopeQuery(caller))
     return respond(MyScope.from_record(scope))
+
+
+@router.post(
+    "/me/deletion-request",
+    operation_id="RequestMyAccountDeletion",
+    status_code=202,
+    responses=problem_responses(403),
+)
+async def request_account_deletion(caller: CallerDep, c: ContainerDep) -> Response:
+    """Delete my account: record the caller's own request and notify the administrators who can
+    block members. Always answers 202 with no body; a repeat within 24 hours records nothing and
+    notifies no one, so the reply never reveals whether a request was already made."""
+    await c.request_account_deletion.execute(RequestAccountDeletionCommand(caller))
+    return Response(status_code=202)
 
 
 @router.get(
@@ -204,6 +222,27 @@ async def _set_active(
 
 
 @router.post(
+    "/people/{id:uuid}/erasure",
+    operation_id="ErasePerson",
+    response_model=IdResponse,
+    responses=problem_responses(400, 403, 404, 409),
+)
+async def erase_person(
+    person_id: PersonId,
+    body: PersonErasureRequest,
+    caller: CallerDep,
+    c: ContainerDep,
+) -> Response:
+    """Irreversible: the person's name, email and mobile number are erased from this
+    organization and its history. The person must be blocked and belong to no other
+    organization; a repeat on an erased person changes nothing."""
+    result = await c.erase_person.execute(
+        ErasePersonCommand(caller, person_id, body.version, body.reason)
+    )
+    return respond(IdResponse(id=result.id))
+
+
+@router.post(
     "/people/{id:uuid}/sign-out",
     operation_id="SignOutPerson",
     response_model=IdResponse,
@@ -222,6 +261,19 @@ async def sign_out_person(person_id: PersonId, caller: CallerDep, c: ContainerDe
 )
 async def require_pin_reset(person_id: PersonId, caller: CallerDep, c: ContainerDep) -> Response:
     result = await c.require_pin_reset.execute(RequirePinResetCommand(caller, person_id))
+    return respond(IdResponse(id=result.id))
+
+
+@router.post(
+    "/people/{id:uuid}/invitation",
+    operation_id="InvitePerson",
+    response_model=IdResponse,
+    responses=problem_responses(400, 403, 404),
+)
+async def invite_person(person_id: PersonId, caller: CallerDep, c: ContainerDep) -> Response:
+    """Send again: a fresh link and code replace any pending invitation. The body is empty;
+    the routine decides who may be invited and refuses one who needs none."""
+    result = await c.invite_person.execute(InvitePersonCommand(caller, person_id))
     return respond(IdResponse(id=result.id))
 
 

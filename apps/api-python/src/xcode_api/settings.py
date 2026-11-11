@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import secrets
 from collections.abc import Mapping
 from enum import StrEnum
 from functools import cached_property
 from pathlib import Path
 from typing import Annotated, Any, Self
-from urllib.parse import unquote
+from urllib.parse import SplitResult, unquote, urlsplit
 
 from pydantic import Field, PrivateAttr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -58,6 +59,19 @@ def _split_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(item).strip() for item in value if str(item).strip()]
     return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+_DOTTED_VERSION = re.compile(r"[0-9]{1,6}(?:[.][0-9]{1,6}){0,3}")
+VERSION_PARTS = 4
+
+
+def dotted_version(text: str) -> tuple[int, ...] | None:
+    """``1.4`` as ``(1, 4, 0, 0)``, so two versions compare as tuples; ``None`` for anything
+    but one to four dot-separated groups of digits."""
+    if not _DOTTED_VERSION.fullmatch(text):
+        return None
+    parts = tuple(int(part) for part in text.split("."))
+    return parts + (0,) * (VERSION_PARTS - len(parts))
 
 
 def _operator_errors(operator: str) -> list[str]:
@@ -111,6 +125,11 @@ class Settings(BaseSettings):
     email_password: str = ""
     email_timeout_seconds: int = 10
     email_tls: bool = True
+    public_web_url: str = ""
+    app_store_url: str = ""
+    play_store_url: str = ""
+
+    min_mobile_version: str = ""
 
     log_format: str = "json"
     log_level: str = "INFO"
@@ -180,6 +199,7 @@ class Settings(BaseSettings):
         self._check_proxies(errors)
         self._check_origins_and_hosts(errors)
         self._check_mail(errors)
+        self._check_clients(errors)
         self._check_logging(errors)
         self._check_safety_switches(errors)
         errors.extend(_operator_errors(self.operator))
@@ -214,6 +234,11 @@ class Settings(BaseSettings):
     def auth_signing_key_generated(self) -> bool:
         """True when the key was generated for this process because none was configured."""
         return self._auth_signing_key_generated
+
+    @property
+    def minimum_mobile_version(self) -> tuple[int, ...] | None:
+        """The oldest mobile build the API serves, or ``None`` when every build is served."""
+        return dotted_version(self.min_mobile_version)
 
     def _check_database(self, errors: list[str]) -> None:
         if not self.database_url:
@@ -264,6 +289,11 @@ class Settings(BaseSettings):
     def _check_rate_limit(self, errors: list[str]) -> None:
         if self.rate_limit_backend not in ("memory", "postgres"):
             errors.append("XCODE_RATE_LIMIT_BACKEND must be memory or postgres")
+        if self.rate_limit_backend == "memory" and self.env is Environment.production:
+            errors.append(
+                "XCODE_RATE_LIMIT_BACKEND=memory is refused in production (postgres shares the "
+                "limits across processes and replicas)"
+            )
         if self.rate_limit_auth_per_minute <= 0:
             errors.append("XCODE_RATE_LIMIT_AUTH_PER_MINUTE must be positive")
         if self.rate_limit_pin_per_address <= 0:
@@ -299,6 +329,20 @@ class Settings(BaseSettings):
                 errors.append("XCODE_EMAIL_FROM is required when XCODE_MAIL_BACKEND=smtp")
         if self.email_timeout_seconds <= 0:
             errors.append("XCODE_EMAIL_TIMEOUT_SECONDS must be positive")
+        if self.public_web_url:
+            if not _is_web_origin(self.public_web_url, allow_local_http=not self.is_production):
+                errors.append(
+                    "XCODE_PUBLIC_WEB_URL must be an https origin (scheme, host and optional "
+                    "port, no path); http only for this machine outside production"
+                )
+        elif self.env is Environment.production:
+            errors.append("XCODE_PUBLIC_WEB_URL is required in production (invitation links)")
+        for variable, url in (
+            ("XCODE_APP_STORE_URL", self.app_store_url),
+            ("XCODE_PLAY_STORE_URL", self.play_store_url),
+        ):
+            if url and not _is_https_page(url):
+                errors.append(f"{variable} must be an https URL")
         if (
             not self.email_tls
             and self.env is not Environment.development
@@ -308,6 +352,10 @@ class Settings(BaseSettings):
                 "XCODE_EMAIL_TLS=false is allowed outside development only for a relay on this "
                 "machine (localhost or a loopback address)"
             )
+
+    def _check_clients(self, errors: list[str]) -> None:
+        if self.min_mobile_version and self.minimum_mobile_version is None:
+            errors.append("XCODE_MIN_MOBILE_VERSION must be a dotted numeric version such as 1.4.0")
 
     def _check_logging(self, errors: list[str]) -> None:
         if self.log_format not in ("console", "json"):
@@ -381,6 +429,10 @@ class Settings(BaseSettings):
             "email_password": _SECRET_SET if self.email_password else _SECRET_UNSET,
             "email_timeout_seconds": self.email_timeout_seconds,
             "email_tls": self.email_tls,
+            "public_web_url": self.public_web_url,
+            "app_store_url": self.app_store_url,
+            "play_store_url": self.play_store_url,
+            "min_mobile_version": self.min_mobile_version,
             "log_format": self.log_format,
             "log_level": self.log_level,
             "development_codes": self.development_codes,
@@ -462,6 +514,36 @@ def _is_local_host(host: str) -> bool:
 def is_local_host(host: str) -> bool:
     """``localhost`` or a loopback address literal: a server on this machine."""
     return host.lower() == "localhost" or _is_loopback(host)
+
+
+def _is_web_origin(url: str, *, allow_local_http: bool) -> bool:
+    """``https://host[:port]`` and nothing after it; ``http`` only for a local host if allowed."""
+    parts = _split_url(url)
+    if parts is None:
+        return False
+    host = parts.hostname or ""
+    secure = parts.scheme == "https" or (
+        parts.scheme == "http" and allow_local_http and is_local_host(host)
+    )
+    bare = not (parts.path or parts.query or parts.fragment)
+    return secure and bare
+
+
+def _is_https_page(url: str) -> bool:
+    parts = _split_url(url)
+    return parts is not None and parts.scheme == "https"
+
+
+def _split_url(url: str) -> SplitResult | None:
+    """The parts of an absolute URL with a host, no credentials and a valid port, else None."""
+    try:
+        parts = urlsplit(url)
+        _ = parts.port
+    except ValueError:
+        return None
+    if not parts.hostname or parts.username or parts.password:
+        return None
+    return parts
 
 
 def _is_loopback(address: str) -> bool:

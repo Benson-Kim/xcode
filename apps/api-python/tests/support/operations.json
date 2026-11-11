@@ -36,6 +36,15 @@
   "planned": false
  },
  {
+  "id": "S58",
+  "section": "2.2",
+  "method": "post",
+  "path": "/setup/me/deletion-request",
+  "operationId": "RequestMyAccountDeletion",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
   "id": "S05",
   "section": "2.2",
   "method": "get",
@@ -86,6 +95,15 @@
   "method": "post",
   "path": "/setup/people/{id}/deactivate",
   "operationId": "DeactivatePerson",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S59",
+  "section": "2.2",
+  "method": "post",
+  "path": "/setup/people/{id}/erasure",
+  "operationId": "ErasePerson",
   "tag": "Setup",
   "planned": false
  },
@@ -608,6 +626,15 @@
   "method": "post",
   "path": "/setup/people/{id}/pin-reset",
   "operationId": "RequirePersonPinReset",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S57",
+  "section": "2.12.2",
+  "method": "post",
+  "path": "/setup/people/{id}/invitation",
+  "operationId": "InvitePerson",
   "tag": "Setup",
   "planned": false
  },

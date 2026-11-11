@@ -16,10 +16,12 @@ from ...application.ports import RateLimitDecision
 from ...domain.identity import (
     AccountSummary,
     ClearedPause,
+    CreatedReviewAccount,
     DemoSeeding,
     OperatorRequest,
     ProvisionedUser,
     RemovedUser,
+    ReviewAccountCreation,
     RevokedSessions,
     SeededDemo,
     UserProvisioning,
@@ -149,6 +151,25 @@ class OpsRoutines:
         return SeededDemo(
             organization_id=UUID(str(document["organization_id"])),
             created=bool(document["created"]),
+        )
+
+    async def create_review_account(self, command: ReviewAccountCreation) -> CreatedReviewAccount:
+        rows = await call(
+            self._pool,
+            "ops_review_account_create",
+            command.operator,
+            command.request_id,
+            command.email,
+            command.phone,
+            command.pin_hash,
+            command.code_hash,
+            command.now,
+        )
+        document = _document(rows, "ops_review_account_create")
+        return CreatedReviewAccount(
+            user_id=UUID(str(document["user_id"])),
+            organization_id=UUID(str(document["organization_id"])),
+            created_user=bool(document["created_user"]),
         )
 
     async def _operator_call(self, routine: str, command: OperatorRequest) -> dict[str, Any]:

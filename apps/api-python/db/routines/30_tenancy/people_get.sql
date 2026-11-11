@@ -23,7 +23,7 @@ BEGIN
   IF p_user_id IS NULL OR NOT tenancy.person_in_view(p_user_id) THEN
     PERFORM tenancy.refuse('not_found', 'XC404');
   END IF;
-  RETURN tenancy.person_document(p_user_id, tenancy.person_reach(p_actor_id))
+  RETURN tenancy.person_document(p_user_id, tenancy.person_reach(p_actor_id), p_now)
          || jsonb_build_object('sign_in', tenancy.person_sign_in(p_user_id, p_now));
 END;
 $$;

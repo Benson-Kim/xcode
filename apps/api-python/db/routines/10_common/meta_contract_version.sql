@@ -12,5 +12,5 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
-  SELECT 6;
+  SELECT 7;
 $$;

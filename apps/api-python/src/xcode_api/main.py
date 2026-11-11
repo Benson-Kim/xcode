@@ -3,8 +3,8 @@
 Startup follows ``docs/08-operability.md`` section 6: settings and logging (``serve``),
 the pool within 30 s and the role check, the development-only migration and demo seed,
 the routine-contract version (a mismatch refuses to start), the unassigned-user warning,
-then readiness. Shutdown drains the mail queue for ``XCODE_SHUTDOWN_GRACE_SECONDS`` and
-closes the pool (section 7).
+then readiness, with the invitation sweep running every minute. Shutdown stops the sweep,
+drains the mail queue for ``XCODE_SHUTDOWN_GRACE_SECONDS`` and closes the pool (section 7).
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from psycopg_pool import PoolTimeout
 from starlette.middleware.cors import CORSMiddleware
 
+from .application.observability import active_metrics
 from .application.ops.seed_demo import SeedDemo, SeedDemoCommand
 from .container import Container, build_container
 from .db.contract import EXPECTED_CONTRACT_VERSION
@@ -35,6 +36,7 @@ from .db.pool import (
 )
 from .db.routines.ops import OpsRoutines
 from .http import openapi
+from .http.client_version import ClientVersionMiddleware
 from .http.dependencies import _RateLimited, rate_limited_handler
 from .http.errors import register_exception_handlers
 from .http.middleware import (
@@ -65,6 +67,7 @@ from .http.routers import (
 from .infra.clock import SystemClock
 from .infra.logging import configure_logging
 from .infra.metrics import Metrics
+from .infra.periodic import PeriodicJob
 from .security.pins import Pbkdf2PinHasher
 from .settings import Settings, env_file_present_but_ignored, load_settings
 
@@ -73,6 +76,8 @@ logger = structlog.get_logger("xcode_api")
 STARTUP_POOL_TIMEOUT_SECONDS = 30.0
 WORKER_THREADS = 4
 UNASSIGNED_USERS_WARNING = "{count} active users have no organization membership and cannot sign in"
+INVITATION_SWEEP_SECONDS = 60.0
+INVITATION_SWEEP_LIMIT = 20
 
 
 class ContractVersionMismatch(RuntimeError):  # noqa: N818 - a named startup failure, not an Error type
@@ -95,13 +100,22 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await _verify_contract_version(container)
         await _warn_unassigned_users(container)
+        previous_metrics = active_metrics.get()
+        active_metrics.set(getattr(app.state, "metrics", None))
         container.mail_queue.start()
+        invitation_sweep = PeriodicJob(
+            "invitation_sweep", INVITATION_SWEEP_SECONDS, lambda: _sweep_invitations(container)
+        )
+        invitation_sweep.start()
         app.state.started = True
         try:
             yield
         finally:
             app.state.started = False
+            await invitation_sweep.stop()
             await container.mail_queue.drain(settings.shutdown_grace_seconds)
+            # Shutdown can run in another context than startup, where a reset token is refused.
+            active_metrics.set(previous_metrics)
 
     app = FastAPI(
         title="xcode-api",
@@ -115,6 +129,8 @@ def create_app(
     app.state.started = False
 
     # Middleware order (added inner-first, so outermost is last).
+    if settings.min_mobile_version:
+        app.add_middleware(ClientVersionMiddleware, minimum_version=settings.min_mobile_version)
     app.add_middleware(BodyCapMiddleware)
     if settings.cors_origins:
         app.add_middleware(
@@ -179,6 +195,13 @@ async def _verify_contract_version(container: Container) -> None:
             f"database routine-contract version {version} != expected {EXPECTED_CONTRACT_VERSION}"
         )
     logger.info("startup.contract_version_ok", version=version)
+
+
+async def _sweep_invitations(container: Container) -> None:
+    """Re-send invitations whose mail was lost (a restart between commit and send)."""
+    claimed = await container.invitation_delivery.sweep(INVITATION_SWEEP_LIMIT)
+    if claimed:
+        logger.info("invitation.sweep", claimed=claimed)
 
 
 async def _warn_unassigned_users(container: Container) -> None:

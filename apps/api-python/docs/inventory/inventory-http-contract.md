@@ -869,7 +869,7 @@ Wire shape: `[ { "name": "Dashboard", "items": [ { "key": "dash.capture", "label
 | Concept | Facts |
 |---|---|
 | Person identity | `id` = the user id (same as JWT `sub` and session `userId`). Phone and email are unique across ALL users (unique indexes, phone index ignores the empty string) |
-| Invite / accept | **Does not exist.** Creating a person (S07) sends no email. The person opens the sign-in screen, taps "first time", and runs A04-A06 (setup PIN) which emails a code to the address on file. Web toast on create: `{name} added. They sign in with {phone} and set a PIN with an email code.` |
+| Invite / accept | **Does not exist.** Creating a person (S07) sends no email. The person opens the sign-in screen, taps "first time", and runs A04-A06 (setup PIN) which emails a code to the address on file. Web toast on create: `{name} added. They sign in with {phone} and set a PIN with an email code.` The Python API adds invitations (a mailed link and code; `docs/07-auth.md` section 13) |
 | Organization switch | **Does not exist.** A user has exactly one active membership (unique filtered index `Memberships(UserId) WHERE Active = 1`); the token carries one `org` claim; every query is filtered by it. Provisioning supports a single organization (`Program.cs --provision-user`, `UserProvisioning.EnsureOrganization`) |
 | `hasPin` | false until the person completes setup; `signInState` in the web derives "waiting for PIN" from `active` + `hasPin` |
 | Concurrency | `version` on `PersonDto` is `OrganizationMembership.version` (starts 1, +1 on deactivate/reactivate and on any access change). Update and lifecycle calls must echo it; mismatch = 409 `Settings changed. Reload before saving.` |

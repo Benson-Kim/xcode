@@ -43,6 +43,20 @@ class SignInOperation(StrEnum):
     NEW_PIN = "new_pin"
     CHANGE_PIN = "change_pin"
     REMOVE_DEVICE = "remove_device"
+    INVITE_REDEEM = "invite_redeem"
+
+
+class InvitationRevokeReason(StrEnum):
+    REPLACED = "replaced"
+    BLOCKED = "blocked"
+    REMOVED = "removed"
+    EMAIL_CHANGED = "email_changed"
+
+
+class InvitationDeliveryState(StrEnum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
 
 
 class SignInOutcome(StrEnum):
@@ -79,6 +93,11 @@ class SignInRefusal(StrEnum):
     RESET_REQUIRED = "reset_required"
     PIN_RULE = "pin_rule"
     VERDICT_VOID = "verdict_void"
+    INVITE_INVALID = "invite_invalid"
+    INVITE_EXPIRED = "invite_expired"
+    INVITE_USED = "invite_used"
+    INVITE_REVOKED = "invite_revoked"
+    REFRESH_SUPERSEDED = "refresh_superseded"
 
 
 class PinProblem(StrEnum):
@@ -90,10 +109,12 @@ class PinProblem(StrEnum):
 
 
 class SignInStatus(StrEnum):
-    """``identity.sign_in_status``: the people status of the sign-in state."""
+    """``identity.people_status``: the people status of the sign-in state and the invitation."""
 
     ACTIVE = "active"
     NOT_SIGNED_IN = "not_signed_in"
+    INVITED = "invited"
+    INVITE_EXPIRED = "invite_expired"
     PIN_RESET_DUE = "pin_reset_due"
     LOCKED = "locked"
     BLOCKED = "blocked"
@@ -233,11 +254,13 @@ class AuthOutcome:
     tries_left: int | None = None
     pin_problem: PinProblem | None = None
     device_token_issued: bool | None = None
+    invitation: bool = False
 
 
 class EnvelopeStatus(StrEnum):
     """The ``status`` of the wire envelope every ``/auth`` route answers with; the last five
-    belong to the routes of the number-first flow only."""
+    belong to the routes of the number-first flow only. ``update_required`` is the 426 that
+    every route but the health probes answers a mobile build below the minimum version."""
 
     AUTHENTICATED = "authenticated"
     VERIFICATION_REQUIRED = "verification_required"
@@ -245,11 +268,13 @@ class EnvelopeStatus(StrEnum):
     CODE_VERIFIED = "code_verified"
     PAUSED = "paused"
     AUTHENTICATION_FAILED = "authentication_failed"
+    REFRESH_SUPERSEDED = "refresh_superseded"
     INVALID_PIN = "invalid_pin"
     INVALID_REQUEST = "invalid_request"
     SIGNED_OUT = "signed_out"
     DEVICE_REVOKED = "device_revoked"
     SERVICE_UNAVAILABLE = "service_unavailable"
+    UPDATE_REQUIRED = "update_required"
     PIN_REQUIRED = "pin_required"
     PIN_LOCKED = "pin_locked"
     BLOCKED = "blocked"
@@ -273,6 +298,7 @@ class AuthEnvelope:
     tries_left: int | None = None
     pin_problem: PinProblem | None = None
     device_token: str | None = field(default=None, repr=False)
+    invitation: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,6 +323,7 @@ class TokenClaims:
     user_id: UUID
     device_id: str
     security_version: int
+    issued_at: datetime
     organization_id: UUID | None
     role: str
     first_name: str
@@ -587,11 +614,13 @@ class CodeWithdrawal:
 
 @dataclass(frozen=True, slots=True)
 class SessionCheck:
-    """``api.auth_resolve_session``: the verified token's subject, device and version claim."""
+    """``api.auth_resolve_session``: the verified token's subject, device, version and issue
+    time (``nbf``)."""
 
     user_id: UUID
     device_id: str
     security_version: int
+    not_before: datetime
     now: datetime
 
 
@@ -685,3 +714,25 @@ class DemoSeeding:
 class SeededDemo:
     organization_id: UUID
     created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewAccountCreation:
+    """``api.ops_review_account_create``: the App Review login of the demo organization, with
+    the hash of its PIN and the keyed digest of its fixed new-device code; both replace any
+    earlier ones."""
+
+    operator: str
+    request_id: str
+    email: str = field(repr=False)
+    phone: str = field(repr=False)
+    pin_hash: str = field(repr=False)
+    code_hash: str = field(repr=False)
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class CreatedReviewAccount:
+    user_id: UUID
+    organization_id: UUID
+    created_user: bool

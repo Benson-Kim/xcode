@@ -35,6 +35,7 @@ from ...domain.identity import (
     TrustedDeviceView,
     UserLookup,
 )
+from ...domain.invitations import InvitationRedeem
 from ..session import call
 from ..types import account_state, auth_outcome, session_context, trusted_device_view
 
@@ -109,6 +110,17 @@ class IdentityRoutines:
             command.code_hash,
             command.refresh_token_hash,
             command.skip_cooldown,
+            command.now,
+        )
+
+    async def invite_redeem(self, command: InvitationRedeem) -> AuthOutcome:
+        return await self._outcome(
+            "auth_invite_redeem",
+            command.request_id,
+            command.token_hash,
+            command.phone,
+            command.device_id,
+            command.code_hash,
             command.now,
         )
 
@@ -271,6 +283,7 @@ class IdentityRoutines:
             check.user_id,
             check.device_id,
             check.security_version,
+            check.not_before,
             check.now,
             idempotent=True,
         )

@@ -1,9 +1,9 @@
 -- tenancy.organization_ids() RETURNS uuid[]
 -- Purpose: the ids of every organization in the database, oldest first; provisioning supports exactly one.
--- Callers: api.ops_provision_user.
+-- Callers: api.ops_provision_user, api.ops_remove_user, api.invite_claim_undelivered.
 -- Reads: tenancy.organizations (every organization). Writes: nothing.
 -- Raises: none.
--- Tests: tests/db/test_ops_routines.py.
+-- Tests: tests/db/test_ops_routines.py, tests/db/test_invitations.py.
 -- SECURITY DEFINER owned by xcode_owner (the table owner) so it reads past row-level security; it returns ids only, and only xcode_api_executor may execute it.
 
 CREATE OR REPLACE FUNCTION tenancy.organization_ids()

@@ -31,6 +31,7 @@ from .support.database import Harness, start_harness
 from .support.fakes import (
     FakeExpensesRepository,
     FakeIdentityRepository,
+    FakeInvitationRepository,
     FakeOpsRepository,
     FakePettyCashRepository,
     FakeReportsRepository,
@@ -97,6 +98,7 @@ def make_container(
             revenue=revenue,
             pettycash=pettycash,
             expenses=FakeExpensesRepository(setup, pettycash),
+            invitations=FakeInvitationRepository(),
             reports=FakeReportsRepository(setup, revenue),
             clock=manual_clock,
         )

@@ -30,7 +30,7 @@ from ..support.scenario import device_row, set_user, user_row
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
-STEP_KEYS = [*ENVELOPE_KEYS, "purpose", "triesLeft", "pinProblem", "deviceToken"]
+STEP_KEYS = [*ENVELOPE_KEYS, "purpose", "triesLeft", "pinProblem", "deviceToken", "invitation"]
 SEEN_EXCLUDED = frozenset({"date", "content-length", "x-request-id"})
 UNKNOWN_PHONE = "0799999999"
 PHONE_2 = "phone-2"

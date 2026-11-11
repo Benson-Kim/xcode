@@ -15,12 +15,34 @@ from ..domain.reports import ReportDocument
 @dataclass(frozen=True, slots=True)
 class MailMessage:
     """One email to send: recipient address, subject and plain-text body, plus non-secret
-    ``tags`` for the delivery log lines. Neither the address nor the body is in ``repr``."""
+    ``tags`` for the delivery log lines, an optional HTML alternative and Reply-To. Neither
+    the addresses nor the bodies are in ``repr``."""
 
     to: str = field(repr=False)
     subject: str
     text: str = field(repr=False)
     tags: Mapping[str, str] = field(default_factory=dict)
+    html: str | None = field(default=None, repr=False)
+    reply_to: str | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class InvitationMail:
+    """An invitation for a person added without a PIN: the link token and the code, sent once
+    and stored only as digests. The delivery log names the invitation id, never the token,
+    the code or the address. Names and the organization are admin-typed and untrusted."""
+
+    to: str = field(repr=False)
+    token: str = field(repr=False)
+    code: str = field(repr=False)
+    invitation_id: UUID
+    first_name: str
+    organization_name: str
+    expires_at: datetime
+    time_zone: str
+    inviter_name: str | None = None
+    support_email: str | None = field(default=None, repr=False)
+    request_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +56,19 @@ class VerificationMail:
     code_id: UUID
     request_id: str
     device_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DeletionNotice:
+    """One notice to an administrator who can block members that a member asked to delete their
+    account: the administrator's address and first name, the requester's full name and the
+    organization name. Names are member-typed and untrusted; the address is never in ``repr``."""
+
+    to: str = field(repr=False)
+    recipient_first_name: str
+    requester_name: str
+    organization_name: str
+    request_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +172,35 @@ class CodeMailer(Protocol):
     def send_later(
         self, mail: VerificationMail, *, on_failure: Callable[[], Awaitable[None]]
     ) -> None: ...
+
+
+@runtime_checkable
+class InvitationMailer(Protocol):
+    """Delivers invitations after the reply. Adapter: ``infra/mail.py`` ``QueuedInvitationMailer``.
+
+    ``send_later`` queues the message; once delivery ends, ``on_sent`` or ``on_failure`` runs
+    so the caller can record the outcome (a callback's own failure is logged and swallowed).
+    """
+
+    def send_later(
+        self,
+        mail: InvitationMail,
+        *,
+        on_sent: Callable[[], Awaitable[None]],
+        on_failure: Callable[[], Awaitable[None]],
+    ) -> None: ...
+
+
+@runtime_checkable
+class DeletionNotifier(Protocol):
+    """Tells the administrators who can block members that a member asked to delete their
+    account, after the reply. Adapter: ``infra/mail.py`` ``QueuedDeletionNotifier``.
+
+    ``notify`` queues one message and never raises; a dropped or failed send is logged, not
+    retried, because the request is already recorded and visible in the change log.
+    """
+
+    def notify(self, notice: DeletionNotice) -> None: ...
 
 
 @runtime_checkable

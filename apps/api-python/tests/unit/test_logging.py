@@ -98,9 +98,11 @@ def test_json_renderer_outside_console_mode() -> None:
         database_url="postgresql://xcode_app@db/xcode?sslmode=verify-full",
         auth_signing_key="k" * 32,
         allowed_hosts="h",
+        rate_limit_backend="postgres",
         mail_backend="smtp",
         email_host="h",
         email_from="a@b.co",
+        public_web_url="https://app.example.com",
     )
     configure_logging(prod)
     assert _renderer_type() is structlog.processors.JSONRenderer

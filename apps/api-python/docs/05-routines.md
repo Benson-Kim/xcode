@@ -297,7 +297,7 @@ of `authenticated`, `verification_required`, `check_email`, `silent`, `code_veri
 | `api.auth_sign_out` | `p_token_hash text, p_device_id text, p_now` | `api.auth_outcome` (`signed_out`) | 3.7 | revoke the device's tokens when matched; attempt row |
 | `api.auth_revoke_device` | `p_user_id uuid, p_device_id text, p_now` | `api.auth_outcome` (`device_revoked`) | 3.8 | device revoked; device's tokens revoked; device's codes consumed; attempt row |
 | `api.auth_withdraw_code` | `p_code_id uuid, p_now` | `void` | 7 (mail failure) | `consumed = true`, `expires_at = created_at` for a code still unconsumed; no attempt row |
-| `api.auth_resolve_session` | `p_user_id uuid, p_device_id text, p_security_version integer, p_now` (no `p_request_id`) | `jsonb` `{organization_id, role}` for the log context | 3.10; raises `XC401 session_invalid` | none |
+| `api.auth_resolve_session` | `p_user_id uuid, p_device_id text, p_security_version integer, p_not_before timestamptz, p_now` (no `p_request_id`; `p_not_before` is the token's `nbf`, section 13) | `jsonb` `{organization_id, role}` for the log context | 3.10; raises `XC401 session_invalid` | none |
 
 `p_skip_cooldown` carries `XCODE_DEVELOPMENT_CODES` (the cooldown is skipped, the caps are
 not) and `p_trust_days` carries `XCODE_AUTH_TRUST_LIFETIME_DAYS` (`NULL` = trust without
@@ -321,11 +321,13 @@ audit action. `W` in the Returns column is `api.write_result`.
 | `api.access_role_list` | `people.view` | `p_now` | `jsonb` `[{id, name, permissions}]` by name, permissions = role defaults with dependencies expanded | | none (roles are pre-seeded; the .NET write-on-read is retired) |
 | `api.access_scope_options` | `people.manage` | `p_now` | `jsonb` `{companies: [{id, name}], vehicles: [{id, registration, company_id}]}` limited to what the actor may hand on (`inv 2.3` S03) | | |
 | `api.access_my_scope` | member | `p_now` | `jsonb` `{all_companies, companies, vehicles}` (retired vehicles included) | | |
+| `api.me_deletion_request` (S58) | member | `p_now` | `jsonb` `{recorded, requester_name, organization_name, recipients: [{email, first_name}]}`; recipients are the other active members with an active account who hold `people.block` (the right blocking and erasing need), by `last_name, first_name, user_id`; the caller's membership row is locked first, so a second request at once waits and then sees the first; a repeat within 24 hours of the caller's last `person.deletion_requested` records nothing and returns `recorded` false with no recipients | `XC403 not_member` | first request only: `people`: `Account deletion requested, {First Last}`; audit `person.deletion_requested` |
 | `api.people_list` | `people.view` | `p_page, p_page_size, p_role text, p_status text, p_now` | paged `person` documents (`inv 3.3`), order `last_name, first_name, user_id`, kept to one role by name (case ignored) and one sign-in state (`active`, `waiting`, `none`; blank or `all` keeps everyone); `company_ids`/`vehicle_ids` filtered to the actor's reach, `other_companies`/`other_vehicles` counts | `page_out_of_range`, then `people_filter_status_invalid` | |
 | `api.people_get` | `people.view` | `p_user_id, p_now` | one `person` document | `XC404` when not in `tenancy.people_visible` | |
-| `api.people_create` | `people.manage` | `p_first_name, p_last_name, p_email, p_phone, p_role, p_scope_mode, p_company_ids uuid[], p_vehicle_ids uuid[], p_permissions text[], p_approval_limit numeric, p_now` | `W` (`id` = the new user id) | the sixteen steps of `inv 2.3` in order, codes `people_*` of `docs/06-http-contract.md` section 3; `people_contact_taken` is raised by the routine's own check and, as a backstop, by the `unique_violation` handler on `identity.users` | `people`: `Added {First Last} as {Role}`; audit `person.created` |
-| `api.people_update` | `people.manage` | `p_user_id, ...the same fields..., p_expected_version, p_now` | `W` (`unchanged` when nothing differs; `membership.version + 1` otherwise) | the sixteen steps; `people_version_required` when `p_expected_version IS NULL`; `version_conflict` on mismatch; `people_self_edit` for the actor's own row | `people`: `Changed {name, sign-in details, role, single permissions, data scope, approval limit} for {First Last}`; a name, role or permission change bumps the person's `security_version`; an email or phone change also revokes their devices and tokens; audit `person.updated`, and `person.sign_in_details_changed` (email and phone before and after) when they change |
+| `api.people_create` | `people.manage` | `p_first_name, p_last_name, p_email, p_phone, p_role, p_scope_mode, p_company_ids uuid[], p_vehicle_ids uuid[], p_permissions text[], p_approval_limit numeric, p_now` | `W` (`id` = the new user id) | the sixteen steps of `inv 2.3` in order (step 5 refuses an empty `companies` scope, and an empty `vehicles` scope unless the editor sees every company, `docs/06-http-contract.md` section 2.2), codes `people_*` of `docs/06-http-contract.md` section 3; `people_contact_taken` is raised by the routine's own check and, as a backstop, by the `unique_violation` handler on `identity.users` | `people`: `Added {First Last} as {Role}`; audit `person.created` |
+| `api.people_update` | `people.manage` | `p_user_id, ...the same fields..., p_expected_version, p_now` | `W` (`unchanged` when nothing differs; `membership.version + 1` otherwise) | the sixteen steps (an empty `vehicles` scope only from an editor who sees every company, as on create); `people_version_required` when `p_expected_version IS NULL`; `version_conflict` on mismatch; `people_self_edit` for the actor's own row | `people`: `Changed {name, sign-in details, role, single permissions, data scope, approval limit} for {First Last}`; a name, role or permission change bumps the person's `security_version`; an email or phone change also revokes their devices and tokens; audit `person.updated`, and `person.sign_in_details_changed` (email and phone before and after) when they change |
 | `api.people_set_active` | `people.manage` | `p_user_id, p_active boolean, p_expected_version bigint, p_reason text, p_now` | `W` | `people_self_deactivate` (both directions, same text); `XC404`; `people_owner_edit`; already in the state -> `unchanged` with no version check; else `version_conflict` when `p_expected_version` is `NULL` or differs; deactivate needs a typed reason (`reason_length`) | deactivate: membership inactive, user `removed`, `security_version + 1`, devices and tokens revoked, `Removed access for {First Last}` plus the typed reason, audit `person.deactivated`; activate: `Restored access for {First Last}`, audit `person.activated` |
+| `api.people_erase` (S59) | `people.block` | `p_user_id, p_expected_version bigint, p_reason text, p_now` | `W` | `people_self_erase`; an erased member of this organization the actor can see -> `unchanged` with no version check; `XC404` (not in view); `people_owner_edit`; `people_erase_active` (membership active or account not `removed`); `people_erase_shared` (a membership in any other organization); `version_conflict`; a typed reason (`reason_length`) | membership `FOR NO KEY UPDATE`, then `identity.lock_user`; user: `erased_at`, email, mobile and PIN cleared, `security_version + 1`; `identity.erase_review_login`; `tenancy.erase_person_history` (names to "Former member", email and mobile cleared, in this organization's `people` and `signIn` rows and audit payloads); membership renamed Former member, `version + 1`; device names `Device`, open codes consumed, invitations revoked; `Erased the personal details of a former member` plus the typed reason, before `{"Erased":false}`, after `{"Erased":true}`; audit `person.erased`, which closes the open deletion request (S58); money rows keep the id |
 | `api.people_sign_out` | `people.manage` | `p_user_id, p_now` | `W` | `people_self_sign_out`; `XC404`; `people_owner_edit` | revokes devices and tokens; `Signed {First Last} out of every device` (before = after); audit `person.sessions_revoked` (`AC-24`) |
 
 Owner rules, role and permission holdings, hidden-scope preservation and the sign-in
@@ -565,7 +567,7 @@ Helper (schema `ops`, never granted to `xcode_app` or `xcode_operator`; `EXECUTE
 | Helper | Signature | Behaviour |
 |---|---|---|
 | `ops.record_operator_action` | `(p_operator text, p_action text, p_target text, p_detail jsonb, p_now timestamptz) RETURNS void`, `SECURITY INVOKER` | appends one `ops.operator_actions` row; called by every `api.ops_*` routine so the audit write is in one place; the runner records `migrate`/`routines`/`down` with a direct insert |
-| `ops.seed_demo_user` | `(p_organization_id uuid, p_owner_id uuid, p_request_id text, p_email text, p_phone text, p_role text, p_company_id uuid, p_pin_hash text, p_at timestamptz) RETURNS uuid` | one demo login, added only when missing: the Owner by plain rows (no actor exists yet), everyone else through `api.people_create` as the Owner; the PIN hash only on an account this call created; a removed account is revived with its sessions ended |
+| `ops.seed_demo_user` | `(p_organization_id uuid, p_owner_id uuid, p_request_id text, p_email text, p_phone text, p_role text, p_company_id uuid, p_pin_hash text, p_at timestamptz) RETURNS uuid` | one demo login, added only when missing: the Owner by plain rows (no actor exists yet), everyone else through `api.people_create` as the Owner, with no invitation; the PIN hash only on an account this call created; a removed account is revived with its sessions ended |
 | `ops.seed_catalogue` | `(p_organization_id uuid, p_owner_id uuid, p_request_id text, p_at timestamptz) RETURNS void` | the three main categories (found by name when one exists), a category under each and 13 items, through the setup routines |
 | `ops.seed_companies` | `(p_organization_id uuid, p_owner_id uuid, p_request_id text, p_at timestamptz) RETURNS uuid[]` | the two demo companies, found by name or added through `api.setup_company_create` |
 | `ops.seed_vehicle_plan` | `() RETURNS TABLE (idx integer, registration text, fleet_number text, company_index integer, joined_days_back integer, day_targets numeric[], initial_investment numeric)` | the six demo vehicles |
@@ -1093,3 +1095,69 @@ prompt 07 did for the week grid.
 .NET's history filter has them (`SetupRepository.cs:381-386`): `centralexpenses` rows are visible to a scoped viewer
 when the row's vehicle is visible (the `pettycash` rule), and `reports` rows only to a viewer who sees every company
 (RP-18). The `section` filter accepts both. Test: `tests/db/test_history_routines.py::test_central_expense_and_export_rows_follow_the_scope`.
+
+## 12. Invitations (migration 0015)
+
+A person added without a PIN is invited by email: a link (a 32-byte token) and a 6-digit code, both stored only as
+digests in `identity.invitations`, valid for 7 days. At most one live invitation (not accepted, not revoked) per person
+(`uq_invitations_live`). The raw link and code exist only in the post-commit send; the sweep mints fresh ones.
+
+### 12.1 Helpers (`identity`, granted to `xcode_api_executor` only)
+
+| Helper | Signature | Behaviour |
+|---|---|---|
+| `identity.invitation_tries` | `() RETURNS integer` | 5: wrong invitation codes that void its code (the link keeps working) |
+| `identity.invitation_sends` | `() RETURNS integer` | 5: delivery attempts after which an unsent invitation is `failed` |
+| `identity.invitation_org` | `(p_token_hash text) RETURNS uuid` | the organization of the invitation with that link digest, any state; the one cross-tenant lookup the link step needs; `SECURITY DEFINER` owned by `xcode_owner` (ids only, executor only), on the `tests/db/test_routine_headers.py` allow-list |
+| `identity.invitation_status` | `(p_user_id uuid, p_now timestamptz) RETURNS text` | `invited` while `p_now <= expires_at`, `invite_expired` after; NULL with no live invitation |
+| `identity.people_status` | `(p_user identity.users, p_member_active boolean, p_now timestamptz) RETURNS text` | `identity.sign_in_status`, with `not_signed_in` replaced by `identity.invitation_status` when there is one |
+| `identity.usable_invitation` | `(p_user_id uuid, p_now timestamptz) RETURNS identity.invitations` | live, unexpired, under `invitation_tries`, of the person's active organization, `FOR UPDATE`; a row of NULLs when none |
+| `identity.revoke_invitations` | `(p_user_id uuid, p_reason text, p_now timestamptz) RETURNS integer` | revokes the live invitation with `replaced`, `blocked`, `removed` or `email_changed` |
+| `identity.invite` | `(p_user_id uuid, p_organization_id uuid, p_actor uuid, p_token_hash text, p_code_hash text, p_now timestamptz) RETURNS uuid` | the one place an invitation is made: revoke the live one (`replaced`), insert 7 days, delivery `pending` |
+| `identity.store_code` | `(p_user_id uuid, p_purpose text, p_device_id text, p_code_hash text, p_now timestamptz) RETURNS uuid` | supersede the purpose's open codes, store one for 10 minutes, no caps; `identity.issue_code` is now caps, then this |
+| `identity.invitation_delivery` | `(p_invitation identity.invitations) RETURNS jsonb` | the email fields: `invitation_id, email, first_name, organization_name, inviter_name, support_email, expires_at, time_zone` |
+
+### 12.2 Routines
+
+| Routine | Parameters | Result | Refusals and notes |
+|---|---|---|---|
+| `api.auth_invite_redeem` | `p_request_id, p_token_hash, p_phone, p_device_id, p_code_hash, p_now` | `api.auth_outcome` `verification_required` / `first_setup` with the code id and masked email | unknown token, unknown number and another person's token are all `invite_invalid` (a known token with the wrong number counts one try); with both matching `invite_used`, `invite_revoked`, `invite_expired`; stores the code with `identity.store_code`, outside the caps |
+| `api.people_invite` | `p_actor_id, p_organization_id, p_request_id, p_user_id, p_token_hash, p_code_hash, p_now` | `W` | gate `people.sign_in`; "Send the invitation again"; `XC422 people_self_sign_in`; `XC404` not in view; `XC403 people_owner_edit`; then, under the membership and user locks, `XC422 people_invite_not_needed` with a PIN or blocked; change log `signIn` "Invitation sent, {First Last}" |
+| `api.invite_delivery_start` | `p_token_hash, p_now` | `jsonb` (`identity.invitation_delivery`) or NULL | counts one attempt only while pending and live; NULL tells the caller not to send |
+| `api.invite_delivery_result` | `p_token_hash, p_sent boolean, p_now` | `void` | only while pending: `sent` with `sent_at`; a failure is `failed` at `invitation_sends` attempts, else stays pending for the sweep |
+| `api.invite_claim_undelivered` | `p_now, p_limit, p_token_hashes text[], p_code_hashes text[]` | `jsonb` array with `pair_index` | sweep of every organization in turn (`tenancy.organization_ids`, the organization setting entered for each, so row-level security holds), `FOR UPDATE SKIP LOCKED`, oldest first within each, last attempt over 5 minutes old, never more than the pairs given; expired or exhausted ones become `failed`, the rest get the next pair of digests and a counted attempt |
+
+### 12.3 Changed routines
+
+| Routine | Change |
+|---|---|
+| `api.auth_start` | a person without a PIN with a usable invitation is sent no code: `verification_required`, `first_setup`, `code_issued` false, `invitation` true; an expired or voided one falls through to the mailed code |
+| `identity.matching_code` | for `first_setup`, a usable invitation's code is a second source; a match stores a device code with the same digest; a wrong code counts against both |
+| `api.auth_complete_pin` | a first PIN accepts the live invitation |
+| `api.people_create` | `p_invite_token_hash, p_invite_code_hash` before `p_now`; with both, `identity.invite` |
+| `api.people_update` | the same two before `p_now`; a new email revokes (`email_changed`) and, with the hashes, re-invites an active person without a PIN who had been invited |
+| `api.people_set_active`, `api.ops_remove_user` | revoke the live invitation (`blocked`, `removed`); the operator routine enters each organization in turn (`tenancy.organization_ids`) to do it |
+| `tenancy.person_document`, `api.people_list` | `status` is `identity.people_status` (adds `invited`, `invite_expired`, both filterable); the document takes `p_now` |
+| `tenancy.person_sign_in` | adds `invitation {state, sent_at, expires_at}` (`expired`, else the delivery state; null with none) |
+
+## 13. Session hardening (migration 0016, contract version 7)
+
+Contract version 7 covers 0015 and 0016 together (0015 changed `api.people_create` and `api.people_update` without a bump).
+
+| Routine | Change |
+|---|---|
+| `api.auth_sign_out` | a remembered device stays trusted but gets `signed_out_at = p_now`; a device trusted for one session is revoked as before |
+| `api.auth_resolve_session` | gains `p_not_before` (the access token's `nbf`) before `p_now`; refuses `XC401 session_invalid` when `p_not_before < signed_out_at`, so a sign-out ends the access tokens issued before it at once (the 4-argument signature is dropped) |
+| `api.auth_refresh` | a rotation sets `rotated_at`; a revoked token rotated under 30 seconds ago, presented from its own device, is refused `refresh_superseded` and revokes nothing (two requests racing on one device keep the session; the client re-reads its stored token and retries once). Any other revoked token is `token_replayed` as before |
+| `api.rate_limit_hit` | each hit also deletes at most 100 windows of any key that started over a day ago (`FOR UPDATE SKIP LOCKED`, `ix_rate_limit_windows_window_start`), so keys seen once do not stay for good (open question 56) |
+| `api.meta_contract_version` | 7 |
+
+## 14. App Review login (migration 0017)
+
+Contract version 7 still covers it: 0017 ships in the same release as 0015 and 0016.
+
+| Routine | Change |
+|---|---|
+| `api.ops_review_account_create` (new, `xcode_operator` only) | `(p_operator, p_request_id, p_email, p_phone, p_pin_hash, p_code_hash, p_now)`: in the single organization, only when it is flagged `demo` (else `XC403 review_demo_only`; none, too), an Owner login added by the demo Owner with no invitation, holding the PIN hash and, in `identity.review_accounts`, the keyed digest of its fixed new-device code. The same email again renews it: both secrets replaced, security version bumped, every device and token revoked, the wrong-PIN counters cleared; another phone is `XC409 review_phone_differs`, the email of a person who is not a review login `XC409 people_contact_taken`. Returns `user_id`, `organization_id`, `created_user` |
+| `identity.matching_code` | for `new_device` only, a review login's fixed digest also matches the newest live code of the device, so it answers only after the PIN was right on that device (the caps and the three tries hold); every such sign-in is the usual `identity.sign_in_attempts` row of `api.auth_check_code` or `api.auth_verify_device` |
+| `api.ops_seed_demo` | flags its organization `demo` (a database seeded before 0017 gains the flag on its next run); no other routine sets it |

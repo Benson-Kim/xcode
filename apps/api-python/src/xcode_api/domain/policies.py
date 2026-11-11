@@ -17,6 +17,7 @@ from .identity import (
     AuthOutcomeKind,
     EnvelopeStatus,
     PinProblem,
+    SignInRefusal,
     UserStatus,
 )
 
@@ -29,6 +30,7 @@ TRUSTED_DEVICE_IDLE_DAYS = 90
 _RUNS = ("0123456789", "9876543210")
 
 _REFUSAL = AuthEnvelope(EnvelopeStatus.AUTHENTICATION_FAILED)
+_SUPERSEDED = AuthEnvelope(EnvelopeStatus.REFRESH_SUPERSEDED)
 _INVALID_REQUEST = AuthEnvelope(EnvelopeStatus.INVALID_REQUEST)
 _SERVICE_UNAVAILABLE = AuthEnvelope(EnvelopeStatus.SERVICE_UNAVAILABLE)
 _INVALID_PIN = AuthEnvelope(EnvelopeStatus.INVALID_PIN, minimum_pin_length=PIN_LENGTH)
@@ -136,6 +138,8 @@ def envelope_for(outcome: AuthOutcome) -> AuthEnvelope:
         return AuthEnvelope(EnvelopeStatus.PAUSED, retry_after_seconds=outcome.retry_after_seconds)
     if kind is AuthOutcomeKind.INVALID_PIN:
         return _INVALID_PIN
+    if outcome.refusal is SignInRefusal.REFRESH_SUPERSEDED:
+        return _SUPERSEDED
     return _PLAIN[kind]
 
 
@@ -156,4 +160,5 @@ def step_envelope_for(outcome: AuthOutcome, *, masked: bool = True) -> AuthEnvel
         else None,
         tries_left=outcome.tries_left if status is EnvelopeStatus.AUTHENTICATION_FAILED else None,
         pin_problem=outcome.pin_problem if status is EnvelopeStatus.INVALID_PIN else None,
+        invitation=outcome.invitation and status is EnvelopeStatus.VERIFICATION_REQUIRED,
     )

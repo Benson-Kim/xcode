@@ -370,3 +370,19 @@ no RLS policy for `xcode_readonly`. Retention is a DBA decision recorded in
   - stored daily totals.
 
   Owner: the reports follow-up.
+- An invitation (`docs/07-auth.md` section 13) works for seven days for whoever has the mail
+  and knows the person's number. A forwarded invitation, or one mailed to a wrong address
+  that holds the number, sets the PIN. The number must match; five wrong numbers or codes
+  void the code but not the link; the link has its own rate limit; and the admin sees the
+  status and can block the person. Owner: product (SMS, or an admin-confirmed first sign-in,
+  would add a second factor).
+- If a mail was sent but recording `sent` failed (the process stopped between the SMTP
+  answer and the update), the sweep re-issues that invitation five minutes later. The
+  person gets a second mail, and the first one's link and code stop working. Owner: product
+  (resending the same link would mean storing the raw token).
+- N01 tells an outsider who knows a number that its person has a usable invitation, on top
+  of the "no PIN yet" answer above. It mails nothing. Owner: product (the flag spares the
+  person a wait for a code that will not come).
+- The development log mailer writes invitation links and codes to the log, as it does codes
+  (section 13.5 of `docs/07-auth.md`). The log mailer is refused in production. Owner:
+  operations (never point a development API at real people's addresses).

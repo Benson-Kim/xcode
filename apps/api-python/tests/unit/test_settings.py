@@ -26,10 +26,12 @@ BASE_PROD = {
     "database_url": "postgresql://xcode_app@db:5432/xcode?sslmode=verify-full",
     "auth_signing_key": "x" * 32,
     "allowed_hosts": "api.example.com",
+    "rate_limit_backend": "postgres",
     "cors_origins": "https://app.example.com",
     "mail_backend": "smtp",
     "email_host": "smtp.example.com",
     "email_from": "noreply@example.com",
+    "public_web_url": "https://app.example.com",
     "log_format": "json",
 }
 
@@ -208,6 +210,10 @@ def test_cors_wildcard_refused_outside_development() -> None:
 
 def test_allowed_hosts_wildcard_refused_in_production() -> None:
     _expect_error("XCODE_ALLOWED_HOSTS", allowed_hosts="*")
+
+
+def test_memory_rate_limit_backend_refused_in_production() -> None:
+    _expect_error("XCODE_RATE_LIMIT_BACKEND", rate_limit_backend="memory")
 
 
 def test_mail_backend_values() -> None:
@@ -652,7 +658,9 @@ def _base(env: str) -> dict[str, Any]:
         "mail_backend": "smtp",
         "email_host": "smtp.example.com",
         "email_from": "noreply@example.com",
+        "public_web_url": "https://app.example.com",
         "log_format": "json",
+        "rate_limit_backend": "postgres",
         "allowed_hosts": ["api.example.com"],
         "cors_origins": ["https://web.example.com"],
     }
@@ -734,3 +742,59 @@ def test_plaintext_mail_in_production_only_to_a_loopback_relay(host: str, allowe
     with pytest.raises(ValidationError) as excinfo:
         Settings(_env_file=None, **overrides)
     assert "XCODE_EMAIL_TLS" in str(excinfo.value)
+
+
+# --- invitation links -------------------------------------------------------------------
+
+
+def test_production_requires_the_public_web_url() -> None:
+    _expect_error("XCODE_PUBLIC_WEB_URL", public_web_url="")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://app.example.com",
+        "https://app.example.com/",
+        "https://app.example.com/web",
+        "https://app.example.com?next=x",
+        "https://app.example.com#x",
+        "https://user:pass@app.example.com",
+        "https://app.example.com:99999",
+        "javascript:alert(1)",
+        "app.example.com",
+        "http://localhost:3000",
+    ],
+)
+def test_the_public_web_url_must_be_an_https_origin_in_production(url: str) -> None:
+    _expect_error("XCODE_PUBLIC_WEB_URL", public_web_url=url)
+
+
+def test_an_https_origin_with_a_port_is_accepted() -> None:
+    assert _settings(public_web_url="https://app.example.com:8443").public_web_url == (
+        "https://app.example.com:8443"
+    )
+
+
+def test_development_may_point_links_at_a_local_http_web() -> None:
+    s = _settings(env="development", public_web_url="http://localhost:3000")
+    assert s.public_web_url == "http://localhost:3000"
+    _expect_error(
+        "XCODE_PUBLIC_WEB_URL", env="development", public_web_url="http://app.example.com"
+    )
+
+
+def test_development_needs_no_public_web_url() -> None:
+    assert _settings(env="development", public_web_url="").public_web_url == ""
+
+
+@pytest.mark.parametrize("variable", ["XCODE_APP_STORE_URL", "XCODE_PLAY_STORE_URL"])
+@pytest.mark.parametrize("url", ["http://apps.apple.com/app/id1", "javascript:alert(1)", "store"])
+def test_store_links_must_be_https(variable: str, url: str) -> None:
+    _expect_error(variable, **{variable.removeprefix("XCODE_").lower(): url})
+
+
+def test_store_links_are_optional_and_keep_their_path() -> None:
+    s = _settings(play_store_url="https://play.google.com/store/apps/details?id=ke.co.priori.xcode")
+    assert s.app_store_url == ""
+    assert s.play_store_url.endswith("?id=ke.co.priori.xcode")

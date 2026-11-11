@@ -1,11 +1,11 @@
--- tenancy.person_document(p_user_id uuid, p_viewer tenancy.scope) RETURNS jsonb
--- Purpose: the person document the people routines return: the membership, sign-in details, role, scope mode, the companies and vehicles inside the viewer's reach with counts of the rest, the assigned catalogue permissions (kept for inactive people), approval limit, has_pin, version, the people status and last sign-in, how far back they may change records (back_limit and its words can_change), one access chip per catalogue module they reach ({name, held, total}), whether they hold every right, and sign_in null (api.people_get fills it).
+-- tenancy.person_document(p_user_id uuid, p_viewer tenancy.scope, p_now timestamptz) RETURNS jsonb
+-- Purpose: the person document the people routines return: the membership, sign-in details, role, scope mode, the companies and vehicles inside the viewer's reach with counts of the rest, the assigned catalogue permissions (kept for inactive people), approval limit, has_pin, version, the people status (identity.people_status at p_now) and last sign-in, how far back they may change records (back_limit and its words can_change), one access chip per catalogue module they reach ({name, held, total}), whether they hold every right, and sign_in null (api.people_get fills it).
 -- Callers: api.people_list, api.people_get.
--- Reads: tenancy.memberships, identity.users, tenancy.permissions, and what tenancy.role_of, tenancy.scope_mode, tenancy.person_scope, tenancy.assigned_permissions and tenancy.back_limit_words read. Writes: nothing.
+-- Reads: tenancy.memberships, identity.users, identity.invitations, tenancy.permissions, and what tenancy.role_of, tenancy.scope_mode, tenancy.person_scope, tenancy.assigned_permissions and tenancy.back_limit_words read. Writes: nothing.
 -- Raises: none.
--- Tests: tests/db/test_access_routines.py.
+-- Tests: tests/db/test_access_routines.py, tests/db/test_invitations.py.
 
-CREATE OR REPLACE FUNCTION tenancy.person_document(p_user_id uuid, p_viewer tenancy.scope)
+CREATE OR REPLACE FUNCTION tenancy.person_document(p_user_id uuid, p_viewer tenancy.scope, p_now timestamptz)
 RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
@@ -75,7 +75,7 @@ BEGIN
            'version', m.version,
            'other_companies', cardinality(v_scope.company_ids) - cardinality(v_companies),
            'other_vehicles', cardinality(v_scope.vehicle_ids) - cardinality(v_vehicles),
-           'status', identity.sign_in_status(u, m.active),
+           'status', identity.people_status(u, m.active, p_now),
            'last_signed_in_at', u.last_signed_in_at,
            'back_limit', jsonb_build_object(
              'mode', m.back_limit_mode,
@@ -97,5 +97,5 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION tenancy.person_document(uuid, tenancy.scope) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION tenancy.person_document(uuid, tenancy.scope) TO xcode_api_executor;
+REVOKE ALL ON FUNCTION tenancy.person_document(uuid, tenancy.scope, timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION tenancy.person_document(uuid, tenancy.scope, timestamptz) TO xcode_api_executor;

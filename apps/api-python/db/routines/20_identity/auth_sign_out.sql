@@ -1,7 +1,7 @@
 -- api.auth_sign_out(p_request_id text, p_token_hash text, p_device_id text, p_now timestamptz) RETURNS jsonb
--- Purpose: A11: when a token matches both the digest and the device, revoke every live token of that user on that device, and the device row too when it was trusted for that session only (not remembered); always signed_out (a remembered device and access tokens untouched).
+-- Purpose: A11: when a token matches both the digest and the device, revoke every live token of that user on that device, and the device row too when it was trusted for that session only (not remembered); a remembered device stays trusted but is stamped signed_out_at, so the access tokens issued before it stop working; always signed_out.
 -- Callers: IdentityRoutines.sign_out; the sign-out use case (A11).
--- Reads: identity.refresh_tokens, identity.users. Writes: identity.refresh_tokens (revoke), identity.trusted_devices (a device not remembered), identity.sign_in_attempts.
+-- Reads: identity.refresh_tokens, identity.users. Writes: identity.refresh_tokens (revoke), identity.trusted_devices (revoked when not remembered, else signed_out_at), identity.sign_in_attempts.
 -- Raises: none.
 -- Tests: tests/db/test_auth_routines.py.
 
@@ -39,6 +39,9 @@ BEGIN
   UPDATE identity.trusted_devices
   SET revoked = true, updated_at = p_now
   WHERE user_id = v_user.id AND device_id = p_device_id AND NOT remembered AND NOT revoked;
+  UPDATE identity.trusted_devices
+  SET signed_out_at = p_now, updated_at = p_now
+  WHERE user_id = v_user.id AND device_id = p_device_id AND remembered AND NOT revoked;
   PERFORM identity.record_attempt(
     'sign_out', 'signed_out', NULL, v_user.id, identity.phone_digest(v_user.phone_number), p_device_id, p_now
   );

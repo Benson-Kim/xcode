@@ -148,7 +148,8 @@ class ChangePinRequest(BaseModel):
 
 class StepResponse(BaseModel):
     """The step envelope: the seven properties of the released envelope, then ``purpose``,
-    ``triesLeft``, ``pinProblem`` and ``deviceToken``."""
+    ``triesLeft``, ``pinProblem``, ``deviceToken`` and ``invitation`` (true only when the
+    first-setup code is in the invitation email, otherwise null)."""
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -163,6 +164,7 @@ class StepResponse(BaseModel):
     tries_left: int | None = None
     pin_problem: PinProblem | None = None
     device_token: str | None = None
+    invitation: bool | None = None
 
     @classmethod
     def from_envelope(cls, envelope: AuthEnvelope) -> StepResponse:
@@ -178,6 +180,7 @@ class StepResponse(BaseModel):
             tries_left=envelope.tries_left,
             pin_problem=envelope.pin_problem,
             device_token=envelope.device_token,
+            invitation=envelope.invitation or None,
         )
 
 

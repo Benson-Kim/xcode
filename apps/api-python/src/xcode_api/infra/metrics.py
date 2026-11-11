@@ -1,9 +1,11 @@
 """Prometheus series of ``docs/08-operability.md`` section 5, one registry per app.
 
-Labels are route templates, methods, status codes, routine names, pool states and the four
-internal refusal reasons: never an id, a phone number, an address or a raw path (a request
-no route matched is counted as ``unmatched``). The pool and mail-queue gauges are read at
-scrape time.
+Labels are route templates, methods, status codes, routine names, pool states, the four
+internal refusal reasons, the two burst kinds and the three invitation events: never an id, a
+phone number, an address or a raw path (a request no route matched is counted as
+``unmatched``). A burst is one number reaching its wrong-PIN or wrong-code cap, so the count
+of numbers under attack needs no per-number label. 426 answers are
+``http_requests_total{status="426"}``. The pool and mail-queue gauges are read at scrape time.
 """
 
 from __future__ import annotations
@@ -73,6 +75,18 @@ class Metrics:
             ["reason"],
             registry=self.registry,
         )
+        self._bursts = Counter(
+            "auth_bursts_total",
+            "Numbers that reached their wrong-PIN or wrong-code cap, by kind",
+            ["kind"],
+            registry=self.registry,
+        )
+        self._invitations = Counter(
+            "invitations_total",
+            "Invitation emails sent, failed, and invitations redeemed",
+            ["event"],
+            registry=self.registry,
+        )
         self._rate_limited = Counter(
             "rate_limit_rejections_total",
             "Requests refused by the rate limiter",
@@ -89,6 +103,12 @@ class Metrics:
 
     def auth_refused(self, reason: str) -> None:
         self._refusals.labels(reason).inc()
+
+    def auth_burst(self, kind: str) -> None:
+        self._bursts.labels(kind).inc()
+
+    def invitation(self, event: str) -> None:
+        self._invitations.labels(event).inc()
 
     def rate_limit_rejected(self) -> None:
         self._rate_limited.inc()

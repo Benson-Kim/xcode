@@ -43,6 +43,7 @@ class OrganizationRows:
     code: UUID
     device: UUID
     token: UUID
+    invitation: UUID
     entry: UUID
     central: UUID
     pause: UUID
@@ -111,6 +112,11 @@ def _seed(conn: Conn, slug: str) -> OrganizationRows:
         "%(user)s, repeat('a', 64), 'device-1', 'request-1')",
         p,
     )
+    conn.execute(
+        "INSERT INTO identity.review_accounts (user_id, code_hash, created_at, updated_at) "
+        "VALUES (%(user)s, upper(md5('r' || %(tag)s) || md5('r' || %(tag)s)), now(), now())",
+        p,
+    )
     p["org"] = _one(
         conn,
         "INSERT INTO tenancy.organizations (slug, name) VALUES (%(slug)s, 'Organization') "
@@ -121,6 +127,15 @@ def _seed(conn: Conn, slug: str) -> OrganizationRows:
         "INSERT INTO tenancy.memberships (organization_id, user_id, first_name, last_name, "
         "approval_limit) VALUES (%(org)s, %(user)s, 'Owen', 'Owner', 1000), "
         "(%(org)s, %(user2)s, 'Clara', 'Clerk', NULL)",
+        p,
+    )
+    p["invitation"] = _one(
+        conn,
+        "INSERT INTO identity.invitations (organization_id, user_id, invited_by, token_hash, "
+        "code_hash, created_at, expires_at) VALUES (%(org)s, %(user2)s, %(user)s, "
+        "upper(md5('i' || %(tag)s) || md5('i' || %(tag)s)), "
+        "upper(md5('c' || %(tag)s) || md5('c' || %(tag)s)), now(), now() + interval '7 days') "
+        "RETURNING id",
         p,
     )
     conn.execute(

@@ -14,13 +14,17 @@ from typing import Any
 from psycopg_pool import AsyncConnectionPool
 
 from .application.access.create_person import CreatePerson
+from .application.access.erase_person import ErasePerson
 from .application.access.get_access_catalog import GetAccessCatalog
 from .application.access.get_my_scope import GetMyScope
 from .application.access.get_person import GetPerson
 from .application.access.get_scope_options import GetScopeOptions
+from .application.access.invitation_delivery import InvitationDelivery, InvitationSecrets
+from .application.access.invite_person import InvitePerson
 from .application.access.list_access_roles import ListAccessRoles
 from .application.access.list_people import ListPeople
 from .application.access.remove_person_device import RemovePersonDevice
+from .application.access.request_account_deletion import RequestAccountDeletion
 from .application.access.require_pin_reset import RequirePinReset
 from .application.access.set_person_active import SetPersonActive
 from .application.access.sign_out_person import SignOutPerson
@@ -32,6 +36,7 @@ from .application.auth.enter_code import EnterCode
 from .application.auth.enter_pin import EnterPin
 from .application.auth.get_session import GetSession
 from .application.auth.list_trusted_devices import ListTrustedDevices
+from .application.auth.redeem_invitation import RedeemInvitation
 from .application.auth.refresh import Refresh
 from .application.auth.remove_trusted_device import RemoveTrustedDevice
 from .application.auth.request_code import RequestCode
@@ -87,6 +92,7 @@ from .application.reports.get_reports_access import GetReportsAccess
 from .application.repositories import (
     ExpensesRepository,
     IdentityRepository,
+    InvitationRepository,
     OpsRepository,
     PettyCashRepository,
     ReportsRepository,
@@ -143,6 +149,7 @@ from .application.setup.update_vehicle import UpdateVehicle
 from .db.contract import EXPECTED_CONTRACT_VERSION
 from .db.routines.expenses import ExpensesRoutines
 from .db.routines.identity import IdentityRoutines
+from .db.routines.invitations import InvitationRoutines
 from .db.routines.ops import OpsRoutines
 from .db.routines.pettycash import PettyCashRoutines
 from .db.routines.reports import ReportsRoutines
@@ -153,7 +160,15 @@ from .domain.reports import ExportFormat
 from .infra.clock import SystemClock
 from .infra.exports.pdf import ReportLabAdapter
 from .infra.exports.xlsx import XlsxWriterAdapter
-from .infra.mail import LogMailer, MailQueue, SmtpMailer, VerificationMailer
+from .infra.mail import (
+    InvitationLinks,
+    LogMailer,
+    MailQueue,
+    QueuedDeletionNotifier,
+    QueuedInvitationMailer,
+    SmtpMailer,
+    VerificationMailer,
+)
 from .infra.rate_limit import MemoryRateLimiter, PostgresRateLimiter
 from .security.device_tokens import RandomDeviceTokens
 from .security.digests import KeyedDigester
@@ -200,10 +215,15 @@ class Container:
     get_person: GetPerson
     create_person: CreatePerson
     update_person: UpdatePerson
+    invite_person: InvitePerson
+    redeem_invitation: RedeemInvitation
+    invitation_delivery: InvitationDelivery
     set_person_active: SetPersonActive
+    erase_person: ErasePerson
     sign_out_person: SignOutPerson
     require_pin_reset: RequirePinReset
     remove_person_device: RemovePersonDevice
+    request_account_deletion: RequestAccountDeletion
     list_history: ListHistory
     get_organization_settings: GetOrganizationSettings
     update_organization_settings: UpdateOrganizationSettings
@@ -301,6 +321,7 @@ def build_container(
     pettycash: PettyCashRepository | None = None,
     expenses: ExpensesRepository | None = None,
     reports: ReportsRepository | None = None,
+    invitations: InvitationRepository | None = None,
     export_writers: Mapping[ExportFormat, ReportFileWriter] | None = None,
     clock: Clock | None = None,
     mailer: Mailer | None = None,
@@ -335,6 +356,10 @@ def build_container(
         if pool is None:
             raise ValueError("build_container needs a pool or the reports port")
         reports = ReportsRoutines(pool)
+    if invitations is None:
+        if pool is None:
+            raise ValueError("build_container needs a pool or the invitations port")
+        invitations = InvitationRoutines(pool)
     export_writers = export_writers or _default_export_writers()
     clock = clock or SystemClock()
     mailer = mailer or _default_mailer(settings)
@@ -354,6 +379,13 @@ def build_container(
     )
     device_tokens = RandomDeviceTokens()
     delivery = CodeDelivery(identity, clock, code_mailer)
+    invitation_secrets = InvitationSecrets(device_tokens, secrets, digests)
+    invitation_delivery = InvitationDelivery(
+        invitations,
+        clock,
+        QueuedInvitationMailer(mail_queue, _invitation_links(settings)),
+        invitation_secrets,
+    )
     development_codes = settings.development_codes
     trust_days = settings.auth_trust_lifetime_days
     return Container(
@@ -452,12 +484,21 @@ def build_container(
         get_my_scope=GetMyScope(tenancy, clock),
         list_people=ListPeople(tenancy, clock),
         get_person=GetPerson(tenancy, clock),
-        create_person=CreatePerson(tenancy, clock),
-        update_person=UpdatePerson(tenancy, clock),
+        create_person=CreatePerson(tenancy, clock, invitation_secrets, invitation_delivery),
+        update_person=UpdatePerson(tenancy, clock, invitation_secrets, invitation_delivery),
+        invite_person=InvitePerson(tenancy, clock, invitation_secrets, invitation_delivery),
+        redeem_invitation=RedeemInvitation(
+            identity, clock, digests=digests, secrets=secrets, device_tokens=device_tokens
+        ),
+        invitation_delivery=invitation_delivery,
         set_person_active=SetPersonActive(tenancy, clock),
+        erase_person=ErasePerson(tenancy, clock),
         sign_out_person=SignOutPerson(tenancy, clock),
         require_pin_reset=RequirePinReset(tenancy, clock),
         remove_person_device=RemovePersonDevice(tenancy, clock),
+        request_account_deletion=RequestAccountDeletion(
+            tenancy, clock, QueuedDeletionNotifier(mail_queue)
+        ),
         list_history=ListHistory(tenancy, clock),
         get_organization_settings=GetOrganizationSettings(tenancy, clock),
         update_organization_settings=UpdateOrganizationSettings(tenancy, clock),
@@ -546,6 +587,19 @@ def build_container(
 
 def _default_export_writers() -> Mapping[ExportFormat, ReportFileWriter]:
     return {ExportFormat.XLSX: XlsxWriterAdapter(), ExportFormat.PDF: ReportLabAdapter()}
+
+
+DEVELOPMENT_WEB_URL = "http://localhost:3000"
+
+
+def _invitation_links(settings: Settings) -> InvitationLinks:
+    """The invitation link host from settings only; production requires it, development falls
+    back to the local web app."""
+    return InvitationLinks(
+        web_url=settings.public_web_url or DEVELOPMENT_WEB_URL,
+        app_store_url=settings.app_store_url,
+        play_store_url=settings.play_store_url,
+    )
 
 
 def _default_mailer(settings: Settings) -> Mailer:

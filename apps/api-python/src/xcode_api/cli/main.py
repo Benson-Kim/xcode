@@ -13,9 +13,9 @@ import sys
 from collections.abc import Sequence
 
 from ..infra.logging import configure_cli_logging
-from .commands import db, openapi, seed, serve, settings_check, users
+from .commands import db, openapi, review_account, seed, serve, settings_check, users
 
-COMMANDS = (serve, db, *users.COMMANDS, seed, openapi, settings_check)
+COMMANDS = (serve, db, *users.COMMANDS, seed, review_account, openapi, settings_check)
 
 
 def build_parser() -> argparse.ArgumentParser:

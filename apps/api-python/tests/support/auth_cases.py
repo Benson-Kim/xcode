@@ -71,6 +71,7 @@ from .scenario import (
 OTHER = "other-device"
 THIRD = "third-device"
 STRANGER = UUID(int=1)
+SECOND = timedelta(seconds=1)
 MINUTE = timedelta(minutes=1)
 HOUR = timedelta(hours=1)
 DAY = timedelta(days=1)
@@ -695,10 +696,14 @@ class World:
         *,
         device: str = TRUSTED,
         now: datetime = T0,
+        not_before: datetime | None = None,
     ) -> SessionContext | None:
         user_id = who.user_id if isinstance(who, Ref) else who
+        issued = now if not_before is None else not_before
         try:
-            context = await self.repo.resolve_session(SessionCheck(user_id, device, version, now))
+            context = await self.repo.resolve_session(
+                SessionCheck(user_id, device, version, issued, now)
+            )
         except SessionInvalid:
             self.steps.append(Seen(call="resolve_session", kind="session_invalid"))
             return None
@@ -3959,7 +3964,7 @@ async def refresh_replay_revokes_the_live_tokens_of_that_device_only(w: World) -
     await w.store_token(ref, TRUSTED, "t1")
     await w.store_token(ref, OTHER, "o1")
     await w.refresh("t1", new="t2")
-    await w.refresh("t1")
+    await w.refresh("t1", now=T0 + 30 * SECOND)
 
 
 @case("refused", "token_replayed", check=lambda o: _expect(o.account.live_tokens == ()))
@@ -3967,7 +3972,37 @@ async def refresh_replay_of_a_rotated_token_kills_its_successor(w: World) -> Non
     ref = await standard(w)
     await w.store_token(ref, TRUSTED, "t1")
     await w.refresh("t1", new="t2")
-    await w.refresh("t1", new="t3")
+    await w.refresh("t1", new="t3", now=T0 + 30 * SECOND)
+
+
+@case(
+    "refused",
+    "refresh_superseded",
+    check=lambda o: _expect(o.account.live_tokens == ((TRUSTED, 1),)),
+)
+async def refresh_replay_within_thirty_seconds_of_its_rotation_is_superseded(w: World) -> None:
+    ref = await standard(w)
+    await w.store_token(ref, TRUSTED, "t1")
+    await w.refresh("t1", new="t2")
+    await w.refresh("t1", new="t3", now=T0 + 29 * SECOND)
+
+
+@case("refused", "token_unknown", check=lambda o: _expect(o.account.live_tokens == ((TRUSTED, 1),)))
+async def refresh_replay_within_the_grace_from_another_device_is_unknown(w: World) -> None:
+    ref = await standard(w)
+    await w.trust(ref, OTHER)
+    await w.store_token(ref, TRUSTED, "t1")
+    await w.refresh("t1", new="t2")
+    await w.refresh("t1", device=OTHER, now=T0 + SECOND)
+
+
+@case("refused", "token_replayed", check=lambda o: _expect(o.account.live_tokens == ()))
+async def refresh_of_a_signed_out_token_is_a_replay_at_once(w: World) -> None:
+    ref = await standard(w)
+    await w.store_token(ref, TRUSTED, "t1")
+    await w.store_token(ref, TRUSTED, "t2")
+    await w.sign_out("t2")
+    await w.refresh("t1")
 
 
 @case("refused", "token_expired", check=lambda o: _expect(o.account.live(TRUSTED) == 1))
@@ -4193,6 +4228,22 @@ async def resolve_session_after_a_pin_change_is_refused(w: World) -> None:
 async def resolve_session_from_an_untrusted_device_is_refused(w: World) -> None:
     ref = await standard(w)
     await w.resolve(ref, device=UNTRUSTED)
+
+
+@case("session_invalid")
+async def resolve_session_of_a_token_issued_before_a_sign_out_is_refused(w: World) -> None:
+    ref = await standard(w)
+    await w.store_token(ref, TRUSTED, "t1")
+    await w.sign_out("t1", now=T0 + MINUTE)
+    await w.resolve(ref, now=T0 + MINUTE, not_before=T0 + MINUTE - SECOND)
+
+
+@case("session", check=lambda o: _expect(o.last.role == "Owner"))
+async def resolve_session_of_a_token_issued_at_a_sign_out_or_later_passes(w: World) -> None:
+    ref = await standard(w)
+    await w.store_token(ref, TRUSTED, "t1")
+    await w.sign_out("t1", now=T0 + MINUTE)
+    await w.resolve(ref, now=T0 + 2 * MINUTE, not_before=T0 + MINUTE)
 
 
 @case("session_invalid")

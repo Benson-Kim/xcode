@@ -20,7 +20,14 @@ PROJECT = ROUTINES.parent.parent
 LABELS = ("Purpose:", "Callers:", "Reads:", "Writes:", "Raises:", "Tests:")
 # Cross-tenant lookups that read past row-level security as the table owner (docs/05-routines.md
 # section 2.2); each returns ids only and is executable by xcode_api_executor alone.
-DEFINER_HELPERS = {"identity.active_organization", "tenancy.organization_ids"}
+DEFINER_HELPERS = {
+    "identity.active_organization",
+    "identity.erase_review_login",
+    "identity.invitation_org",
+    "tenancy.belongs_elsewhere",
+    "tenancy.erase_person_history",
+    "tenancy.organization_ids",
+}
 
 _ENTRY = re.compile(r"(XC\d{3}) ([a-z0-9_]+)(?: via ([a-z_]+\.[a-z_]+))?")
 _REFUSE = re.compile(r"tenancy\.refuse\(\s*'([a-z0-9_]+)'(?:\s*,\s*'(XC\d{3})')?")
@@ -130,7 +137,7 @@ def test_raises_matches_the_refusals_of_the_body(routine: RoutineFile) -> None:
 
 def test_auth_routines_raise_nothing_but_session_resolution_and_device_removal() -> None:
     auth = [f for f in _files() if f.name.startswith("api.auth_")]
-    assert len(auth) == 19
+    assert len(auth) == 20
     for routine in auth:
         if routine.name == "api.auth_resolve_session":
             assert _declared(routine.raises) == [("XC401", "session_invalid", None)]

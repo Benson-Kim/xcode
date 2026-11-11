@@ -76,8 +76,13 @@ BEGIN
   IF p_scope_mode IS NULL OR p_scope_mode NOT IN ('all', 'companies', 'vehicles') THEN
     PERFORM tenancy.refuse('people_scope_mode', 'XC422');
   END IF;
-  IF (p_scope_mode = 'companies' AND cardinality(v_companies) = 0)
-     OR (p_scope_mode = 'vehicles' AND cardinality(v_vehicles) = 0) THEN
+  IF p_scope_mode = 'companies' AND cardinality(v_companies) = 0 THEN
+    PERFORM tenancy.refuse('people_scope_empty', 'XC422');
+  END IF;
+  -- Only an editor who sees every company may leave a vehicles scope empty: the person is then
+  -- listed only for such editors, so anyone else would lose sight of them.
+  IF p_scope_mode = 'vehicles' AND cardinality(v_vehicles) = 0
+     AND NOT (tenancy.actor_scope()).all_companies THEN
     PERFORM tenancy.refuse('people_scope_empty', 'XC422');
   END IF;
   IF (SELECT count(DISTINCT c.id) FROM unnest(v_companies) AS c (id)) <> cardinality(v_companies)

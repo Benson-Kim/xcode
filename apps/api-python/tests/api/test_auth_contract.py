@@ -180,9 +180,33 @@ async def test_refresh_rotates_and_a_replay_ends_the_device_session(api: AuthApi
     )
     assert rotated["refreshToken"] != first["refreshToken"]
     assert rotated["accessToken"]
+    api.clock.advance(31)
     refused(await api.post("/auth/refresh", refreshToken=first["refreshToken"], deviceId=DEVICE))
     refused(await api.post("/auth/refresh", refreshToken=rotated["refreshToken"], deviceId=DEVICE))
     envelope(await api.sign_in(), 200, "authenticated")
+
+
+async def test_a_refresh_racing_its_own_rotation_is_superseded_and_keeps_the_session(
+    api: AuthApi,
+) -> None:
+    _, first = await api.onboard()
+    rotated = envelope(
+        await api.post("/auth/refresh", refreshToken=first["refreshToken"], deviceId=DEVICE),
+        200,
+        "authenticated",
+    )
+    api.clock.advance(29)
+    raced = envelope(
+        await api.post("/auth/refresh", refreshToken=first["refreshToken"], deviceId=DEVICE),
+        401,
+        "refresh_superseded",
+    )
+    assert all(raced[key] is None for key in ENVELOPE_KEYS[1:])
+    envelope(
+        await api.post("/auth/refresh", refreshToken=rotated["refreshToken"], deviceId=DEVICE),
+        200,
+        "authenticated",
+    )
 
 
 async def test_refresh_from_another_device_is_refused(api: AuthApi) -> None:
@@ -209,7 +233,7 @@ async def test_sign_out_always_answers_signed_out_and_ends_the_refresh_token(
     session = await api.client.get(
         "/auth/session", headers={"Authorization": f"Bearer {first['accessToken']}"}
     )
-    assert session.status_code == 200, "access tokens live until exp after sign-out"
+    assert session.status_code == 401, "a sign-out stops the device's access tokens at once"
 
 
 async def test_revoking_the_own_device_stops_its_token_at_once(api: AuthApi) -> None:

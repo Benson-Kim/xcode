@@ -29,7 +29,15 @@ def _documented_commands() -> list[str]:
 
 def test_registry_lists_every_command() -> None:
     names = {module.NAME for module in COMMANDS}
-    assert names == {"serve", "db", "openapi", "settings-check", "seed-demo", *USER_COMMANDS}
+    assert names == {
+        "serve",
+        "db",
+        "openapi",
+        "settings-check",
+        "seed-demo",
+        "review-account",
+        *USER_COMMANDS,
+    }
 
 
 def test_registry_equals_the_documented_table() -> None:

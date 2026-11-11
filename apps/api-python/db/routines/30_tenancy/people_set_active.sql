@@ -1,9 +1,9 @@
 -- api.people_set_active(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_user_id uuid, p_active boolean, p_expected_version bigint, p_reason text, p_now timestamptz) RETURNS api.write_result
--- Purpose: deactivate (membership inactive, user removed, sessions and devices ended; a typed reason required) or reactivate a visible person; repeating a finished transition answers unchanged without a version.
+-- Purpose: deactivate (membership inactive, user removed, sessions, devices and the live invitation ended; a typed reason required) or reactivate a visible person; repeating a finished transition answers unchanged without a version.
 -- Callers: TenancyRoutines.set_person_active; SetPersonActive (POST /setup/people/{id}/activate, /deactivate).
--- Reads: tenancy.memberships, identity.users, and what tenancy.person_in_view and tenancy.role_of read. Writes: tenancy.memberships, identity.users, identity.trusted_devices, identity.refresh_tokens, and through tenancy.record_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
+-- Reads: tenancy.memberships, identity.users, and what tenancy.person_in_view and tenancy.role_of read. Writes: tenancy.memberships, identity.users, identity.trusted_devices, identity.refresh_tokens, identity.invitations (revoked 'blocked'), and through tenancy.record_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 people_self_deactivate, XC404 not_found, XC403 people_owner_edit, XC409 version_conflict, XC422 reason_length.
--- Tests: tests/db/test_access_routines.py, tests/api/test_people.py.
+-- Tests: tests/db/test_access_routines.py, tests/db/test_invitations.py, tests/api/test_people.py.
 
 CREATE OR REPLACE FUNCTION api.people_set_active(
   p_actor_id uuid,
@@ -80,6 +80,7 @@ BEGIN
     WHERE id = p_user_id;
     PERFORM identity.revoke_devices(p_user_id);
     PERFORM identity.revoke_tokens(p_user_id);
+    PERFORM identity.revoke_invitations(p_user_id, 'blocked', p_now);
     PERFORM identity.touch_version(p_user_id);
     PERFORM tenancy.record_change(
       'people', p_user_id, NULL, v_before, tenancy.person_snapshot(p_user_id),

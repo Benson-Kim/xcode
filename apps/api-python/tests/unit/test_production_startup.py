@@ -17,7 +17,9 @@ PRODUCTION = {
     "XCODE_AUTH_SIGNING_KEY": "production-test-signing-key-0123456789-abcdef",
     "XCODE_EMAIL_HOST": "smtp.example.com",
     "XCODE_EMAIL_FROM": "noreply@example.com",
+    "XCODE_PUBLIC_WEB_URL": "https://app.example.com",
     "XCODE_ALLOWED_HOSTS": "api.example.com",
+    "XCODE_RATE_LIMIT_BACKEND": "postgres",
 }
 
 
@@ -54,13 +56,20 @@ def test_production_without_its_four_values_exits_2_naming_each(
         "XCODE_AUTH_SIGNING_KEY",
         "XCODE_EMAIL_HOST",
         "XCODE_EMAIL_FROM",
+        "XCODE_PUBLIC_WEB_URL",
     ):
         assert name in out, name
 
 
 @pytest.mark.parametrize(
     "missing",
-    ["XCODE_DATABASE_URL", "XCODE_AUTH_SIGNING_KEY", "XCODE_EMAIL_HOST", "XCODE_EMAIL_FROM"],
+    [
+        "XCODE_DATABASE_URL",
+        "XCODE_AUTH_SIGNING_KEY",
+        "XCODE_EMAIL_HOST",
+        "XCODE_EMAIL_FROM",
+        "XCODE_PUBLIC_WEB_URL",
+    ],
 )
 def test_production_without_one_value_exits_2_naming_it(
     environment: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], missing: str
@@ -84,6 +93,7 @@ def test_production_without_one_value_exits_2_naming_it(
         ("production", "XCODE_CORS_ORIGINS", "*"),
         ("testing", "XCODE_CORS_ORIGINS", "*"),
         ("production", "XCODE_ALLOWED_HOSTS", "*"),
+        ("production", "XCODE_RATE_LIMIT_BACKEND", "memory"),
     ],
 )
 def test_a_safety_switch_outside_its_environments_exits_2(

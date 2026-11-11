@@ -94,6 +94,7 @@ def test_verify_returns_the_claims() -> None:
         user_id=USER,
         device_id="phone-1",
         security_version=3,
+        issued_at=NOW.replace(microsecond=0),
         organization_id=ORG,
         role="Owner",
         first_name="Jane",

@@ -67,12 +67,15 @@ its tests decide, the inventory is corrected, and this document follows.
 | `Retry-After` | on 429 (seconds to the window end) and on 503 from a transient failure (`1`). Additions to the .NET contract; no client reads them |
 | `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` | on every response; no `Server` header (`docs/12-security.md`) |
 | Device or client identity headers | none; the device id travels in the body (`deviceId`) and in the `device` claim |
+| `X-XCODE-Client` | the mobile app sends `mobile/<version>` on every request, its `app.json` version (dotted numeric, `1.4.0`). With `XCODE_MIN_MOBILE_VERSION` set, a version below it, or one that is not dotted numeric, answers 426 `update_required` (section 1.6) on every route but the health probes. A missing header or one that does not start with `mobile/` (the web BFF, builds from before the header) is not checked. A compatibility gate for the phone, not an access control (`http/client_version.py`, `tests/api/test_client_version.py`) |
 | `Content-Encoding`, `Vary: Accept-Encoding` | gzip for `/setup/**` answers above 1 KiB when the client accepts it (the .NET API also offered Brotli; gzip is what the phone sends), except spreadsheets (already a zip); `Vary: Accept-Encoding` on every `/setup/**` answer, compressed or not; never on `/auth/**` (byte-for-byte rule, and no compression oracle over tokens) or health (`http/middleware.py` `SetupCompressionMiddleware`, `tests/api/test_compression.py`) |
 
 ### 1.5 Middleware order
 
 1. forwarded headers (trusted proxies only); 2. request id; 3. exception handlers; 4. CORS;
-5. body cap; 6. security headers; 7. routers. The auth rate limit is the first dependency
+5. body cap; 6. security headers; 7. the minimum mobile version (only with
+`XCODE_MIN_MOBILE_VERSION`), after the host check and before routing, so a 426 carries the
+request id and security headers and is counted as `unmatched`; 8. routers. The auth rate limit is the first dependency
 of every `/auth` route, so it also runs before authentication of `GET /auth/session` and the
 revoke route: in .NET `UseRateLimiter` came before `UseAuthentication` and
 `UseAuthorization` (`Program.cs:169-171`), so a request without a valid token is charged and,
@@ -91,11 +94,16 @@ past the limit, answered 429 rather than 401. `X-Request-ID` is present on 429 a
 | `code_verified` | 200 | | A05, A08 |
 | `paused` | 423 | `retryAfterSeconds` (integer > 0) | A01, A02 |
 | `authentication_failed` | 401 | | A01, A02, A03, A05, A06, A08, A09, A10 |
+| `refresh_superseded` | 401 | | A03, when the presented refresh token was rotated for the same device less than 30 s ago; nothing is revoked, and the client re-reads its stored token and retries once (`docs/07-auth.md` section 3) |
 | `invalid_pin` | 400 | `minimumPinLength` (4..8) | A06, A09 |
 | `invalid_request` | 400 | | pre-validation of A01 to A12 |
 | `signed_out` | 200 | | A11 |
 | `device_revoked` | 200 | | A12 |
 | `service_unavailable` | 503 | | A01, A02 (new-device mail failed) |
+| `update_required` | 426 | `minimumVersion`, `message` | every route but the health probes, for a mobile build below `XCODE_MIN_MOBILE_VERSION` (section 1.4 `X-XCODE-Client`) |
+
+The 426 body is `{"status":"update_required","minimumVersion":<XCODE_MIN_MOBILE_VERSION>,"message":...}`
+on every route, `/setup/**` included: not the seven-property envelope and not a problem.
 
 Empty bodies on `/auth/**`: 401 from the bearer check (session and revoke routes), 403 from
 revoking another device, 429, and the framework 404 and 405.
@@ -185,8 +193,8 @@ any header, no credentials, no exposed headers. No current client is a browser o
 | `GET /health/ready` | 200 `Healthy` once the startup checks have passed (`docs/08-operability.md` section 6) and while `SELECT 1` succeeds within 10 s as `xcode_app`, the contract version matches and, with `XCODE_RATE_LIMIT_BACKEND=postgres`, the shared limiter answers (its own window `health:ready`); else 503 `Unhealthy`, the reason only in the log line `health.ready.failed` |
 | `GET /health` | 200 `{"status":"ok"}` (legacy JSON), no database call |
 
-None is authenticated, rate limited or checked against `XCODE_ALLOWED_HOSTS` (probes call by
-address); all carry `X-Request-ID`. `GET /metrics` (Prometheus text, only with
+None is authenticated, rate limited, checked against `XCODE_ALLOWED_HOSTS` (probes call by
+address) or refused for an old mobile build; all carry `X-Request-ID`. `GET /metrics` (Prometheus text, only with
 `XCODE_METRICS_ENABLED`) follows the same three rules; the proxy never forwards it.
 
 ### 1.11 OpenAPI
@@ -249,6 +257,7 @@ check order, messages) are the contract for each row.
 | A11 | `POST /auth/sign-out` | anonymous (token in body) | 200 `signed_out` always | `api.auth_sign_out` | 1 |
 | A12 | `POST /auth/devices/{id}/revoke` | bearer; `id` must equal the `device` claim else 403 empty | 200 `device_revoked` | `api.auth_revoke_device` | 2 |
 | A13 | `GET /auth/session` | bearer | 200 `{userId, firstName, lastName, role, permissions}` from the claims | none beyond session resolution | 1 |
+| A14 | `POST /auth/invite/redeem` (`{token, phoneNumber, deviceId, deviceName}`) | anonymous; `auth`, then `auth_invite` per address before pre-validation and per token digest after it | 202 `verification_required` plus the one-time setup `code`; 401 `authentication_failed`, plus `inviteProblem` (`expired`, `used`, `revoked`) only when the token and the number both matched | `api.auth_invite_redeem` | 1 |
 
 Pre-validation (400 `invalid_request`, before any lookup): `deviceId` 1..128; `phoneNumber`
 at most 14; `email` at most 320 and a valid address when non-empty; `pin` at most 8; `code`
@@ -276,12 +285,14 @@ header must be added to the exclusion list of that test.
 | S02 | `GET /setup/access/roles` | `people.view` | `AccessRole[]` by name | `ListAccessRoles` | `api.access_role_list` (read-only; roles are pre-seeded) | 2 |
 | S03 | `GET /setup/access/scope-options` | `people.manage` | `ScopeOptions` | `GetAccessScopeOptions` | `api.access_scope_options` | 2 |
 | S04 | `GET /setup/access/me` | member | `MyScope` | `GetMyAccessScope` | `api.access_my_scope` | 2 |
+| S58 | `POST /setup/me/deletion-request` (no body; the subject is always the caller) | member | 202, no body, the same whether or not a request was made in the last 24 hours; after the reply, one email to each other member who holds `people.block` (the right blocking and erasing need) on the first request only | `RequestMyAccountDeletion` | `api.me_deletion_request` | 2 |
 | S05 | `GET /setup/people?page&pageSize&role&status` | `people.view` | `Page<PersonDto>` | `ListPeople` | `api.people_list` | 2 |
 | S06 | `GET /setup/people/{id}` | `people.view` | `PersonDto`; 404 | `GetPerson` | `api.people_get` | 2 |
 | S07 | `POST /setup/people` | `people.manage` + rules | 200 `{id}` | `CreatePerson` | `api.people_create` | 2 |
 | S08 | `PUT /setup/people/{id}` | `people.manage` + rules; `version` | 200 `{id}` | `UpdatePerson` | `api.people_update` | 2 |
 | S09 | `POST /setup/people/{id}/activate` | `people.manage`; optional body | 200 `{id}` | `ActivatePerson` | `api.people_set_active` | 2 |
 | S10 | `POST /setup/people/{id}/deactivate` | `people.manage`; optional body; typed reason required | 200 `{id}` | `DeactivatePerson` | `api.people_set_active` | 2 |
+| S59 | `POST /setup/people/{id}/erasure` (body `{version, reason}`; irreversible) | `people.block`; the person blocked first, a member of no other organization, not the caller; a non-Owner may not erase an Owner; typed reason required | 200 `{id}`; the same on a repeat for an erased person, who is then 404 on S06 and left out of S05 | `ErasePerson` | `api.people_erase` | 2 |
 | S11 | `POST /setup/people/{id}/sign-out` | `people.manage` | 200 `{id}` | `SignOutPerson` | `api.people_sign_out` | 2 |
 
 S05 filters (.NET `AccessUseCases.List`, `ListFilterTests`): `role` keeps people holding the
@@ -293,7 +304,12 @@ names are unique (an unknown name gives an empty page; empty or `all` means no f
 .NET. `total` counts the filtered people. Built by `api.people_list` `p_role`/`p_status`.
 
 The sixteen-step check order of S07/S08 and the exact 400/403/404/409 sentences are
-`inv 2.3`; they are reproduced in section 3 as message codes.
+`inv 2.3`; they are reproduced in section 3 as message codes. One accepted deviation (user
+decision, 2026-11-11): step 5 refuses `people_scope_empty` for a `companies` scope with no
+company, and for a `vehicles` scope with no vehicle unless the editor sees every company (the
+Owner or a manager of all companies). Such a person sees no vehicles until some are given, as in
+a new organization that has none yet, and is listed only for editors who see every company, so
+an editor limited to some companies can never make someone vanish from their own list.
 
 ### 2.3 Companies and vehicles (`inv 2.4`, `inv 2.5`, `inv 3.4`)
 
@@ -504,7 +520,7 @@ order, `null` when unused.
 
 | ID | Route | Body | Success and refusals | Routine | Budget |
 |---|---|---|---|---|---|
-| N01 | `POST /auth/start` | `phoneNumber, deviceId, deviceToken?, deviceName?` | 200 `pin_required`; 423 `pin_locked`; 403 `blocked`; 202 `verification_required` (`purpose` `first_setup` or `pin_reset`, `maskedEmail`) | `api.auth_start` | 1 |
+| N01 | `POST /auth/start` | `phoneNumber, deviceId, deviceToken?, deviceName?` | 200 `pin_required`; 423 `pin_locked`; 403 `blocked`; 202 `verification_required` (`purpose` `first_setup` or `pin_reset`, `maskedEmail`; with a usable invitation, `purpose` `first_setup`, `invitation` true and `maskedEmail` the masked address the invitation went to: no code is sent, the person types the code from the invitation email) | `api.auth_start` | 1 |
 | N02 | `POST /auth/pin` | `phoneNumber, deviceId, deviceToken?, deviceName?, pin` | 200 `authenticated`; 202 `verification_required` (`purpose` `new_device` with `maskedEmail`, or `first_setup`/`pin_reset`); 401 `authentication_failed` with `triesLeft`; 423 `pin_locked`; 403 `blocked`; 503 `service_unavailable` (new-device mail failed) | `api.auth_account_lookup`, `api.auth_pin` | 2 |
 | N03 | `POST /auth/code` | `phoneNumber, deviceId, deviceName?, purpose, code, trustDevice` | `new_device`: 200 `authenticated` (`deviceToken` when trusted); `first_setup`/`pin_reset`: 200 `code_verified`; 401 `authentication_failed` (`triesLeft`, or null when the code is expired or gone); 202 `code_resent` (the third wrong try) | `api.auth_check_code` | 1 |
 | N04 | `POST /auth/code/resend` | `phoneNumber, deviceId, deviceName?, purpose` | 202 `verification_required` always (`maskedEmail` null) | `api.auth_resend_code` | 1 |
@@ -533,6 +549,7 @@ order, `null` when unused.
 | ID | Route | Permission | Success | operationId | Routine | Budget |
 |---|---|---|---|---|---|---|
 | S45 | `POST /setup/people/{id}/pin-reset` | `people.sign_in` | 200 `{id}` | `RequirePersonPinReset` | `api.people_pin_reset` | 2 |
+| S57 | `POST /setup/people/{id}/invitation` (empty body; send again) | `people.sign_in` | 200 `{id}`; 400 `people_invite_not_needed` once the person has a PIN | `InvitePerson` | `api.people_invite`, then `api.invite_delivery_start` after commit | 2 |
 | S46 | `POST /setup/people/{id}/trusted-devices/{deviceId}/remove` (`{deviceId}` the row id) | `people.sign_in` | 200 `{id}` | `RemovePersonDevice` | `api.people_device_remove` | 2 |
 
 S11 (`POST /setup/people/{id}/sign-out`) is "Remove all" under `people.sign_in`.
@@ -566,7 +583,7 @@ property order of today with the new properties at the end.
 | S02 | `people.view` | |
 | S03 | any of `people.add`, `people.edit` | vehicle options add `fleetNumber` |
 | S05 | `people.view` | `status` filter: `active`, `not_signed_in`, `pin_reset_due`, `locked`, `blocked` (legacy `waiting`, `none` accepted); `PersonDto` adds `status`, `lastSignedInAt`, `backLimit` `{mode, count, from}`, `canChange`, `modules` `[{name, held, total}]`, `everything`; `active` and `hasPin` stay |
-| S06 | `people.view` | adds `signIn` `{status, lock, lastSignedInAt, email, devices: [{id, name, trustedAt, lastUsedAt}]}` |
+| S06 | `people.view` | adds `signIn` `{status, lock, lastSignedInAt, email, invitation, devices: [{id, name, trustedAt, lastUsedAt}]}`; `invitation` is `{state, sentAt, expiresAt}` while one is live (`state` `pending`, `sent`, `failed` or `expired`), null once accepted or revoked or with none |
 | S07 | `people.add` | body adds `backLimit` (absent = `days` 7); `permissions` must be catalogue keys (**changed**: today's retired keys are `people_permission_unknown`) |
 | S08 | `people.edit` | body adds `backLimit` (absent = unchanged); catalogue keys only |
 | S09, S10 | `people.block` | |
@@ -825,7 +842,7 @@ People and access (`inv 2.3`):
 | `people_scope_mode` | 400 | `Choose a data scope.` |
 | `people_scope_empty` | 400 | `Choose at least one item in the data scope.` |
 | `people_scope_duplicate` | 400 | `Data scope items must be distinct.` |
-| `people_filter_status_invalid` | 400 | `Status must be active, not_signed_in, pin_reset_due, locked or blocked.` (the legacy `waiting` and `none` are still accepted, not named) |
+| `people_filter_status_invalid` | 400 | `Status must be active, not_signed_in, invited, invite_expired, pin_reset_due, locked or blocked.` (the legacy `waiting` and `none` are still accepted, not named) |
 | `people_permissions_invalid` | 400 | `Permissions and approval limit are invalid.` |
 | `people_role_unknown` | 400 | `Unknown role.` |
 | `people_version_required` | 400 | `Reload this person before saving.` |
@@ -848,6 +865,10 @@ People and access (`inv 2.3`):
 | `people_self_deactivate` | 400 | `You cannot deactivate your own access.` (activate uses the same text) |
 | `people_self_sign_out` | 400 | `Use sign out for your own session.` |
 | `people_self_sign_in` | 400 | `Use the profile menu for your own PIN and devices.` |
+| `people_invite_not_needed` | 400 | `This person has already set up their PIN and needs no invitation.` |
+| `people_self_erase` | 400 | `You cannot erase your own details here.` (a member asks for deletion with S58) |
+| `people_erase_active` | 400 | `Block this person before erasing their details.` (also an account not yet removed) |
+| `people_erase_shared` | 400 | `This person also belongs to another organization, so their details cannot be erased.` |
 | `people_back_limit_invalid` | 400 | `Choose how far back this person can change records: none, 0 to 3650 days or 0 to 120 months.` |
 | `people_back_limit_date_future` | 400 | `The date before which this person cannot change records cannot be after today.` |
 | `people_back_limit_not_held` | 403 | `You cannot let someone change records further back than you can.` (a non-Owner's own limit bounds the limits they give) |

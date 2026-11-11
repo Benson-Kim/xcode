@@ -1,7 +1,7 @@
 -- api.auth_refresh(p_request_id text, p_token_hash text, p_device_id text, p_new_token_hash text, p_now timestamptz) RETURNS jsonb
--- Purpose: A10: rotate a refresh token with freshly read claims; a replayed token revokes the device's live tokens, an inactive user's every token; refused while the PIN is locked on every device or the device row is not live (unused for 90 days, revoked, expired); a rotation marks the device used (docs/07-auth.md section 3.6, 12.13).
+-- Purpose: A10: rotate a refresh token with freshly read claims; a replayed token revokes the device's live tokens, an inactive user's every token, except a token rotated under 30 seconds ago, which is refused as refresh_superseded and revokes nothing, so two requests racing on one device do not end its session; refused while the PIN is locked on every device or the device row is not live (unused for 90 days, revoked, expired); a rotation marks the device used (docs/07-auth.md section 3.6, 12.13).
 -- Callers: IdentityRoutines.refresh; the refresh use case (A10).
--- Reads: identity.refresh_tokens, identity.users, identity.trusted_devices, and what identity.policy_for reads. Writes: identity.refresh_tokens (revoke, insert), identity.trusted_devices.last_used_at, identity.users.version, identity.sign_in_attempts.
+-- Reads: identity.refresh_tokens, identity.users, identity.trusted_devices, and what identity.policy_for reads. Writes: identity.refresh_tokens (revoke, rotated_at, insert), identity.trusted_devices.last_used_at, identity.users.version, identity.sign_in_attempts.
 -- Raises: none.
 -- Tests: tests/db/test_auth_routines.py.
 
@@ -49,6 +49,11 @@ BEGIN
     PERFORM identity.record_attempt('refresh', 'refused', 'inactive', v_user.id, v_digest, p_device_id, p_now);
     RETURN identity.outcome('refused', '{"refusal": "inactive"}');
   END IF;
+  IF v_token.revoked AND v_token.rotated_at IS NOT NULL
+     AND p_now < v_token.rotated_at + interval '30 seconds' THEN
+    PERFORM identity.record_attempt('refresh', 'refused', 'refresh_superseded', v_user.id, v_digest, p_device_id, p_now);
+    RETURN identity.outcome('refused', '{"refusal": "refresh_superseded"}');
+  END IF;
   IF v_token.revoked THEN
     -- Replay: every live token of the user on this device dies; the device stays trusted.
     PERFORM identity.revoke_tokens(v_user.id, p_device_id);
@@ -79,7 +84,9 @@ BEGIN
     RETURN identity.outcome('refused', '{"refusal": "inactive"}');
   END IF;
 
-  UPDATE identity.refresh_tokens SET revoked = true, version = version + 1 WHERE id = v_token.id;
+  UPDATE identity.refresh_tokens
+  SET revoked = true, rotated_at = p_now, version = version + 1
+  WHERE id = v_token.id;
   v_result := identity.issue_session(v_user.id, p_device_id, p_new_token_hash, v_policy, false, p_now);
   PERFORM identity.touch_version(v_user.id);
   PERFORM identity.record_attempt('refresh', 'authenticated', NULL, v_user.id, v_digest, p_device_id, p_now);

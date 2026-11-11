@@ -12,7 +12,9 @@ from psycopg_pool import AsyncConnectionPool
 from ...application.errors import IntegrityBug
 from ...domain.tenancy import (
     AccessRole,
+    AccountDeletionRequest,
     Appearance,
+    DeletionRequestOutcome,
     HistoryPage,
     HistoryQuery,
     LogoRemoval,
@@ -25,6 +27,8 @@ from ...domain.tenancy import (
     Person,
     PersonDetails,
     PersonDeviceRemoval,
+    PersonErasure,
+    PersonInvite,
     PersonLifecycle,
     PersonPinReset,
     PersonQuery,
@@ -44,6 +48,11 @@ from ..types import document, write_result
 
 def _tenant(context: TenantContext) -> tuple[Any, ...]:
     return (context.actor_id, context.organization_id, context.request_id)
+
+
+def _invitation(command: PersonSave) -> tuple[str | None, str | None]:
+    hashes = command.invitation
+    return (None, None) if hashes is None else (hashes.token_hash, hashes.code_hash)
 
 
 def _back_limit(details: PersonDetails) -> tuple[Any, ...]:
@@ -110,6 +119,7 @@ class TenancyRoutines:
             list(d.permissions),
             d.approval_limit,
             *_back_limit(d),
+            *_invitation(command),
             command.context.now,
         )
 
@@ -131,6 +141,7 @@ class TenancyRoutines:
             d.approval_limit,
             *_back_limit(d),
             command.expected_version,
+            *_invitation(command),
             command.context.now,
         )
 
@@ -140,6 +151,16 @@ class TenancyRoutines:
             *_tenant(command.context),
             command.user_id,
             command.active,
+            command.expected_version,
+            command.reason,
+            command.context.now,
+        )
+
+    async def erase_person(self, command: PersonErasure) -> WriteResult:
+        return await self._write(
+            "people_erase",
+            *_tenant(command.context),
+            command.user_id,
             command.expected_version,
             command.reason,
             command.context.now,
@@ -155,6 +176,16 @@ class TenancyRoutines:
             "people_pin_reset", *_tenant(command.context), command.user_id, command.context.now
         )
 
+    async def invite_person(self, command: PersonInvite) -> WriteResult:
+        return await self._write(
+            "people_invite",
+            *_tenant(command.context),
+            command.user_id,
+            command.hashes.token_hash,
+            command.hashes.code_hash,
+            command.context.now,
+        )
+
     async def remove_person_device(self, command: PersonDeviceRemoval) -> WriteResult:
         return await self._write(
             "people_device_remove",
@@ -162,6 +193,18 @@ class TenancyRoutines:
             command.user_id,
             command.device_id,
             command.context.now,
+        )
+
+    async def request_account_deletion(
+        self, command: AccountDeletionRequest
+    ) -> DeletionRequestOutcome:
+        rows = await call(
+            self._pool, "me_deletion_request", *_tenant(command.context), command.context.now
+        )
+        return document(
+            _single(rows, "me_deletion_request"),
+            DeletionRequestOutcome,
+            "api.me_deletion_request",
         )
 
     async def list_history(self, query: HistoryQuery) -> HistoryPage:

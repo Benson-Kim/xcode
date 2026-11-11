@@ -86,6 +86,34 @@ def test_two_connections_share_the_same_window(
     assert _hit(app_conn, "shared", 2, 60, T0)["allowed"] is False
 
 
+def test_a_hit_sweeps_at_most_a_hundred_windows_older_than_a_day(
+    app_conn: psycopg.Connection[dict[str, object]],
+    owner_conn: psycopg.Connection[dict[str, object]],
+) -> None:
+    stale = T0 - timedelta(days=1, seconds=1)
+    owner_conn.execute(
+        "INSERT INTO ops.rate_limit_windows (key, window_start, count) "
+        "SELECT 'once:' || n, %s, 1 FROM generate_series(1, 150) AS n",
+        (stale,),
+    )
+    owner_conn.execute(
+        "INSERT INTO ops.rate_limit_windows (key, window_start, count) VALUES ('recent', %s, 1)",
+        (T0 - timedelta(hours=23),),
+    )
+
+    def left(prefix: str) -> int:
+        row = owner_conn.execute(
+            "SELECT count(*) AS n FROM ops.rate_limit_windows WHERE key LIKE %s", (prefix + "%",)
+        ).fetchone()
+        assert row is not None
+        return int(str(row["n"]))
+
+    _hit(app_conn, "k", 5, 60, T0)
+    assert (left("once:"), left("recent")) == (50, 1)
+    _hit(app_conn, "k", 5, 60, T0)
+    assert (left("once:"), left("recent"), left("k")) == (0, 1, 1)
+
+
 def test_rate_limit_invalid_inputs_raise_xc422(
     app_conn: psycopg.Connection[dict[str, object]],
 ) -> None:
@@ -590,7 +618,7 @@ AUTH_CALLS = [
     ("auth_sign_out", ("r", "t", "d", T0)),
     ("auth_revoke_device", ("r", None, "d", T0)),
     ("auth_withdraw_code", ("r", None, T0)),
-    ("auth_resolve_session", (None, "d", 0, T0)),
+    ("auth_resolve_session", (None, "d", 0, T0, T0)),
 ]
 
 

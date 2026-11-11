@@ -602,10 +602,17 @@ class Auth:
         call(self.conn, "auth_withdraw_code", "req-withdraw", code_id, now)
 
     def resolve(
-        self, user_id: UUID, version: int, *, device: str = TRUSTED, now: datetime = T0
+        self,
+        user_id: UUID,
+        version: int,
+        *,
+        device: str = TRUSTED,
+        now: datetime = T0,
+        not_before: datetime | None = None,
     ) -> dict[str, Any]:
+        issued = now if not_before is None else not_before
         result: dict[str, Any] = call(
-            self.conn, "auth_resolve_session", user_id, device, version, now
+            self.conn, "auth_resolve_session", user_id, device, version, issued, now
         )
         return result
 

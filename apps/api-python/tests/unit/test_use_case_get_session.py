@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from xcode_api.application.auth.get_session import GetSession, GetSessionQuery
@@ -14,6 +15,7 @@ async def test_the_claims_are_echoed_in_token_order() -> None:
         user_id=user_id,
         device_id="phone-1",
         security_version=2,
+        issued_at=datetime(2026, 10, 7, 9, 0, tzinfo=UTC),
         organization_id=uuid4(),
         role="Fleet manager",
         first_name="Jane",
