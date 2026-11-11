@@ -69,7 +69,7 @@ chown -R root:root "$REL" && chmod -R a+rX,go-w "$REL"
   set -a
   . "$ETC/admin.env"
   set +a
-  export XCODE_ENV=production XCODE_OPERATOR=installer
+  export XCODE_ENV=production XCODE_OPERATOR=installer XCODE_DB_DIR=$REL/db
   "$REL/venv/bin/xcode-api" db migrate > "$WORK/migrate.log" 2>&1 &&
     "$REL/venv/bin/xcode-api" db verify > "$WORK/verify.log" 2>&1
 ) || fail "db migrate or verify (see $WORK/migrate.log and verify.log)"
