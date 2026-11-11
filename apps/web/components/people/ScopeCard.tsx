@@ -67,6 +67,7 @@ export function VehiclesAndDatesPane({
             <VehicleTicks
               pf={pf}
               options={scopeOptions}
+              fullScope={fullScope}
               editable={editable}
               hidden={all}
             />
@@ -156,11 +157,13 @@ export function VehiclesAndDatesPane({
 function VehicleTicks({
   pf,
   options,
+  fullScope,
   editable,
   hidden,
 }: {
   pf: PersonFormState;
   options: ScopeOptions;
+  fullScope: boolean;
   editable: boolean;
   hidden: boolean;
 }) {
@@ -183,6 +186,13 @@ function VehicleTicks({
           vehicles to choose them one by one.
         </span>
       )}
+      {fullScope &&
+        form.scopeMode === "vehicles" &&
+        !form.vehicleIds.length && (
+          <span className="hint" style={{ gridColumn: "1 / -1" }}>
+            This person sees no vehicles until you give them some.
+          </span>
+        )}
       {scopeGroups(options).map((company) => (
         <Fragment key={company.id || "other"}>
           <span className="cogrp">{company.name}</span>

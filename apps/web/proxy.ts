@@ -38,8 +38,8 @@ export const config = {
   matcher: [
     {
       // The API proxies return JSON, and static assets need no policy. Prefetches are skipped so that
-      // a prefetched page is never cached with another request's nonce.
-      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+      // a prefetched page is never cached with another request's nonce. The phones fetch /.well-known untouched.
+      source: "/((?!api|_next/static|_next/image|favicon.ico|\\.well-known).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

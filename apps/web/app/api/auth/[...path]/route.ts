@@ -1,21 +1,31 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import type {
-  AuthRequest,
-  AuthResponse,
-  CodePurpose,
+import {
+  isInviteToken,
+  type AuthRequest,
+  type AuthResponse,
+  type CodePurpose,
+  type InviteProblem,
 } from "@xcode/shared/auth";
 
 import {
+  crossSitePost,
   deviceNameFrom,
+  foreignOrigin,
   forwardedFor,
   logProxyError,
   readLimitedBody,
   requestId,
-  sameOrigin,
   upstreamUrl,
 } from "../../body";
+import {
+  moveLegacyCookies,
+  readCookie,
+  writeCookie,
+  type CookieJar,
+  type CookieName,
+} from "../../cookies";
 
 // The released sign-in routes (XCODE Mobile v2.11 still uses them) and the number-first routes of XCODE Web v2.33.
 const allowed = new Set([
@@ -37,17 +47,16 @@ const allowed = new Set([
   "pin/forgot",
   "pin/new",
   "pin/change",
+  "invite/redeem",
 ]);
 
 const DEVICE_REMOVE = /^trusted-devices\/([0-9a-f-]{36})\/remove$/;
 const PURPOSES: readonly string[] = ["first_setup", "new_device", "pin_reset"];
+const INVITE_PROBLEMS: readonly string[] = ["expired", "used", "revoked"];
 
-const cookieOptions = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "strict" as const,
-  path: "/",
-};
+// The code an accepted invitation link mints lives in a cookie, so browser JS never holds it, as long as the code does
+// on the server. Only pin/new sends it upstream.
+const inviteCodeSeconds = 10 * 60;
 
 // Calls that mark this browser as a trusted device when they succeed (the released routes).
 const trustingOperations = new Set([
@@ -69,11 +78,21 @@ type Remembered = {
   role: string;
 };
 
-function remembered(jar: {
-  get: (name: string) => { value: string } | undefined;
-}) {
+// How long a moved cookie lives: as long as the answer that first set it would have kept it.
+function movedLifetime(jar: CookieJar) {
+  const persist =
+    readCookie(jar, "remember") === "1" || Boolean(readCookie(jar, "trust"));
+  return (name: CookieName) =>
+    name === "trust" || name === "who"
+      ? trustCookieSeconds
+      : name === "remember" || persist
+        ? rememberedSeconds
+        : undefined;
+}
+
+function remembered(jar: CookieJar) {
   try {
-    const raw = jar.get("who")?.value;
+    const raw = readCookie(jar, "who");
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<Remembered>;
     if (typeof parsed.phoneNumber !== "string") return null;
@@ -129,32 +148,30 @@ export async function GET(
   context: { params: Promise<{ path: string[] }> },
 ) {
   const id = requestId();
-  const origin = request.headers.get("origin");
-  const expectedOrigin = request.nextUrl.origin;
-  if (
-    origin &&
-    !sameOrigin(origin, request.headers.get("host"), expectedOrigin)
-  )
-    return invalid(403);
+  if (foreignOrigin(request)) return invalid(403);
 
   const { path } = await context.params;
   const operation = path.join("/");
   const jar = await cookies();
   // What this browser remembers: a trusted device starts at the PIN with the person's name (nothing upstream).
   if (operation === "device") {
-    const who = jar.get("trust")?.value ? remembered(jar) : null;
-    return NextResponse.json(
+    const who = readCookie(jar, "trust") ? remembered(jar) : null;
+    const output = NextResponse.json(
       who ? { trusted: true, ...who } : { trusted: false },
       { headers: { "Cache-Control": "no-store" } },
     );
+    moveLegacyCookies(jar, output, movedLifetime(jar));
+    return output;
   }
   if (operation !== "session" && operation !== "trusted-devices")
     return invalid(404);
 
-  const access = jar.get("access")?.value;
+  const access = readCookie(jar, "access");
   if (!access) return invalid(401, "authentication_failed");
   try {
-    return await passThrough(operation, id, request, access);
+    const output = await passThrough(operation, id, request, access);
+    moveLegacyCookies(jar, output, movedLifetime(jar));
+    return output;
   } catch (error) {
     logProxyError(id, operation, error);
     return serviceUnavailable(id);
@@ -180,16 +197,26 @@ const safeToken = (v: unknown) =>
   typeof v === "string" && v.length > 0 ? v : undefined;
 
 // The body each route takes, and nothing else, from what the browser sent plus what only this proxy knows: the
-// device id, the trusted-device token and the device's name.
+// device id, the trusted-device token, the device's name and the code an invitation link minted.
 function upstreamBody(
   operation: string,
   body: AuthRequest,
-  device: { id: string; token?: string; name: string; refreshToken: string },
+  device: {
+    id: string;
+    token?: string;
+    name: string;
+    refreshToken: string;
+    inviteCode?: string;
+  },
 ): Record<string, unknown> {
   const phoneNumber = str(body.phoneNumber) ?? "";
   const pin = str(body.pin) ?? "";
-  const code = str(body.code) ?? "";
   const purpose = str(body.purpose) ?? "";
+  const code =
+    str(body.code) ||
+    (operation === "pin/new" && purpose === "first_setup"
+      ? (device.inviteCode ?? "")
+      : "");
   const trustDevice = body.trustDevice !== false;
   const named = { deviceId: device.id, deviceName: device.name };
   const trusted = device.token ? { deviceToken: device.token } : {};
@@ -211,6 +238,8 @@ function upstreamBody(
         currentPin: str(body.currentPin) ?? "",
         newPin: str(body.newPin) ?? "",
       };
+    case "invite/redeem":
+      return { token: str(body.token) ?? "", phoneNumber, ...named };
     default:
       if (DEVICE_REMOVE.test(operation)) return {};
       return {
@@ -229,13 +258,7 @@ export async function POST(
   context: { params: Promise<{ path: string[] }> },
 ) {
   const id = requestId();
-  const origin = request.headers.get("origin");
-  const expectedOrigin = request.nextUrl.origin;
-  if (
-    origin &&
-    !sameOrigin(origin, request.headers.get("host"), expectedOrigin)
-  )
-    return invalid(403);
+  if (crossSitePost(request)) return invalid(403);
 
   const { path } = await context.params;
   const operation = path.join("/");
@@ -263,7 +286,8 @@ export async function POST(
   const code = str(body.code) ?? "";
   const purpose = str(body.purpose) ?? "";
   const rememberDevice = body.rememberDevice === true;
-  const fields = [body.currentPin, body.newPin, body.trustDevice];
+  const fields = [body.currentPin, body.newPin, body.trustDevice, body.token];
+  const redeems = operation === "invite/redeem";
 
   if (
     phoneNumber.length > 20 ||
@@ -273,6 +297,7 @@ export async function POST(
     (str(body.currentPin) ?? "").length > 8 ||
     (str(body.newPin) ?? "").length > 8 ||
     (purpose && !PURPOSES.includes(purpose)) ||
+    ((redeems || body.token !== undefined) && !isInviteToken(body.token)) ||
     fields.some(
       (value) =>
         value !== undefined &&
@@ -282,9 +307,10 @@ export async function POST(
   )
     return invalid(400);
 
-  const existingDevice = jar.get("device")?.value;
+  const existingDevice = readCookie(jar, "device");
   const deviceId = existingDevice || crypto.randomUUID();
-  const trustToken = jar.get("trust")?.value || undefined;
+  const trustToken = readCookie(jar, "trust");
+  const access = readCookie(jar, "access");
   const upstreamOperation =
     operation === "devices/current/revoke"
       ? `devices/${encodeURIComponent(deviceId)}/revoke`
@@ -298,16 +324,15 @@ export async function POST(
         "Content-Type": "application/json",
         "X-Request-ID": id,
         ...forwardedFor(request),
-        ...(jar.get("access")
-          ? { Authorization: `Bearer ${jar.get("access")!.value}` }
-          : {}),
+        ...(access ? { Authorization: `Bearer ${access}` } : {}),
       },
       body: JSON.stringify(
         upstreamBody(operation, body, {
           id: deviceId,
           token: trustToken,
           name: deviceNameFrom(request.headers.get("user-agent")),
-          refreshToken: jar.get("refresh")?.value || "",
+          refreshToken: readCookie(jar, "refresh") ?? "",
+          inviteCode: readCookie(jar, "invite"),
         }),
       ),
       signal: AbortSignal.timeout(15_000),
@@ -325,7 +350,7 @@ export async function POST(
             ? result.retryAfterSeconds
             : undefined,
         developmentCode:
-          process.env.NODE_ENV !== "production"
+          process.env.NODE_ENV !== "production" && !redeems
             ? str(result.developmentCode) || undefined
             : undefined,
         maskedEmail: str(result.maskedEmail) || undefined,
@@ -339,10 +364,24 @@ export async function POST(
         triesLeft:
           typeof result.triesLeft === "number" ? result.triesLeft : undefined,
         pinProblem: str(result.pinProblem) || undefined,
+        inviteProblem: INVITE_PROBLEMS.includes(str(result.inviteProblem) ?? "")
+          ? (result.inviteProblem as InviteProblem)
+          : undefined,
       },
       { status: response.status },
     );
     output.headers.set("Cache-Control", "no-store");
+
+    const minted = str(result.code);
+    if (redeems && response.ok && minted && /^\d{6}$/.test(minted))
+      writeCookie(output, "invite", minted, inviteCodeSeconds);
+    // The minted code is spent by a new PIN, and useless once pin/new refuses it.
+    if (
+      operation === "pin/new" &&
+      readCookie(jar, "invite") &&
+      (response.ok || response.status === 401)
+    )
+      writeCookie(output, "invite", "", 0);
 
     const accessToken = safeToken(result.accessToken);
     const refreshToken = safeToken(result.refreshToken);
@@ -355,38 +394,40 @@ export async function POST(
         Boolean(accessToken));
     const persist = trusted
       ? newTrust !== undefined || rememberDevice
-      : jar.get("remember")?.value === "1" || Boolean(trustToken);
+      : readCookie(jar, "remember") === "1" || Boolean(trustToken);
     if (trusted || !existingDevice) {
-      output.cookies.set("device", deviceId, {
-        ...cookieOptions,
-        ...(persist ? { maxAge: rememberedSeconds } : {}),
-      });
-      output.cookies.set("remember", persist ? "1" : "", {
-        ...cookieOptions,
-        maxAge: persist ? rememberedSeconds : 0,
-      });
+      writeCookie(
+        output,
+        "device",
+        deviceId,
+        persist ? rememberedSeconds : undefined,
+      );
+      writeCookie(
+        output,
+        "remember",
+        persist ? "1" : "",
+        persist ? rememberedSeconds : 0,
+      );
     }
     if (newTrust) {
-      output.cookies.set("trust", newTrust, {
-        ...cookieOptions,
-        maxAge: trustCookieSeconds,
-      });
+      writeCookie(output, "trust", newTrust, trustCookieSeconds);
       // The trusted device remembers its person: the name comes from the session the new token opens.
       const who = await whoIs(accessToken, phoneNumber, id, request);
-      output.cookies.set("who", JSON.stringify(who), {
-        ...cookieOptions,
-        maxAge: trustCookieSeconds,
-      });
+      writeCookie(output, "who", JSON.stringify(who), trustCookieSeconds);
     }
     if (response.ok && accessToken && refreshToken) {
-      output.cookies.set("access", accessToken, {
-        ...cookieOptions,
-        maxAge: secondsUntilExpiry(accessToken),
-      });
-      output.cookies.set("refresh", refreshToken, {
-        ...cookieOptions,
-        ...(persist ? { maxAge: refreshCookieSeconds } : {}),
-      });
+      writeCookie(
+        output,
+        "access",
+        accessToken,
+        secondsUntilExpiry(accessToken),
+      );
+      writeCookie(
+        output,
+        "refresh",
+        refreshToken,
+        persist ? refreshCookieSeconds : undefined,
+      );
     }
     // The server no longer trusts this device: a right PIN came back asking for a code.
     const distrusted =
@@ -397,17 +438,21 @@ export async function POST(
       (response.ok && operation === "devices/current/revoke") ||
       (response.ok && removesDevice && body.thisDevice === true);
     if (distrusted || forgets) {
-      output.cookies.set("trust", "", { ...cookieOptions, maxAge: 0 });
-      output.cookies.set("who", "", { ...cookieOptions, maxAge: 0 });
+      writeCookie(output, "trust", "", 0);
+      writeCookie(output, "who", "", 0);
     }
+    // A superseded refresh lost to another tab, whose answer carries the new cookies: clearing here could erase them.
     if (
       (response.ok && operation === "sign-out") ||
       forgets ||
-      (operation === "refresh" && response.status === 401)
+      (operation === "refresh" &&
+        response.status === 401 &&
+        result.status !== "refresh_superseded")
     ) {
-      output.cookies.set("access", "", { ...cookieOptions, maxAge: 0 });
-      output.cookies.set("refresh", "", { ...cookieOptions, maxAge: 0 });
+      writeCookie(output, "access", "", 0);
+      writeCookie(output, "refresh", "", 0);
     }
+    moveLegacyCookies(jar, output, movedLifetime(jar));
     return output;
   } catch (error) {
     logProxyError(id, operation, error);

@@ -59,3 +59,64 @@ it("announces the end of the session when refresh fails", async () => {
   expect(response.status).toBe(401);
   expect(expired).toHaveBeenCalledOnce();
 });
+
+const superseded = () =>
+  new Response(JSON.stringify({ status: "refresh_superseded" }), {
+    status: 401,
+  });
+
+it("asks once more when another tab renewed the session first, and keeps the session", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(json(401))
+    .mockResolvedValueOnce(superseded())
+    .mockResolvedValueOnce(json(200))
+    .mockResolvedValueOnce(json(200));
+  vi.stubGlobal("fetch", fetcher);
+  const expired = vi.fn();
+  const stop = onSessionExpired(expired);
+
+  const response = await fetchWithSession("/api/setup/companies");
+
+  stop();
+  expect(response.status).toBe(200);
+  expect(fetcher.mock.calls.map(([input]) => input)).toEqual([
+    "/api/setup/companies",
+    "/api/auth/refresh",
+    "/api/auth/refresh",
+    "/api/setup/companies",
+  ]);
+  expect(expired).not.toHaveBeenCalled();
+});
+
+it("ends the session after a second superseded refresh instead of asking again", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(json(401))
+    .mockResolvedValueOnce(superseded())
+    .mockResolvedValueOnce(superseded());
+  vi.stubGlobal("fetch", fetcher);
+  const expired = vi.fn();
+  const stop = onSessionExpired(expired);
+
+  const response = await fetchWithSession("/api/setup/companies");
+
+  stop();
+  expect(response.status).toBe(401);
+  expect(
+    fetcher.mock.calls.filter(([input]) => input === "/api/auth/refresh"),
+  ).toHaveLength(2);
+  expect(expired).toHaveBeenCalledOnce();
+});
+
+it("does not ask again after a plainly refused refresh", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(json(401))
+    .mockResolvedValueOnce(json(401));
+  vi.stubGlobal("fetch", fetcher);
+
+  await fetchWithSession("/api/setup/companies");
+
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});

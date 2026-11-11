@@ -4,6 +4,7 @@ import {
   normalisePhone,
   phoneError,
   plural,
+  type Formatter,
 } from "@xcode/shared/format";
 
 import type { SavePersonRequest } from "../../lib/endpoints/people";
@@ -12,6 +13,7 @@ import type {
   BackLimitMode,
   Permission,
   Person,
+  PersonInvitation,
   PersonStatus,
   Role,
   ScopeOptions,
@@ -33,16 +35,49 @@ export function personStatus(person: Person): PersonStatus {
   return person.hasPin ? "active" : "not_signed_in";
 }
 
-export const STATUS_CHIPS: Record<
-  PersonStatus,
-  { label: string; tone: "ok" | "wait" | "bad" }
-> = {
+type StatusChip = { label: string; tone: "ok" | "wait" | "bad" };
+
+const STATUS_CHIPS: Record<PersonStatus, StatusChip> = {
   active: { label: "Active", tone: "ok" },
   not_signed_in: { label: "Not signed in yet", tone: "wait" },
+  invited: { label: "Invited", tone: "wait" },
+  invite_expired: { label: "Invitation expired", tone: "bad" },
   pin_reset_due: { label: "PIN reset due", tone: "wait" },
   locked: { label: "Locked", tone: "bad" },
   blocked: { label: "Blocked", tone: "bad" },
 };
+
+// A status this web does not know yet, from a newer API, is never shown as one it does know.
+const UNKNOWN_STATUS: StatusChip = { label: "Status unknown", tone: "wait" };
+
+export function statusChip(status: string): StatusChip {
+  return Object.prototype.hasOwnProperty.call(STATUS_CHIPS, status)
+    ? STATUS_CHIPS[status as PersonStatus]
+    : UNKNOWN_STATUS;
+}
+
+// What the Sign in pane offers. Only a person whose invitation is still unused is sent another one: nobody is
+// invited for the first time from here, so people loaded without an invitation are left as they are. A PIN reset is
+// offered only to someone known to hold a PIN that is not already due for one. "Blocked" hides whether a PIN exists,
+// so the reset waits until the person is unblocked rather than offering a button that may do nothing.
+export function signInActions(status: PersonStatus, canAct: boolean) {
+  return {
+    canInvite: canAct && (status === "invited" || status === "invite_expired"),
+    canReset: canAct && (status === "active" || status === "locked"),
+  };
+}
+
+export function invitationText(
+  invitation: PersonInvitation,
+  { formatDateTime }: Formatter,
+) {
+  const expires = formatDateTime(invitation.expiresAt);
+  if (invitation.state === "expired") return `Invitation expired ${expires}`;
+  if (invitation.state === "failed") return "Not delivered";
+  if (invitation.state === "sent" && invitation.sentAt)
+    return `Invitation sent ${formatDateTime(invitation.sentAt)} · expires ${expires}`;
+  return `Invitation being sent · expires ${expires}`;
+}
 
 export function roleDefaults(roles: Role[] | undefined, role: string) {
   return roles?.find((candidate) => candidate.name === role)?.permissions ?? [];
@@ -294,6 +329,8 @@ export type PersonContext = {
   assignableCount: number;
   permissions: string[];
   today: string;
+  // Whether the editor sees every company: only they may leave a person with no vehicles.
+  fullScope: boolean;
 };
 
 export function validatePerson(form: PersonForm, ctx: PersonContext): Errors {
@@ -306,9 +343,10 @@ export function validatePerson(form: PersonForm, ctx: PersonContext): Errors {
     next.email = "Enter the email that receives codes.";
   if (ctx.rolesLoaded && !ctx.assignableCount)
     next.role = "You cannot assign any available role.";
-  if (form.scopeMode === "companies" && !form.companyIds.length)
-    next.scope = "Pick at least one vehicle this person can see.";
-  if (form.scopeMode === "vehicles" && !form.vehicleIds.length)
+  if (
+    (form.scopeMode === "companies" && !form.companyIds.length) ||
+    (form.scopeMode === "vehicles" && !form.vehicleIds.length && !ctx.fullScope)
+  )
     next.scope = "Pick at least one vehicle this person can see.";
   if (
     form.backMode !== "none" &&

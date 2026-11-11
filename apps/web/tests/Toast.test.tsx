@@ -37,3 +37,16 @@ it("is a silent no-op outside a provider", () => {
   fireEvent.click(screen.getByText("show A"));
   expect(screen.queryByRole("status")).toBeNull();
 });
+
+it("draws the toast inside an open pop up, which sits above the page", () => {
+  render(
+    <ToastProvider>
+      <dialog open>
+        <Buttons />
+      </dialog>
+    </ToastProvider>,
+  );
+  fireEvent.click(screen.getByText("show A"));
+  act(() => vi.advanceTimersByTime(50));
+  expect(screen.getByText("A").closest("dialog")).not.toBeNull();
+});

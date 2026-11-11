@@ -1289,7 +1289,12 @@ td.ed {
   }
   .signin .side {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
+    row-gap: 8px;
+  }
+  .signin .side .cos {
+    white-space: nowrap;
   }
   .signin .formside {
     align-items: flex-start;

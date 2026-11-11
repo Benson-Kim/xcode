@@ -63,14 +63,10 @@ export function PeopleAccessView({
       canManage={editing === "new" ? canAdd : canEdit}
       canSignIn={canSignIn}
       onClose={() => setEditing(null)}
-      onSaved={(name, isNew) => {
+      onSaved={(_name, isNew, email) => {
         setEditing(null);
         people.reload();
-        toast(
-          isNew
-            ? `Saved. ${name.split(" ")[0]} sets a PIN at first sign in.`
-            : "Saved",
-        );
+        toast(isNew ? `Saved. Invitation emailed to ${email}.` : "Saved");
       }}
       onChanged={people.reload}
     />

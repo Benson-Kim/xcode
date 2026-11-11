@@ -43,6 +43,9 @@ export const peopleApi = {
   // "Make [name] reset the PIN": removes their devices and forces a new PIN at the next sign in (v2.33).
   pinReset: (id: string) =>
     apiRequest(`${personPath(id)}/pin-reset`, { method: "POST" }),
+  // "Send invitation again": a new link and code, emailed; the old ones stop working.
+  invite: (id: string) =>
+    apiRequest(`${personPath(id)}/invitation`, { method: "POST" }),
   removeDevice: (id: string, deviceId: string) =>
     apiRequest(`${personPath(id)}/trusted-devices/${deviceId}/remove`, {
       method: "POST",

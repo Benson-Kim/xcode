@@ -1,4 +1,5 @@
-import { Skeleton, cn } from "./ui";
+import { cn } from "./ui/cn";
+import { Skeleton } from "./ui/skeleton";
 
 // The organization's mark and name on the brand colour: its uploaded logo, or the XCODE mark, then the wordmark.
 // `compact` hides the second line on narrow screens.

@@ -116,6 +116,8 @@ const pane = (name: string) =>
     ),
   );
 
+const SEES_NONE = "This person sees no vehicles until you give them some.";
+
 const lastPost = (prefix: string): Sent =>
   fake.calls.filter(
     (call) => call.method === "POST" && call.path.startsWith(prefix),
@@ -169,6 +171,20 @@ it("shows Everything for someone holding every right, and the sign-in statuses a
         modules: [],
       }),
       personFixture({
+        id: "p-invited",
+        firstName: "Ruth",
+        lastName: "Wanjiku",
+        status: "invited",
+        modules: [],
+      }),
+      personFixture({
+        id: "p-expired",
+        firstName: "Brian",
+        lastName: "Omondi",
+        status: "invite_expired",
+        modules: [],
+      }),
+      personFixture({
         id: "p-locked",
         firstName: "Peter",
         lastName: "Otieno",
@@ -188,6 +204,8 @@ it("shows Everything for someone holding every right, and the sign-in statuses a
   open();
   expect(await screen.findByText("Everything")).toHaveClass("mchip");
   expect(screen.getByText("Not signed in yet")).toHaveClass("chip", "wait");
+  expect(screen.getByText("Invited")).toHaveClass("chip", "wait");
+  expect(screen.getByText("Invitation expired")).toHaveClass("chip", "bad");
   expect(screen.getByText("Locked")).toHaveClass("chip", "bad");
   expect(screen.getByText("Blocked")).toHaveClass("chip", "bad");
   expect(
@@ -257,7 +275,9 @@ it("opens the person pop up on Details with a side menu, and saves a new person 
   expect(screen.getByLabelText("Limit")).toHaveValue("days");
   expect(screen.getByLabelText("Days")).toHaveValue("7");
   expect(screen.getByText("Today, from 5 Oct 2026")).toBeInTheDocument();
+  expect(screen.getByText(SEES_NONE)).toBeInTheDocument();
   fireEvent.click(screen.getByLabelText("KDA 482M"));
+  expect(screen.queryByText(SEES_NONE)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(fake.sent("POST setup/people")).toHaveLength(1));
   expect(fake.sent("POST setup/people")[0]).toMatchObject({
@@ -269,9 +289,54 @@ it("opens the person pop up on Details with a side menu, and saves a new person 
     permissions: ["revenue.view", "revenue.capture"],
     backLimit: { mode: "days", count: 7, from: null },
   });
+  const saved = await screen.findByText(
+    "Saved. Invitation emailed to jane@example.com.",
+  );
+  expect(saved.closest("dialog")).toBeNull();
+});
+
+it("saves a person with no vehicles in an organisation that has none, without All vehicles", async () => {
+  fake.on("setup/access/scope-options", [
+    200,
+    { ...scopeOptionsFixture, vehicles: [] },
+  ]);
+  await openNewPerson();
+  pane("Vehicles and dates");
+  expect(await screen.findByText(SEES_NONE)).toBeInTheDocument();
+  expect(screen.getByLabelText("All vehicles")).not.toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(fake.sent("POST setup/people")).toHaveLength(1));
+  expect(fake.sent("POST setup/people")[0]).toMatchObject({
+    scopeMode: "vehicles",
+    companyIds: [],
+    vehicleIds: [],
+  });
+});
+
+it("asks an editor limited to some companies to pick at least one vehicle", async () => {
+  fake.on("setup/access/me", [
+    200,
+    { allCompanies: false, companies: [], vehicles: [], canChange: "Any date" },
+  ]);
+  await openNewPerson();
+  pane("Vehicles and dates");
+  expect(await screen.findByLabelText("KDA 482M")).not.toBeChecked();
+  expect(screen.queryByLabelText("All vehicles")).not.toBeInTheDocument();
+  expect(screen.queryByText(SEES_NONE)).not.toBeInTheDocument();
+  pane("Access");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(
-    await screen.findByText("Saved. Jane sets a PIN at first sign in."),
-  ).toBeInTheDocument();
+    await screen.findByText("Pick at least one vehicle this person can see."),
+  ).toBeVisible();
+  expect(screen.getByLabelText("KDA 482M")).toBeVisible();
+  expect(fake.sent("POST setup/people")).toHaveLength(0);
+  fireEvent.click(screen.getByLabelText("KDA 482M"));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(fake.sent("POST setup/people")).toHaveLength(1));
+  expect(fake.sent("POST setup/people")[0]).toMatchObject({
+    scopeMode: "vehicles",
+    vehicleIds: ["vehicle-1"],
+  });
 });
 
 it("opens the pane that holds the problem when a save is refused on screen", async () => {
@@ -378,6 +443,111 @@ it("shows a person's sign in, and acts at once on reset, a device, and Remove al
   );
   // None of these waited for Save.
   expect(fake.calls.filter((call) => call.method === "PUT")).toHaveLength(0);
+});
+
+it("shows when an invitation went out and when it expires, and sends it again at once", async () => {
+  fake.on(PEOPLE, [200, peoplePage([grace()])]);
+  fake.on("setup/people/person-2", [
+    200,
+    {
+      ...grace(),
+      hasPin: false,
+      signIn: {
+        status: "invited",
+        lock: null,
+        lastSignedInAt: null,
+        email: "grace@example.com",
+        devices: [],
+        invitation: {
+          state: "sent",
+          sentAt: "2026-10-09T08:40:00Z",
+          expiresAt: "2026-10-16T08:40:00Z",
+        },
+      },
+    },
+  ]);
+  open();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Grace Achieng" }),
+  );
+  pane("Sign in");
+  expect(
+    await screen.findByText(/^Invitation sent .+ · expires .+/),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /reset the PIN/ }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Send invitation again" }),
+  );
+  await waitFor(() =>
+    expect(lastPost("setup/people/person-2/invitation")).toBeTruthy(),
+  );
+  await waitFor(() =>
+    expect(
+      screen
+        .getByText("Invitation emailed to grace@example.com")
+        .closest("dialog"),
+    ).not.toBeNull(),
+  );
+  expect(fake.calls.filter((call) => call.method === "PUT")).toHaveLength(0);
+});
+
+it("says an invitation was not delivered", async () => {
+  fake.on(PEOPLE, [200, peoplePage([grace()])]);
+  fake.on("setup/people/person-2", [
+    200,
+    {
+      ...grace(),
+      hasPin: false,
+      signIn: {
+        status: "invited",
+        lock: null,
+        lastSignedInAt: null,
+        email: "grace@example.com",
+        devices: [],
+        invitation: {
+          state: "failed",
+          sentAt: null,
+          expiresAt: "2026-10-16T08:40:00Z",
+        },
+      },
+    },
+  ]);
+  open();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Grace Achieng" }),
+  );
+  pane("Sign in");
+  expect(await screen.findByText("Not delivered")).toBeInTheDocument();
+});
+
+it("offers no first invitation to someone loaded without one", async () => {
+  fake.on(PEOPLE, [200, peoplePage([grace()])]);
+  fake.on("setup/people/person-2", [
+    200,
+    {
+      ...grace(),
+      hasPin: false,
+      signIn: {
+        status: "not_signed_in",
+        lock: null,
+        lastSignedInAt: null,
+        email: "grace@example.com",
+        devices: [],
+        invitation: null,
+      },
+    },
+  ]);
+  open();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Grace Achieng" }),
+  );
+  pane("Sign in");
+  expect(await screen.findByText("grace@example.com")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /invitation/ }),
+  ).not.toBeInTheDocument();
 });
 
 it("offers no sign-in actions without the right", async () => {

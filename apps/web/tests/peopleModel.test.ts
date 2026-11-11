@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 
+import { createFormatter } from "@xcode/shared/format";
+
 import {
   assignableRoles,
   initialForm,
+  invitationText,
   keptCounts,
   personPayload,
   scopeGroups,
   scopeLabel,
   personStatus,
+  signInActions,
+  statusChip,
   validatePerson,
   withNeeds,
   withoutDependents,
@@ -174,6 +179,17 @@ describe("personStatus", () => {
   });
 });
 
+describe("statusChip", () => {
+  it("names a known status and never shows an unknown one as a known status", () => {
+    expect(statusChip("locked")).toEqual({ label: "Locked", tone: "bad" });
+    for (const status of ["suspended", "toString", ""])
+      expect(statusChip(status)).toEqual({
+        label: "Status unknown",
+        tone: "wait",
+      });
+  });
+});
+
 describe("scopeGroups and keptCounts", () => {
   const options = {
     companies: [
@@ -219,6 +235,7 @@ describe("validatePerson", () => {
     assignableCount: 1,
     permissions: ["a"],
     today: "2026-10-12",
+    fullScope: true,
   };
 
   const cases: [string, Partial<typeof ready>, Partial<typeof ctx>, object][] =
@@ -261,10 +278,22 @@ describe("validatePerson", () => {
         { scope: "Pick at least one vehicle this person can see." },
       ],
       [
-        "vehicles scope with none ticked",
+        "vehicles scope with none ticked by an editor who sees every company, so the person sees none yet",
         { vehicleIds: [] },
         {},
+        {},
+      ],
+      [
+        "vehicles scope with none ticked by an editor limited to some companies",
+        { vehicleIds: [] },
+        { fullScope: false },
         { scope: "Pick at least one vehicle this person can see." },
+      ],
+      [
+        "vehicles scope with one ticked by an editor limited to some companies",
+        {},
+        { fullScope: false },
+        {},
       ],
       [
         "all scope needs no ticks",
@@ -337,5 +366,52 @@ describe("personPayload", () => {
       ).approvalLimit;
     expect(send(false, "5000")).toBeNull();
     expect(send(true, "")).toBeNull();
+  });
+});
+
+describe("the Sign in pane's invitation", () => {
+  const formats = createFormatter();
+  it("offers another invitation only to someone whose invitation is unused, and never a PIN reset to them", () => {
+    expect(signInActions("invited", true)).toEqual({
+      canInvite: true,
+      canReset: false,
+    });
+    expect(signInActions("invite_expired", true).canInvite).toBe(true);
+    expect(signInActions("not_signed_in", true).canInvite).toBe(false);
+    expect(signInActions("active", true)).toEqual({
+      canInvite: false,
+      canReset: true,
+    });
+    expect(signInActions("invited", false).canInvite).toBe(false);
+  });
+  it("offers a PIN reset only to someone known to hold a PIN that is not already due for one", () => {
+    expect(signInActions("active", true).canReset).toBe(true);
+    expect(signInActions("locked", true).canReset).toBe(true);
+    expect(signInActions("blocked", true)).toEqual({
+      canInvite: false,
+      canReset: false,
+    });
+    expect(signInActions("not_signed_in", true).canReset).toBe(false);
+    expect(signInActions("pin_reset_due", true).canReset).toBe(false);
+    expect(signInActions("invite_expired", true).canReset).toBe(false);
+    expect(signInActions("active", false).canReset).toBe(false);
+  });
+  it("says when it went out and when it expires, or that it was not delivered", () => {
+    const expiresAt = "2026-10-16T08:40:00Z";
+    expect(
+      invitationText(
+        { state: "sent", sentAt: "2026-10-09T08:40:00Z", expiresAt },
+        formats,
+      ),
+    ).toMatch(/^Invitation sent .+ · expires .+$/);
+    expect(
+      invitationText({ state: "failed", sentAt: null, expiresAt }, formats),
+    ).toBe("Not delivered");
+    expect(
+      invitationText({ state: "expired", sentAt: null, expiresAt }, formats),
+    ).toMatch(/^Invitation expired /);
+    expect(
+      invitationText({ state: "pending", sentAt: null, expiresAt }, formats),
+    ).toMatch(/^Invitation being sent · expires /);
   });
 });

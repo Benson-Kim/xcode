@@ -9,12 +9,14 @@ import type { PersonFormState } from "./usePersonForm";
 export function usePersonActions({
   person,
   today,
+  fullScope,
   onSaved,
   onChanged,
 }: {
   person?: Person;
   today: string;
-  onSaved: (name: string, isNew: boolean) => void;
+  fullScope: boolean;
+  onSaved: (name: string, isNew: boolean, email: string) => void;
   // A sign-in action acted at once: the pane and the list read the person again.
   onChanged?: () => void;
 }) {
@@ -30,6 +32,7 @@ export function usePersonActions({
       assignableCount: pf.assignable.length,
       permissions,
       today,
+      fullScope,
     });
     setErrors(next);
     setSaveError("");
@@ -44,7 +47,7 @@ export function usePersonActions({
     setBusy(true);
     try {
       await peopleApi.save(person, body);
-      onSaved(name, !person);
+      onSaved(name, !person, form.email.trim());
     } catch (value) {
       setSaveError((value as Error).message);
     } finally {
@@ -77,6 +80,12 @@ export function usePersonActions({
       act(
         () => peopleApi.pinReset(person.id),
         `${person.firstName} must set a new PIN at the next sign in`,
+      ),
+    sendInvitation: () =>
+      person &&
+      act(
+        () => peopleApi.invite(person.id),
+        `Invitation emailed to ${person.email}`,
       ),
     removeDevice: (deviceId: string) =>
       person &&

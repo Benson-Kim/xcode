@@ -31,3 +31,15 @@ it("sends HSTS only in production, and the permissions policy and existing heade
   );
   expect(development["X-Frame-Options"]).toBe("DENY");
 });
+
+it("sends no Referer from the invitation page and never lets it be stored, overriding the site-wide policy", async () => {
+  const rules = await config.headers!();
+  const site = rules.findIndex((rule) => rule.source === "/(.*)");
+  const invite = rules.findIndex((rule) => rule.source === "/invite");
+  expect(invite).toBeGreaterThan(site);
+  expect(
+    Object.fromEntries(
+      rules[invite].headers.map((header) => [header.key, header.value]),
+    ),
+  ).toEqual({ "Referrer-Policy": "no-referrer", "Cache-Control": "no-store" });
+});

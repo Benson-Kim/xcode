@@ -57,11 +57,10 @@ export async function readLimitedBody(
 
 // Names the browser to the API, which limits sign-in tries per client and would otherwise see only this proxy. Next.js
 // keeps any x-forwarded-for a client sends, so only the entry the outermost trusted proxy appended is believed: the
-// Nth from the right for TRUSTED_PROXY_HOPS = N. At 0 (the default) nothing is forwarded and the API sees this server.
+// Nth from the right for TRUSTED_PROXY_HOPS = N. At 0 nothing is forwarded and the API sees this server.
 // X-Real-IP and Forwarded are never used. The API believes the header only from a proxy it trusts (KnownProxies).
 export function forwardedFor(request: NextRequest): Record<string, string> {
-  const setting = process.env.TRUSTED_PROXY_HOPS?.trim() || "0";
-  const hops = /^\d+$/.test(setting) ? Number(setting) : 0;
+  const hops = trustedProxyHops();
   if (hops === 0) return {};
   const entries =
     request.headers
@@ -70,6 +69,18 @@ export function forwardedFor(request: NextRequest): Record<string, string> {
       .map((entry) => entry.trim()) ?? [];
   const address = entries.length >= hops ? entries[entries.length - hops] : "";
   return isIP(address) ? { "X-Forwarded-For": address } : {};
+}
+
+// Production must say how many proxies sit in front, 0 included: left to the default behind a proxy, every browser
+// would share the proxy's address and one sign-in limit. The server checks this at start (instrumentation.ts).
+export function trustedProxyHops(): number {
+  const setting = process.env.TRUSTED_PROXY_HOPS?.trim() ?? "";
+  if (/^\d+$/.test(setting)) return Number(setting);
+  if (process.env.NODE_ENV === "production")
+    throw new Error(
+      "TRUSTED_PROXY_HOPS must be set in production: the number of reverse proxies in front of the web server, 0 for none.",
+    );
+  return 0;
 }
 
 export function requestId() {
@@ -117,7 +128,24 @@ export function logProxyError(id: string, operation: string, error: unknown) {
   );
 }
 
-export function sameOrigin(
+// A state-changing request from another site: its Origin names another site, or it sends no Origin and the browser
+// does not vouch for it with Sec-Fetch-Site. Browsers send Origin on every POST, so only forged or old clients lack both.
+export function crossSitePost(request: NextRequest) {
+  if (!request.headers.get("origin"))
+    return request.headers.get("sec-fetch-site") !== "same-origin";
+  return foreignOrigin(request);
+}
+
+// A read is refused only when its Origin names another site: browsers leave Origin off same-origin GETs.
+export function foreignOrigin(request: NextRequest) {
+  const origin = request.headers.get("origin");
+  return (
+    !!origin &&
+    !sameOrigin(origin, request.headers.get("host"), request.nextUrl.origin)
+  );
+}
+
+function sameOrigin(
   origin: string,
   host: string | null,
   expectedOrigin: string,

@@ -16,7 +16,8 @@ import { SecurityCheckError } from "../lib/checkedFetch";
 import { useResource } from "../lib/data";
 import { onSessionExpired, readSession, restoreSession } from "../lib/session";
 import { AppShell } from "./AppShell";
-import { Brand } from "./Brand";
+import { AuthFrame } from "./auth/AuthFrame";
+import { NewPinFields, newPinProblem } from "./auth/NewPinFields";
 import { Skeleton } from "./ui";
 
 // Steps: phone, then pin when the person has one, code when the device is new, at first sign in or for a reset,
@@ -312,8 +313,8 @@ export function AuthPanel() {
   }
 
   function saveNewPin() {
-    if (!/^\d{4}$/.test(newPin)) return setMessage("The PIN is 4 digits.");
-    if (newPin !== repeatPin) return setMessage("The two PINs do not match.");
+    const problem = newPinProblem(newPin, repeatPin);
+    if (problem) return setMessage(problem);
     void run(async () => {
       try {
         const result = await authApi("pin/new", {
@@ -575,39 +576,12 @@ export function AuthPanel() {
           <h1 id="auth-title">
             {purpose === "first_setup" ? "Choose your PIN" : "New PIN"}
           </h1>
-          <div className="f">
-            <label htmlFor="siNew">New PIN</label>
-            <input
-              className="inp num pinin"
-              id="siNew"
-              name="newPin"
-              type="password"
-              inputMode="numeric"
-              maxLength={4}
-              autoComplete="new-password"
-              autoFocus
-              value={newPin}
-              onChange={(event) =>
-                setNewPin(event.target.value.replace(/\D/g, ""))
-              }
-            />
-          </div>
-          <div className="f">
-            <label htmlFor="siNew2">Repeat PIN</label>
-            <input
-              className="inp num pinin"
-              id="siNew2"
-              name="repeatPin"
-              type="password"
-              inputMode="numeric"
-              maxLength={4}
-              autoComplete="new-password"
-              value={repeatPin}
-              onChange={(event) =>
-                setRepeatPin(event.target.value.replace(/\D/g, ""))
-              }
-            />
-          </div>
+          <NewPinFields
+            newPin={newPin}
+            repeatPin={repeatPin}
+            onNewPin={setNewPin}
+            onRepeatPin={setRepeatPin}
+          />
           {trustBox}
           {feedback}
           <button type="submit" className="btn ok" disabled={busy}>
@@ -629,30 +603,18 @@ export function AuthPanel() {
   );
 
   const screen = (
-    <div className="signin min-h-screen">
-      <header className="side">
-        <Brand size={46} />
-        <div className="cos">XCODE Web v2.33</div>
-      </header>
-      <main className="formside">
-        <div className="box">
-          {restoring ? (
-            <section
-              aria-busy="true"
-              aria-labelledby="auth-title"
-              className="box"
-            >
-              <h1 id="auth-title">Signing you in</h1>
-              <div className="muted">Checking for your session...</div>
-              <Skeleton className="h-12" />
-              <Skeleton className="h-12" />
-            </section>
-          ) : (
-            form
-          )}
-        </div>
-      </main>
-    </div>
+    <AuthFrame>
+      {restoring ? (
+        <section aria-busy="true" aria-labelledby="auth-title" className="box">
+          <h1 id="auth-title">Signing you in</h1>
+          <div className="muted">Checking for your session...</div>
+          <Skeleton className="h-12" />
+          <Skeleton className="h-12" />
+        </section>
+      ) : (
+        form
+      )}
+    </AuthFrame>
   );
 
   // Locked: the app stays mounted underneath, with what was typed, and the PIN screen covers it.

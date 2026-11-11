@@ -14,7 +14,7 @@ vi.mock("next/headers", () => ({
 }));
 beforeEach(() => {
   jar.clear();
-  jar.set("device", "browser-device");
+  jar.set("__Host-device", "browser-device");
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -40,7 +40,7 @@ const step = (path: string, body: object) =>
   );
 
 it("sends the number step with the device id, its name and the trusted-device token, never what the browser sent", async () => {
-  jar.set("trust", "kept-token");
+  jar.set("__Host-trust", "kept-token");
   const fetcher = upstream({ status: "pin_required" });
   vi.stubGlobal("fetch", fetcher);
   const result = await step("start", {
@@ -59,7 +59,7 @@ it("sends the number step with the device id, its name and the trusted-device to
 });
 
 it("passes the step envelope back without any token, and keeps the trusted-device token and the person in HttpOnly cookies", async () => {
-  jar.delete("device");
+  jar.delete("__Host-device");
   const fetcher = vi
     .fn()
     .mockResolvedValueOnce(
@@ -101,17 +101,17 @@ it("passes the step envelope back without any token, and keeps the trusted-devic
     code: "123456",
     trustDevice: true,
   });
-  expect(result.cookies.get("trust")?.value).toBe("trust-value");
-  expect(result.cookies.get("trust")?.maxAge).toBe(90 * 24 * 3600);
-  expect(JSON.parse(result.cookies.get("who")!.value)).toEqual({
+  expect(result.cookies.get("__Host-trust")?.value).toBe("trust-value");
+  expect(result.cookies.get("__Host-trust")?.maxAge).toBe(90 * 24 * 3600);
+  expect(JSON.parse(result.cookies.get("__Host-who")!.value)).toEqual({
     phoneNumber: "0733520614",
     firstName: "Antony",
     lastName: "Maina",
     role: "Owner",
   });
-  expect(result.cookies.get("access")?.value).toBe("access-value");
-  expect(result.cookies.get("refresh")?.maxAge).toBe(90 * 24 * 3600);
-  expect(result.cookies.get("device")?.maxAge).toBe(365 * 24 * 3600);
+  expect(result.cookies.get("__Host-access")?.value).toBe("access-value");
+  expect(result.cookies.get("__Host-refresh")?.maxAge).toBe(90 * 24 * 3600);
+  expect(result.cookies.get("__Host-device")?.maxAge).toBe(365 * 24 * 3600);
   expect(result.headers.get("set-cookie")).toContain("HttpOnly");
 });
 
@@ -164,39 +164,39 @@ it("passes triesLeft, the purpose and the masked email through, and the PIN prob
 });
 
 it("forgets the trusted device when a right PIN is answered with a new-device code", async () => {
-  jar.set("trust", "old-token");
-  jar.set("who", JSON.stringify({ phoneNumber: "0733520614" }));
+  jar.set("__Host-trust", "old-token");
+  jar.set("__Host-who", JSON.stringify({ phoneNumber: "0733520614" }));
   vi.stubGlobal(
     "fetch",
     upstream({ status: "verification_required", purpose: "new_device" }, 202),
   );
   const result = await step("pin", { phoneNumber: "0733520614", pin: "4826" });
-  expect(result.cookies.get("trust")?.maxAge).toBe(0);
-  expect(result.cookies.get("who")?.maxAge).toBe(0);
+  expect(result.cookies.get("__Host-trust")?.maxAge).toBe(0);
+  expect(result.cookies.get("__Host-who")?.maxAge).toBe(0);
 });
 
 it("keeps the trusted device on sign out, and forgets it when this device is removed", async () => {
-  jar.set("trust", "kept-token");
-  jar.set("access", "access-value");
+  jar.set("__Host-trust", "kept-token");
+  jar.set("__Host-access", "access-value");
   vi.stubGlobal("fetch", upstream({ status: "signed_out" }));
   let result = await step("sign-out", {});
-  expect(result.cookies.get("access")?.maxAge).toBe(0);
-  expect(result.cookies.get("trust")).toBeUndefined();
+  expect(result.cookies.get("__Host-access")?.maxAge).toBe(0);
+  expect(result.cookies.get("__Host-trust")).toBeUndefined();
   vi.stubGlobal("fetch", upstream({ status: "device_revoked" }));
   result = await step(
     "trusted-devices/0f3b6a2e-2a0b-4f1e-9d2c-7c1a5b3d9e10/remove",
     { thisDevice: true },
   );
   expect(result.status).toBe(200);
-  expect(result.cookies.get("trust")?.maxAge).toBe(0);
-  expect(result.cookies.get("who")?.maxAge).toBe(0);
-  expect(result.cookies.get("access")?.maxAge).toBe(0);
+  expect(result.cookies.get("__Host-trust")?.maxAge).toBe(0);
+  expect(result.cookies.get("__Host-who")?.maxAge).toBe(0);
+  expect(result.cookies.get("__Host-access")?.maxAge).toBe(0);
   vi.stubGlobal("fetch", upstream({ status: "device_revoked" }));
   result = await step(
     "trusted-devices/0f3b6a2e-2a0b-4f1e-9d2c-7c1a5b3d9e10/remove",
     {},
   );
-  expect(result.cookies.get("trust")).toBeUndefined();
+  expect(result.cookies.get("__Host-trust")).toBeUndefined();
 });
 
 it("tells the sign-in screen what this browser remembers, from its cookies alone", async () => {
@@ -207,9 +207,9 @@ it("tells the sign-in screen what this browser remembers, from its cookies alone
       params: Promise.resolve({ path: ["device"] }),
     });
   expect(await (await ask()).json()).toEqual({ trusted: false });
-  jar.set("trust", "kept-token");
+  jar.set("__Host-trust", "kept-token");
   jar.set(
-    "who",
+    "__Host-who",
     JSON.stringify({
       phoneNumber: "0733520614",
       firstName: "Antony",
@@ -228,7 +228,7 @@ it("tells the sign-in screen what this browser remembers, from its cookies alone
 });
 
 it("lists the trusted devices with the session's token, and refuses an unknown purpose", async () => {
-  jar.set("access", "access-value");
+  jar.set("__Host-access", "access-value");
   const fetcher = upstream([{ id: "d1", name: "Chrome on Windows" }]);
   vi.stubGlobal("fetch", fetcher);
   const result = await GET(

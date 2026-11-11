@@ -73,7 +73,20 @@ export type BackLimit = {
 
 // Where a person is with signing in (v2.33).
 export type PersonStatus =
-  "active" | "not_signed_in" | "pin_reset_due" | "locked" | "blocked";
+  | "active"
+  | "not_signed_in"
+  | "invited"
+  | "invite_expired"
+  | "pin_reset_due"
+  | "locked"
+  | "blocked";
+
+// The person's live invitation: whether its email went out, and when the link stops working.
+export type PersonInvitation = {
+  state: "pending" | "sent" | "failed" | "expired";
+  sentAt: string | null;
+  expiresAt: string;
+};
 
 export type PersonModule = { name: string; held: number; total: number };
 
@@ -91,6 +104,7 @@ export type PersonSignIn = {
   lastSignedInAt: string | null;
   email: string;
   devices: PersonDevice[];
+  invitation?: PersonInvitation | null;
 };
 
 export type Person = PersonIdentity & {

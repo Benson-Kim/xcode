@@ -38,6 +38,11 @@ export const AUTH_STATUSES = [
   "blocked",
   "code_resent",
   "pin_changed",
+  // A refresh token replayed within 30 seconds of its rotation on the same device: another request already
+  // renewed the session. Nothing is revoked.
+  "refresh_superseded",
+  // HTTP 426: the mobile app's version (X-XCODE-Client) is below the minimum the API supports.
+  "update_required",
 ] as const;
 
 // unexpected_response is never sent: the client raises it for an answer it cannot trust.
@@ -60,6 +65,29 @@ export type CodePurpose = "new_device" | "first_setup" | "pin_reset";
 
 // Why a new PIN was refused.
 export type PinProblem = "length" | "weak" | "unchanged";
+
+// Why a matching invitation link and number were refused. An unknown link, a wrong number or another person's
+// link carry no problem at all, so they cannot be told apart.
+export type InviteProblem = "expired" | "used" | "revoked";
+
+const INVITE_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+
+// The link token of an invitation: 32 random bytes in base64url.
+export function isInviteToken(value: unknown): value is string {
+  return typeof value === "string" && INVITE_TOKEN.test(value);
+}
+
+export function inviteProblemText(
+  problem: InviteProblem | null | undefined,
+): string {
+  if (problem === "expired")
+    return "This invitation has expired. Ask the office to send it again.";
+  if (problem === "used")
+    return "This invitation has been used. Sign in with your number and PIN.";
+  if (problem === "revoked")
+    return "This invitation is no longer valid. Ask the office for a new one.";
+  return "This number does not match the invitation. Check it, or open the link in your latest invitation email.";
+}
 
 function isAuthBody(body: unknown): body is AuthResponse {
   return (
@@ -90,6 +118,8 @@ export interface AuthRequest {
   newPin?: string;
   // Web only, on a trusted-device remove: the row is this browser, so it forgets its own trust.
   thisDevice?: boolean;
+  // invite/redeem: the link token from the invitation email.
+  token?: string;
 }
 
 export interface AuthResponse {
@@ -106,6 +136,11 @@ export interface AuthResponse {
   triesLeft?: number | null;
   pinProblem?: PinProblem | null;
   deviceToken?: string | null;
+  // invite/redeem: the code it minted (the web proxy keeps it in a cookie), and why a matching link was refused.
+  code?: string | null;
+  inviteProblem?: InviteProblem | null;
+  // start: no code was sent because the first-setup code is in the invitation email.
+  invitation?: boolean | null;
 }
 
 // A device the person trusts (GET /auth/trusted-devices).
@@ -152,7 +187,8 @@ export type AuthOperation =
   | "code/resend"
   | "pin/forgot"
   | "pin/new"
-  | "pin/change";
+  | "pin/change"
+  | "invite/redeem";
 
 // The prototype's words for a refused new PIN.
 export function pinProblemText(

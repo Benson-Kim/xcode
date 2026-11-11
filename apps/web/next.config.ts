@@ -45,6 +45,15 @@ const config: NextConfig = {
             : []),
         ],
       },
+      // An invitation link carries its token in the fragment: the page sends no Referer anywhere and is never stored.
+      // Listed after the site-wide rule, so these values win.
+      {
+        source: "/invite",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store" },
+        ],
+      },
     ];
   },
 };

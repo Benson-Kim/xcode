@@ -2,7 +2,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { GET, POST, PUT } from "../app/api/setup/[...path]/route";
+import { DELETE, GET, POST, PUT } from "../app/api/setup/[...path]/route";
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({
   cookies: async () => ({
@@ -12,7 +12,7 @@ vi.mock("next/headers", () => ({
 }));
 beforeEach(() => {
   jar.clear();
-  jar.set("access", "access-value");
+  jar.set("__Host-access", "access-value");
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -144,6 +144,65 @@ it("forwards the expenses ledger and reports paths, and nothing like them", asyn
   expect(fetcher).not.toHaveBeenCalled();
 });
 
+// The session cookie is SameSite=Strict, which a sibling subdomain on the same site still gets past.
+it("refuses a write from another origin, or with no Origin unless the browser says it is same-origin", async () => {
+  const fetcher = vi.fn(async () => new Response("{}", { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  const path = ["people", "3f2c", "invitation"];
+  const send = (
+    handler: typeof POST,
+    method: string,
+    headers: Record<string, string>,
+  ) =>
+    handler(
+      new NextRequest(`http://localhost:3000/api/setup/${path.join("/")}`, {
+        method,
+        headers,
+      }),
+      { params: Promise.resolve({ path }) },
+    );
+  for (const [handler, method] of [
+    [POST, "POST"],
+    [PUT, "PUT"],
+    [DELETE, "DELETE"],
+  ] as const) {
+    for (const headers of <Record<string, string>[]>[
+      {},
+      { "sec-fetch-site": "cross-site" },
+      { "sec-fetch-site": "same-site" },
+      { origin: "https://other.example" },
+      { origin: "http://evil.localhost:3000" },
+      { origin: "https://localhost:3000" },
+      { origin: "null" },
+      { origin: "https://other.example", "sec-fetch-site": "same-origin" },
+    ]) {
+      const refused = await send(handler, method, headers);
+      expect(refused.status, `${method} ${JSON.stringify(headers)}`).toBe(403);
+      expect(await refused.json()).toEqual({ status: "invalid_request" });
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+
+    expect(
+      (await send(handler, method, { origin: "http://localhost:3000" })).status,
+    ).toBe(200);
+    expect(
+      (await send(handler, method, { "sec-fetch-site": "same-origin" })).status,
+    ).toBe(200);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    fetcher.mockClear();
+  }
+
+  const read = (headers: Record<string, string>) =>
+    GET(
+      new NextRequest("http://localhost:3000/api/setup/people", { headers }),
+      {
+        params: Promise.resolve({ path: ["people"] }),
+      },
+    );
+  expect((await read({ origin: "https://other.example" })).status).toBe(403);
+  expect((await read({})).status).toBe(200);
+});
+
 // The largest legitimate body is a logo upload: a data URL of about 350 KB.
 const MB = 1024 * 1024;
 const write = (
@@ -156,7 +215,11 @@ const write = (
     new NextRequest("http://localhost:3000/api/setup/organization/logo", {
       method,
       body,
-      headers: { "content-type": "application/json", ...headers },
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost:3000",
+        ...headers,
+      },
       duplex: "half",
     } as ConstructorParameters<typeof NextRequest>[1]),
     { params: Promise.resolve({ path: ["organization", "logo"] }) },
@@ -227,7 +290,7 @@ it("never forwards an empty body, which fetch would send as text/plain and the A
   vi.stubGlobal("fetch", fetcher);
   const request = new NextRequest(
     "http://localhost:3000/api/setup/people/3f2c/deactivate",
-    { method: "POST" },
+    { method: "POST", headers: { origin: "http://localhost:3000" } },
   );
   expect(
     (

@@ -2,13 +2,15 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  crossSitePost,
+  foreignOrigin,
   forwardedFor,
   logProxyError,
   readLimitedBody,
   requestId,
-  sameOrigin,
   upstreamUrl,
 } from "../../body";
+import { readCookie } from "../../cookies";
 
 const allowedMethods = new Set(["GET", "POST", "PUT", "DELETE"]);
 const HEADERS_TIMEOUT_MS = 15_000;
@@ -73,12 +75,7 @@ async function proxy(
   const id = requestId();
   if (!allowedMethods.has(method))
     return NextResponse.json({ status: "invalid_request" }, { status: 405 });
-  const origin = request.headers.get("origin");
-  const expectedOrigin = request.nextUrl.origin;
-  if (
-    origin &&
-    !sameOrigin(origin, request.headers.get("host"), expectedOrigin)
-  )
+  if (method === "GET" ? foreignOrigin(request) : crossSitePost(request))
     return NextResponse.json({ status: "invalid_request" }, { status: 403 });
 
   const { path } = await context.params;
@@ -102,7 +99,7 @@ async function proxy(
     return NextResponse.json({ status: "invalid_request" }, { status: 404 });
 
   const jar = await cookies();
-  const access = jar.get("access")?.value;
+  const access = readCookie(jar, "access");
   if (!access)
     return NextResponse.json(
       { status: "authentication_failed" },

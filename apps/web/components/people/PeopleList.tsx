@@ -3,7 +3,7 @@ import { formatPhone, initials } from "@xcode/shared/format";
 import { useFormats } from "../../lib/formats";
 import type { Person, ScopeOptions } from "../../lib/types";
 import { DataTable, RowAction, Td, Tr } from "../ui";
-import { FLOAT_RIGHT, personStatus, scopeLabel, STATUS_CHIPS } from "./model";
+import { FLOAT_RIGHT, personStatus, scopeLabel, statusChip } from "./model";
 
 type Props = {
   items: Person[];
@@ -20,7 +20,7 @@ type Props = {
 };
 
 export function StatusChip({ person }: { person: Person }) {
-  const chip = STATUS_CHIPS[personStatus(person)];
+  const chip = statusChip(personStatus(person));
   return <span className={`chip ${chip.tone}`}>{chip.label}</span>;
 }
 

@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AuthError,
   createAuthClient,
+  inviteProblemText,
+  isInviteToken,
   pauseSeconds,
   pinHelp,
   pinProblemText,
@@ -237,5 +239,37 @@ describe("pinProblemText", () => {
       "Choose a PIN that is harder to guess.",
     );
     expect(pinProblemText(null)).toBe("Choose a PIN that is harder to guess.");
+  });
+});
+
+describe("invitation links", () => {
+  const token = () =>
+    btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+
+  it("accepts only 32 bytes in base64url as a link token", () => {
+    const link = token();
+    expect(link).toHaveLength(43);
+    expect(isInviteToken(link)).toBe(true);
+    expect(isInviteToken(link.slice(1))).toBe(false);
+    expect(isInviteToken(`${link}A`)).toBe(false);
+    expect(isInviteToken(`${link.slice(1)}=`)).toBe(false);
+    expect(isInviteToken(`${link.slice(1)}+`)).toBe(false);
+    expect(isInviteToken(undefined)).toBe(false);
+    expect(isInviteToken(42)).toBe(false);
+  });
+
+  it("names why a matching link was refused, and says the same for every other refusal", () => {
+    expect(inviteProblemText("expired")).toBe(
+      "This invitation has expired. Ask the office to send it again.",
+    );
+    expect(inviteProblemText("used")).toMatch(/has been used/);
+    expect(inviteProblemText("revoked")).toMatch(/no longer valid/);
+    expect(inviteProblemText(null)).toBe(inviteProblemText(undefined));
+    expect(inviteProblemText(undefined)).toMatch(
+      /does not match the invitation/,
+    );
   });
 });

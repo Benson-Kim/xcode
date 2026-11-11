@@ -1,7 +1,7 @@
 import { useFormats } from "../../lib/formats";
 import type { Person, PersonSignIn } from "../../lib/types";
 import { ListSkeleton } from "../ui";
-import { STATUS_CHIPS } from "./model";
+import { invitationText, signInActions, statusChip } from "./model";
 
 // The "Sign in" pane (v2.33): PIN status, last sign in, where codes go, and the trusted devices. With the right
 // `people.sign_in`: make the person reset the PIN, remove a device, remove all. These act at once and are logged.
@@ -12,6 +12,7 @@ export function SignInPane({
   canAct,
   busy,
   onPinReset,
+  onSendInvitation,
   onRemoveDevice,
   onRemoveAll,
 }: {
@@ -21,10 +22,12 @@ export function SignInPane({
   canAct: boolean;
   busy: boolean;
   onPinReset: () => void;
+  onSendInvitation: () => void;
   onRemoveDevice: (deviceId: string) => void;
   onRemoveAll: () => void;
 }) {
-  const { formatDateOnly, formatDateTime } = useFormats();
+  const formats = useFormats();
+  const { formatDateOnly, formatDateTime } = formats;
   if (!person)
     return (
       <div className="pblock">
@@ -41,11 +44,15 @@ export function SignInPane({
         <ListSkeleton rows={3} />
       </div>
     ) : null;
-  const chip = STATUS_CHIPS[signIn.status] ?? STATUS_CHIPS.active;
-  const canReset =
-    canAct &&
-    signIn.status !== "not_signed_in" &&
-    signIn.status !== "pin_reset_due";
+  const chip = statusChip(signIn.status);
+  const { canInvite, canReset } = signInActions(signIn.status, canAct);
+  const action = (label: string, onClick: () => void) => (
+    <div>
+      <button type="button" className="btn" disabled={busy} onClick={onClick}>
+        {label}
+      </button>
+    </div>
+  );
   return (
     <>
       <div className="pblock">
@@ -66,19 +73,16 @@ export function SignInPane({
             <span>Codes go to</span>
             <b>{signIn.email}</b>
           </div>
+          {signIn.invitation && (
+            <div>
+              <span>Invitation</span>
+              <b>{invitationText(signIn.invitation, formats)}</b>
+            </div>
+          )}
         </div>
-        {canReset && (
-          <div>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy}
-              onClick={onPinReset}
-            >
-              Make {person.firstName} reset the PIN
-            </button>
-          </div>
-        )}
+        {canInvite && action("Send invitation again", onSendInvitation)}
+        {canReset &&
+          action(`Make ${person.firstName} reset the PIN`, onPinReset)}
       </div>
       <div className="pblock">
         <div className="pbh">

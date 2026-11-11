@@ -12,7 +12,7 @@ vi.mock("next/headers", () => ({
 }));
 beforeEach(() => {
   jar.clear();
-  jar.set("device", "browser-device");
+  jar.set("__Host-device", "browser-device");
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -64,7 +64,7 @@ it("keeps tokens in HttpOnly cookies and binds requests to the browser device", 
     params: Promise.resolve({ path: ["sign-in"] }),
   });
   expect(await result.json()).toEqual({ status: "authenticated" });
-  expect(result.cookies.get("access")?.value).toBe("access-value");
+  expect(result.cookies.get("__Host-access")?.value).toBe("access-value");
   expect(result.headers.get("set-cookie")).toContain("HttpOnly");
   expect(result.headers.get("set-cookie")).toContain("SameSite=strict");
   expect(JSON.parse(fetcher.mock.calls[0][1].body).deviceId).toBe(
@@ -84,8 +84,10 @@ it("sets the access cookie to the lifetime of the token inside it", async () => 
   const result = await POST(request(), {
     params: Promise.resolve({ path: ["sign-in"] }),
   });
-  expect(result.cookies.get("access")?.maxAge).toBeGreaterThanOrEqual(299);
-  expect(result.cookies.get("access")?.maxAge).toBeLessThanOrEqual(300);
+  expect(result.cookies.get("__Host-access")?.maxAge).toBeGreaterThanOrEqual(
+    299,
+  );
+  expect(result.cookies.get("__Host-access")?.maxAge).toBeLessThanOrEqual(300);
 });
 it("keeps a remembered device and its session after the browser closes", async () => {
   vi.stubGlobal(
@@ -97,9 +99,9 @@ it("keeps a remembered device and its session after the browser closes", async (
     }),
   );
   const result = await verify(true);
-  expect(result.cookies.get("device")?.maxAge).toBe(365 * 24 * 3600);
-  expect(result.cookies.get("remember")?.value).toBe("1");
-  expect(result.cookies.get("refresh")?.maxAge).toBe(90 * 24 * 3600);
+  expect(result.cookies.get("__Host-device")?.maxAge).toBe(365 * 24 * 3600);
+  expect(result.cookies.get("__Host-remember")?.value).toBe("1");
+  expect(result.cookies.get("__Host-refresh")?.maxAge).toBe(90 * 24 * 3600);
 });
 it("trusts a device only for the browser session unless asked to remember it", async () => {
   vi.stubGlobal(
@@ -111,13 +113,13 @@ it("trusts a device only for the browser session unless asked to remember it", a
     }),
   );
   const result = await verify(false);
-  expect(result.cookies.get("device")?.value).toBe("browser-device");
-  expect(result.cookies.get("device")?.maxAge).toBeUndefined();
-  expect(result.cookies.get("refresh")?.maxAge).toBeUndefined();
-  expect(result.cookies.get("remember")?.maxAge).toBe(0);
+  expect(result.cookies.get("__Host-device")?.value).toBe("browser-device");
+  expect(result.cookies.get("__Host-device")?.maxAge).toBeUndefined();
+  expect(result.cookies.get("__Host-refresh")?.maxAge).toBeUndefined();
+  expect(result.cookies.get("__Host-remember")?.maxAge).toBe(0);
 });
 it("keeps the remembered choice on refresh without re-extending the device cookie", async () => {
-  jar.set("remember", "1");
+  jar.set("__Host-remember", "1");
   vi.stubGlobal(
     "fetch",
     upstream({
@@ -129,8 +131,83 @@ it("keeps the remembered choice on refresh without re-extending the device cooki
   const result = await POST(request(undefined, {}, "refresh"), {
     params: Promise.resolve({ path: ["refresh"] }),
   });
-  expect(result.cookies.get("device")).toBeUndefined();
-  expect(result.cookies.get("refresh")?.maxAge).toBe(90 * 24 * 3600);
+  expect(result.cookies.get("__Host-device")).toBeUndefined();
+  expect(result.cookies.get("__Host-refresh")?.maxAge).toBe(90 * 24 * 3600);
+});
+it("ends the session on a refused refresh, but leaves the cookies of a refresh another tab won", async () => {
+  jar.set("__Host-access", "access-value");
+  jar.set("__Host-refresh", "refresh-value");
+  const refresh = () =>
+    POST(request(undefined, {}, "refresh"), {
+      params: Promise.resolve({ path: ["refresh"] }),
+    });
+
+  vi.stubGlobal("fetch", upstream({ status: "refresh_superseded" }, 401));
+  const lost = await refresh();
+  expect(lost.status).toBe(401);
+  expect(await lost.json()).toMatchObject({ status: "refresh_superseded" });
+  expect(lost.cookies.get("__Host-access")).toBeUndefined();
+  expect(lost.cookies.get("__Host-refresh")).toBeUndefined();
+
+  vi.stubGlobal("fetch", upstream({ status: "authentication_failed" }, 401));
+  const refused = await refresh();
+  expect(refused.cookies.get("__Host-access")?.maxAge).toBe(0);
+  expect(refused.cookies.get("__Host-refresh")?.maxAge).toBe(0);
+});
+it("moves cookies from their old names once, without bringing back a refresh token another tab spent", async () => {
+  jar.clear();
+  jar.set("device", "old-device");
+  jar.set("trust", "kept-token");
+  jar.set("who", JSON.stringify({ phoneNumber: "0733520614" }));
+  jar.set("access", "old-access");
+  jar.set("refresh", "old-refresh");
+
+  const device = await GET(
+    new NextRequest("http://localhost:3000/api/auth/device"),
+    { params: Promise.resolve({ path: ["device"] }) },
+  );
+  expect(await device.json()).toMatchObject({
+    trusted: true,
+    phoneNumber: "0733520614",
+  });
+  expect(device.cookies.get("__Host-trust")).toMatchObject({
+    value: "kept-token",
+    maxAge: 90 * 24 * 3600,
+    secure: true,
+    path: "/",
+  });
+  expect(device.cookies.get("__Host-device")?.value).toBe("old-device");
+  expect(device.cookies.get("trust")?.maxAge).toBe(0);
+  expect(device.cookies.get("who")?.maxAge).toBe(0);
+  expect(device.cookies.get("device")?.maxAge).toBe(0);
+  expect(device.cookies.get("__Host-refresh")).toBeUndefined();
+  expect(device.cookies.get("refresh")).toBeUndefined();
+
+  const refresh = () =>
+    POST(request(undefined, {}, "refresh"), {
+      params: Promise.resolve({ path: ["refresh"] }),
+    });
+  vi.stubGlobal("fetch", upstream({ status: "refresh_superseded" }, 401));
+  const lost = await refresh();
+  expect(lost.cookies.get("__Host-refresh")).toBeUndefined();
+  expect(lost.cookies.get("__Host-access")).toBeUndefined();
+  expect(lost.cookies.get("refresh")).toBeUndefined();
+  expect(lost.cookies.get("access")).toBeUndefined();
+
+  const renewed = upstream({
+    status: "authenticated",
+    accessToken: "access-value",
+    refreshToken: "rotated",
+  });
+  vi.stubGlobal("fetch", renewed);
+  const won = await refresh();
+  expect(JSON.parse(renewed.mock.calls[0][1].body).refreshToken).toBe(
+    "old-refresh",
+  );
+  expect(won.cookies.get("__Host-refresh")?.value).toBe("rotated");
+  expect(won.cookies.get("__Host-access")?.value).toBe("access-value");
+  expect(won.cookies.get("refresh")?.maxAge).toBe(0);
+  expect(won.cookies.get("access")?.maxAge).toBe(0);
 });
 it("starts a new browser as a session-only device", async () => {
   jar.clear();
@@ -138,8 +215,8 @@ it("starts a new browser as a session-only device", async () => {
   const result = await POST(request(), {
     params: Promise.resolve({ path: ["sign-in"] }),
   });
-  expect(result.cookies.get("device")?.value).toBeTruthy();
-  expect(result.cookies.get("device")?.maxAge).toBeUndefined();
+  expect(result.cookies.get("__Host-device")?.value).toBeTruthy();
+  expect(result.cookies.get("__Host-device")?.maxAge).toBeUndefined();
 });
 it("passes the organization's minimum PIN length back to the client", async () => {
   vi.stubGlobal(
@@ -180,6 +257,7 @@ it("passes the development code back to the client outside production", async ()
 it("never passes the development code back to the client in production, even when the API sends one", async () => {
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("API_URL", "https://api.example.com");
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "0");
   vi.stubGlobal(
     "fetch",
     upstream(
@@ -204,7 +282,7 @@ it("never passes the development code back to the client in production, even whe
 });
 
 it("answers 503 with a timeout when the API is down while checking the session", async () => {
-  jar.set("access", "access-value");
+  jar.set("__Host-access", "access-value");
   const fetcher = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
   vi.stubGlobal("fetch", fetcher);
   const result = await GET(
@@ -220,7 +298,7 @@ it("answers 503 with a timeout when the API is down while checking the session",
 });
 
 it("maps an upstream 5xx on the session check to 503 service_unavailable with a request id", async () => {
-  jar.set("access", "access-value");
+  jar.set("__Host-access", "access-value");
   const fetcher = upstream(
     {
       title: "Internal Server Error",
@@ -244,7 +322,7 @@ it("maps an upstream 5xx on the session check to 503 service_unavailable with a 
 });
 
 it("passes an upstream answer below 500 on the session check through unchanged", async () => {
-  jar.set("access", "access-value");
+  jar.set("__Host-access", "access-value");
   vi.stubGlobal("fetch", upstream({ status: "authentication_failed" }, 401));
   const result = await GET(
     new NextRequest("http://localhost:3000/api/auth/session"),
@@ -345,7 +423,7 @@ it("forwards nothing when the trusted entry is missing or not an IP, or the sett
 
 it("tells the API which browser a session check comes from", async () => {
   vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
-  jar.set("access", "access-value");
+  jar.set("__Host-access", "access-value");
   const fetcher = upstream({ userId: "u-1" });
   vi.stubGlobal("fetch", fetcher);
   await GET(

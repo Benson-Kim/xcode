@@ -20,7 +20,7 @@ import {
   paneFor,
   personStatus,
   readBackLimit,
-  STATUS_CHIPS,
+  statusChip,
 } from "./model";
 import { AccessPane } from "./PermissionsCard";
 import { DetailsPane } from "./PersonCards";
@@ -40,7 +40,7 @@ type Props = {
   canManage: boolean;
   canSignIn: boolean;
   onClose: () => void;
-  onSaved: (name: string, isNew: boolean) => void;
+  onSaved: (name: string, isNew: boolean, email: string) => void;
   onChanged: () => void;
 };
 
@@ -67,6 +67,7 @@ export function PersonEditor({
   const actions = usePersonActions({
     person,
     today,
+    fullScope,
     onSaved,
     onChanged: () => {
       detail.reload();
@@ -113,7 +114,7 @@ export function PersonEditor({
         : plural(form.vehicleIds.length, "vehicle", "vehicles");
   const signIn = detail.data?.signIn;
   const signWords = person
-    ? `${STATUS_CHIPS[signIn?.status ?? personStatus(person)].label}${
+    ? `${statusChip(signIn?.status ?? personStatus(person)).label}${
         signIn?.devices.length
           ? ` · ${plural(signIn.devices.length, "device", "devices")}`
           : ""
@@ -239,6 +240,7 @@ export function PersonEditor({
               canAct={canSignIn && !self}
               busy={actions.busy}
               onPinReset={() => void actions.pinReset()}
+              onSendInvitation={() => void actions.sendInvitation()}
               onRemoveDevice={(deviceId) => void actions.removeDevice(deviceId)}
               onRemoveAll={() => void actions.removeAllDevices()}
             />
