@@ -13,7 +13,8 @@ export const COOKIE = {
 
 export type CookieName = keyof typeof COOKIE;
 
-// Browsers accept Secure cookies from http://localhost, so development needs no exception.
+// Browsers accept Secure cookies over plain HTTP only from localhost. A phone on the local network opens the
+// development server by this computer's address, so it needs `npm run dev:lan`, which serves HTTPS.
 export const cookieOptions = {
   httpOnly: true,
   secure: true,

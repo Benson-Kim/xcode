@@ -4,7 +4,8 @@ const config: NextConfig = {
   transpilePackages: ["@xcode/shared"],
   poweredByHeader: false,
   // The development server only serves its scripts and live reload to localhost unless told otherwise. A phone on the
-  // local network opens it by this computer's address, e.g. DEV_ORIGINS=192.168.100.9. Production builds ignore it.
+  // local network opens it by this computer's address, e.g. DEV_ORIGINS=192.168.100.9, over `npm run dev:lan`
+  // (HTTPS, which the Secure sign-in cookies need off localhost). Production builds ignore it.
   allowedDevOrigins: (process.env.DEV_ORIGINS ?? "")
     .split(",")
     .map((host) => host.trim())
