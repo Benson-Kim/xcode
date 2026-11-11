@@ -5,13 +5,28 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
     "ios": {
-      "bundleIdentifier": "com.xcode",
-      "supportsTablet": true
+      "bundleIdentifier": "ke.co.priori.xcode",
+      "supportsTablet": false,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
-      "package": "com.xcode"
+      "package": "ke.co.priori.xcode",
+      "allowBackup": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#14213d"
+      }
     },
-    "plugins": ["expo-secure-store", "expo-font"]
+    "plugins": ["expo-secure-store", "expo-font"],
+    "extra": {
+      "eas": {
+        "projectId": "1fcbbed5-f688-4e26-92f4-eeed33dfd423"
+      }
+    },
+    "owner": "priori-technlogies-limited"
   }
 }

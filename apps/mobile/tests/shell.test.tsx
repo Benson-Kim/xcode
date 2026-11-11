@@ -24,7 +24,7 @@ async function unlockAs(
 ) {
   await trustPhone(person, phone);
   const api = fakeApi();
-  api.on("auth/unlock", [200, tokens(2)]);
+  api.on("auth/pin", [200, tokens(2)]);
   api.on("auth/session", [200, person]);
   api.on("setup/access/catalog", [200, catalog]);
   api.on("setup/revenue", [200, revenueWeek]);
@@ -263,7 +263,7 @@ it("locks from Home and switches user from More", async () => {
   await fireEvent.press(screen.getByRole("button", { name: "Lock app" }));
   await screen.findByText("Welcome back, Antony");
 
-  api.on("auth/unlock", [200, tokens(3)]);
+  api.on("auth/pin", [200, tokens(3)]);
   await typePin("4826");
   await screen.findByText("Hi Antony");
   api.on("auth/devices/stable-test-device/revoke", [
@@ -280,7 +280,7 @@ it("locks from Home and switches user from More", async () => {
 it("returns to the unlock pad when the session can no longer be renewed", async () => {
   await trustPhone(people.owner, "0733520614");
   const api = fakeApi();
-  api.on("auth/unlock", [200, tokens(2)]);
+  api.on("auth/pin", [200, tokens(2)]);
   api.on("auth/session", [200, people.owner]);
   api.on("setup/access/catalog", [401, {}]);
   api.on("auth/refresh", [401, { status: "authentication_failed" }]);
@@ -296,7 +296,7 @@ it("returns to the unlock pad when the session can no longer be renewed", async 
 it("renews an expired access token once and retries", async () => {
   await trustPhone(people.owner, "0733520614");
   const api = fakeApi();
-  api.on("auth/unlock", [200, tokens(2)]);
+  api.on("auth/pin", [200, tokens(2)]);
   api.on("auth/session", [200, people.owner]);
   api.on("auth/refresh", [200, tokens(4)]);
   api.on("setup/access/catalog", (_, headers) =>

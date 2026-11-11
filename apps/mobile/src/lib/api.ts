@@ -9,11 +9,14 @@ import {
   type AuthResponse,
 } from "@xcode/shared/auth";
 
+import { appVersion } from "./appVersion";
 import { hasConnection } from "./network";
 import {
   forgetPerson,
   getDeviceId,
+  loadDeviceToken,
   loadSession,
+  saveDeviceToken,
   saveSession,
   type StoredSession,
 } from "./storage";
@@ -59,6 +62,34 @@ export class ServerError extends OfflineError {
   }
 }
 
+const CLIENT = `mobile/${appVersion}`;
+
+// The API answered 426: this version of the app is too old for it. Nothing more can be done until the app is updated.
+export class UpdateRequiredError extends Error {
+  constructor(readonly minimumVersion: string | null) {
+    super("This version of XCODE is too old. Update it to carry on.");
+  }
+}
+
+const updateListeners = new Set<(minimumVersion: string | null) => void>();
+
+export function onUpdateRequired(
+  listener: (minimumVersion: string | null) => void,
+): () => void {
+  updateListeners.add(listener);
+  return () => updateListeners.delete(listener);
+}
+
+async function updateRequired(response: Response) {
+  const body = (await response.json().catch(() => null)) as {
+    minimumVersion?: unknown;
+  } | null;
+  const minimum =
+    typeof body?.minimumVersion === "string" ? body.minimumVersion : null;
+  for (const listener of updateListeners) listener(minimum);
+  return new UpdateRequiredError(minimum);
+}
+
 // The session can no longer be renewed, so the person has to sign in again.
 export class SessionEndedError extends Error {
   constructor() {
@@ -89,8 +120,16 @@ async function reach(
         once: true,
       });
   }
+  let response: Response;
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    response = await fetch(input, {
+      ...init,
+      headers: {
+        ...(init?.headers as Record<string, string> | undefined),
+        "X-XCODE-Client": CLIENT,
+      },
+      signal: controller.signal,
+    });
   } catch {
     throw caller?.aborted || !(await phoneIsOnline())
       ? new OfflineError()
@@ -98,6 +137,9 @@ async function reach(
   } finally {
     clearTimeout(timer);
   }
+  // Not an OfflineError: an app too old for the API must not fall back to unlocking offline.
+  if (response.status === 426) throw await updateRequired(response);
+  return response;
 }
 
 async function phoneIsOnline() {
@@ -125,12 +167,61 @@ export function wakeServer(now = Date.now()): void {
   );
 }
 
-// The API rejects a request with any field missing, so every call sends them all.
+// The steps of signing in. They name the device the person sees in their list of trusted devices.
+const SIGN_IN_STEPS: readonly string[] = [
+  "start",
+  "pin",
+  "code",
+  "code/resend",
+  "pin/forgot",
+  "pin/new",
+  "invite/redeem",
+];
+// Only the steps that take a PIN carry the trusted-device token.
+const TOKEN_STEPS: readonly string[] = ["start", "pin"];
+
+export function deviceName(): string {
+  const { Brand, Model } = Platform.constants as {
+    Brand?: string;
+    Model?: string;
+  };
+  const name =
+    Platform.OS === "ios"
+      ? Platform.isPad
+        ? "iPad"
+        : "iPhone"
+      : [Brand, Model].filter(Boolean).join(" ");
+  return (name || "Phone").slice(0, 100);
+}
+
+async function stepRequest(
+  operation: string,
+  request: AuthRequest,
+  deviceId: string,
+): Promise<AuthRequest> {
+  const deviceToken = TOKEN_STEPS.includes(operation)
+    ? await loadDeviceToken()
+    : "";
+  return {
+    ...request,
+    deviceId,
+    deviceName: deviceName(),
+    ...(deviceToken ? { deviceToken } : {}),
+  };
+}
+
+// The sign-in steps send only their own fields. Refresh, sign-out and revoke reject a request with any field
+// missing, so they send them all.
 export async function authApi(
   operation: AuthOperation | "revoke-device",
   request: AuthRequest = {},
 ): Promise<AuthResponse> {
   const deviceId = await getDeviceId();
+  if (SIGN_IN_STEPS.includes(operation))
+    return authClient(
+      operation as AuthOperation,
+      await stepRequest(operation, request, deviceId),
+    );
   const session = await loadSession();
   return authClient(
     operation === "revoke-device"
@@ -156,6 +247,7 @@ export async function keepSession(
 ): Promise<StoredSession> {
   if (!result.accessToken || !result.refreshToken)
     throw new AuthError({ status: "unexpected_response" }, 200);
+  if (result.deviceToken) await saveDeviceToken(result.deviceToken);
   const session = {
     phoneNumber,
     accessToken: result.accessToken,
@@ -170,6 +262,9 @@ export async function keepSession(
 
 let renewing: Promise<StoredSession> | null = null;
 
+const isSuperseded = (error: unknown) =>
+  error instanceof AuthError && error.response.status === "refresh_superseded";
+
 // Access tokens last minutes. One renewal at a time: concurrent requests wait on the same attempt.
 function renew() {
   renewing ??= (async () => {
@@ -182,6 +277,13 @@ function renew() {
       return await keepSession(session.phoneNumber, result);
     } catch (error) {
       if (!(error instanceof AuthError)) throw error;
+      // Another request renewed the session first. Its tokens are the ones to use if it stored them; if its
+      // answer never arrived, nothing on the phone can carry the session on.
+      if (isSuperseded(error)) {
+        const latest = await loadSession();
+        if (latest && latest.refreshToken !== session.refreshToken)
+          return latest;
+      }
       throw error.httpStatus === 401 || error.httpStatus === 403
         ? new SessionEndedError()
         : new ServerError();

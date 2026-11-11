@@ -1,10 +1,9 @@
 import {
+  forgetPinCheck,
   loadOfflineTries,
   saveOfflineTries,
   type OfflineTries,
 } from "../lib/storage";
-
-export const CODE_TRIES = 5;
 
 export type TryLimits = { triesAllowed: number; lockoutSeconds: number };
 
@@ -14,7 +13,20 @@ export const wrongPinMessage = (left: number) =>
   `Wrong PIN. ${triesLeft(left)}.`;
 export const wrongCodeMessage = (left: number) =>
   `That code is wrong. ${triesLeft(left)}.`;
-export const DEAD_CODE_MESSAGE = "Too many wrong codes. Tap Send a new code.";
+export const GONE_CODE_MESSAGE =
+  "This code no longer works. Tap Send a new code.";
+export const RESENT_CODE_MESSAGE =
+  "That code was wrong 3 times, so we emailed you a new one.";
+
+// A code the server refused, from the tries it says are left: none left means the code expired or was replaced.
+export function refusedCode(left: number | null | undefined): {
+  dead: boolean;
+  message: string;
+} {
+  return typeof left === "number" && left > 0
+    ? { dead: false, message: wrongCodeMessage(left) }
+    : { dead: true, message: GONE_CODE_MESSAGE };
+}
 
 export type Outcome =
   | { kind: "left"; left: number; message: string }
@@ -32,20 +44,16 @@ export function outcomeOf(
   return { kind: "left", left, message: wrongPinMessage(left) };
 }
 
-export function codeOutcome(wrong: number): { dead: boolean; message: string } {
-  return wrong >= CODE_TRIES
-    ? { dead: true, message: DEAD_CODE_MESSAGE }
-    : { dead: false, message: wrongCodeMessage(CODE_TRIES - wrong) };
-}
-
 export type OfflineStore = {
   load(): Promise<OfflineTries>;
   save(tries: OfflineTries): Promise<void>;
+  forgetCheck(): Promise<void>;
 };
 
 const phoneStore: OfflineStore = {
   load: () => loadOfflineTries(),
   save: (tries) => saveOfflineTries(tries),
+  forgetCheck: () => forgetPinCheck(),
 };
 
 // The stored count is read, changed and written back. One at a time, or two wrong PINs count as one.
@@ -59,7 +67,8 @@ function serialized<T>(task: () => Promise<T>): Promise<T> {
 export type Attempts = {
   // Wrong PINs the server refused, counted in memory for each number.
   wrongOnline(phone: string, limits: TryLimits): Outcome;
-  // Wrong PINs checked on the phone itself, kept so a restart does not give the tries back.
+  // Wrong PINs checked on the phone itself, kept so a restart does not give the tries back. At the limit the phone's
+  // PIN check is deleted.
   wrongOffline(limits: TryLimits): Promise<Outcome>;
   pausedUntil(): Promise<number>;
   clear(phone: string): Promise<void>;
@@ -76,6 +85,7 @@ export function createAttempts(store: OfflineStore = phoneStore): Attempts {
     wrongOffline: (limits) =>
       serialized(async () => {
         const outcome = outcomeOf((await store.load()).count + 1, limits);
+        if (outcome.kind === "paused") await store.forgetCheck();
         await store.save(
           outcome.kind === "paused"
             ? { count: 0, pausedUntil: outcome.until }

@@ -11,23 +11,20 @@ jest.mock("expo-secure-store", () => {
     deleteItemAsync: jest.fn(async (key: string) => void items.delete(key)),
   };
 });
+// An ES module, so tests can spy on what the app's "import * as Crypto" calls.
 jest.mock("expo-crypto", () => ({
+  __esModule: true,
   CryptoDigestAlgorithm: { SHA256: "SHA-256" },
   randomUUID: () => "stable-test-device",
   getRandomBytes: (size: number) => new Uint8Array(size).fill(7),
-  digestStringAsync: async (_algorithm: string, value: string) =>
-    [...value]
-      .reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7)
-      .toString(16),
+  digest: async (_algorithm: string, data: Uint8Array) => {
+    const bytes = require("crypto").createHash("sha256").update(data).digest();
+    return bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    );
+  },
 }));
-// The real derivation runs in pbkdf2.test.ts and storage.test.ts; flows use one iteration.
-jest.mock("../src/lib/pbkdf2", () => {
-  const actual = jest.requireActual("../src/lib/pbkdf2");
-  return {
-    pbkdf2Sha256: (password: Uint8Array, salt: Uint8Array) =>
-      actual.pbkdf2Sha256(password, salt, 1),
-  };
-});
 
 // Tests announce a change of network with require("expo-network").__emit(state), and set what the phone reports
 // when asked with __setState(state). A phone is offline until a test says otherwise, as fakeApi's "offline" implies.

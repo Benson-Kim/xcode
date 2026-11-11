@@ -1,8 +1,7 @@
 import {
-  CODE_TRIES,
-  codeOutcome,
   createAttempts,
   outcomeOf,
+  refusedCode,
   triesLeft,
   wrongCodeMessage,
   wrongPinMessage,
@@ -14,7 +13,7 @@ const limits = { triesAllowed: 5, lockoutSeconds: 900 };
 
 // A store whose reads and writes take a few turns of the event loop, as the keychain does.
 function slowStore(start: OfflineTries = { count: 0, pausedUntil: 0 }) {
-  const state = { saved: start, writes: 0 };
+  const state = { saved: start, writes: 0, checkForgotten: false };
   const turn = () => new Promise((resolve) => setTimeout(resolve, 5));
   const store: OfflineStore = {
     async load() {
@@ -25,6 +24,10 @@ function slowStore(start: OfflineTries = { count: 0, pausedUntil: 0 }) {
       await turn();
       state.saved = { ...tries };
       state.writes += 1;
+    },
+    async forgetCheck() {
+      await turn();
+      state.checkForgotten = true;
     },
   };
   return { store, state };
@@ -61,18 +64,23 @@ describe("outcomeOf", () => {
   });
 });
 
-describe("codeOutcome", () => {
-  it("kills the code at the fifth wrong try", () => {
-    expect(codeOutcome(1)).toEqual({
+describe("refusedCode", () => {
+  it("shows the tries the server says are left", () => {
+    expect(refusedCode(2)).toEqual({
       dead: false,
-      message: "That code is wrong. 4 tries left.",
-    });
-    expect(codeOutcome(CODE_TRIES - 1).dead).toBe(false);
-    expect(codeOutcome(CODE_TRIES)).toEqual({
-      dead: true,
-      message: "Too many wrong codes. Tap Send a new code.",
+      message: "That code is wrong. 2 tries left.",
     });
   });
+
+  it.each([0, null, undefined])(
+    "kills the code when the server gives %p tries left",
+    (left) => {
+      expect(refusedCode(left)).toEqual({
+        dead: true,
+        message: "This code no longer works. Tap Send a new code.",
+      });
+    },
+  );
 });
 
 describe("online tries", () => {
@@ -115,6 +123,15 @@ describe("offline tries", () => {
     expect(outcome.kind).toBe("paused");
     expect(state.saved.count).toBe(0);
     expect(state.saved.pausedUntil).toBeGreaterThan(Date.now());
+    expect(state.checkForgotten).toBe(true);
+  });
+
+  it("keep the PIN check while tries are left", async () => {
+    const { store, state } = slowStore({ count: 3, pausedUntil: 0 });
+    expect(await createAttempts(store).wrongOffline(limits)).toMatchObject({
+      left: 1,
+    });
+    expect(state.checkForgotten).toBe(false);
   });
 
   it("count two wrong PINs that overlap as two", async () => {
@@ -162,6 +179,7 @@ describe("offline tries", () => {
     const { store, state } = slowStore();
     const flaky: OfflineStore = {
       load: store.load,
+      forgetCheck: store.forgetCheck,
       save: async (tries) => {
         if (failNext) {
           failNext = false;

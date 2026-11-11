@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { Linking } from "react-native";
 
-import { checkForUpdate } from "../src/lib/updates";
+import { checkForUpdate, releaseSource } from "../src/lib/updates";
 import { UpdateNotice } from "../src/shell/UpdateBanner";
 
 const source = {
@@ -63,6 +63,25 @@ it("never looks from a build made outside CI", async () => {
     await checkForUpdate({ build: 41, manifestUrl: "" }, fetcher),
   ).toBeNull();
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("a store build never looks for an update, even with an address", async () => {
+  const fetcher = manifest({ build: 99, url: "https://x" });
+  const store = releaseSource({
+    distribution: "store",
+    build: "41",
+    updateUrl: source.manifestUrl,
+  });
+  expect(store).toEqual({ build: 41, manifestUrl: "" });
+  expect(await checkForUpdate(store, fetcher)).toBeNull();
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(
+    releaseSource({
+      distribution: "direct",
+      build: "41",
+      updateUrl: source.manifestUrl,
+    }),
+  ).toEqual(source);
 });
 
 it("shows the update; Update downloads it and Later hides it", async () => {

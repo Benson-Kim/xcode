@@ -42,7 +42,6 @@ export function PhoneStep({
   busy,
   onChange,
   onContinue,
-  onFirstTime,
 }: {
   value: string;
   error: string;
@@ -51,7 +50,6 @@ export function PhoneStep({
   busy: boolean;
   onChange: (value: string) => void;
   onContinue: () => void;
-  onFirstTime: () => void;
 }) {
   const { colors } = useTheme();
   return (
@@ -86,11 +84,6 @@ export function PhoneStep({
       <Text style={[styles.small, { color: colors.grey, textAlign: "center" }]}>
         New here? Your admin adds you with your mobile number and email address.
       </Text>
-      <LinkRow>
-        <LinkButton align="start" disabled={busy} onPress={onFirstTime}>
-          First time here? Set your PIN
-        </LinkButton>
-      </LinkRow>
       {__DEV__ && (
         <DemoBox>
           <Text weight="bold" style={styles.small}>
@@ -111,8 +104,65 @@ export function PhoneStep({
   );
 }
 
+// An invitation link opened the app. Nothing is sent until the person confirms their number.
+export function InviteStep({
+  value,
+  error,
+  banner,
+  trustedName,
+  busy,
+  onChange,
+  onContinue,
+  onCancel,
+}: {
+  value: string;
+  error: string;
+  banner: string;
+  // The person this phone is trusted for, who is signed out of it once the invitation matches.
+  trustedName: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onContinue: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <View style={styles.screen}>
+      <Heading title="Set up XCODE">
+        You were invited to XCODE. Enter the mobile number your admin added for
+        you, then choose your PIN.
+      </Heading>
+      {trustedName ? (
+        <Banner>
+          {`This phone is set up for ${trustedName}. Setting up your access signs ${trustedName} out of it.`}
+        </Banner>
+      ) : null}
+      <Field
+        label="Mobile number"
+        value={value}
+        error={error}
+        placeholder="0712 345 678"
+        keyboardType="phone-pad"
+        autoComplete="tel"
+        textContentType="telephoneNumber"
+        returnKeyType="next"
+        autoFocus
+        onChangeText={onChange}
+        onSubmitEditing={onContinue}
+      />
+      {banner ? <Banner>{banner}</Banner> : null}
+      <Button busy={busy} busyText="Checking…" onPress={onContinue}>
+        Continue
+      </Button>
+      <LinkButton disabled={busy} onPress={onCancel}>
+        Cancel
+      </LinkButton>
+    </View>
+  );
+}
+
 export function CodeStep({
   lead,
+  invitation,
   email,
   value,
   error,
@@ -126,6 +176,8 @@ export function CodeStep({
   onCancel,
 }: {
   lead: string;
+  // No code was sent: the first-setup code is in the invitation email.
+  invitation: boolean;
   email: string;
   value: string;
   error: string;
@@ -142,10 +194,21 @@ export function CodeStep({
   return (
     <View style={styles.screen}>
       <Heading title="Check your email">
-        {lead}We sent a code to{" "}
-        {email ? <Text weight="semibold">{email}</Text> : "the email"}
-        {email ? ", the email" : ""} your admin registered. It works for 10
-        minutes.
+        {invitation ? (
+          <>
+            Type the code from your XCODE invitation email
+            {email ? " to " : ""}
+            {email ? <Text weight="semibold">{email}</Text> : ""}. It works
+            until the invitation expires.
+          </>
+        ) : (
+          <>
+            {lead}We sent a code to{" "}
+            {email ? <Text weight="semibold">{email}</Text> : "the email"}
+            {email ? ", the email" : ""} your admin registered. It works for 10
+            minutes.
+          </>
+        )}
       </Heading>
       <Field
         label="6 digit code"

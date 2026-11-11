@@ -3,7 +3,9 @@ import { AuthError, type AuthStatus } from "@xcode/shared/auth";
 import {
   expectStatus,
   failureMessage,
+  isBlocked,
   isPaused,
+  isPinLocked,
   isRefused,
   profileFailedMessage,
   type CheckedOperation,
@@ -76,21 +78,21 @@ describe("profileFailedMessage", () => {
 
 describe("expectStatus", () => {
   const allowed: [CheckedOperation, AuthStatus[]][] = [
-    ["sign-in", ["authenticated", "verification_required"]],
-    ["unlock", ["authenticated", "verification_required"]],
-    ["verify-device", ["authenticated"]],
-    ["setup-pin/request", ["check_email"]],
-    ["setup-pin/verify", ["code_verified"]],
-    ["setup-pin/complete", ["authenticated"]],
-    ["pin-reset/request", ["check_email"]],
-    ["pin-reset/verify", ["code_verified"]],
-    ["pin-reset/complete", ["authenticated"]],
+    ["start", ["pin_required", "verification_required"]],
+    ["pin", ["authenticated", "verification_required"]],
+    ["code", ["authenticated", "code_verified", "code_resent"]],
+    ["code/resend", ["verification_required"]],
+    ["pin/forgot", ["verification_required"]],
+    ["pin/new", ["authenticated"]],
   ];
   const every: AuthStatus[] = [
     "authenticated",
     "verification_required",
-    "check_email",
+    "pin_required",
     "code_verified",
+    "code_resent",
+    "check_email",
+    "pin_changed",
     "signed_out",
     "device_revoked",
   ];
@@ -115,7 +117,7 @@ describe("expectStatus", () => {
       accessToken: "a",
       refreshToken: "r",
     };
-    expect(expectStatus("sign-in", answer)).toBe(answer);
+    expect(expectStatus("pin", answer)).toBe(answer);
   });
 });
 
@@ -128,5 +130,15 @@ describe("error kinds", () => {
     expect(isRefused(refused)).toBe(true);
     expect(isRefused(paused)).toBe(false);
     expect(isRefused(new Error("x"))).toBe(false);
+  });
+
+  it("tells a locked PIN and a blocked person apart", () => {
+    const locked = new AuthError({ status: "pin_locked" }, 423);
+    const blocked = new AuthError({ status: "blocked" }, 403);
+    expect(isPinLocked(locked)).toBe(true);
+    expect(isPinLocked(blocked)).toBe(false);
+    expect(isBlocked(blocked)).toBe(true);
+    expect(isBlocked(locked)).toBe(false);
+    expect(isPaused(locked)).toBe(false);
   });
 });

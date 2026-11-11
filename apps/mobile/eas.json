@@ -1,0 +1,23 @@
+{
+  "cli": { "appVersionSource": "remote" },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_DISTRIBUTION": "direct",
+        "EXPO_PUBLIC_API_URL": "https://api.xcode.mgr.priori.co.ke",
+        "EXPO_PUBLIC_WEB_URL": "https://xcode.mgr.priori.co.ke"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_DISTRIBUTION": "store",
+        "EXPO_PUBLIC_API_URL": "https://api.xcode.mgr.priori.co.ke",
+        "EXPO_PUBLIC_WEB_URL": "https://xcode.mgr.priori.co.ke"
+      }
+    }
+  },
+  "submit": { "production": {} }
+}

@@ -29,15 +29,13 @@ export const profileFailedMessage = (consumedCode: boolean) =>
 
 // What each call may answer with a 2xx. Anything else is a fault in the service, never a result to act on.
 const EXPECTED = {
-  "sign-in": ["authenticated", "verification_required"],
-  unlock: ["authenticated", "verification_required"],
-  "verify-device": ["authenticated"],
-  "setup-pin/request": ["check_email"],
-  "setup-pin/verify": ["code_verified"],
-  "setup-pin/complete": ["authenticated"],
-  "pin-reset/request": ["check_email"],
-  "pin-reset/verify": ["code_verified"],
-  "pin-reset/complete": ["authenticated"],
+  start: ["pin_required", "verification_required"],
+  pin: ["authenticated", "verification_required"],
+  code: ["authenticated", "code_verified", "code_resent"],
+  "code/resend": ["verification_required"],
+  "pin/forgot": ["verification_required"],
+  "pin/new": ["authenticated"],
+  "invite/redeem": ["verification_required"],
 } as const satisfies Record<string, readonly AuthStatus[]>;
 
 export type CheckedOperation = keyof typeof EXPECTED;
@@ -56,3 +54,10 @@ export const isPaused = (error: unknown): error is AuthError =>
 
 export const isRefused = (error: unknown): error is AuthError =>
   error instanceof AuthError && error.httpStatus === 401;
+
+// Too many wrong PINs on every device: only a PIN reset signs the person in again.
+export const isPinLocked = (error: unknown): error is AuthError =>
+  error instanceof AuthError && error.response.status === "pin_locked";
+
+export const isBlocked = (error: unknown): error is AuthError =>
+  error instanceof AuthError && error.response.status === "blocked";

@@ -2,9 +2,12 @@ import type { Dispatch } from "react";
 
 import {
   AuthError,
+  inviteProblemText,
+  pinProblemText,
   validatePin,
   type AuthRequest,
   type AuthResponse,
+  type CodePurpose,
 } from "@xcode/shared/auth";
 import { formatPhone, normalisePhone, phoneError } from "@xcode/shared/format";
 
@@ -21,15 +24,21 @@ import {
   matchesPinCheck,
   offlineUnlockUntil,
   savePinCheck,
-  startPinMatch,
   type StoredPerson,
 } from "../lib/storage";
 import { fetchPerson } from "../session";
-import type { Attempts, Outcome } from "./attempts";
+import {
+  GONE_CODE_MESSAGE,
+  wrongPinMessage,
+  type Attempts,
+  type Outcome,
+} from "./attempts";
 import {
   expectStatus,
   failureMessage,
+  isBlocked,
   isPaused,
+  isPinLocked,
   isRefused,
   profileFailedMessage,
   type CheckedOperation,
@@ -38,12 +47,10 @@ import {
   isPersonalPad,
   limitsOf,
   padLimit,
-  trustedHere,
   type Action,
   type AuthState,
   type CodeScreen,
   type Flow,
-  type NewPinFlow,
   type PadScreen,
 } from "./authFlowState";
 import type { DelayedSubmit, OperationLock } from "./hooks";
@@ -60,7 +67,28 @@ export type AuthContext = {
   onForgotten(): void;
 };
 
-const DEAD_CODE = "This code no longer works. Tap Send a new code.";
+// The phone is the person's own, so every code it confirms keeps it trusted.
+const TRUST_THIS_PHONE = true;
+
+const PURPOSE_OF: Record<Flow, CodePurpose> = {
+  signin: "new_device",
+  setup: "first_setup",
+  reset: "pin_reset",
+};
+
+const FLOW_OF: Record<CodePurpose, Flow> = {
+  new_device: "signin",
+  first_setup: "setup",
+  pin_reset: "reset",
+};
+
+const unexpected = () => new AuthError({ status: "unexpected_response" }, 200);
+
+function flowOf(result: AuthResponse): Flow {
+  const flow = result.purpose ? FLOW_OF[result.purpose] : undefined;
+  if (!flow) throw unexpected();
+  return flow;
+}
 
 async function send(
   operation: CheckedOperation,
@@ -70,9 +98,34 @@ async function send(
 }
 
 const codeDetails = (result: AuthResponse) => ({
+  invitation: result.invitation === true,
   maskedEmail: result.maskedEmail || "",
   developmentCode: result.developmentCode || "",
 });
+
+// A code the server sent: confirming this phone after the PIN, or setting a new PIN.
+function showCode(
+  ctx: AuthContext,
+  result: AuthResponse,
+  flow: Flow,
+  challengePin: string,
+) {
+  if (flow === "signin")
+    ctx.dispatch({
+      type: "codeRequested",
+      flow,
+      challengePin,
+      lead: "New phone. ",
+      ...codeDetails(result),
+    });
+  else
+    ctx.dispatch({
+      type: "codeRequested",
+      flow,
+      lead: "",
+      ...codeDetails(result),
+    });
+}
 
 // Everything after the server accepted a sign-in.
 async function finishSignIn(
@@ -84,8 +137,7 @@ async function finishSignIn(
   const { phone } = ctx.state();
   try {
     await keepSession(phone, result);
-    // Deriving the offline PIN check takes seconds on a phone, so signing in goes ahead without it.
-    void savePinCheck(usedPin, result.accessToken).catch(() => undefined);
+    await savePinCheck(usedPin, result.accessToken).catch(() => undefined);
     await ctx.attempts.clear(phone);
     const person = await fetchPerson(phone, usedPin.length);
     if (!ctx.alive()) return;
@@ -118,45 +170,14 @@ function pauseFromServer(ctx: AuthContext, error: AuthError) {
   });
 }
 
-// The phone's own PIN check takes seconds. When the server is slow to answer an unlock, it starts while the request
-// is still waiting, so the answer is ready if the server turns out to be out of reach. A quick answer never costs one.
-const EARLY_CHECK_AFTER_MS = 800;
-
-type EarlyMatch = { result: () => Promise<boolean | null>; cancel: () => void };
-
-function earlyMatch(entered: string): EarlyMatch {
-  let started: ReturnType<typeof startPinMatch> | undefined;
-  const timer = setTimeout(
-    () => (started = startPinMatch(entered)),
-    EARLY_CHECK_AFTER_MS,
-  );
-  return {
-    // The check started while waiting, or one now if the request failed before it began or it was stopped.
-    result: () => {
-      clearTimeout(timer);
-      return started
-        ? started.result.catch(() => matchesPinCheck(entered))
-        : matchesPinCheck(entered);
-    },
-    cancel: () => {
-      clearTimeout(timer);
-      started?.cancel();
-    },
-  };
-}
-
-const matchOf = (entered: string, early?: EarlyMatch) =>
-  early ? early.result() : matchesPinCheck(entered);
-
 // PIN unlock works without internet
 async function unlockOffline(
   ctx: AuthContext,
   entered: string,
   failure: unknown,
-  early?: EarlyMatch,
 ) {
   const { person, phone } = ctx.state();
-  const match = await matchOf(entered, early);
+  const match = await matchesPinCheck(entered);
   if (match === null || !person)
     return ctx.dispatch({
       type: "padError",
@@ -186,28 +207,38 @@ async function failPad(
   error: unknown,
   entered: string,
   mode: "enter" | "unlock",
-  early?: EarlyMatch,
 ) {
   if (isPaused(error)) return pauseFromServer(ctx, error);
+  // The server counts wrong PINs across every device; at its limit only a PIN reset helps.
+  if (isPinLocked(error) || isBlocked(error))
+    return ctx.dispatch({ type: "padError", message: error.message });
   // The PIN this phone last signed in with, refused online: the person's number (or PIN) was changed
-  // elsewhere, so another try cannot help and must not count toward a pause.
-  if (isRefused(error) && mode === "unlock" && (await matchOf(entered, early)))
+  // elsewhere, so another try cannot help.
+  if (isRefused(error) && mode === "unlock" && (await matchesPinCheck(entered)))
     return ctx.dispatch({
       type: "padError",
       message:
         'This phone can no longer unlock with your PIN. If your mobile number changed, choose "Not you? Switch user" and sign in again.',
     });
-  if (isRefused(error))
-    return showOutcome(
-      ctx,
-      ctx.attempts.wrongOnline(ctx.state().phone, limitsOf(ctx.state())),
-    );
+  if (isRefused(error)) {
+    const left = error.response.triesLeft;
+    return typeof left === "number"
+      ? ctx.dispatch({
+          type: "padError",
+          message: wrongPinMessage(left),
+          shake: true,
+        })
+      : showOutcome(
+          ctx,
+          ctx.attempts.wrongOnline(ctx.state().phone, limitsOf(ctx.state())),
+        );
+  }
   if (
     mode === "unlock" &&
     (error instanceof OfflineError ||
       (error instanceof AuthError && error.httpStatus >= 500))
   )
-    return unlockOffline(ctx, entered, error, early);
+    return unlockOffline(ctx, entered, error);
   ctx.dispatch({
     type: "padError",
     message: failureMessage(
@@ -217,50 +248,29 @@ async function failPad(
   });
 }
 
+// The PIN signs in. A phone without this person's trusted-device token is confirmed with an emailed code first.
 async function checkPin(
   ctx: AuthContext,
   entered: string,
   mode: "enter" | "unlock",
 ) {
   const { phone } = ctx.state();
-  const early = mode === "unlock" ? earlyMatch(entered) : undefined;
   try {
-    const result = await send(mode === "unlock" ? "unlock" : "sign-in", {
-      phoneNumber: phone,
-      pin: entered,
-    });
-    early?.cancel();
-    if (result.status === "verification_required")
-      ctx.dispatch({
-        type: "codeRequested",
-        flow: "signin",
-        challengePin: entered,
-        lead: "New phone. ",
-        ...codeDetails(result),
-      });
-    else await finishSignIn(ctx, result, entered, false);
+    const result = await send("pin", { phoneNumber: phone, pin: entered });
+    if (result.status === "authenticated")
+      await finishSignIn(ctx, result, entered, false);
+    else showCode(ctx, result, flowOf(result), entered);
   } catch (error) {
-    await failPad(ctx, error, entered, mode, early);
-    early?.cancel();
+    await failPad(ctx, error, entered, mode);
   }
 }
 
-async function choosePin(ctx: AuthContext, entered: string, flow: NewPinFlow) {
-  const state = ctx.state();
-  if (validatePin(entered, state.pinLength))
+// Reusing the old PIN is refused by the server once the new one is confirmed.
+function choosePin(ctx: AuthContext, entered: string) {
+  if (validatePin(entered, ctx.state().pinLength))
     return ctx.dispatch({
       type: "padError",
       message: "Too easy to guess. Choose different numbers.",
-      shake: true,
-    });
-  if (
-    flow === "reset" &&
-    trustedHere(state) &&
-    (await matchesPinCheck(entered))
-  )
-    return ctx.dispatch({
-      type: "padError",
-      message: "Pick a PIN different from your old one.",
       shake: true,
     });
   ctx.dispatch({ type: "pinChosen", pin: entered });
@@ -272,19 +282,24 @@ async function savePin(
   pad: Extract<PadScreen, { mode: "confirm" }>,
 ) {
   try {
-    const result = await send(
-      pad.flow === "setup" ? "setup-pin/complete" : "pin-reset/complete",
-      { phoneNumber: ctx.state().phone, pin: entered, code: pad.code },
-    );
+    const result = await send("pin/new", {
+      phoneNumber: ctx.state().phone,
+      purpose: PURPOSE_OF[pad.flow],
+      code: pad.code,
+      pin: entered,
+      trustDevice: TRUST_THIS_PHONE,
+    });
     await finishSignIn(ctx, result, entered, true);
   } catch (error) {
-    if (error instanceof AuthError && error.response.status === "invalid_pin")
-      ctx.dispatch({
-        type: "pinTooShort",
-        minimum: error.response.minimumPinLength ?? 4,
-      });
-    else if (isRefused(error))
-      ctx.dispatch({ type: "codeDead", message: DEAD_CODE });
+    if (error instanceof AuthError && error.response.status === "invalid_pin") {
+      const { pinProblem, minimumPinLength } = error.response;
+      ctx.dispatch(
+        pinProblem && pinProblem !== "length"
+          ? { type: "pinRefused", message: pinProblemText(pinProblem) }
+          : { type: "pinTooShort", minimum: minimumPinLength ?? 4 },
+      );
+    } else if (isRefused(error))
+      ctx.dispatch({ type: "codeDead", message: GONE_CODE_MESSAGE });
     else ctx.dispatch({ type: "padError", message: failureMessage(error) });
   }
 }
@@ -295,7 +310,7 @@ async function submitPin(ctx: AuthContext, entered: string) {
     if (pad.step !== "pad") return;
     ctx.dispatch({ type: "pinSubmitted" });
     if (isPersonalPad(pad)) return await checkPin(ctx, entered, pad.mode);
-    if (pad.mode === "choose") return await choosePin(ctx, entered, pad.flow);
+    if (pad.mode === "choose") return choosePin(ctx, entered);
     if (entered === pad.chosen) return await savePin(ctx, entered, pad);
     ctx.dispatch({ type: "pinsDiffer" });
   } finally {
@@ -303,23 +318,39 @@ async function submitPin(ctx: AuthContext, entered: string) {
   }
 }
 
-async function requestCode(
-  ctx: AuthContext,
-  flow: NewPinFlow,
-  number?: string,
-) {
+// The number decides what comes next: the PIN, or a code to set one (from the invitation email when there is one).
+async function start(ctx: AuthContext, phoneNumber: string) {
   if (!ctx.lock.acquire()) return;
   try {
-    const result = await send(
-      flow === "setup" ? "setup-pin/request" : "pin-reset/request",
-      { phoneNumber: number ?? ctx.state().phone },
-    );
-    ctx.dispatch({
-      type: "codeRequested",
-      flow,
-      lead: "",
-      ...codeDetails(result),
-    });
+    const result = await send("start", { phoneNumber });
+    if (result.status === "pin_required")
+      return ctx.dispatch({ type: "padOpened", mode: "enter" });
+    const flow = flowOf(result);
+    if (flow === "signin") throw unexpected();
+    showCode(ctx, result, flow, "");
+  } catch (error) {
+    if (isPinLocked(error)) {
+      // The pad is where "Forgot PIN?" is.
+      ctx.dispatch({ type: "padOpened", mode: "enter" });
+      ctx.dispatch({ type: "padError", message: error.message });
+    } else
+      ctx.dispatch({
+        type: "errorShown",
+        message: failureMessage(
+          error,
+          "No internet. Signing in needs network.",
+        ),
+      });
+  } finally {
+    ctx.lock.release();
+  }
+}
+
+async function forgotPin(ctx: AuthContext) {
+  if (!ctx.lock.acquire()) return;
+  try {
+    const result = await send("pin/forgot", { phoneNumber: ctx.state().phone });
+    showCode(ctx, result, "reset", "");
   } catch (error) {
     ctx.dispatch({
       type: "errorShown",
@@ -338,15 +369,19 @@ async function verifyCode(
   screen: CodeScreen,
   entered: string,
 ) {
-  const phoneNumber = ctx.state().phone;
+  const result = await send("code", {
+    phoneNumber: ctx.state().phone,
+    purpose: PURPOSE_OF[screen.flow],
+    code: entered,
+    trustDevice: TRUST_THIS_PHONE,
+  });
+  if (result.status === "code_resent")
+    return ctx.dispatch({ type: "codeResent" });
   if (screen.flow === "signin") {
-    const result = await send("verify-device", { phoneNumber, code: entered });
+    if (result.status !== "authenticated") throw unexpected();
     return finishSignIn(ctx, result, screen.challengePin, true);
   }
-  await send(
-    screen.flow === "setup" ? "setup-pin/verify" : "pin-reset/verify",
-    { phoneNumber, code: entered },
-  );
+  if (result.status !== "code_verified") throw unexpected();
   ctx.dispatch({ type: "codeVerified", code: entered });
 }
 
@@ -355,7 +390,7 @@ async function confirmCode(ctx: AuthContext, typed?: string) {
   if (screen.step !== "code" || ctx.lock.held()) return;
   const entered = typed ?? screen.value;
   const problem = screen.dead
-    ? DEAD_CODE
+    ? GONE_CODE_MESSAGE
     : entered.length === 6
       ? ""
       : entered
@@ -368,7 +403,7 @@ async function confirmCode(ctx: AuthContext, typed?: string) {
   } catch (error) {
     ctx.dispatch(
       isRefused(error)
-        ? { type: "codeWrong" }
+        ? { type: "codeWrong", triesLeft: error.response.triesLeft ?? null }
         : { type: "errorShown", message: failureMessage(error) },
     );
   } finally {
@@ -376,25 +411,25 @@ async function confirmCode(ctx: AuthContext, typed?: string) {
   }
 }
 
+// A fresh code for the same purpose. The answer never names the address, so the screen keeps the one it had.
 async function resend(ctx: AuthContext) {
   const screen = ctx.state().screen;
-  if (screen.step !== "code") return;
-  if (screen.flow !== "signin") return requestCode(ctx, screen.flow);
-  if (!ctx.lock.acquire()) return;
+  if (screen.step !== "code" || !ctx.lock.acquire()) return;
   try {
-    const result = await send("sign-in", {
+    const result = await send("code/resend", {
       phoneNumber: ctx.state().phone,
-      pin: screen.challengePin,
+      purpose: PURPOSE_OF[screen.flow],
     });
-    if (result.status === "verification_required")
-      ctx.dispatch({
-        type: "codeRequested",
-        flow: "signin",
-        challengePin: screen.challengePin,
-        lead: "New phone. ",
-        ...codeDetails(result),
-      });
-    else await finishSignIn(ctx, result, screen.challengePin, false);
+    showCode(
+      ctx,
+      {
+        ...result,
+        invitation: false,
+        maskedEmail: result.maskedEmail || screen.maskedEmail,
+      },
+      screen.flow,
+      screen.flow === "signin" ? screen.challengePin : "",
+    );
   } catch (error) {
     if (isPaused(error)) pauseFromServer(ctx, error);
     else ctx.dispatch({ type: "errorShown", message: failureMessage(error) });
@@ -419,13 +454,46 @@ async function switchUser(ctx: AuthContext) {
   }
 }
 
-function continueWithPhone(ctx: AuthContext, flow: Flow) {
+// The invitation link and the number the person confirmed. A phone trusted for someone else stops being theirs only
+// once the invitation matched.
+async function redeemInvite(ctx: AuthContext) {
+  const { screen, phoneInput, person } = ctx.state();
+  if (screen.step !== "invite") return;
+  const digits = normalisePhone(phoneInput);
+  const invalid = phoneError(digits);
+  if (invalid) return ctx.dispatch({ type: "phoneRejected", message: invalid });
+  if (!ctx.lock.acquire()) return;
+  try {
+    const result = await send("invite/redeem", {
+      token: screen.token,
+      phoneNumber: digits,
+    });
+    if (result.purpose !== "first_setup" || !result.code) throw unexpected();
+    if (person) await forgetThisPhone();
+    if (!ctx.alive()) return;
+    ctx.dispatch({ type: "phoneAccepted", phone: digits });
+    ctx.dispatch({ type: "inviteRedeemed", code: result.code });
+  } catch (error) {
+    ctx.dispatch({
+      type: "errorShown",
+      message: isRefused(error)
+        ? inviteProblemText(error.response.inviteProblem)
+        : failureMessage(
+            error,
+            "No internet. Setting up your access needs network.",
+          ),
+    });
+  } finally {
+    ctx.lock.release();
+  }
+}
+
+function continueWithPhone(ctx: AuthContext) {
   const digits = normalisePhone(ctx.state().phoneInput);
   const invalid = phoneError(digits);
   if (invalid) return ctx.dispatch({ type: "phoneRejected", message: invalid });
   ctx.dispatch({ type: "phoneAccepted", phone: digits });
-  if (flow === "signin") ctx.dispatch({ type: "padOpened", mode: "enter" });
-  else void requestCode(ctx, flow, digits);
+  void start(ctx, digits);
 }
 
 function press(ctx: AuthContext, digit: string) {
@@ -465,8 +533,13 @@ export function createAuthActions(ctx: AuthContext) {
         type: "phoneEdited",
         input: formatPhone(normalisePhone(input)),
       }),
-    continueWithPhone: (flow: Flow) => continueWithPhone(ctx, flow),
-    requestReset: () => void requestCode(ctx, "reset"),
+    continueWithPhone: () => continueWithPhone(ctx),
+    openInvite: (token: string) => {
+      if (!ctx.lock.held()) ctx.dispatch({ type: "inviteOpened", token });
+    },
+    redeemInvite: () => void redeemInvite(ctx),
+    cancelInvite: () => ctx.dispatch({ type: "inviteCancelled" }),
+    requestReset: () => void forgotPin(ctx),
     press: (digit: string) => press(ctx, digit),
     backspace: () => {
       if (!ctx.lock.held()) ctx.dispatch({ type: "backspace" });

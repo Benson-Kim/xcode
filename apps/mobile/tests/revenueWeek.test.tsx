@@ -32,7 +32,7 @@ async function signIn(routes: (api: ReturnType<typeof fakeApi>) => void) {
   const clerk = { ...people.clerk, userId: `u-week-${next}` };
   await trustPhone(clerk, `07120001${next}0`);
   const api = fakeApi();
-  api.on("auth/unlock", [200, tokens(2)]);
+  api.on("auth/pin", [200, tokens(2)]);
   api.on("auth/session", [200, clerk]);
   api.on("setup/access/catalog", [200, catalog]);
   routes(api);

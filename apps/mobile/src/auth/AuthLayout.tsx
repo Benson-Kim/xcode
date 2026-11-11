@@ -6,9 +6,10 @@ import {
   useWindowDimensions,
 } from "react-native";
 
+import { appVersion } from "../lib/appVersion";
 import { Brand, Text, useTheme } from "../ui";
 
-export const VERSION = "XCODE Mobile v0.9";
+export const VERSION = `XCODE Mobile v${appVersion}`;
 
 export type BrandInfo = {
   name?: string;

@@ -3,14 +3,15 @@ import * as Crypto from "expo-crypto";
 import type { PersonIdentity } from "@xcode/shared/auth";
 import type { SessionTokens } from "@xcode/shared/auth";
 
-import { pbkdf2Sha256 } from "./pbkdf2";
 import { vault } from "./vault";
 
 const keys = {
   device: "xcode.device",
+  deviceToken: "xcode.device-token",
   session: "xcode.session",
   person: "xcode.person",
   pinCheck: "xcode.pin-check",
+  pinKey: "xcode.pin-key",
   offlineTries: "xcode.offline-tries",
   captureList: "xcode.capture-list",
 };
@@ -72,6 +73,14 @@ export function getDeviceId(): Promise<string> {
     });
   return devicePromise;
 }
+
+// The trusted-device token the API gave after a code: with it, the PIN alone signs the person in on this phone.
+export async function loadDeviceToken(): Promise<string> {
+  return (await vault.get(keys.deviceToken)) ?? "";
+}
+
+export const saveDeviceToken = (token: string) =>
+  vault.set(keys.deviceToken, token);
 
 // Reads a stored JSON value, removing it when it is corrupt or fails the check rather than trusting it.
 export async function read<T>(
@@ -171,8 +180,12 @@ export async function savePinPolicy(policy: PinPolicy): Promise<void> {
     });
 }
 
-const PIN_CHECK_VERSION = 2;
-const PBKDF2_ITERATIONS = 100_000;
+// A 4 to 6 digit PIN has too few possibilities for any number of hashing rounds to protect a copied check, so the
+// check is keyed instead: HMAC-SHA256 under a random key that never leaves this phone's Keychain or Keystore. A check
+// read without the key reveals nothing, and the offline try limit bounds guessing on the phone itself. Checks of an
+// earlier version are dropped; the next online unlock saves a new one.
+const PIN_CHECK_VERSION = 3;
+const SHA256_BLOCK_BYTES = 64;
 
 function hexBytes(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -185,34 +198,62 @@ function fromHex(hex: string): Uint8Array {
   return bytes;
 }
 
-async function pbkdf2(
-  pin: string,
-  saltHex: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  return hexBytes(
-    await pbkdf2Sha256(
-      new TextEncoder().encode(pin),
-      fromHex(saltHex),
-      PBKDF2_ITERATIONS,
-      undefined,
-      signal,
-    ),
+const sha256 = async (data: Uint8Array<ArrayBuffer>) =>
+  new Uint8Array(
+    await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, data),
   );
+
+// RFC 2104 over the platform's native SHA-256, for a key no longer than one block.
+export async function hmacSha256(
+  key: Uint8Array,
+  message: Uint8Array,
+): Promise<Uint8Array> {
+  const inner = new Uint8Array(SHA256_BLOCK_BYTES + message.length);
+  const outer = new Uint8Array(SHA256_BLOCK_BYTES + 32);
+  for (let i = 0; i < SHA256_BLOCK_BYTES; i++) {
+    inner[i] = (key[i] ?? 0) ^ 0x36;
+    outer[i] = (key[i] ?? 0) ^ 0x5c;
+  }
+  inner.set(message, SHA256_BLOCK_BYTES);
+  outer.set(await sha256(inner), SHA256_BLOCK_BYTES);
+  return sha256(outer);
 }
 
-async function digestV1(salt: string, pin: string) {
-  return Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    `${salt}:${pin}`,
-  );
+async function loadPinKey(): Promise<Uint8Array | null> {
+  const stored = await vault.get(keys.pinKey);
+  return stored && /^[0-9a-f]{64}$/.test(stored) ? fromHex(stored) : null;
+}
+
+async function ensurePinKey(): Promise<Uint8Array> {
+  const existing = await loadPinKey();
+  if (existing) return existing;
+  const key = Crypto.getRandomBytes(32);
+  await vault.set(keys.pinKey, hexBytes(key));
+  return key;
+}
+
+async function pinDigest(key: Uint8Array, saltHex: string, pin: string) {
+  const salt = fromHex(saltHex);
+  const pinBytes = new TextEncoder().encode(pin);
+  const message = new Uint8Array(salt.length + pinBytes.length);
+  message.set(salt);
+  message.set(pinBytes, salt.length);
+  return hexBytes(await hmacSha256(key, message));
+}
+
+function sameText(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let i = 0; i < a.length; i++)
+    difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return difference === 0;
 }
 
 interface PinCheck {
-  version?: number;
+  version: number;
   salt: string;
   hash: string;
-  // Who signed in with the PIN, and at which security version. Absent on checks saved before it was kept.
+  // Who signed in with the PIN, and at which security version. Absent when the token carried neither.
   stamp?: string;
 }
 
@@ -250,10 +291,15 @@ function tokenStamp(accessToken: string): string | undefined {
 const readPinCheck = () =>
   read<PinCheck>(
     keys.pinCheck,
-    (v) => typeof v.salt === "string" && typeof v.hash === "string",
+    (v) =>
+      v.version === PIN_CHECK_VERSION &&
+      typeof v.salt === "string" &&
+      /^[0-9a-f]{32}$/.test(v.salt) &&
+      typeof v.hash === "string" &&
+      /^[0-9a-f]{64}$/.test(v.hash),
   );
 
-// Sign-in does not wait for a check to be derived. Reading waits for a save in progress, and a save still running
+// Saves run one at a time, so two can never create different keys. Reading waits for them, and a save still running
 // when the person is forgotten writes nothing.
 let pinCheckEpoch = 0;
 let pinCheckSaving: Promise<unknown> = Promise.resolve();
@@ -267,12 +313,13 @@ export function savePinCheck(
 ): Promise<void> {
   const epoch = ++pinCheckEpoch;
   const stamp = accessToken ? tokenStamp(accessToken) : undefined;
-  const save = (async () => {
+  const save = pinCheckSaving.then(async () => {
     const current = await readPinCheck();
     if (stamp && current?.stamp === stamp) return;
     if (current) await vault.remove(keys.pinCheck);
+    const key = await ensurePinKey();
     const salt = hexBytes(Crypto.getRandomBytes(16));
-    const hash = await pbkdf2(pin, salt);
+    const hash = await pinDigest(key, salt, pin);
     if (epoch !== pinCheckEpoch) return;
     const writing = write(keys.pinCheck, {
       version: PIN_CHECK_VERSION,
@@ -282,34 +329,25 @@ export function savePinCheck(
     });
     pinCheckWriting = writing.catch(() => undefined);
     await writing;
-  })();
+  });
   pinCheckSaving = save.catch(() => undefined);
   return save;
 }
 
-export async function matchesPinCheck(
-  pin: string,
-  signal?: AbortSignal,
-): Promise<boolean | null> {
+export async function matchesPinCheck(pin: string): Promise<boolean | null> {
   await pinCheckSaving;
   const check = await readPinCheck();
-  if (!check) return null;
-  const v = check.version ?? 1;
-  if (v === 1) return (await digestV1(check.salt, pin)) === check.hash;
-  return (await pbkdf2(pin, check.salt, signal)) === check.hash;
+  const key = check && (await loadPinKey());
+  if (!check || !key) return null;
+  return sameText(await pinDigest(key, check.salt, pin), check.hash);
 }
 
-// Starts checking a PIN against this phone's own check the moment it is complete, alongside the request to the
-// server, so that if the server cannot be reached the answer is already there instead of taking seconds more.
-// Cancel it once the server has answered.
-export function startPinMatch(pin: string): {
-  result: Promise<boolean | null>;
-  cancel: () => void;
-} {
-  const controller = new AbortController();
-  const result = matchesPinCheck(pin, controller.signal);
-  result.catch(() => undefined);
-  return { result, cancel: () => controller.abort() };
+// At the offline try limit the check goes, so resetting the stored count gains nothing: only an online unlock, which
+// saves a new check, lets this phone unlock offline again.
+export async function forgetPinCheck(): Promise<void> {
+  pinCheckEpoch++;
+  await pinCheckWriting;
+  await vault.remove(keys.pinCheck);
 }
 
 export async function loadOfflineTries(): Promise<OfflineTries> {
@@ -389,8 +427,10 @@ export async function forgetPerson(): Promise<void> {
   await pinCheckWriting;
   for (const key of [
     keys.session,
+    keys.deviceToken,
     keys.person,
     keys.pinCheck,
+    keys.pinKey,
     keys.offlineTries,
     keys.captureList,
   ])

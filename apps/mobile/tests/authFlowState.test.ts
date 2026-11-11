@@ -41,12 +41,13 @@ const signinCode = (secret: string) =>
       flow: "signin",
       challengePin: secret,
       lead: "New phone. ",
+      invitation: false,
       maskedEmail: "w***@example.com",
       developmentCode: "",
     },
   );
 
-const setupCode = () =>
+const setupCode = (invitation = false) =>
   run(
     fresh(),
     { type: "phoneAccepted", phone: "0700111222" },
@@ -54,6 +55,7 @@ const setupCode = () =>
       type: "codeRequested",
       flow: "setup",
       lead: "",
+      invitation,
       maskedEmail: "",
       developmentCode: "",
     },
@@ -243,6 +245,19 @@ describe("choosing a new PIN", () => {
     expect(JSON.stringify(state)).not.toContain("5937");
   });
 
+  it("goes back to choosing, with a shake and the server's reason, when it refuses the PIN", () => {
+    const state = run(confirming("1234"), {
+      type: "pinRefused",
+      message: "Choose a PIN that is harder to guess.",
+    });
+    expect(pad(state)).toMatchObject({
+      mode: "choose",
+      error: "Choose a PIN that is harder to guess.",
+    });
+    expect(state.shake).toBe(1);
+    expect(JSON.stringify(state)).not.toContain("1234");
+  });
+
   it("starts again without the first entry", () => {
     const state = run(confirming("5937"), { type: "startAgain" });
     expect(pad(state)).toMatchObject({ mode: "choose", error: "" });
@@ -281,16 +296,20 @@ describe("choosing a new PIN", () => {
 });
 
 describe("the email code", () => {
-  it("starts with a full resend wait and no tries used", () => {
+  it("starts with a full resend wait", () => {
     const state = setupCode();
     expect(state.screen).toMatchObject({
       step: "code",
       flow: "setup",
       value: "",
       dead: false,
+      invitation: false,
       resendIn: 60,
-      tries: 0,
     });
+  });
+
+  it("keeps whether the code came in the invitation email", () => {
+    expect(setupCode(true).screen).toMatchObject({ invitation: true });
   });
 
   it("counts a second at a time down to zero", () => {
@@ -299,43 +318,74 @@ describe("the email code", () => {
     expect(state.screen).toMatchObject({ resendIn: 0 });
   });
 
-  it("clears a wrong code, counts the try, and kills the code after five", () => {
-    let state = run(setupCode(), { type: "codeEdited", value: "000000" });
-    state = reduce(state, { type: "codeWrong" });
+  it("clears a wrong code and shows the tries the server says are left", () => {
+    const state = run(
+      setupCode(),
+      { type: "codeEdited", value: "000000" },
+      { type: "codeWrong", triesLeft: 2 },
+    );
     expect(state.screen).toMatchObject({
       value: "",
-      tries: 1,
       dead: false,
-      error: "That code is wrong. 4 tries left.",
-    });
-    for (let i = 0; i < 4; i++) state = reduce(state, { type: "codeWrong" });
-    expect(state.screen).toMatchObject({
-      dead: true,
-      resendIn: 0,
-      error: "Too many wrong codes. Tap Send a new code.",
+      resendIn: 60,
+      error: "That code is wrong. 2 tries left.",
     });
   });
+
+  it.each([0, null])(
+    "kills the code when the server gives %p tries left",
+    (triesLeft) => {
+      const state = run(setupCode(), { type: "codeWrong", triesLeft });
+      expect(state.screen).toMatchObject({
+        dead: true,
+        resendIn: 0,
+        error: "This code no longer works. Tap Send a new code.",
+      });
+    },
+  );
 
   it("keeps a dead code's message when more is typed", () => {
-    let state = setupCode();
-    for (let i = 0; i < 5; i++) state = reduce(state, { type: "codeWrong" });
-    state = reduce(state, { type: "codeEdited", value: "123" });
+    const state = run(
+      setupCode(),
+      { type: "codeWrong", triesLeft: null },
+      { type: "codeEdited", value: "123" },
+    );
     expect(state.screen).toMatchObject({
-      error: "Too many wrong codes. Tap Send a new code.",
+      error: "This code no longer works. Tap Send a new code.",
     });
   });
 
-  it("a new code starts the tries again", () => {
-    let state = setupCode();
-    for (let i = 0; i < 3; i++) state = reduce(state, { type: "codeWrong" });
+  it("says a new code was emailed after the third wrong try", () => {
+    const state = run(
+      setupCode(true),
+      { type: "codeEdited", value: "000000" },
+      { type: "resendTick" },
+      { type: "codeResent" },
+    );
+    expect(state.screen).toMatchObject({
+      value: "",
+      dead: false,
+      invitation: false,
+      resendIn: 60,
+      error: "That code was wrong 3 times, so we emailed you a new one.",
+    });
+  });
+
+  it("a new code starts afresh", () => {
+    let state = run(setupCode(), { type: "codeWrong", triesLeft: null });
     state = run(state, {
       type: "codeRequested",
       flow: "setup",
       lead: "",
+      invitation: false,
       maskedEmail: "",
       developmentCode: "",
     });
-    expect(state.screen).toMatchObject({ tries: 0, dead: false, resendIn: 60 });
+    expect(state.screen).toMatchObject({
+      error: "",
+      dead: false,
+      resendIn: 60,
+    });
   });
 
   it("turns a code the server refused at the end into a dead code step", () => {
@@ -384,6 +434,7 @@ describe("secrets are dropped structurally", () => {
         type: "codeRequested",
         flow: "reset",
         lead: "",
+        invitation: false,
         maskedEmail: "",
         developmentCode: "",
       },
@@ -420,6 +471,7 @@ describe("secrets are dropped structurally", () => {
       type: "codeRequested",
       flow: "reset",
       lead: "",
+      invitation: false,
       maskedEmail: "",
       developmentCode: "",
     });
@@ -460,6 +512,7 @@ describe("secrets are dropped structurally", () => {
         type: "codeRequested",
         flow: "reset",
         lead: "",
+        invitation: false,
         maskedEmail: "",
         developmentCode: "",
       }),
@@ -527,8 +580,75 @@ describe("signing out", () => {
 
   it("an action that does not fit the screen changes nothing", () => {
     const state = trusted();
-    expect(reduce(state, { type: "codeWrong" })).toBe(state);
+    expect(reduce(state, { type: "codeWrong", triesLeft: 1 })).toBe(state);
     expect(reduce(state, { type: "resendTick" })).toBe(state);
     expect(reduce(state, { type: "pauseEnded" })).toBe(state);
+    expect(reduce(state, { type: "inviteRedeemed", code: "1" })).toBe(state);
+    expect(reduce(state, { type: "inviteCancelled" })).toBe(state);
+  });
+});
+
+describe("an invitation link", () => {
+  const invited = (state: AuthState) =>
+    run(state, { type: "inviteOpened", token: "link-token" });
+
+  it("opens the invitation step with nothing typed or sent", () => {
+    expect(invited(fresh()).screen).toEqual({
+      step: "invite",
+      token: "link-token",
+      fieldError: "",
+      banner: "",
+    });
+  });
+
+  it("keeps the invitation step when the number is wrong, and clears the error on typing", () => {
+    let state = run(invited(fresh()), {
+      type: "phoneRejected",
+      message: "Enter a valid number.",
+    });
+    expect(state.screen).toMatchObject({
+      step: "invite",
+      fieldError: "Enter a valid number.",
+    });
+    state = run(state, { type: "phoneEdited", input: "07" });
+    expect(state.screen).toMatchObject({ step: "invite", fieldError: "" });
+  });
+
+  it("shows a failure on the invitation step", () => {
+    const state = run(invited(fresh()), {
+      type: "errorShown",
+      message: "This invitation has expired. Ask the office to send it again.",
+    });
+    expect(state.screen).toMatchObject({
+      step: "invite",
+      banner: "This invitation has expired. Ask the office to send it again.",
+    });
+  });
+
+  it("goes to choosing the PIN with the code the server made, trusted for no one else", () => {
+    const state = run(
+      invited(trusted()),
+      { type: "phoneAccepted", phone: "0700111222" },
+      { type: "inviteRedeemed", code: "135792" },
+    );
+    expect(state.person).toBeNull();
+    expect(state.phone).toBe("0700111222");
+    expect(pad(state)).toMatchObject({
+      mode: "choose",
+      flow: "setup",
+      code: "135792",
+    });
+    expect(JSON.stringify(state)).not.toContain("link-token");
+  });
+
+  it("cancels back to sign in, or to the unlock pad on a trusted phone", () => {
+    expect(run(invited(fresh()), { type: "inviteCancelled" }).screen).toEqual({
+      step: "phone",
+      fieldError: "",
+      banner: "",
+    });
+    expect(
+      pad(run(invited(trusted()), { type: "inviteCancelled" })),
+    ).toMatchObject({ mode: "unlock" });
   });
 });

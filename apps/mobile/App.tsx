@@ -28,6 +28,7 @@ import {
   type Appearance,
 } from "./src/appearance";
 import { AuthFlow } from "./src/auth/AuthFlow";
+import { useInviteLink } from "./src/auth/useInviteLink";
 import { SessionEndedError, forgetThisPhone } from "./src/lib/api";
 import { FormatsContext } from "./src/lib/formats";
 import { hasConnection } from "./src/lib/network";
@@ -36,6 +37,7 @@ import { useServerWake } from "./src/lib/useServerWake";
 import { fetchPerson } from "./src/session";
 import { AppShell } from "./src/shell/AppShell";
 import { UpdateNotice } from "./src/shell/UpdateBanner";
+import { UpdateRequired, useUpdateRequired } from "./src/shell/UpdateRequired";
 import { ErrorBoundary, ThemeProvider } from "./src/ui";
 
 type State =
@@ -57,6 +59,13 @@ export default function App() {
   // The organization's branding, formats and the person's display preferences, as last saved on XCODE Web.
   const [appearance, setAppearance] = useState<Appearance | null>(null);
   useServerWake();
+  const [invite, takeInvite] = useInviteLink();
+  const updateRequired = useUpdateRequired();
+
+  // Someone signed in has their PIN already: an invitation link is not theirs to act on.
+  useEffect(() => {
+    if (state.phase === "signed-in" && invite) takeInvite();
+  }, [state.phase, invite, takeInvite]);
 
   useEffect(() => {
     let mounted = true;
@@ -215,6 +224,10 @@ export default function App() {
                     accessibilityLabel="Starting XCODE"
                   />
                 </View>
+              ) : updateRequired ? (
+                <UpdateRequired
+                  minimumVersion={updateRequired.minimumVersion}
+                />
               ) : state.phase === "signed-in" ? (
                 <AppShell
                   person={state.person}
@@ -242,6 +255,8 @@ export default function App() {
                       setState({ phase: "signed-in", person, offline })
                     }
                     onForgotten={forgotten}
+                    invite={invite}
+                    onInviteTaken={takeInvite}
                   />
                 )
               )}

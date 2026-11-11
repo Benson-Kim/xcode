@@ -7,10 +7,27 @@ export type AvailableUpdate = { build: number; version: string; url: string };
 
 export type UpdateSource = { build: number; manifestUrl: string };
 
-export const RELEASE: UpdateSource = {
-  build: Number(process.env.EXPO_PUBLIC_BUILD_NUMBER ?? ""),
-  manifestUrl: process.env.EXPO_PUBLIC_UPDATE_URL ?? "",
+export type BuildValues = {
+  distribution?: string;
+  build?: string;
+  updateUrl?: string;
 };
+
+// The App Store and Play Store update the app themselves and forbid it from installing builds of its own.
+export const releaseSource = ({
+  distribution,
+  build,
+  updateUrl,
+}: BuildValues): UpdateSource => ({
+  build: Number(build ?? ""),
+  manifestUrl: distribution === "store" ? "" : (updateUrl ?? ""),
+});
+
+export const RELEASE = releaseSource({
+  distribution: process.env.EXPO_PUBLIC_DISTRIBUTION,
+  build: process.env.EXPO_PUBLIC_BUILD_NUMBER,
+  updateUrl: process.env.EXPO_PUBLIC_UPDATE_URL,
+});
 
 const CHECK_EVERY_MS = 60 * 60 * 1000;
 

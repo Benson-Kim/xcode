@@ -93,7 +93,7 @@ it("formats money in the organization's currency", () => {
 it("applies saved settings at sign in and keeps them for the next unlock", async () => {
   await trustPhone(people.owner, "0733520614");
   const api = fakeApi();
-  api.on("auth/unlock", [200, tokens(2)]);
+  api.on("auth/pin", [200, tokens(2)]);
   api.on("auth/session", [200, people.owner]);
   api.on("setup/access/catalog", [200, catalog]);
   api.on("setup/appearance", [200, appearance]);
@@ -120,7 +120,7 @@ it("shows the organization's brand on the unlock screen, even before going onlin
   await trustPhone(people.owner, "0733520614");
   const store = require("expo-secure-store");
   await store.setItemAsync("xcode.appearance", JSON.stringify(appearance));
-  fakeApi().on("auth/unlock", "offline");
+  fakeApi().on("auth/pin", "offline");
   await startApp();
   await screen.findByText("Welcome back, Antony");
   expect(screen.getByText("North Star Sacco")).toBeTruthy();
@@ -142,7 +142,7 @@ it("still unlocks with an appearance cached by an older version of the app", asy
     "xcode.appearance",
     JSON.stringify({ ...legacy, formats, themeMode: "midnight" }),
   );
-  fakeApi().on("auth/unlock", "offline");
+  fakeApi().on("auth/pin", "offline");
   await startApp();
   await screen.findByText("Welcome back, Antony");
   expect(screen.getByText("North Star Sacco")).toBeTruthy();
@@ -196,7 +196,7 @@ it("writes the period labels in the organization's date pattern", () => {
 it("labels the dashboard week as the API counts it for an organization whose week starts on Sunday", async () => {
   await trustPhone(people.owner, "0733520614");
   const api = fakeApi();
-  api.on("auth/unlock", [200, tokens(2)]);
+  api.on("auth/pin", [200, tokens(2)]);
   api.on("auth/session", [200, people.owner]);
   api.on("setup/access/catalog", [200, catalog]);
   api.on("setup/appearance", [
@@ -239,7 +239,7 @@ const oldGroupingKey = () => {
 async function signInWithAppearance(served: unknown) {
   await trustPhone(people.owner, "0733520614");
   const api = fakeApi();
-  api.on("auth/unlock", [200, tokens(2)]);
+  api.on("auth/pin", [200, tokens(2)]);
   api.on("auth/session", [200, people.owner]);
   api.on("setup/access/catalog", [200, catalog]);
   api.on("setup/appearance", [200, served]);
@@ -272,7 +272,7 @@ it("still unlocks offline from a cache that has the old digit grouping key", asy
     "xcode.appearance",
     JSON.stringify(oldGroupingKey()),
   );
-  fakeApi().on("auth/unlock", "offline");
+  fakeApi().on("auth/pin", "offline");
   await startApp();
   await screen.findByText("Welcome back, Antony");
   expect(screen.getByText("North Star Sacco")).toBeTruthy();

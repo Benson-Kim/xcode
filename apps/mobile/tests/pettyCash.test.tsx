@@ -39,7 +39,7 @@ async function signIn(
   const who = { ...people.manager, permissions };
   await trustPhone(who, "0700111555");
   const api = fakeApi();
-  api.on("auth/unlock", [200, tokens(2)]);
+  api.on("auth/pin", [200, tokens(2)]);
   api.on("auth/session", [200, who]);
   api.on("setup/access/catalog", [200, catalog]);
   setup(api);

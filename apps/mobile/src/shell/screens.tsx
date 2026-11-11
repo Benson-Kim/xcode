@@ -31,7 +31,7 @@ import {
 } from "../pettycash/PettyCashScreen";
 import { firstOfMonth, isDate, shiftDate } from "../revenue/dates";
 import type { RevenueDashboard } from "../revenue/types";
-import { Banner, Button, Text, useTheme } from "../ui";
+import { Banner, Button, LinkButton, Text, useTheme } from "../ui";
 import {
   DASHBOARD_CARDS,
   periodLabel,
@@ -41,6 +41,7 @@ import {
   type PermissionGroup,
   type Tab,
 } from "./access";
+import { DeleteAccount } from "./DeleteAccount";
 import {
   Bullets,
   Card,
@@ -414,8 +415,11 @@ export function MoreScreen({
   onSwitchUser: () => void;
 }) {
   const { colors } = useTheme();
+  const [deleting, setDeleting] = useState(false);
   const has = permissionChecker(person.permissions);
   const links = SETUP_LINKS.filter((link) => canSee(link, has));
+  if (deleting)
+    return <DeleteAccount person={person} onClose={() => setDeleting(false)} />;
   return (
     <View style={styles.screen}>
       <ScreenTitle>More</ScreenTitle>
@@ -500,6 +504,9 @@ export function MoreScreen({
       >
         Switch user
       </Button>
+      <LinkButton disabled={busy} onPress={() => setDeleting(true)}>
+        Delete my account
+      </LinkButton>
       <Text style={[styles.version, { color: colors.grey }]}>{VERSION}</Text>
     </View>
   );

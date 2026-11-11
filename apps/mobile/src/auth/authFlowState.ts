@@ -2,13 +2,14 @@ import { pauseSeconds } from "@xcode/shared/auth";
 import { formatPhone, initials, maskPhone } from "@xcode/shared/format";
 
 import { DEFAULT_PIN_POLICY, type StoredPerson } from "../lib/storage";
-import { codeOutcome, type TryLimits } from "./attempts";
+import { RESENT_CODE_MESSAGE, refusedCode, type TryLimits } from "./attempts";
 import type { PadHeader } from "./PinPad";
 
 export const RESEND_SECONDS = 60;
 export const LONG_PIN_DIGITS = 8;
 
-// signin: PIN then (on a new phone) an email code. setup and reset: an email code, then a new PIN.
+// The number decides the flow. signin: PIN then (on a new phone) an email code. setup and reset: an email code
+// (for setup, the one in the invitation email when there is one), then a new PIN.
 export type Flow = "signin" | "setup" | "reset";
 export type NewPinFlow = "setup" | "reset";
 
@@ -17,16 +18,18 @@ type CodeView = {
   error: string;
   dead: boolean;
   lead: string;
+  invitation: boolean;
   maskedEmail: string;
   developmentCode: string;
   resendIn: number;
-  tries: number;
 };
 
 // The PIN, the email code and the chosen PIN exist only on the screens that need them, so a transition that
 // builds another screen drops them.
 export type Screen =
   | { step: "phone"; fieldError: string; banner: string }
+  // An invitation link opened the app: the person confirms their number before anything is sent.
+  | { step: "invite"; token: string; fieldError: string; banner: string }
   | {
       step: "pad";
       mode: "enter" | "unlock";
@@ -76,6 +79,7 @@ export type AuthState = {
 
 type CodeRequest = {
   lead: string;
+  invitation: boolean;
   maskedEmail: string;
   developmentCode: string;
 };
@@ -84,6 +88,10 @@ export type Action =
   | { type: "phoneEdited"; input: string }
   | { type: "phoneRejected"; message: string }
   | { type: "phoneAccepted"; phone: string }
+  | { type: "inviteOpened"; token: string }
+  // The invitation matched the number: the server made a first-setup code for this phone.
+  | { type: "inviteRedeemed"; code: string }
+  | { type: "inviteCancelled" }
   | { type: "padOpened"; mode: "enter" | "unlock" }
   | { type: "digit"; digit: string }
   | { type: "backspace" }
@@ -95,10 +103,14 @@ export type Action =
   | { type: "pinsDiffer" }
   | { type: "startAgain" }
   | { type: "pinTooShort"; minimum: number }
+  | { type: "pinRefused"; message: string }
   | ({ type: "codeRequested" } & CodeRequest &
       ({ flow: "signin"; challengePin: string } | { flow: NewPinFlow }))
   | { type: "codeEdited"; value: string }
-  | { type: "codeWrong" }
+  // The server counts the tries: null when the code expired or was replaced.
+  | { type: "codeWrong"; triesLeft: number | null }
+  // The third wrong try: the server voided the code and emailed a new one.
+  | { type: "codeResent" }
   | { type: "codeDead"; message: string }
   | { type: "resendTick" }
   | { type: "codeVerified"; code: string }
@@ -206,10 +218,10 @@ const freshCode = (request: CodeRequest): CodeView => ({
   error: "",
   dead: false,
   lead: request.lead,
+  invitation: request.invitation,
   maskedEmail: request.maskedEmail,
   developmentCode: request.developmentCode,
   resendIn: RESEND_SECONDS,
-  tries: 0,
 });
 
 function reducePhone(state: AuthState, action: Action): AuthState | undefined {
@@ -219,16 +231,49 @@ function reducePhone(state: AuthState, action: Action): AuthState | undefined {
         ...state,
         phoneInput: action.input,
         screen:
-          state.screen.step === "phone"
-            ? { step: "phone", fieldError: "", banner: "" }
+          state.screen.step === "phone" || state.screen.step === "invite"
+            ? { ...state.screen, fieldError: "", banner: "" }
             : state.screen,
       };
     case "phoneRejected":
+      return withScreen(
+        state,
+        state.screen.step === "invite"
+          ? { ...state.screen, fieldError: action.message, banner: "" }
+          : { step: "phone", fieldError: action.message, banner: "" },
+      );
+    case "inviteOpened":
       return withScreen(state, {
-        step: "phone",
-        fieldError: action.message,
+        step: "invite",
+        token: action.token,
+        fieldError: "",
         banner: "",
       });
+    case "inviteRedeemed":
+      // The phone is no longer trusted for anyone else: the invited person sets their PIN.
+      return state.screen.step === "invite"
+        ? {
+            ...state,
+            person: null,
+            screen: {
+              step: "pad",
+              mode: "choose",
+              flow: "setup",
+              code: action.code,
+              pin: "",
+              error: "",
+            },
+          }
+        : state;
+    case "inviteCancelled":
+      return state.screen.step === "invite"
+        ? withScreen(
+            state,
+            trustedHere(state)
+              ? personalPad("unlock")
+              : { step: "phone", fieldError: "", banner: "" },
+          )
+        : state;
     case "phoneAccepted":
       return {
         ...state,
@@ -250,7 +295,7 @@ function showError(state: AuthState, message: string): AuthState {
   const { screen } = state;
   return withScreen(
     state,
-    screen.step === "phone"
+    screen.step === "phone" || screen.step === "invite"
       ? { ...screen, fieldError: "", banner: message }
       : { ...screen, error: message },
   );
@@ -323,6 +368,8 @@ function reducePinChoice(
         `Your organization needs a PIN of at least ${action.minimum} numbers.`,
         action.minimum,
       );
+    case "pinRefused":
+      return { ...choose(action.message), shake: state.shake + 1 };
   }
   return undefined;
 }
@@ -340,17 +387,24 @@ function reduceCode(state: AuthState, action: Action): AuthState | undefined {
         error: screen.dead ? screen.error : "",
       });
     case "codeWrong": {
-      const wrong = screen.tries + 1;
-      const { dead, message } = codeOutcome(wrong);
+      const { dead, message } = refusedCode(action.triesLeft);
       return withScreen(state, {
         ...screen,
         value: "",
-        tries: wrong,
         error: message,
         dead,
         resendIn: dead ? 0 : screen.resendIn,
       });
     }
+    case "codeResent":
+      return withScreen(state, {
+        ...screen,
+        value: "",
+        error: RESENT_CODE_MESSAGE,
+        dead: false,
+        invitation: false,
+        resendIn: RESEND_SECONDS,
+      });
     case "resendTick":
       return screen.resendIn > 0
         ? withScreen(state, { ...screen, resendIn: screen.resendIn - 1 })
@@ -408,7 +462,12 @@ function killCode(state: AuthState, message: string): AuthState {
         : null;
   if (!flow) return state;
   const view = {
-    ...freshCode({ lead: "", maskedEmail: "", developmentCode: "" }),
+    ...freshCode({
+      lead: "",
+      invitation: false,
+      maskedEmail: "",
+      developmentCode: "",
+    }),
     error: message,
     dead: true,
     resendIn: 0,

@@ -4,6 +4,7 @@ import {
   clearSession,
   forgetPerson,
   getDeviceId,
+  hmacSha256,
   loadPerson,
   loadSession,
   matchesPinCheck,
@@ -15,36 +16,34 @@ import {
 } from "../src/lib/storage";
 import { accessToken } from "./fakeApi";
 
-jest.unmock("../src/lib/pbkdf2");
-
-const pbkdf2 =
-  require("../src/lib/pbkdf2") as typeof import("../src/lib/pbkdf2");
+const Crypto = require("expo-crypto") as {
+  digest: (algorithm: string, data: Uint8Array) => Promise<ArrayBuffer>;
+};
 const items = () => require("expo-secure-store").__items as Map<string, string>;
 
 const spies: { mockRestore(): void }[] = [];
 afterEach(() => spies.splice(0).forEach((spy) => spy.mockRestore()));
 
-function watchDerivations() {
-  const derive = jest.spyOn(pbkdf2, "pbkdf2Sha256");
-  spies.push(derive);
-  return derive;
+function watchDigests() {
+  const digest = jest.spyOn(Crypto, "digest");
+  spies.push(digest);
+  return digest;
 }
 
-// Holds the next derivation until release() is called.
-function holdDerivation() {
-  const real = pbkdf2.pbkdf2Sha256;
+// Holds the next native digest until release() is called.
+function holdDigest() {
+  const real = Crypto.digest;
   let release = () => {};
-  const derive = watchDerivations().mockImplementationOnce(
+  const digest = watchDigests().mockImplementationOnce(
     (...args) =>
       new Promise((resolve) => {
         release = () => resolve(real(...args));
       }),
   );
   return {
-    derive,
     release: () => release(),
     started: async () => {
-      while (!derive.mock.calls.length)
+      while (!digest.mock.calls.length)
         await new Promise((resolve) => setTimeout(resolve, 0));
     },
   };
@@ -100,33 +99,52 @@ it("discards incomplete identity and token state", async () => {
   expect(await loadPerson()).toBeNull();
 });
 
-it("checks a PIN offline without storing it", async () => {
+it("checks a PIN offline with a keyed check that holds neither the PIN nor its device-only key", async () => {
   expect(await matchesPinCheck("2580")).toBeNull();
   await savePinCheck("2580");
   expect(await matchesPinCheck("2580")).toBe(true);
   expect(await matchesPinCheck("2581")).toBe(false);
-  expect(await SecureStore.getItemAsync("xcode.pin-check")).not.toContain(
-    "2580",
+  const check = items().get("xcode.pin-check")!;
+  expect(JSON.parse(check).version).toBe(3);
+  expect(check).not.toContain("2580");
+  expect(check).not.toContain(items().get("xcode.pin-key"));
+  expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
+    "xcode.pin-key",
+    expect.stringMatching(/^[0-9a-f]{64}$/),
+    { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY },
+  );
+
+  // Without the key, the check says nothing.
+  items().delete("xcode.pin-key");
+  expect(await matchesPinCheck("2580")).toBeNull();
+});
+
+it("computes HMAC-SHA256 exactly as RFC 2104 defines it", async () => {
+  const node = require("crypto");
+  const key = new Uint8Array(node.randomBytes(32));
+  const message = new Uint8Array(node.randomBytes(22));
+  expect(Buffer.from(await hmacSha256(key, message)).toString("hex")).toBe(
+    node.createHmac("sha256", key).update(message).digest("hex"),
   );
 });
 
-it("keeps the check without deriving again when the same user signs in at the same security version", async () => {
+it("keeps the check without computing it again when the same user signs in at the same security version", async () => {
   await savePinCheck("1379", accessToken("user-1", 3));
   const kept = items().get("xcode.pin-check");
-  const derive = watchDerivations();
+  const digest = watchDigests();
   await savePinCheck("1379", accessToken("user-1", 3));
-  expect(derive).not.toHaveBeenCalled();
+  expect(digest).not.toHaveBeenCalled();
   expect(items().get("xcode.pin-check")).toBe(kept);
 
   // A token the phone cannot read never counts as unchanged.
   await savePinCheck("1379", "not-a-token");
-  expect(derive).toHaveBeenCalledTimes(1);
+  expect(digest).toHaveBeenCalled();
   expect(await matchesPinCheck("1379")).toBe(true);
 });
 
-it("drops the old check at once when the PIN may have changed, and keeps the new one once derived", async () => {
+it("drops the old check at once when the PIN may have changed, and keeps the new one once saved", async () => {
   await savePinCheck("1379", accessToken("user-1", 3));
-  const held = holdDerivation();
+  const held = holdDigest();
   const saving = savePinCheck("2468", accessToken("user-1", 4));
   await held.started();
   expect(items().has("xcode.pin-check")).toBe(false);
@@ -143,8 +161,8 @@ it("never keeps another user's check, even at the same security version", async 
   expect(await matchesPinCheck("1379")).toBe(false);
 });
 
-it("checks a PIN against a save still being derived", async () => {
-  const held = holdDerivation();
+it("checks a PIN against a save still in progress", async () => {
+  const held = holdDigest();
   const saving = savePinCheck("2468", accessToken("user-1", 1));
   await held.started();
   const match = matchesPinCheck("2468");
@@ -153,8 +171,8 @@ it("checks a PIN against a save still being derived", async () => {
   await saving;
 });
 
-it("writes nothing from a save still being derived when switch user forgets the person", async () => {
-  const held = holdDerivation();
+it("writes nothing from a save still in progress when switch user forgets the person", async () => {
+  const held = holdDigest();
   const saving = savePinCheck("2468", accessToken("user-1", 1));
   await held.started();
   await forgetPerson();
@@ -263,34 +281,24 @@ it("concurrent requests share a single persistent installation identifier", asyn
   });
 });
 
-it("verifies a v1 SHA-256 pin check from before the PBKDF2 upgrade", async () => {
-  const Crypto = require("expo-crypto");
-  const oldHash = await Crypto.digestStringAsync(
-    "SHA-256",
-    "0707070707070707070707070707070707070707070707070707070707070707:2580",
-  );
-  await SecureStore.setItemAsync(
-    "xcode.pin-check",
-    JSON.stringify({
-      salt: "0707070707070707070707070707070707070707070707070707070707070707",
-      hash: oldHash,
-    }),
-  );
-  expect(await matchesPinCheck("2580")).toBe(true);
-  expect(await matchesPinCheck("9999")).toBe(false);
-});
+it("drops a check from an earlier version, even the same user's, so the next online unlock saves a keyed one", async () => {
+  const token = accessToken("user-1", 3);
+  await savePinCheck("1379", token);
+  const { stamp } = JSON.parse(items().get("xcode.pin-check")!);
+  const older = JSON.stringify({
+    version: 2,
+    salt: "07".repeat(16),
+    hash: "ab".repeat(32),
+    stamp,
+  });
+  items().set("xcode.pin-check", older);
+  expect(await matchesPinCheck("1379")).toBeNull();
+  expect(items().has("xcode.pin-check")).toBe(false);
 
-it("writes a v2 PBKDF2 pin check and verifies it", async () => {
-  await savePinCheck("1379");
-  const stored = JSON.parse(
-    (require("expo-secure-store").__items as Map<string, string>).get(
-      "xcode.pin-check",
-    )!,
-  );
-  expect(stored.version).toBe(2);
-  expect(stored.hash).not.toContain("1379");
+  items().set("xcode.pin-check", older);
+  await savePinCheck("1379", token);
+  expect(JSON.parse(items().get("xcode.pin-check")!).version).toBe(3);
   expect(await matchesPinCheck("1379")).toBe(true);
-  expect(await matchesPinCheck("0000")).toBe(false);
 });
 
 it("checks a PIN offline on a phone, which has no WebCrypto", async () => {

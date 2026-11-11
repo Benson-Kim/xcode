@@ -90,7 +90,7 @@ async function signIn(
 ) {
   await trustPhone(person, phone);
   const api = fakeApi();
-  api.on("auth/unlock", [200, tokens(2)]);
+  api.on("auth/pin", [200, tokens(2)]);
   api.on("auth/session", [200, person]);
   api.on("setup/access/catalog", [200, catalog]);
   routes(api);
@@ -666,7 +666,7 @@ it("takes today from the organization's business date, never the phone's clock, 
     // Offline, the business date saved with the appearance still applies.
     await fireEvent.press(screen.getByRole("tab", { name: "Home" }));
     await fireEvent.press(screen.getByRole("button", { name: "Lock app" }));
-    api.on("auth/unlock", "offline");
+    api.on("auth/pin", "offline");
     await typePin("4826");
     await screen.findByText(
       "No internet. You are seeing what this phone saved at your last sign in.",
@@ -815,7 +815,7 @@ it("goes back online when the connection returns after an offline unlock", async
   );
   expect(await screen.findByText("1 of 2 captured")).toBeTruthy();
   await fireEvent.press(screen.getByRole("button", { name: "Lock app" }));
-  api.on("auth/unlock", "offline");
+  api.on("auth/pin", "offline");
   await typePin("4826");
   await screen.findByText(
     "No internet. You are seeing what this phone saved at your last sign in.",

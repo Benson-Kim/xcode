@@ -32,7 +32,7 @@ function fakeTimers() {
 async function unlockOffline() {
   await trustPhone();
   const api = fakeApi();
-  api.on("auth/unlock", "offline");
+  api.on("auth/pin", "offline");
   api.on("auth/session", "offline");
   await startApp();
   await screen.findByText("Welcome back, Antony");
@@ -187,14 +187,18 @@ describe("what a failed call says", () => {
 
   it("tells a new phone the server is unreachable when the phone itself is connected", async () => {
     network().__setState(ONLINE);
-    fakeApi().on("auth/sign-in", "offline");
+    const api = fakeApi();
+    api.on("auth/start", [200, { status: "pin_required" }]);
+    api.on("auth/pin", "offline");
     await firstSignIn();
     await screen.findByText(UNREACHABLE);
     expect(screen.queryByText(/No internet/)).toBeNull();
   });
 
   it("tells a new phone there is no internet when the phone has no connection", async () => {
-    fakeApi().on("auth/sign-in", "offline");
+    const api = fakeApi();
+    api.on("auth/start", [200, { status: "pin_required" }]);
+    api.on("auth/pin", "offline");
     await firstSignIn();
     await screen.findByText(
       "No internet. Signing in on this phone for the first time needs network.",
@@ -202,9 +206,23 @@ describe("what a failed call says", () => {
     expect(screen.queryByText(UNREACHABLE)).toBeNull();
   });
 
+  it("says signing in needs network when the number cannot be checked", async () => {
+    fakeApi().on("auth/start", "offline");
+    await startApp();
+    await fireEvent.changeText(
+      await screen.findByLabelText("Mobile number"),
+      "0733520614",
+    );
+    await fireEvent.press(screen.getByText("Continue"));
+    await screen.findByText("No internet. Signing in needs network.");
+    expect(screen.queryByText("Enter the PIN for this number")).toBeNull();
+  });
+
   it("does not blame the internet when sign in meets a server error", async () => {
     network().__setState(ONLINE);
-    fakeApi().on("auth/sign-in", [500, { title: "Internal Server Error" }]);
+    const api = fakeApi();
+    api.on("auth/start", [200, { status: "pin_required" }]);
+    api.on("auth/pin", [500, { title: "Internal Server Error" }]);
     await firstSignIn();
     await screen.findByText(/Something went wrong|service/i);
     expect(screen.queryByText(/No internet/)).toBeNull();
@@ -213,7 +231,7 @@ describe("what a failed call says", () => {
   it("still unlocks with the phone's own PIN check when the server is unreachable", async () => {
     await trustPhone();
     network().__setState(ONLINE);
-    fakeApi().on("auth/unlock", "offline");
+    fakeApi().on("auth/pin", "offline");
     await startApp();
     await screen.findByText("Welcome back, Antony");
     await typePin("4826");
