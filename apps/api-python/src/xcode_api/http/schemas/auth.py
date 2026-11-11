@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from ...domain.identity import AuthEnvelope, EnvelopeStatus, SessionView
-from ...domain.invitations import InviteProblem
 from ...domain.values import DeviceId, Email, PhoneNumber, Pin, RefreshToken, VerificationCode
 
 
@@ -150,14 +149,6 @@ class AuthResponse(BaseModel):
             masked_email=envelope.masked_email,
             minimum_pin_length=envelope.minimum_pin_length,
         )
-
-
-class InviteRedeemResponse(AuthResponse):
-    """The envelope plus the one-time setup ``code`` (202 only) and, on a 401 whose token and
-    number both matched, ``inviteProblem``. Both are null otherwise."""
-
-    code: str | None = None
-    invite_problem: InviteProblem | None = None
 
 
 class AuthSessionResponse(BaseModel):

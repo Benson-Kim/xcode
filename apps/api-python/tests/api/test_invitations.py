@@ -19,7 +19,16 @@ from ..support.setup_client import FORBIDDEN, INVALID, NOT_FOUND, Member, empty,
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
-REDEEM_KEYS = [*ENVELOPE_KEYS, "code", "inviteProblem"]
+REDEEM_KEYS = [
+    *ENVELOPE_KEYS,
+    "purpose",
+    "triesLeft",
+    "pinProblem",
+    "deviceToken",
+    "invitation",
+    "code",
+    "inviteProblem",
+]
 LINK = re.compile(r"(https?://[^/\s]+)/invite#([A-Za-z0-9_-]{43})$", re.MULTILINE)
 CODE = re.compile(r"type (\d{3}) (\d{3})\.")
 NOT_NEEDED = "This person has already set up their PIN and needs no invitation."
@@ -117,7 +126,7 @@ async def test_the_link_and_number_answer_a_code_that_sets_the_first_pin(
         await redeem(api, token=token, phoneNumber=PERSON_PHONE), 202, "verification_required"
     )
     assert re.fullmatch(r"\d{6}", redeemed["code"])
-    assert redeemed["inviteProblem"] is None
+    assert (redeemed["purpose"], redeemed["inviteProblem"]) == ("first_setup", None)
     assert redeemed["accessToken"] is None and redeemed["developmentCode"] is None
     done = await api.client.post(
         "/auth/pin/new",

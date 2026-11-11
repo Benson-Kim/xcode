@@ -16,6 +16,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Path, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 from starlette.responses import Response
 
@@ -48,7 +49,6 @@ from ..schemas.auth import (
     AuthResponse,
     AuthSessionResponse,
     InviteRedeemRequest,
-    InviteRedeemResponse,
     PinResetCodeRequest,
     PinResetCompleteRequest,
     PinResetVerifyRequest,
@@ -61,6 +61,7 @@ from ..schemas.auth import (
     UnlockRequest,
     VerifyDeviceRequest,
 )
+from ..schemas.auth_steps import InviteRedeemResponse
 
 HTTP_STATUS = MappingProxyType(
     {
@@ -100,7 +101,7 @@ _EMPTY = MappingProxyType(
 AuthJsonResponse = JsonResponse
 
 
-def envelope_response(envelope: AuthEnvelope, model: AuthResponse | None = None) -> Response:
+def envelope_response(envelope: AuthEnvelope, model: BaseModel | None = None) -> Response:
     status = HTTP_STATUS[envelope.status]
     shown = AuthResponse.from_envelope(envelope) if model is None else model
     body = shown.model_dump(mode="json", by_alias=True)

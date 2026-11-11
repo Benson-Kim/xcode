@@ -15,6 +15,7 @@ from pydantic.alias_generators import to_camel
 
 from ...domain.identity import AuthEnvelope, CodePurpose, EnvelopeStatus, PinProblem
 from ...domain.identity import TrustedDeviceView as TrustedDeviceRecord
+from ...domain.invitations import InviteProblem
 from ...domain.values import DeviceId, DeviceName, DeviceToken, PhoneNumber, Pin, VerificationCode
 from .auth import storable
 from .common import ApiModel, Instant
@@ -182,6 +183,14 @@ class StepResponse(BaseModel):
             device_token=envelope.device_token,
             invitation=envelope.invitation or None,
         )
+
+
+class InviteRedeemResponse(StepResponse):
+    """The step envelope plus the one-time setup ``code`` (202 only) and, on a 401 whose token
+    and number both matched, ``inviteProblem``. Both are null otherwise."""
+
+    code: str | None = None
+    invite_problem: InviteProblem | None = None
 
 
 class TrustedDeviceResponse(ApiModel):

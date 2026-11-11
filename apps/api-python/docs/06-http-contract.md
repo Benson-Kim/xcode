@@ -257,7 +257,7 @@ check order, messages) are the contract for each row.
 | A11 | `POST /auth/sign-out` | anonymous (token in body) | 200 `signed_out` always | `api.auth_sign_out` | 1 |
 | A12 | `POST /auth/devices/{id}/revoke` | bearer; `id` must equal the `device` claim else 403 empty | 200 `device_revoked` | `api.auth_revoke_device` | 2 |
 | A13 | `GET /auth/session` | bearer | 200 `{userId, firstName, lastName, role, permissions}` from the claims | none beyond session resolution | 1 |
-| A14 | `POST /auth/invite/redeem` (`{token, phoneNumber, deviceId, deviceName}`) | anonymous; `auth`, then `auth_invite` per address before pre-validation and per token digest after it | 202 `verification_required` plus the one-time setup `code`; 401 `authentication_failed`, plus `inviteProblem` (`expired`, `used`, `revoked`) only when the token and the number both matched | `api.auth_invite_redeem` | 1 |
+| A14 | `POST /auth/invite/redeem` (`{token, phoneNumber, deviceId, deviceName}`) | anonymous; `auth`, then `auth_invite` per address before pre-validation and per token digest after it | the step envelope; 202 `verification_required` with `purpose` `first_setup` and the one-time setup `code`; 401 `authentication_failed`, plus `inviteProblem` (`expired`, `used`, `revoked`) only when the token and the number both matched | `api.auth_invite_redeem` | 1 |
 
 Pre-validation (400 `invalid_request`, before any lookup): `deviceId` 1..128; `phoneNumber`
 at most 14; `email` at most 320 and a valid address when non-empty; `pin` at most 8; `code`
