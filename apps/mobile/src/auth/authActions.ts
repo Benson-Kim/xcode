@@ -534,8 +534,11 @@ export function createAuthActions(ctx: AuthContext) {
         input: formatPhone(normalisePhone(input)),
       }),
     continueWithPhone: () => continueWithPhone(ctx),
-    openInvite: (token: string) => {
-      if (!ctx.lock.held()) ctx.dispatch({ type: "inviteOpened", token });
+    // False while another step is running: the caller keeps the token and tries again after it.
+    openInvite: (token: string): boolean => {
+      if (ctx.lock.held()) return false;
+      ctx.dispatch({ type: "inviteOpened", token });
+      return true;
     },
     redeemInvite: () => void redeemInvite(ctx),
     cancelInvite: () => ctx.dispatch({ type: "inviteCancelled" }),

@@ -37,10 +37,9 @@ export function AuthFlow({
   const { openInvite } = actions;
 
   useEffect(() => {
-    if (!invite) return;
-    openInvite(invite);
-    onInviteTaken?.();
-  }, [invite, openInvite, onInviteTaken]);
+    if (!invite || busy) return;
+    if (openInvite(invite)) onInviteTaken?.();
+  }, [invite, busy, openInvite, onInviteTaken]);
 
   const layout = (content: ReactNode, footnote?: string) => (
     <AuthLayout brand={brand} footnote={footnote}>

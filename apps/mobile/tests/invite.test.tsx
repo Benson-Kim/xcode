@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { randomBytes } from "crypto";
 import { Linking } from "react-native";
 
@@ -143,4 +143,30 @@ it("signs the trusted person out of the phone only once the invitation matched",
   expect(api.sent(`auth/devices/${DEVICE}/revoke`)).toHaveLength(1);
   expect(storedText()).not.toContain("refresh-0");
   expect(storedText()).not.toContain("Antony");
+});
+
+it("keeps a link that comes during a sign-in step and opens it once the step ends", async () => {
+  let deliver: (event: { url: string }) => void = () => undefined;
+  jest.spyOn(Linking, "getInitialURL").mockResolvedValue(null);
+  jest
+    .spyOn(Linking, "addEventListener")
+    .mockImplementation((_type, handler) => {
+      deliver = handler as typeof deliver;
+      return { remove: () => undefined } as ReturnType<
+        typeof Linking.addEventListener
+      >;
+    });
+  let answer: (reply: "offline") => void = () => undefined;
+  const api = fakeApi();
+  api.on("auth/start", () => new Promise((resolve) => (answer = resolve)));
+  await startApp();
+  await fireEvent.changeText(
+    await screen.findByLabelText("Mobile number"),
+    "0700111222",
+  );
+  await fireEvent.press(screen.getByText("Continue"));
+  await waitFor(() => expect(api.sent("auth/start")).toHaveLength(1));
+  await act(async () => deliver({ url: LINK }));
+  await act(async () => answer("offline"));
+  await screen.findByText("Set up XCODE");
 });
