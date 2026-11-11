@@ -136,15 +136,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.lock.txt
           pip install --no-deps -e .
-      - name: Install psql client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      # psql runs inside the database container: no package download, so a mirror outage cannot fail the job.
       - name: Create roles, schemas and grants
+        env:
+          DB_CONTAINER: ${{ job.services.postgres.id }}
         run: |
-          psql -h localhost -U postgres -d xcode -v ON_ERROR_STOP=1 -f db/roles/010_roles.sql
-          psql -h localhost -U postgres -d xcode -v ON_ERROR_STOP=1 -f db/roles/900_local_dev.sql
-          psql -h localhost -U postgres -d xcode -v ON_ERROR_STOP=1 -c "ALTER DATABASE xcode OWNER TO xcode_owner"
-          PGPASSWORD=xcode_owner psql -h localhost -U xcode_owner -d xcode -v ON_ERROR_STOP=1 -f db/roles/020_schemas.sql
-          PGPASSWORD=xcode_owner psql -h localhost -U xcode_owner -d xcode -v ON_ERROR_STOP=1 -f db/roles/030_grants.sql
+          as_postgres() { docker exec -i "$DB_CONTAINER" psql -U postgres -d xcode -v ON_ERROR_STOP=1 "$@"; }
+          as_owner() { docker exec -i -e PGPASSWORD=xcode_owner "$DB_CONTAINER" psql -h localhost -U xcode_owner -d xcode -v ON_ERROR_STOP=1 "$@"; }
+          as_postgres < db/roles/010_roles.sql
+          as_postgres < db/roles/900_local_dev.sql
+          as_postgres -c "ALTER DATABASE xcode OWNER TO xcode_owner"
+          as_owner < db/roles/020_schemas.sql
+          as_owner < db/roles/030_grants.sql
       - name: Migrate, status and verify a fresh database
         run: |
           xcode-api db migrate
