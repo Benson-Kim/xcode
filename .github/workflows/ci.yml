@@ -144,7 +144,7 @@ jobs:
           cache-to: type=gha,scope=web,mode=max
       - name: The image starts and serves the sign-in page with its security policy
         run: |
-          docker run -d --name web -p 3000:3000 -e API_URL=https://api.example.test xcode-web:ci
+          docker run -d --name web -p 3000:3000 -e API_URL=https://api.example.test -e TRUSTED_PROXY_HOPS=0 xcode-web:ci
           curl --retry 15 --retry-delay 2 --retry-all-errors -fsS -D headers.txt -o /dev/null http://localhost:3000/
           grep -i '^content-security-policy:' headers.txt
       - if: failure()

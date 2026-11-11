@@ -237,7 +237,8 @@ def test_a_copied_pin_hash_and_token_digest_sign_in_through_the_routines(
         assert signed_in["outcome"] == "authenticated", signed_in
 
         session = conn.execute(
-            "SELECT api.auth_resolve_session(%s, %s, %s, %s)", (owner, fx.OWNER_DEVICE, 3, now)
+            "SELECT api.auth_resolve_session(%s, %s, %s, %s, %s)",
+            (owner, fx.OWNER_DEVICE, 3, now, now),
         ).fetchone()[0]  # type: ignore[index]
         assert session["organization_id"] == fx.ORG.lower()
         assert session["role"] == "Owner"
@@ -251,7 +252,8 @@ def test_a_copied_pin_hash_and_token_digest_sign_in_through_the_routines(
 
         with pytest.raises(psycopg.Error, match="session_invalid"):
             conn.execute(
-                "SELECT api.auth_resolve_session(%s, %s, %s, %s)", (owner, fx.OWNER_DEVICE, 2, now)
+                "SELECT api.auth_resolve_session(%s, %s, %s, %s, %s)",
+                (owner, fx.OWNER_DEVICE, 2, now, now),
             )
 
 

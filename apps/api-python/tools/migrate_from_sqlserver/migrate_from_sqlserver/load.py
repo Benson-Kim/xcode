@@ -351,8 +351,8 @@ def _sessions(conn: Connection, at: datetime) -> Check:
         try:
             with conn.transaction():
                 conn.execute(
-                    "SELECT api.auth_resolve_session(%s, %s, %s, %s)",
-                    (row["id"], row["device_id"], row["security_version"], at),
+                    "SELECT api.auth_resolve_session(%s, %s, %s, %s, %s)",
+                    (row["id"], row["device_id"], row["security_version"], at, at),
                 )
         except psycopg.Error as exc:
             lines.append(f"user {row['id']} device {row['device_id']}: {exc.diag.message_primary}")
