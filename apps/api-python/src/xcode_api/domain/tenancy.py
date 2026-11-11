@@ -656,11 +656,26 @@ class AccountDeletionRequest:
 
 @dataclass(frozen=True, slots=True)
 class DeletionRecipient:
-    """An administrator who can block members, to notify of a deletion request: the stored
-    address and the first name for the greeting."""
+    """An administrator who can block members, to notify of a deletion request: the queued
+    notice, the stored address and the first name for the greeting."""
 
+    notice_id: UUID
     email: str
     first_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class PendingDeletionNotice:
+    """A deletion notice ``api.deletion_notice_claim`` took for another send: the notice and its
+    organization, the recipient's stored address and first name, and the requester's and
+    organization's names as they are now."""
+
+    notice_id: UUID
+    organization_id: UUID
+    email: str
+    first_name: str
+    requester_name: str
+    organization_name: str
 
 
 @dataclass(frozen=True, slots=True)

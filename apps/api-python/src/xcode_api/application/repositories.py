@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
+from uuid import UUID
 
 from ..domain.expenses import (
     ExpenseChange,
@@ -153,6 +154,7 @@ from ..domain.tenancy import (
     LogoSave,
     MyScope,
     OrganizationSettings,
+    PendingDeletionNotice,
     PeoplePage,
     PeopleQuery,
     PermissionGroup,
@@ -420,7 +422,22 @@ class TenancyRepository(Protocol):
     ) -> DeletionRequestOutcome:
         """``api.me_deletion_request`` (any member): record the caller's own deletion request,
         or do nothing when one in the last 24 hours already was, and return the administrators
-        who can block members to notify (empty on that repeat)."""
+        who can block members to notify, each with the notice queued for them (empty on that
+        repeat)."""
+        ...
+
+    async def record_deletion_notice(
+        self, organization_id: UUID, notice_id: UUID, sent: bool, now: datetime
+    ) -> None:
+        """``api.deletion_notice_result``: ``sent``, or ``failed`` once its sends are used up,
+        only while the notice is pending."""
+        ...
+
+    async def claim_deletion_notices(
+        self, now: datetime, limit: int
+    ) -> list[PendingDeletionNotice]:
+        """``api.deletion_notice_claim``: take up to ``limit`` pending notices whose last send is
+        over 5 minutes old for another send; those used up or no longer needed are ended."""
         ...
 
     async def list_history(self, query: HistoryQuery) -> HistoryPage:

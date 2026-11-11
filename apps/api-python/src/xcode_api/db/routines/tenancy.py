@@ -4,7 +4,9 @@ a transient SQLSTATE; every command runs once."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
@@ -21,6 +23,7 @@ from ...domain.tenancy import (
     LogoSave,
     MyScope,
     OrganizationSettings,
+    PendingDeletionNotice,
     PeoplePage,
     PeopleQuery,
     PermissionGroup,
@@ -206,6 +209,20 @@ class TenancyRoutines:
             DeletionRequestOutcome,
             "api.me_deletion_request",
         )
+
+    async def record_deletion_notice(
+        self, organization_id: UUID, notice_id: UUID, sent: bool, now: datetime
+    ) -> None:
+        await call(self._pool, "deletion_notice_result", organization_id, notice_id, sent, now)
+
+    async def claim_deletion_notices(
+        self, now: datetime, limit: int
+    ) -> list[PendingDeletionNotice]:
+        routine = "deletion_notice_claim"
+        value = _single(await call(self._pool, routine, now, limit), routine)
+        if not isinstance(value, list):
+            raise IntegrityBug(f"api.{routine} returned no array")
+        return [document(item, PendingDeletionNotice, f"api.{routine}") for item in value]
 
     async def list_history(self, query: HistoryQuery) -> HistoryPage:
         f = query.filter

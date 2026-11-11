@@ -10,7 +10,9 @@
 -- Reads: tenancy.audit_events, tenancy.memberships, tenancy.organizations, identity.users, and what
 --   tenancy.effective_permissions reads.
 -- Writes: on the first request only, through tenancy.record_change tenancy.change_log,
---   tenancy.audit_events and tenancy.organizations.settings_version.
+--   tenancy.audit_events and tenancy.organizations.settings_version; one tenancy.deletion_notices
+--   row per recipient, counted as its first attempt, whose id each recipient carries as notice_id
+--   for recording the send (api.deletion_notice_result).
 -- Raises: XC403 not_member via tenancy.enter_organization.
 -- Tests: tests/db/test_deletion_routines.py, tests/api/test_account_deletion.py.
 
@@ -60,19 +62,32 @@ BEGIN
     );
   END IF;
 
+  WITH eligible AS (
+    SELECT m.user_id, m.first_name, m.last_name, u.email
+    FROM tenancy.memberships AS m
+    JOIN identity.users AS u ON u.id = m.user_id
+    WHERE m.organization_id = p_organization_id
+      AND m.active
+      AND m.user_id <> p_actor_id
+      AND u.status = 'active'
+      AND 'people.block' = ANY (tenancy.effective_permissions(p_organization_id, m.user_id))
+  ),
+  queued AS (
+    INSERT INTO tenancy.deletion_notices (
+      organization_id, requester_id, recipient_id, created_at, attempts, attempted_at
+    )
+    SELECT p_organization_id, p_actor_id, e.user_id, p_now, 1, p_now
+    FROM eligible AS e
+    RETURNING id, recipient_id
+  )
   SELECT coalesce(
            jsonb_agg(
-             jsonb_build_object('email', u.email, 'first_name', m.first_name)
-             ORDER BY m.last_name, m.first_name, m.user_id),
+             jsonb_build_object('notice_id', q.id, 'email', e.email, 'first_name', e.first_name)
+             ORDER BY e.last_name, e.first_name, e.user_id),
            '[]'::jsonb)
   INTO v_recipients
-  FROM tenancy.memberships AS m
-  JOIN identity.users AS u ON u.id = m.user_id
-  WHERE m.organization_id = p_organization_id
-    AND m.active
-    AND m.user_id <> p_actor_id
-    AND u.status = 'active'
-    AND 'people.block' = ANY (tenancy.effective_permissions(p_organization_id, m.user_id));
+  FROM queued AS q
+  JOIN eligible AS e ON e.user_id = q.recipient_id;
 
   v_snapshot := jsonb_build_object('user_id', p_actor_id, 'requested_at', p_now);
   PERFORM tenancy.record_change(

@@ -14,6 +14,7 @@ from typing import Any
 from psycopg_pool import AsyncConnectionPool
 
 from .application.access.create_person import CreatePerson
+from .application.access.deletion_notices import DeletionNotices
 from .application.access.erase_person import ErasePerson
 from .application.access.get_access_catalog import GetAccessCatalog
 from .application.access.get_my_scope import GetMyScope
@@ -218,6 +219,7 @@ class Container:
     invite_person: InvitePerson
     redeem_invitation: RedeemInvitation
     invitation_delivery: InvitationDelivery
+    deletion_notices: DeletionNotices
     set_person_active: SetPersonActive
     erase_person: ErasePerson
     sign_out_person: SignOutPerson
@@ -386,6 +388,7 @@ def build_container(
         QueuedInvitationMailer(mail_queue, _invitation_links(settings)),
         invitation_secrets,
     )
+    deletion_notices = DeletionNotices(tenancy, clock, QueuedDeletionNotifier(mail_queue))
     development_codes = settings.development_codes
     trust_days = settings.auth_trust_lifetime_days
     return Container(
@@ -496,9 +499,8 @@ def build_container(
         sign_out_person=SignOutPerson(tenancy, clock),
         require_pin_reset=RequirePinReset(tenancy, clock),
         remove_person_device=RemovePersonDevice(tenancy, clock),
-        request_account_deletion=RequestAccountDeletion(
-            tenancy, clock, QueuedDeletionNotifier(mail_queue)
-        ),
+        deletion_notices=deletion_notices,
+        request_account_deletion=RequestAccountDeletion(tenancy, clock, deletion_notices),
         list_history=ListHistory(tenancy, clock),
         get_organization_settings=GetOrganizationSettings(tenancy, clock),
         update_organization_settings=UpdateOrganizationSettings(tenancy, clock),

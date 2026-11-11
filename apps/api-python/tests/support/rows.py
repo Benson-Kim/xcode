@@ -139,6 +139,11 @@ def _seed(conn: Conn, slug: str) -> OrganizationRows:
         p,
     )
     conn.execute(
+        "INSERT INTO tenancy.deletion_notices (organization_id, requester_id, recipient_id, "
+        "created_at) VALUES (%(org)s, %(user2)s, %(user)s, now())",
+        p,
+    )
+    conn.execute(
         "INSERT INTO tenancy.organization_localizations (organization_id) VALUES (%(org)s)", p
     )
     conn.execute("INSERT INTO tenancy.organization_brandings (organization_id) VALUES (%(org)s)", p)

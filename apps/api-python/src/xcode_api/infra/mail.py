@@ -417,15 +417,18 @@ class QueuedInvitationMailer:
 
 
 class QueuedDeletionNotifier:
-    """The ``DeletionNotifier`` adapter: renders each notice and queues it after the reply. There
-    is no durable outbox: a dropped or failed send is logged by the queue, and the request stays
-    recorded in the change log for an administrator to see."""
+    """The ``DeletionNotifier`` adapter: renders each notice and queues it after the reply; the
+    callbacks record the send in the notice outbox, whose sweep retries what was lost."""
 
     def __init__(self, queue: MailQueue) -> None:
         self._queue = queue
 
-    def notify(self, notice: DeletionNotice) -> None:
-        self._queue.enqueue(deletion_request_message(notice))
+    def notify(
+        self, notice: DeletionNotice, *, on_sent: SuccessCallback, on_failure: FailureCallback
+    ) -> None:
+        self._queue.enqueue(
+            deletion_request_message(notice), on_failure=on_failure, on_success=on_sent
+        )
 
 
 async def _run_callback(

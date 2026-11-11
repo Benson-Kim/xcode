@@ -248,6 +248,7 @@ from xcode_api.domain.tenancy import (
     MyScope,
     OrganizationDetails,
     OrganizationSettings,
+    PendingDeletionNotice,
     PeoplePage,
     PeopleQuery,
     PermissionGroup,
@@ -2288,6 +2289,7 @@ class FakeTenancyRepository:
         }
         self.revenue_row = False
         self.logo: LogoUpload | None = None
+        self.deletion_notice_results: list[tuple[UUID, bool]] = []
         self.preference_rows: dict[UUID, UserPreferences] = {}
         self.log: list[HistoryEntry] = []
         self.invitations: dict[UUID, InvitationHashes] = {}
@@ -2694,8 +2696,18 @@ class FakeTenancyRepository:
             {"user_id": str(member.user_id), "requested_at": context.now.isoformat()}
         )
         self._record(context, "people", member.user_id, snapshot, snapshot, reason)
-        recipients = tuple(DeletionRecipient(m.email, m.first_name) for m in others)
+        recipients = tuple(DeletionRecipient(uuid4(), m.email, m.first_name) for m in others)
         return DeletionRequestOutcome(True, name, self.name, recipients)
+
+    async def record_deletion_notice(
+        self, organization_id: UUID, notice_id: UUID, sent: bool, now: datetime
+    ) -> None:
+        self.deletion_notice_results.append((notice_id, sent))
+
+    async def claim_deletion_notices(
+        self, now: datetime, limit: int
+    ) -> list[PendingDeletionNotice]:
+        return []
 
     # --- change log -------------------------------------------------------------------------
 

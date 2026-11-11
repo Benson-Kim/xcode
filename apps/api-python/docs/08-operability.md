@@ -81,6 +81,9 @@ owner URL and nothing of the API's own configuration or secrets.
 - Invitation sweep: `invitation.sweep` (INFO, `claimed`) when a run re-issued lost
   invitations; `job.failed` (ERROR, `job=invitation_sweep`, the exception type) when a run
   failed. The next run still happens 60 s later (`docs/07-auth.md` section 13.4).
+- Deletion notice sweep: `deletion_notice.sweep` (INFO, `claimed`) when a run re-sent lost or
+  failed account-deletion notices; `job.failed` (ERROR, `job=deletion_notice_sweep`) when a run
+  failed. It runs every 60 s; a notice is given up as `failed` after 5 sends.
 
 ## 3. Request id and tracing
 

@@ -96,6 +96,7 @@ TABLES: tuple[TableSpec, ...] = (
     _identity("refresh_tokens", "IU"),
     _identity("sign_in_attempts", "I", TableKind.AUDIT),
     TableSpec("identity", "invitations", ("id",), "IU"),
+    TableSpec("tenancy", "deletion_notices", ("id",), "IU"),
     TableSpec("identity", "review_accounts", ("user_id",), "IU", tenant=False),
     TableSpec("tenancy", "organizations", ("id",), "IU"),
     _org("tenancy", "memberships", "IU", "user_id"),
@@ -212,6 +213,11 @@ INDEXES: tuple[IndexSpec, ...] = (
     ),
     IndexSpec("identity.invitations", "organization_id"),
     IndexSpec("identity.invitations", "invited_by", where="invited_by IS NOT NULL"),
+    IndexSpec(
+        "tenancy.deletion_notices", "organization_id, created_at", where="(state = 'pending'::text)"
+    ),
+    IndexSpec("tenancy.deletion_notices", "organization_id, requester_id"),
+    IndexSpec("tenancy.deletion_notices", "organization_id, recipient_id"),
     IndexSpec("identity.sign_in_attempts", "user_id, occurred_at DESC"),
     IndexSpec("ops.rate_limit_windows", "window_start"),
     IndexSpec("identity.sign_in_attempts", "phone_digest, occurred_at DESC"),

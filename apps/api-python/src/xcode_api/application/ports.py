@@ -196,11 +196,17 @@ class DeletionNotifier(Protocol):
     """Tells the administrators who can block members that a member asked to delete their
     account, after the reply. Adapter: ``infra/mail.py`` ``QueuedDeletionNotifier``.
 
-    ``notify`` queues one message and never raises; a dropped or failed send is logged, not
-    retried, because the request is already recorded and visible in the change log.
+    ``notify`` queues one message and never raises; once delivery ends, ``on_sent`` or
+    ``on_failure`` runs so the caller can record the outcome in the notice outbox.
     """
 
-    def notify(self, notice: DeletionNotice) -> None: ...
+    def notify(
+        self,
+        notice: DeletionNotice,
+        *,
+        on_sent: Callable[[], Awaitable[None]],
+        on_failure: Callable[[], Awaitable[None]],
+    ) -> None: ...
 
 
 @runtime_checkable

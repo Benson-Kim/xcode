@@ -60,6 +60,25 @@ def _request(app: Conn, actor: Member, *, now: Any = T0) -> dict[str, Any]:
     return call(app, "me_deletion_request", actor.id, actor.org, REQUEST, now)
 
 
+def _named(result: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{k: r[k] for k in ("email", "first_name")} for r in result["recipients"]]
+
+
+def _notices(owner_conn: Conn, org: Any) -> dict[str, dict[str, Any]]:
+    rows = owner_conn.execute(
+        "SELECT id, recipient_id, state, attempts FROM tenancy.deletion_notices "
+        "WHERE organization_id = %s",
+        (org,),
+    ).fetchall()
+    return {str(r["id"]): r for r in rows}
+
+
+def _claim(app: Conn, org: Any, now: Any) -> list[dict[str, Any]]:
+    return [
+        n for n in call(app, "deletion_notice_claim", now, 100) if n["organization_id"] == str(org)
+    ]
+
+
 def _org_name(owner_conn: Conn, org: Any) -> str:
     row = owner_conn.execute(
         "SELECT name FROM tenancy.organizations WHERE id = %s", (org,)
@@ -110,14 +129,14 @@ def test_the_first_request_names_only_the_other_admins_who_can_block(
     assert result["requester_name"] == "Otto Office"
     assert result["organization_name"] == _org_name(owner_conn, office.org)
     # owner holds people.block; office is the requester; fleet and clerk do not hold it.
-    assert result["recipients"] == [{"email": "olive.owner@example.com", "first_name": "Olive"}]
+    assert _named(result) == [{"email": "olive.owner@example.com", "first_name": "Olive"}]
 
 
 def test_the_recipients_are_every_other_admin_who_can_block_in_name_order(
     app_conn: Conn, owner: Member, office: Member, admin2: Member
 ) -> None:
     result = _request(app_conn, office)
-    assert result["recipients"] == [
+    assert _named(result) == [
         {"email": "amara.admin@example.com", "first_name": "Amara"},
         {"email": "olive.owner@example.com", "first_name": "Olive"},
     ]
@@ -192,7 +211,7 @@ def test_an_inactive_member_or_removed_account_is_not_notified(
         set_user(owner_conn, admin2.id, status="removed")
     result = _request(app_conn, office)
     assert result["recorded"] is True
-    assert result["recipients"] == [{"email": "olive.owner@example.com", "first_name": "Olive"}]
+    assert _named(result) == [{"email": "olive.owner@example.com", "first_name": "Olive"}]
 
 
 def test_a_repeat_within_twenty_four_hours_records_nothing(
@@ -249,3 +268,58 @@ def test_two_requests_at_once_record_the_deletion_only_once(
     assert late["recorded"] is False
     assert late["recipients"] == []
     assert len(audit_events(owner_conn, office.org, "person.deletion_requested")) == 1
+
+
+def test_each_recipient_gets_one_pending_notice_counted_as_its_first_send(
+    app_conn: Conn, owner_conn: Conn, owner: Member, office: Member, admin2: Member
+) -> None:
+    result = _request(app_conn, office)
+    notices = _notices(owner_conn, office.org)
+    assert sorted(notices) == sorted(r["notice_id"] for r in result["recipients"])
+    assert {n["recipient_id"] for n in notices.values()} == {owner.id, admin2.id}
+    assert {(n["state"], n["attempts"]) for n in notices.values()} == {("pending", 1)}
+
+
+def test_a_lost_send_is_sent_again_after_five_minutes_until_it_is_recorded_sent(
+    app_conn: Conn, owner_conn: Conn, owner: Member, office: Member
+) -> None:
+    (recipient,) = _request(app_conn, office)["recipients"]
+    assert _claim(app_conn, office.org, T0 + timedelta(minutes=4)) == []
+
+    (again,) = _claim(app_conn, office.org, T0 + timedelta(minutes=6))
+    assert again == {
+        "notice_id": recipient["notice_id"],
+        "organization_id": str(office.org),
+        "email": "olive.owner@example.com",
+        "first_name": "Olive",
+        "requester_name": "Otto Office",
+        "organization_name": _org_name(owner_conn, office.org),
+    }
+    call(app_conn, "deletion_notice_result", office.org, recipient["notice_id"], True, T0)
+    assert _notices(owner_conn, office.org)[recipient["notice_id"]]["state"] == "sent"
+    assert _claim(app_conn, office.org, T0 + timedelta(hours=1)) == []
+
+
+def test_a_notice_no_longer_needed_is_dropped_and_one_never_sent_fails_after_five_sends(
+    app_conn: Conn, owner_conn: Conn, owner: Member, office: Member, admin2: Member
+) -> None:
+    _request(app_conn, office)
+    by_recipient = {n["recipient_id"]: key for key, n in _notices(owner_conn, office.org).items()}
+    owner_conn.execute(
+        "UPDATE tenancy.memberships SET active = false WHERE organization_id = %s AND user_id = %s",
+        (admin2.org, admin2.id),
+    )
+    now = T0
+    for _ in range(4):
+        now += timedelta(minutes=6)
+        claimed = _claim(app_conn, office.org, now)
+        assert [n["notice_id"] for n in claimed] == [by_recipient[owner.id]]
+        call(app_conn, "deletion_notice_result", office.org, by_recipient[owner.id], False, now)
+
+    notices = _notices(owner_conn, office.org)
+    assert notices[by_recipient[admin2.id]]["state"] == "dropped"
+    assert (
+        notices[by_recipient[owner.id]]["state"],
+        notices[by_recipient[owner.id]]["attempts"],
+    ) == ("failed", 5)
+    assert _claim(app_conn, office.org, now + timedelta(hours=1)) == []
