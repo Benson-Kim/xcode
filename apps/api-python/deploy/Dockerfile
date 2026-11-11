@@ -33,6 +33,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
+# Debian security fixes released after the pinned base image (the image scan fails on any that has a fix).
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 # Non-root user; the root filesystem is mounted read-only by the platform, with /tmp a tmpfs.
 RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin xcode
 
