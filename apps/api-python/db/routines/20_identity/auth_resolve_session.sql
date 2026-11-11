@@ -1,5 +1,5 @@
 -- api.auth_resolve_session(p_user_id uuid, p_device_id text, p_security_version integer, p_not_before timestamptz, p_now timestamptz) RETURNS jsonb
--- Purpose: the per-request session check of every bearer route: the user exists and is active, the security version matches the token, the device row is live (used within 90 days, not revoked, not expired; remembered or for this session only), and the token was issued (p_not_before, its nbf) no earlier than the device's last sign-out; returns {organization_id, role} for the log context.
+-- Purpose: the per-request session check of every bearer route: the user exists and is active, the security version matches the token, the device row is live (used within 90 days, not revoked, not expired; remembered or for this session only), and the token was issued (p_not_before, its nbf) no earlier than the device's last sign-out, compared in whole seconds because nbf has no fraction (a token issued in the second of the sign-out is accepted); returns {organization_id, role} for the log context.
 -- Callers: IdentityRoutines.resolve_session; the bearer principal (every authenticated request).
 -- Reads: identity.users, identity.trusted_devices, tenancy.person_roles, tenancy.roles. Writes: nothing.
 -- Raises: XC401 session_invalid.
@@ -31,7 +31,7 @@ BEGIN
        SELECT 1
        FROM identity.trusted_devices AS d
        WHERE d.user_id = v_user.id AND d.device_id = p_device_id AND identity.device_live(d, p_now)
-         AND (d.signed_out_at IS NULL OR p_not_before >= d.signed_out_at)
+         AND (d.signed_out_at IS NULL OR p_not_before >= date_trunc('second', d.signed_out_at))
      ) THEN
     PERFORM tenancy.refuse('session_invalid', 'XC401');
   END IF;

@@ -1053,6 +1053,18 @@ def test_sign_out_of_a_remembered_device_ends_the_access_tokens_issued_before_it
     assert later["role"] == "Owner"
 
 
+def test_a_token_issued_in_the_second_of_the_sign_out_is_accepted(
+    auth: Auth, owner_conn: Conn, account: Account
+) -> None:
+    token = store_token(owner_conn, account.user_id, TRUSTED)
+    signed_out = T0 + timedelta(minutes=1, microseconds=400_000)
+    auth.sign_out(token, now=signed_out)
+    issued = signed_out.replace(microsecond=0)
+    assert auth.resolve(account.user_id, 0, now=signed_out, not_before=issued)["role"] == "Owner"
+    with pytest.raises(psycopg.Error):
+        auth.resolve(account.user_id, 0, now=signed_out, not_before=issued - timedelta(seconds=1))
+
+
 def test_signing_out_of_a_device_trusted_for_one_session_ends_its_row(
     auth: Auth, owner_conn: Conn, account: Account
 ) -> None:

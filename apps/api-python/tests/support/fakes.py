@@ -1030,7 +1030,10 @@ class FakeIdentityRepository:
             or user.security_version != check.security_version
             or device is None
             or not device.live(check.now)
-            or (device.signed_out_at is not None and check.not_before < device.signed_out_at)
+            or (
+                device.signed_out_at is not None
+                and check.not_before < device.signed_out_at.replace(microsecond=0)
+            )
         ):
             raise SessionInvalid
         if not user.membership:
