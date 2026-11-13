@@ -35,6 +35,8 @@ from ..domain.tenancy import (
     LogoContentType,
     PermissionSection,
     RoleName,
+    SignInNoticeKind,
+    SignInNoticeState,
     ThemeMode,
     WeekNumbering,
 )
@@ -98,6 +100,7 @@ TABLES: tuple[TableSpec, ...] = (
     _identity("sign_in_attempts", "I", TableKind.AUDIT),
     TableSpec("identity", "invitations", ("id",), "IU"),
     TableSpec("tenancy", "deletion_notices", ("id",), "IU"),
+    TableSpec("tenancy", "sign_in_notices", ("id",), "IU"),
     TableSpec("identity", "review_accounts", ("user_id",), "IU", tenant=False),
     TableSpec("tenancy", "organizations", ("id",), "IU"),
     _org("tenancy", "memberships", "IU", "user_id"),
@@ -219,6 +222,11 @@ INDEXES: tuple[IndexSpec, ...] = (
     ),
     IndexSpec("tenancy.deletion_notices", "organization_id, requester_id"),
     IndexSpec("tenancy.deletion_notices", "organization_id, recipient_id"),
+    IndexSpec(
+        "tenancy.sign_in_notices", "organization_id, created_at", where="state = 'pending'::text"
+    ),
+    IndexSpec("tenancy.sign_in_notices", "organization_id, user_id"),
+    IndexSpec("tenancy.sign_in_notices", "organization_id, actor_id"),
     IndexSpec("identity.sign_in_attempts", "user_id, occurred_at DESC"),
     IndexSpec("ops.rate_limit_windows", "window_start"),
     IndexSpec("identity.sign_in_attempts", "phone_digest, occurred_at DESC"),
@@ -325,6 +333,8 @@ CHECK_LIST_ENUMS: dict[str, type[Enum]] = {
     "identity.invitations.ck_invitations_revoke_reason": InvitationRevokeReason,
     "identity.invitations.ck_invitations_delivery_state": InvitationDeliveryState,
     "tenancy.deletion_notices.ck_deletion_notices_state": DeletionNoticeState,
+    "tenancy.sign_in_notices.ck_sign_in_notices_kind": SignInNoticeKind,
+    "tenancy.sign_in_notices.ck_sign_in_notices_state": SignInNoticeState,
     "tenancy.organization_localizations.ck_localizations_date_pattern": DatePattern,
     "tenancy.organization_localizations.ck_localizations_week_numbering": WeekNumbering,
     "tenancy.organization_logos.ck_logos_content_type": LogoContentType,

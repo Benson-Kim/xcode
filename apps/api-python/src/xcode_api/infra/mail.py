@@ -1,5 +1,5 @@
-"""Mail adapters: the verification and invitation messages, log and SMTP mailers, and a
-drained queue.
+"""Mail adapters: the verification, invitation, deletion-request and sign-in change messages in
+one branded layout, log and SMTP mailers, and a drained queue.
 
 Log events carry the recipient hash and non-secret tags, never the address, the code or the
 invitation token; the log mailer writes the body only when told to (development and testing).
@@ -11,7 +11,7 @@ import asyncio
 import hashlib
 import html
 import unicodedata
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from email.message import EmailMessage
 from types import MappingProxyType
@@ -25,9 +25,11 @@ from ..application.ports import (
     InvitationMail,
     Mailer,
     MailMessage,
+    SignInNotice,
     VerificationMail,
 )
 from ..domain.identity import CodePurpose
+from ..domain.tenancy import SignInNoticeKind
 from ..settings import is_local_host
 
 logger = structlog.get_logger("xcode_api.mail")
@@ -47,17 +49,122 @@ FailureCallback = Callable[[], Awaitable[None]]
 SuccessCallback = Callable[[], Awaitable[None]]
 
 
+# The one branded layout of every mail. A body is a sequence of blocks; each renders to its text
+# lines and to an HTML fragment in which every value is escaped. The text part is the blocks'
+# lines, blank-line separated; the HTML part wraps the fragments in the XCODE frame: inline
+# styles only, no remote images, no scripts.
+
+_BRAND = "#1f6feb"
+_INK = "#1f2933"
+_MUTED = "#52606d"
+_RULE = "#e4e7eb"
+_PAGE = "#f4f5f7"
+_FOOTER = "This is an automatic message from XCODE."
+
+
+@dataclass(frozen=True, slots=True)
+class Strong:
+    """A run of a paragraph shown in bold in the HTML part."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Block:
+    lines: tuple[str, ...]
+    html: str
+
+
+def _paragraph(*runs: str | Strong, muted: bool = False) -> _Block:
+    text = "".join(r.text if isinstance(r, Strong) else r for r in runs)
+    inner = "".join(
+        f"<strong>{_escape(r.text)}</strong>" if isinstance(r, Strong) else _escape(r) for r in runs
+    )
+    style = f"margin:0 0 16px;color:{_MUTED};font-size:13px" if muted else "margin:0 0 16px"
+    return _Block((text,), f'<p style="{style}">{inner}</p>')
+
+
+def _facts(rows: Sequence[tuple[str, str]]) -> _Block:
+    cells = "".join(
+        f'<tr><td style="padding:4px 16px 4px 0;color:{_MUTED}">{_escape(label)}</td>'
+        f'<td style="padding:4px 0;font-weight:bold">{_escape(value)}</td></tr>'
+        for label, value in rows
+    )
+    return _Block(
+        tuple(f"{label}: {value}" for label, value in rows),
+        f'<table role="presentation" style="margin:0 0 16px;border-collapse:collapse">{cells}'
+        "</table>",
+    )
+
+
+def _button(label: str, url: str) -> _Block:
+    if not _web_url(url):
+        return _paragraph(f"{label}: {url}")
+    return _Block(
+        (f"{label}: {url}",),
+        f'<p style="margin:0 0 16px"><a href="{_escape(url)}" style="display:inline-block;'
+        f"padding:10px 18px;background:{_BRAND};color:#ffffff;text-decoration:none;"
+        f'border-radius:6px">{_escape(label)}</a></p>',
+    )
+
+
+def _links(heading: str, links: Sequence[tuple[str, str]]) -> _Block:
+    anchors = "".join(
+        f'<br><a href="{_escape(url)}" style="color:{_BRAND}">{_escape(name)}</a>'
+        if _web_url(url)
+        else f"<br>{_escape(name)}: {_escape(url)}"
+        for name, url in links
+    )
+    return _Block(
+        (heading, *(f"{name}: {url}" for name, url in links)),
+        f'<p style="margin:0 0 16px">{_escape(heading)}{anchors}</p>',
+    )
+
+
+def _layout(subject: str, blocks: Sequence[_Block]) -> tuple[str, str]:
+    """The text part and the HTML part of one mail."""
+    text = "\n\n".join("\n".join(block.lines) for block in blocks)
+    body = "".join(block.html for block in blocks)
+    page = (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>{_escape(subject)}</title></head>"
+        f'<body style="margin:0;padding:0;background:{_PAGE};color:{_INK};'
+        'font-family:Arial,Helvetica,sans-serif">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="background:{_PAGE}"><tr><td align="center" style="padding:24px 12px">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="max-width:560px;background:#ffffff;border:1px solid {_RULE};border-radius:8px">'
+        f'<tr><td style="padding:20px 28px;border-bottom:3px solid {_BRAND}">'
+        f'<span style="font-size:20px;font-weight:bold;letter-spacing:3px;color:{_BRAND}">'
+        "XCODE</span></td></tr>"
+        f'<tr><td style="padding:24px 28px 8px;font-size:15px;line-height:1.5">{body}</td></tr>'
+        f'<tr><td style="padding:16px 28px;border-top:1px solid {_RULE};font-size:12px;'
+        f'color:{_MUTED}">{_escape(_FOOTER)}</td></tr>'
+        "</table></td></tr></table></body></html>"
+    )
+    return text, page
+
+
+def _web_url(url: str) -> bool:
+    return url.lower().startswith(("https://", "http://"))
+
+
 def verification_message(mail: VerificationMail) -> MailMessage:
     """The code, its purpose and the device that asked, nothing else."""
-    lines = (
-        f"Code: {mail.code}",
-        f"For: {PURPOSE_LABELS[mail.purpose]}",
-        f"Device: {mail.device_name or UNKNOWN_DEVICE}",
+    facts = _facts(
+        (
+            ("Code", mail.code),
+            ("For", PURPOSE_LABELS[mail.purpose]),
+            ("Device", mail.device_name or UNKNOWN_DEVICE),
+        )
     )
+    text, body_html = _layout(VERIFICATION_SUBJECT, (facts,))
     return MailMessage(
         to=mail.to,
         subject=VERIFICATION_SUBJECT,
-        text="\n".join(lines),
+        text=text,
+        html=body_html,
         tags={
             "purpose": mail.purpose.value,
             "code_id": str(mail.code_id),
@@ -95,48 +202,27 @@ def invitation_message(mail: InvitationMail, links: InvitationLinks) -> MailMess
     added = f"{inviter or 'Someone'} added you to {organization}."
     greeting = f"Hello {first_name}," if first_name else "Hello,"
     stores = _store_lines(links)
+    subject = INVITATION_SUBJECT.format(organization=organization)
 
-    text_lines = [
-        greeting,
-        "",
-        added,
-        "",
-        f"Set up my access: {link}",
-        "",
-        f"Or open the XCODE app, enter your mobile number and type {code}.",
-        "",
-        f"The link and code work until {until}.",
+    blocks = [
+        _paragraph(greeting),
+        _paragraph(added),
+        _button("Set up my access", link),
+        _paragraph("Or open the XCODE app, enter your mobile number and type ", Strong(code), "."),
+        _paragraph(f"The link and code work until {until}."),
     ]
     if stores:
-        text_lines += ["", "Get the app:", *(f"{name}: {url}" for name, url in stores)]
-    text_lines += ["", _NO_PIN_BY_EMAIL]
-
-    e = _escape
-    store_html = "".join(
-        f'<p style="margin:4px 0"><a href="{e(url)}">{e(name)}</a></p>' for name, url in stores
-    )
-    body_html = (
-        '<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1f2933">'
-        f"<p>{e(greeting)}</p>"
-        f"<p>{e(added)}</p>"
-        f'<p><a href="{e(link)}" style="display:inline-block;padding:10px 18px;'
-        'background:#1f6feb;color:#ffffff;text-decoration:none;border-radius:6px">'
-        "Set up my access</a></p>"
-        "<p>Or open the XCODE app, enter your mobile number and type "
-        f"<strong>{e(code)}</strong>.</p>"
-        f"<p>The link and code work until {e(until)}.</p>"
-        f"{store_html}"
-        f'<p style="color:#52606d;font-size:13px">{e(_NO_PIN_BY_EMAIL)}</p>'
-        "</body></html>"
-    )
+        blocks.append(_links("Get the app:", stores))
+    blocks.append(_paragraph(_NO_PIN_BY_EMAIL, muted=True))
+    text, body_html = _layout(subject, blocks)
     tags = {"purpose": "invitation", "invitation_id": str(mail.invitation_id)}
     if mail.request_id:
         tags["request_id"] = mail.request_id
     support = _one_line(mail.support_email or "")
     return MailMessage(
         to=mail.to,
-        subject=INVITATION_SUBJECT.format(organization=organization),
-        text="\n".join(text_lines),
+        subject=subject,
+        text=text,
         html=body_html,
         reply_to=support or None,
         tags=tags,
@@ -162,14 +248,9 @@ def deletion_request_message(notice: DeletionNotice) -> MailMessage:
         "Open People in XCODE to review the request. If it is genuine, block and erase the member "
         "there; their financial records are kept against a former member."
     )
-    text_lines = [greeting, "", asked, "", guidance]
-    e = _escape
-    body_html = (
-        '<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1f2933">'
-        f"<p>{e(greeting)}</p>"
-        f"<p>{e(asked)}</p>"
-        f'<p style="color:#52606d">{e(guidance)}</p>'
-        "</body></html>"
+    text, body_html = _layout(
+        DELETION_REQUEST_SUBJECT,
+        (_paragraph(greeting), _paragraph(asked), _paragraph(guidance, muted=True)),
     )
     tags = {"purpose": "deletion_request"}
     if notice.request_id:
@@ -177,9 +258,65 @@ def deletion_request_message(notice: DeletionNotice) -> MailMessage:
     return MailMessage(
         to=notice.to,
         subject=DELETION_REQUEST_SUBJECT,
-        text="\n".join(text_lines),
+        text=text,
         html=body_html,
         tags=tags,
+    )
+
+
+SIGN_IN_EMAIL_SUBJECT = "Your XCODE sign-in email was changed"
+SIGN_IN_DETAILS_SUBJECT = "Your XCODE sign-in details were changed"
+_SIGNED_OUT = "You have been signed out of XCODE on every device and need to sign in again."
+
+
+def sign_in_change_message(notice: SignInNotice) -> MailMessage:
+    """Tell a person their sign-in email or mobile number changed: at the replaced email (naming
+    the new one only masked), at the new one, or at the current one when only the number
+    changed. It says who made the change and to contact the organization if it was not expected;
+    it carries no code, link or phone number. Every name is folded to one line and escaped in
+    the HTML part."""
+    person = _one_line(notice.first_name)
+    actor = _one_line(notice.actor_name or "") or "An administrator"
+    organization = _one_line(notice.organization_name)
+    hint = _one_line(notice.new_address_hint or "")
+    greeting = f"Hello {person}," if person else "Hello,"
+    subject = SIGN_IN_DETAILS_SUBJECT
+    if notice.kind is SignInNoticeKind.OLD:
+        subject = SIGN_IN_EMAIL_SUBJECT
+        changed = (
+            _paragraph(
+                f"{actor} changed the email you use to sign in to XCODE in {organization}. "
+                "It is now ",
+                Strong(hint),
+                ". This address no longer signs you in.",
+            )
+            if hint
+            else _paragraph(
+                f"{actor} changed the email you use to sign in to XCODE in {organization}. "
+                "This address no longer signs you in."
+            )
+        )
+    elif notice.kind is SignInNoticeKind.NEW:
+        changed = _paragraph(
+            f"{actor} changed your sign-in details for XCODE in {organization}. "
+            "This email address now signs you in."
+        )
+    else:
+        changed = _paragraph(
+            f"{actor} changed the mobile number you use to sign in to XCODE in {organization}."
+        )
+    unexpected = _paragraph(
+        f"If you did not expect this change, contact {organization} straight away.", muted=True
+    )
+    text, body_html = _layout(
+        subject, (_paragraph(greeting), changed, _paragraph(_SIGNED_OUT), unexpected)
+    )
+    return MailMessage(
+        to=notice.to,
+        subject=subject,
+        text=text,
+        html=body_html,
+        tags={"purpose": "sign_in_change", "kind": notice.kind.value},
     )
 
 
@@ -428,6 +565,21 @@ class QueuedDeletionNotifier:
     ) -> None:
         self._queue.enqueue(
             deletion_request_message(notice), on_failure=on_failure, on_success=on_sent
+        )
+
+
+class QueuedSignInNotifier:
+    """The ``SignInNotifier`` adapter: renders each notice and queues it after the reply; the
+    callbacks record the send in the notice outbox, whose sweep retries what was lost."""
+
+    def __init__(self, queue: MailQueue) -> None:
+        self._queue = queue
+
+    def notify(
+        self, notice: SignInNotice, *, on_sent: SuccessCallback, on_failure: FailureCallback
+    ) -> None:
+        self._queue.enqueue(
+            sign_in_change_message(notice), on_failure=on_failure, on_success=on_sent
         )
 
 

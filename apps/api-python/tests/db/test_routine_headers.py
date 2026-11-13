@@ -27,8 +27,10 @@ DEFINER_HELPERS = {
     "tenancy.belongs_elsewhere",
     "tenancy.deletion_notice_org",
     "tenancy.erase_person_history",
+    "tenancy.has_demo_membership",
     "tenancy.organization_ids",
     "tenancy.organization_ids_where_demo",
+    "tenancy.sign_in_notice_org",
 }
 
 _ENTRY = re.compile(r"(XC\d{3}) ([a-z0-9_]+)(?: via ([a-z_]+\.[a-z_]+))?")

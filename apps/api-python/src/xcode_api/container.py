@@ -28,6 +28,7 @@ from .application.access.remove_person_device import RemovePersonDevice
 from .application.access.request_account_deletion import RequestAccountDeletion
 from .application.access.require_pin_reset import RequirePinReset
 from .application.access.set_person_active import SetPersonActive
+from .application.access.sign_in_notices import SignInNotices
 from .application.access.sign_out_person import SignOutPerson
 from .application.access.update_person import UpdatePerson
 from .application.auth.change_pin import ChangePin
@@ -167,6 +168,7 @@ from .infra.mail import (
     MailQueue,
     QueuedDeletionNotifier,
     QueuedInvitationMailer,
+    QueuedSignInNotifier,
     SmtpMailer,
     VerificationMailer,
 )
@@ -220,6 +222,7 @@ class Container:
     redeem_invitation: RedeemInvitation
     invitation_delivery: InvitationDelivery
     deletion_notices: DeletionNotices
+    sign_in_notices: SignInNotices
     set_person_active: SetPersonActive
     erase_person: ErasePerson
     sign_out_person: SignOutPerson
@@ -389,6 +392,7 @@ def build_container(
         invitation_secrets,
     )
     deletion_notices = DeletionNotices(tenancy, clock, QueuedDeletionNotifier(mail_queue))
+    sign_in_notices = SignInNotices(tenancy, clock, QueuedSignInNotifier(mail_queue))
     development_codes = settings.development_codes
     trust_days = settings.auth_trust_lifetime_days
     return Container(
@@ -488,7 +492,9 @@ def build_container(
         list_people=ListPeople(tenancy, clock),
         get_person=GetPerson(tenancy, clock),
         create_person=CreatePerson(tenancy, clock, invitation_secrets, invitation_delivery),
-        update_person=UpdatePerson(tenancy, clock, invitation_secrets, invitation_delivery),
+        update_person=UpdatePerson(
+            tenancy, clock, invitation_secrets, invitation_delivery, sign_in_notices
+        ),
         invite_person=InvitePerson(tenancy, clock, invitation_secrets, invitation_delivery),
         redeem_invitation=RedeemInvitation(
             identity, clock, digests=digests, secrets=secrets, device_tokens=device_tokens
@@ -500,6 +506,7 @@ def build_container(
         require_pin_reset=RequirePinReset(tenancy, clock),
         remove_person_device=RemovePersonDevice(tenancy, clock),
         deletion_notices=deletion_notices,
+        sign_in_notices=sign_in_notices,
         request_account_deletion=RequestAccountDeletion(tenancy, clock, deletion_notices),
         list_history=ListHistory(tenancy, clock),
         get_organization_settings=GetOrganizationSettings(tenancy, clock),

@@ -1,6 +1,6 @@
 -- identity.mask_email(p_email text) RETURNS text
 -- Purpose: the masked address of verification_required: the first character, ***, then everything from the first @; *** alone when there is no @ or it comes first.
--- Callers: api.auth_sign_in.
+-- Callers: api.auth_sign_in, api.sign_in_notice_claim.
 -- Reads: nothing. Writes: nothing.
 -- Raises: none.
 -- Tests: tests/db/test_identity_helpers.py.

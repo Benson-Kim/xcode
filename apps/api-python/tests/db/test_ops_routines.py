@@ -4,6 +4,7 @@ routines as ``xcode_operator`` (``docs/07-auth.md`` section 9), and the refusal 
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -13,6 +14,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from xcode_api.db.contract import EXPECTED_CONTRACT_VERSION
+from xcode_api.db.migrate import find_db_dir
 from xcode_api.db.verify import run_checks
 
 from ..support.rows import seed_organization
@@ -35,7 +37,7 @@ from ..support.scenario import (
     trust,
     user_row,
 )
-from ..support.tenancy import set_scope
+from ..support.tenancy import set_scope, write
 
 T0 = datetime(2026, 10, 7, 9, 0, 0, tzinfo=UTC)
 
@@ -475,6 +477,15 @@ def test_provision_refuses_a_database_with_two_organizations(
     assert (error.sqlstate, error.diag.message_primary) == ("XC409", "organization_not_single")
 
 
+def test_provision_takes_the_real_organization_lock_before_looking() -> None:
+    (path,) = (find_db_dir() / "routines").rglob("ops_provision_user.sql")
+    code = re.sub(r"--[^\n]*", "", path.read_text(encoding="utf-8"))
+    lock = code.find("pg_advisory_xact_lock(hashtext('real-organization'))")
+    assert lock >= 0, "ops_provision_user does not take the real-organization lock"
+    assert lock < code.find("tenancy.organization_ids_where_demo(false)")
+    assert lock < code.find("tenancy.insert_organization_with_free_slug")
+
+
 REVIEW_EMAIL = "app.review@example.com"
 REVIEW_PHONE = "0798765432"
 
@@ -520,6 +531,23 @@ def test_provision_beside_only_a_demo_organization_creates_the_real_one(
     assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations WHERE NOT demo") == 1
 
 
+def test_provision_picks_a_free_slug_when_a_demo_organization_holds_the_derived_one(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    demo = seed_organization(owner_conn, slug="my-fleet").org
+    owner_conn.execute("UPDATE tenancy.organizations SET demo = true")
+    result = provision(operator_conn)
+    assert result["created_organization"] is True
+    real = UUID(result["organization_id"])
+    assert _one(owner_conn, "SELECT slug FROM tenancy.organizations WHERE id = %s", (real,)) == (
+        "my-fleet-2"
+    )
+    assert _one(owner_conn, "SELECT slug FROM tenancy.organizations WHERE id = %s", (demo,)) == (
+        "my-fleet"
+    )
+    assert _one(owner_conn, "SELECT demo FROM tenancy.organizations WHERE id = %s", (demo,)) is True
+
+
 def test_provision_refuses_the_review_login_and_the_demo_organizations_people(
     operator_conn: Conn, owner_conn: Conn
 ) -> None:
@@ -540,6 +568,79 @@ def test_provision_refuses_the_review_login_and_the_demo_organizations_people(
     assert _provision_refused(operator_conn, REVIEW_EMAIL, REVIEW_PHONE) == taken
     assert _provision_refused(operator_conn, EMAIL, PHONE) == taken
     assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations") == 1
+
+
+MEMBERSHIPS = (
+    "SELECT organization_id, active, version FROM tenancy.memberships "
+    "WHERE user_id = %s ORDER BY organization_id"
+)
+
+
+def test_provision_refuses_a_deactivated_member_of_the_demo_organization(
+    operator_conn: Conn, owner_conn: Conn, app_conn: Conn
+) -> None:
+    member = make_account(operator_conn, owner_conn)
+    owner_conn.execute("UPDATE tenancy.organizations SET demo = true")
+    review = call(
+        operator_conn,
+        "ops_review_account_create",
+        "test-operator",
+        "req-review",
+        REVIEW_EMAIL,
+        REVIEW_PHONE,
+        PIN_HASH,
+        digest("code:424242"),
+        T0,
+    )
+    version = _one(
+        owner_conn, "SELECT version FROM tenancy.memberships WHERE user_id = %s", (member.user_id,)
+    )
+    blocked = write(
+        app_conn,
+        "people_set_active",
+        UUID(review["user_id"]),
+        member.organization_id,
+        "req-block",
+        member.user_id,
+        False,
+        version,
+        "Left the demo",
+        T0,
+    )
+    assert blocked["outcome"] == "updated"
+    before = owner_conn.execute(MEMBERSHIPS, (member.user_id,)).fetchall()
+    assert [row["active"] for row in before] == [False]
+    status = user_row(owner_conn, member.user_id)["status"]
+    real = seed_organization(owner_conn).org
+    real_members = "SELECT count(*) FROM tenancy.memberships WHERE organization_id = %s"
+    real_count = _one(owner_conn, real_members, (real,))
+
+    assert _provision_refused(operator_conn, EMAIL, PHONE) == ("XC409", "people_contact_taken")
+    assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations") == 2
+    assert _one(owner_conn, real_members, (real,)) == real_count
+    assert owner_conn.execute(MEMBERSHIPS, (member.user_id,)).fetchall() == before
+    assert user_row(owner_conn, member.user_id)["status"] == status
+
+
+def test_provision_reactivates_a_real_member_beside_a_demo_organization(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    account = make_account(operator_conn, owner_conn)
+    demo = seed_organization(owner_conn).org
+    owner_conn.execute("UPDATE tenancy.organizations SET demo = true WHERE id = %s", (demo,))
+    call(operator_conn, "ops_remove_user", "test-operator", "req", EMAIL, T0)
+    owner_conn.execute(
+        "UPDATE tenancy.memberships SET active = false WHERE user_id = %s", (account.user_id,)
+    )
+    result = provision(operator_conn)
+    assert (UUID(result["organization_id"]), result["reactivated"]) == (
+        account.organization_id,
+        True,
+    )
+    rows = owner_conn.execute(MEMBERSHIPS, (account.user_id,)).fetchall()
+    assert [(row["organization_id"], row["active"]) for row in rows] == [
+        (account.organization_id, True)
+    ]
 
 
 def test_remove_user_bumps_the_version_and_revokes_tokens_but_not_devices(
@@ -1064,11 +1165,59 @@ def test_seed_demo_never_seeds_a_database_holding_other_data(
     assert _one(owner_conn, SEED_ACTIONS) == 0
 
 
-def test_seed_demo_refuses_a_database_with_two_organizations(
+def _flag_demo(owner: Conn, organization_id: UUID) -> None:
+    owner.execute("UPDATE tenancy.organizations SET demo = true WHERE id = %s", (organization_id,))
+
+
+def test_seed_demo_never_treats_a_lone_real_demo_fleet_as_the_demo_one(
     operator_conn: Conn, owner_conn: Conn
 ) -> None:
-    seed_organization(owner_conn)
-    seed_organization(owner_conn)
+    organization = seed_organization(owner_conn, slug="demo-fleet").org
+    before = _counts(owner_conn)
+    error = _refused(
+        operator_conn,
+        "ops_seed_demo",
+        "test-operator",
+        "req-seed",
+        "development",
+        Jsonb({}),
+        SEED_NOW,
+    )
+    assert (error.sqlstate, error.diag.message_primary) == ("XC409", "seed_exists")
+    flag = "SELECT demo FROM tenancy.organizations WHERE id = %s"
+    assert _one(owner_conn, flag, (organization,)) is False
+    assert _counts(owner_conn) == before
+
+
+def test_seed_demo_reuses_the_demo_organization_beside_a_real_one(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    first = _seed(operator_conn)
+    real = seed_organization(owner_conn, slug="real-fleet").org
+    before = _counts(owner_conn)
+    second = _seed(operator_conn)
+    assert second == {"organization_id": first["organization_id"], "created": False}
+    assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations") == 2
+    flag = "SELECT demo FROM tenancy.organizations WHERE id = %s"
+    assert _one(owner_conn, flag, (real,)) is False
+    assert _counts(owner_conn) == before
+
+
+def test_seed_demo_reuses_a_lone_demo_organization_under_any_slug(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    organization = seed_organization(owner_conn, slug="demo-fleet-2").org
+    _flag_demo(owner_conn, organization)
+    result = _seed(operator_conn)
+    assert result == {"organization_id": str(organization), "created": False}
+    assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations") == 1
+
+
+def test_seed_demo_refuses_a_database_with_two_demo_organizations(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    _flag_demo(owner_conn, seed_organization(owner_conn).org)
+    _flag_demo(owner_conn, seed_organization(owner_conn).org)
     error = _refused(
         operator_conn,
         "ops_seed_demo",

@@ -13,7 +13,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -698,6 +698,43 @@ class DeletionRequestOutcome:
     requester_name: str
     organization_name: str
     recipients: tuple[DeletionRecipient, ...]
+
+
+class SignInNoticeKind(StrEnum):
+    """Where a sign-in notice goes: the email that was replaced, the new email, or the current
+    one when only the mobile number changed."""
+
+    OLD = "old"
+    NEW = "new"
+    CURRENT = "current"
+
+
+class SignInNoticeState(StrEnum):
+    """Where one sign-in notice stands: waiting for a send, sent, given up after its sends, or
+    no longer needed (the account was erased, or its email changed again)."""
+
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    DROPPED = "dropped"
+
+
+@dataclass(frozen=True, slots=True)
+class PendingSignInNotice:
+    """A sign-in notice ``api.sign_in_notice_claim`` took for a send: the notice and its
+    organization, the address and kind, the person's first name, the name of who made the change
+    (``None`` once they left), the organization's name and, for the replaced email only, the
+    account's email now masked. Names are member-typed and untrusted; the address and the hint
+    are never in ``repr``."""
+
+    notice_id: UUID
+    organization_id: UUID
+    address: str = field(repr=False)
+    kind: SignInNoticeKind
+    first_name: str
+    actor_name: str | None
+    organization_name: str
+    new_address_hint: str | None = field(repr=False)
 
 
 # --- change log ----------------------------------------------------------------------------

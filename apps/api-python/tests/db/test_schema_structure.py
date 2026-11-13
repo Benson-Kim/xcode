@@ -52,7 +52,7 @@ def test_every_declared_table_exists(owner_conn: Conn) -> None:
         "WHERE schemaname IN ('identity', 'tenancy', 'setup', 'revenue', 'pettycash', 'expenses')"
     ).fetchall()
     assert {r["qualified"] for r in rows} == {t.qualified for t in TABLES}
-    assert len(TABLES) == 54
+    assert len(TABLES) == 55
 
 
 def test_tenant_tables_are_exactly_those_with_an_organization(owner_conn: Conn) -> None:
