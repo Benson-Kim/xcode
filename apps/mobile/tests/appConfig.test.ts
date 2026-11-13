@@ -25,6 +25,23 @@ test("app data never leaves the phone in a backup", () => {
   expect(store("https://xcode.example.co.ke").android?.allowBackup).toBe(false);
 });
 
+// The store reviews ask about every permission and purpose string, and the privacy policy promises none of these.
+test("the app asks for no device access it does not use", () => {
+  const config = store("https://xcode.example.co.ke");
+  expect(config.android?.blockedPermissions).toEqual(
+    expect.arrayContaining([
+      "android.permission.SYSTEM_ALERT_WINDOW",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "android.permission.VIBRATE",
+    ]),
+  );
+  expect(config.plugins).toContainEqual([
+    "expo-secure-store",
+    { faceIDPermission: false },
+  ]);
+});
+
 test("the app declares only exempt encryption", () => {
   expect(
     store("https://xcode.example.co.ke").ios?.config?.usesNonExemptEncryption,
