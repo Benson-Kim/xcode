@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "XCode",
+    "name": "XCODE Fleet",
     "slug": "xcode",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -19,9 +19,18 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#14213d"
-      }
+      },
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.VIBRATE"
+      ]
     },
-    "plugins": ["expo-secure-store", "expo-font"],
+    "plugins": [
+      ["expo-secure-store", { "faceIDPermission": false }],
+      "expo-font"
+    ],
     "extra": {
       "eas": {
         "projectId": "1fcbbed5-f688-4e26-92f4-eeed33dfd423"
