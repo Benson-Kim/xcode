@@ -173,6 +173,7 @@ class ChangeLogSection(StrEnum):
     PETTYCASH = "pettycash"
     CENTRAL_EXPENSES = "centralexpenses"
     REPORTS = "reports"
+    ROLES = "roles"
 
 
 class ScopeMode(StrEnum):
@@ -411,9 +412,14 @@ class PermissionGroup:
 
 @dataclass(frozen=True, slots=True)
 class AccessRole:
+    """A role and its permissions, dependencies expanded. The four built-in roles are fixed;
+    a custom role changes at ``version``."""
+
     id: UUID
     name: str
     permissions: tuple[str, ...]
+    built_in: bool
+    version: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -605,6 +611,34 @@ class PersonLifecycle:
     active: bool
     expected_version: int | None
     reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PersonRemoval:
+    """Delete a person nothing refers to; the routine refuses one who has records."""
+
+    context: TenantContext
+    user_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class RoleSave:
+    """Create a custom role (``role_id`` None) or change one at ``expected_version``; the
+    routine expands the permissions and refuses what the actor may not give."""
+
+    context: TenantContext
+    role_id: UUID | None
+    name: str | None
+    permissions: tuple[str, ...] | None
+    expected_version: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class RoleRemoval:
+    """Delete a custom role nobody holds."""
+
+    context: TenantContext
+    role_id: UUID
 
 
 @dataclass(frozen=True, slots=True)

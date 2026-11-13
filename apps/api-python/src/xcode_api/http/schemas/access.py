@@ -32,6 +32,26 @@ class AccessRole(ApiModel):
     id: UUID
     name: str
     permissions: list[str]
+    built_in: bool
+    version: Int64
+
+
+class SaveAccessRole(ApiModel):
+    """``POST /setup/access/roles``: a custom role's name and permissions. The routine trims
+    the name, expands the permissions and refuses what the caller may not give."""
+
+    name: str | None = None
+    permissions: list[str] | None = None
+
+    def permission_keys(self) -> tuple[str, ...] | None:
+        return None if self.permissions is None else tuple(self.permissions)
+
+
+class UpdateAccessRole(SaveAccessRole):
+    """``PUT /setup/access/roles/{id}``: the role as it should be, at the version the caller
+    saw; a stale version is 409."""
+
+    version: Int64
 
 
 class CompanyOption(ApiModel):

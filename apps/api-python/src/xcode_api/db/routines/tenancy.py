@@ -36,10 +36,13 @@ from ...domain.tenancy import (
     PersonLifecycle,
     PersonPinReset,
     PersonQuery,
+    PersonRemoval,
     PersonSave,
     PersonSignOut,
     Preferences,
     PreferencesSave,
+    RoleRemoval,
+    RoleSave,
     ScopeOptions,
     SettingsSave,
     TenantContext,
@@ -80,6 +83,24 @@ class TenancyRoutines:
     async def access_roles(self, context: TenantContext) -> tuple[AccessRole, ...]:
         roles = await self._read("access_role_list", *_tenant(context), context.now)
         return tuple(document(r, AccessRole, "api.access_role_list") for r in roles)
+
+    async def save_access_role(self, command: RoleSave) -> AccessRole:
+        permissions = None if command.permissions is None else list(command.permissions)
+        if command.role_id is None:
+            routine = "access_role_create"
+            args: tuple[Any, ...] = (command.name, permissions)
+        else:
+            routine = "access_role_update"
+            args = (command.role_id, command.name, permissions, command.expected_version)
+        rows = await call(
+            self._pool, routine, *_tenant(command.context), *args, command.context.now
+        )
+        return document(_single(rows, routine), AccessRole, f"api.{routine}")
+
+    async def delete_access_role(self, command: RoleRemoval) -> WriteResult:
+        return await self._write(
+            "access_role_delete", *_tenant(command.context), command.role_id, command.context.now
+        )
 
     async def scope_options(self, context: TenantContext) -> ScopeOptions:
         value = await self._read("access_scope_options", *_tenant(context), context.now)
@@ -168,6 +189,11 @@ class TenancyRoutines:
             command.expected_version,
             command.reason,
             command.context.now,
+        )
+
+    async def delete_person(self, command: PersonRemoval) -> WriteResult:
+        return await self._write(
+            "people_delete", *_tenant(command.context), command.user_id, command.context.now
         )
 
     async def sign_out_person(self, command: PersonSignOut) -> WriteResult:

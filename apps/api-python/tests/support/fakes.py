@@ -208,6 +208,8 @@ from xcode_api.domain.setup import (
     RunState,
     RunStates,
     SetupPageQuery,
+    SetupRecord,
+    SetupRecordRemoval,
     ShareSummary,
     ShareVehicle,
     TargetEntry,
@@ -264,6 +266,7 @@ from xcode_api.domain.tenancy import (
     PersonLifecycle,
     PersonPinReset,
     PersonQuery,
+    PersonRemoval,
     PersonSave,
     PersonSignIn,
     PersonSignOut,
@@ -271,6 +274,8 @@ from xcode_api.domain.tenancy import (
     Preferences,
     PreferencesSave,
     RevenueSettings,
+    RoleRemoval,
+    RoleSave,
     ScopeMode,
     ScopeOptions,
     SecurityPolicy,
@@ -2079,6 +2084,17 @@ def _erased_snapshot(snapshot: str | None) -> str | None:
     return _compact({k: _ERASED_VALUES[k] if k in _ERASED_VALUES else v for k, v in value.items()})
 
 
+_CONTACT_KEYS = frozenset({"Email", "PhoneNumber", "email", "phone_number"})
+
+
+def _contactless_snapshot(snapshot: str | None) -> str | None:
+    """``tenancy.contactless_snapshot``: the email and mobile keys of a JSON object nulled."""
+    value = None if snapshot is None else json.loads(snapshot)
+    if not isinstance(value, dict):
+        return snapshot
+    return _compact({k: None if k in _CONTACT_KEYS else v for k, v in value.items()})
+
+
 def _camel(key: str) -> str:
     head, *rest = key.split("_")
     return head + "".join(part[:1].upper() + part[1:] for part in rest)
@@ -2181,6 +2197,27 @@ def back_limit_words(mode: str, count: int | None, since: date | None) -> str:
         words = "Today only" if count == 0 else f"{count} {unit}{'' if count == 1 else 's'} back"
         return words if fixed is None else f"{words}, not before {fixed}"
     return "Any date" if fixed is None else f"Not before {fixed}"
+
+
+@dataclass
+class FakeRole:
+    """A custom role of the fake organization."""
+
+    name: str
+    permissions: tuple[str, ...]
+    version: int = 1
+
+    def document(self, role_id: UUID) -> AccessRole:
+        return AccessRole(
+            id=role_id,
+            name=self.name,
+            permissions=self.permissions,
+            built_in=False,
+            version=self.version,
+        )
+
+    def snapshot(self) -> str:
+        return _compact({"Name": self.name, "Permissions": list(self.permissions)})
 
 
 @dataclass(slots=True)
@@ -2291,6 +2328,7 @@ class FakeTenancyRepository:
         self.business_date: date | None = None
         self.settings_version = 1
         self.members: dict[UUID, FakeMember] = {}
+        self.custom_roles: dict[UUID, FakeRole] = {}
         self.sections: dict[str, dict[str, Any]] = {
             name: dict(values) for name, values in _SECTION_DEFAULTS.items()
         }
@@ -2353,11 +2391,117 @@ class FakeTenancyRepository:
 
     async def access_roles(self, context: TenantContext) -> tuple[AccessRole, ...]:
         self._enter(context, "people.view")
-        return tuple(
+        built_in = tuple(
             AccessRole(
-                id=uuid5(self.organization_id, name), name=name, permissions=role_rights(name)
+                id=uuid5(self.organization_id, name),
+                name=name,
+                permissions=role_rights(name),
+                built_in=True,
+                version=1,
             )
-            for name in sorted(role_names())
+            for name in sorted(role_names(), key=str.lower)
+        )
+        custom = sorted(self.custom_roles.items(), key=lambda item: item[1].name.lower())
+        return built_in + tuple(role.document(role_id) for role_id, role in custom)
+
+    def _built_in_role(self, role_id: UUID) -> bool:
+        return role_id in {uuid5(self.organization_id, name) for name in role_names()}
+
+    async def save_access_role(self, command: RoleSave) -> AccessRole:
+        """``tenancy.save_role``: the same refusals in the same order."""
+        actor = self._enter(command.context, "access.manage")
+        name = (command.name or "").strip()
+        if not 1 <= len(name) <= 100:
+            raise RuleViolation(code="role_name_invalid")
+        keys = command.permissions
+        if not keys or len(set(keys)) != len(keys):
+            raise RuleViolation(code="role_permissions_invalid")
+        if not set(keys) <= set(_needs()):
+            raise RuleViolation(code="role_permission_unknown")
+        held = set(actor.held())
+        role = None
+        if command.role_id is not None:
+            role = self.custom_roles.get(command.role_id)
+            if role is None and not self._built_in_role(command.role_id):
+                raise NotFound(code="not_found")
+            if role is None:
+                raise RuleViolation(code="role_built_in")
+            if command.expected_version != role.version:
+                raise Conflict(code="version_conflict")
+            if not set(role.permissions) <= held:
+                raise RuleViolation(code="role_not_held")
+        taken = {n.lower() for n in role_names()} | {
+            other.name.lower()
+            for other_id, other in self.custom_roles.items()
+            if other_id != command.role_id
+        }
+        if name.lower() in taken:
+            raise RuleViolation(code="role_name_taken")
+        expanded = expand_permissions(keys)
+        if not set(expanded) <= held:
+            raise RuleViolation(code="role_permission_not_held")
+        if role is None or command.role_id is None:
+            role_id = uuid4()
+            added = FakeRole(name=name, permissions=expanded)
+            self.custom_roles[role_id] = added
+            self._record(
+                command.context, "roles", role_id, "null", added.snapshot(), f"Added role {name}"
+            )
+            return added.document(role_id)
+        changes = [
+            word
+            for word, changed in (
+                ("name", name != role.name),
+                ("permissions", expanded != role.permissions),
+            )
+            if changed
+        ]
+        if changes:
+            before = role.snapshot()
+            self._rename_holders(role.name, name)
+            role.name, role.permissions, role.version = name, expanded, role.version + 1
+            self._record(
+                command.context,
+                "roles",
+                command.role_id,
+                before,
+                role.snapshot(),
+                f"Changed {' and '.join(changes)} of role {name}",
+            )
+        return role.document(command.role_id)
+
+    def _rename_holders(self, old: str, new: str) -> None:
+        """Members name their role, where ``tenancy.person_roles`` keeps its id."""
+        for member in self.members.values():
+            if member.role.lower() == old.lower():
+                member.role = new
+
+    async def delete_access_role(self, command: RoleRemoval) -> WriteResult:
+        actor = self._enter(command.context, "access.manage")
+        role = self.custom_roles.get(command.role_id)
+        if role is None and self._built_in_role(command.role_id):
+            raise RuleViolation(code="role_built_in")
+        if role is None:
+            raise NotFound(code="not_found")
+        if not set(role.permissions) <= set(actor.held()):
+            raise RuleViolation(code="role_not_held")
+        holders = sum(1 for m in self.members.values() if m.role.lower() == role.name.lower())
+        if holders:
+            people = f"{holders} person" if holders == 1 else f"{holders} people"
+            raise Conflict(
+                code="in_use", detail={"name": role.name, "use": "role_people", "people": people}
+            )
+        del self.custom_roles[command.role_id]
+        self._record(
+            command.context,
+            "roles",
+            command.role_id,
+            role.snapshot(),
+            "null",
+            f"Deleted role {role.name}",
+        )
+        return WriteResult(
+            id=command.role_id, version=role.version + 1, outcome=WriteOutcome.UPDATED
         )
 
     async def scope_options(self, context: TenantContext) -> ScopeOptions:
@@ -2555,6 +2699,37 @@ class FakeTenancyRepository:
             command.context, "people", member.user_id, before, member.snapshot(), automatic
         )
         return WriteResult(id=member.user_id, version=member.version, outcome=WriteOutcome.UPDATED)
+
+    async def delete_person(self, command: PersonRemoval) -> WriteResult:
+        """``api.people_delete``: a fake member has records once the change log names them as
+        the actor; the routine's foreign keys see every other kind of record too."""
+        actor = self._enter(command.context, "people.block")
+        if command.user_id == command.context.actor_id:
+            raise Forbidden(code="people_self_delete")
+        member = self.members.get(command.user_id)
+        if member is None or member.erased:
+            raise NotFound(code="not_found")
+        if actor.role.lower() != "owner" and member.role.lower() == "owner":
+            raise Forbidden(code="people_owner_edit")
+        name = f"{member.first_name} {member.last_name}"
+        if any(entry.actor_id == member.user_id for entry in self.log):
+            raise Conflict(code="in_use", detail={"name": name, "use": "person_records"})
+        before = _contactless_snapshot(member.snapshot())
+        del self.members[member.user_id]
+        self.log = [
+            replace(
+                entry,
+                before=_contactless_snapshot(entry.before),
+                after=_contactless_snapshot(entry.after),
+            )
+            if entry.entity_id == member.user_id and entry.section in ("people", "signIn")
+            else entry
+            for entry in self.log
+        ]
+        self._record(command.context, "people", member.user_id, before, "null", f"Deleted {name}")
+        return WriteResult(
+            id=member.user_id, version=member.version + 1, outcome=WriteOutcome.UPDATED
+        )
 
     async def erase_person(self, command: PersonErasure) -> WriteResult:
         actor = self._enter(command.context, "people.block")
@@ -3030,7 +3205,8 @@ class FakeTenancyRepository:
         self._check_scope(details, editor)
         if not details.permissions or len(set(details.permissions)) != len(details.permissions):
             raise RuleViolation(code="people_permissions_invalid")
-        role = next((n for n in role_names() if n.lower() == (details.role or "").lower()), None)
+        names = (*role_names(), *(custom.name for custom in self.custom_roles.values()))
+        role = next((n for n in names if n.lower() == (details.role or "").lower()), None)
         if role is None:
             raise RuleViolation(code="people_role_unknown")
         limit = details.back_limit
@@ -3459,6 +3635,39 @@ class FakeInvestment:
     amount: Decimal
     recorded_by: UUID
     recorded_at: datetime
+
+
+_DELETE_RIGHTS = {
+    SetupRecord.MAIN_CATEGORY: "catalog.stop",
+    SetupRecord.CATEGORY: "catalog.stop",
+    SetupRecord.ITEM: "catalog.stop",
+    SetupRecord.VEHICLE: "vehicles.edit",
+    SetupRecord.COMPANY: "companies.edit",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _Deletion:
+    """A record about to be deleted: its store, name, change-log section and snapshot, the
+    words of the log reason, and what refers to it (the first one refuses)."""
+
+    store: dict[UUID, Any]
+    name: str
+    section: str
+    before: str
+    label: str
+    uses: list[str]
+
+
+def _known(store: Mapping[UUID, Any], record_id: UUID) -> Any:
+    found = store.get(record_id)
+    if found is None:
+        raise NotFound(code="not_found")
+    return found
+
+
+def _uses(**checks: bool) -> list[str]:
+    return [use for use, used in checks.items() if used]
 
 
 class FakeSetupRepository:
@@ -4527,6 +4736,87 @@ class FakeSetupRepository:
             f"Removed investment {entry.description} on {vehicle.registration}",
         )
         return WriteResult(id=entry.id, version=version, outcome=WriteOutcome.UPDATED)
+
+    # --- deletes of records nothing refers to -----------------------------------------------
+
+    async def delete_setup_record(self, command: SetupRecordRemoval) -> WriteResult:
+        context, record, record_id = command.context, command.record, command.id
+        self._enter(context, _DELETE_RIGHTS[record])
+        deletion = self._deletion(record, record_id)
+        if deletion.uses:
+            use = f"{record}_{deletion.uses[0]}"
+            raise Conflict(code="in_use", detail={"name": deletion.name, "use": use})
+        del deletion.store[record_id]
+        version = self._log(
+            context,
+            deletion.section,
+            record_id,
+            deletion.before,
+            "null",
+            f"Deleted {deletion.label} {deletion.name}",
+        )
+        return WriteResult(id=record_id, version=version, outcome=WriteOutcome.UPDATED)
+
+    def _deletion(self, record: SetupRecord, record_id: UUID) -> _Deletion:
+        # What the routines' foreign keys would see in this fake's own tables; revenue, petty
+        # cash, expenses and data scopes live elsewhere (see the class docstring).
+        if record is SetupRecord.MAIN_CATEGORY:
+            main = _known(self.main_categories, record_id)
+            uses = _uses(
+                categories=any(c.main_category_id == record_id for c in self.categories.values())
+            )
+            return _Deletion(
+                self.main_categories,
+                main.name,
+                "expenses",
+                self._main_snapshot(main),
+                "main category",
+                uses,
+            )
+        if record is SetupRecord.CATEGORY:
+            category = _known(self.categories, record_id)
+            uses = _uses(items=any(i.category_id == record_id for i in self.items.values()))
+            return _Deletion(
+                self.categories,
+                category.name,
+                "expenses",
+                self._category_snapshot(category),
+                "expense category",
+                uses,
+            )
+        versions = [v for item in self.recurring.values() for v in item.versions]
+        if record is SetupRecord.ITEM:
+            item = _known(self.items, record_id)
+            uses = _uses(schedules=any(v.expense_item_id == record_id for v in versions))
+            return _Deletion(
+                self.items, item.name, "expenses", self._item_snapshot(item), "expense item", uses
+            )
+        if record is SetupRecord.VEHICLE:
+            vehicle = _known(self.vehicles, record_id)
+            uses = _uses(
+                investments=any(e.vehicle_id == record_id for e in self.investments.values()),
+                away=bool(vehicle.away),
+                schedules=any(share == record_id for v in versions for share, _ in v.shares),
+                savings=any(record_id in item.opening for item in self.recurring.values()),
+            )
+            return _Deletion(
+                self.vehicles,
+                vehicle.registration,
+                "vehicles",
+                self._vehicle_snapshot(vehicle),
+                "vehicle",
+                uses,
+            )
+        company = _known(self.companies, record_id)
+        uses = _uses(vehicles=any(v.company_id == record_id for v in self.vehicles.values()))
+        return _Deletion(
+            self.companies,
+            company.name,
+            "companies",
+            self._company_snapshot(company),
+            "company",
+            uses,
+        )
 
     # --- the scheduled item save ------------------------------------------------------------
 

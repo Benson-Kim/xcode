@@ -14,6 +14,8 @@ from typing import Any
 from psycopg_pool import AsyncConnectionPool
 
 from .application.access.create_person import CreatePerson
+from .application.access.delete_access_role import DeleteAccessRole
+from .application.access.delete_person import DeletePerson
 from .application.access.deletion_notices import DeletionNotices
 from .application.access.erase_person import ErasePerson
 from .application.access.get_access_catalog import GetAccessCatalog
@@ -27,6 +29,7 @@ from .application.access.list_people import ListPeople
 from .application.access.remove_person_device import RemovePersonDevice
 from .application.access.request_account_deletion import RequestAccountDeletion
 from .application.access.require_pin_reset import RequirePinReset
+from .application.access.save_access_role import SaveAccessRole
 from .application.access.set_person_active import SetPersonActive
 from .application.access.sign_in_notices import SignInNotices
 from .application.access.sign_out_person import SignOutPerson
@@ -118,6 +121,7 @@ from .application.setup.create_investment import CreateInvestment
 from .application.setup.create_recurring import CreateRecurring
 from .application.setup.create_vehicle import CreateVehicle
 from .application.setup.delete_investment import DeleteInvestment
+from .application.setup.delete_setup_record import DeleteSetupRecord
 from .application.setup.get_investment import GetInvestment
 from .application.setup.get_recurring_runs import GetRecurringRuns
 from .application.setup.get_recurring_summary import GetRecurringSummary
@@ -212,6 +216,8 @@ class Container:
     tenancy: TenancyRepository
     get_access_catalog: GetAccessCatalog
     list_access_roles: ListAccessRoles
+    save_access_role: SaveAccessRole
+    delete_access_role: DeleteAccessRole
     get_scope_options: GetScopeOptions
     get_my_scope: GetMyScope
     list_people: ListPeople
@@ -225,6 +231,7 @@ class Container:
     sign_in_notices: SignInNotices
     set_person_active: SetPersonActive
     erase_person: ErasePerson
+    delete_person: DeletePerson
     sign_out_person: SignOutPerson
     require_pin_reset: RequirePinReset
     remove_person_device: RemovePersonDevice
@@ -278,6 +285,7 @@ class Container:
     create_investment: CreateInvestment
     update_investment: UpdateInvestment
     delete_investment: DeleteInvestment
+    delete_setup_record: DeleteSetupRecord
     revenue: RevenueRepository
     get_revenue_week: GetRevenueWeek
     get_revenue_dashboard: GetRevenueDashboard
@@ -487,6 +495,8 @@ def build_container(
         tenancy=tenancy,
         get_access_catalog=GetAccessCatalog(tenancy, clock),
         list_access_roles=ListAccessRoles(tenancy, clock),
+        save_access_role=SaveAccessRole(tenancy, clock),
+        delete_access_role=DeleteAccessRole(tenancy, clock),
         get_scope_options=GetScopeOptions(tenancy, clock),
         get_my_scope=GetMyScope(tenancy, clock),
         list_people=ListPeople(tenancy, clock),
@@ -502,6 +512,7 @@ def build_container(
         invitation_delivery=invitation_delivery,
         set_person_active=SetPersonActive(tenancy, clock),
         erase_person=ErasePerson(tenancy, clock),
+        delete_person=DeletePerson(tenancy, clock),
         sign_out_person=SignOutPerson(tenancy, clock),
         require_pin_reset=RequirePinReset(tenancy, clock),
         remove_person_device=RemovePersonDevice(tenancy, clock),
@@ -557,6 +568,7 @@ def build_container(
         create_investment=CreateInvestment(setup, clock),
         update_investment=UpdateInvestment(setup, clock),
         delete_investment=DeleteInvestment(setup, clock),
+        delete_setup_record=DeleteSetupRecord(setup, clock),
         revenue=revenue,
         get_revenue_week=GetRevenueWeek(revenue, clock),
         get_revenue_dashboard=GetRevenueDashboard(revenue, clock),

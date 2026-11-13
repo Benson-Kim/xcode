@@ -14,11 +14,13 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
+from xcode_api.db.migrate import find_db_dir
 from xcode_api.domain.errors import Conflict, Forbidden, NotFound, RuleViolation
 from xcode_api.http.errors import register_exception_handlers
 from xcode_api.http.messages import (
     CONFLICT_TITLE,
     FORBIDDEN_TITLE,
+    IN_USE_TITLE,
     INVALID_TITLE,
     MESSAGES,
     NOT_FOUND_TITLE,
@@ -45,6 +47,8 @@ SAMPLES = {
     "currency": "KES",
     "threshold": "4,000",
     "count": "10,001",
+    "name": "KDA 482M",
+    "people": "3 people",
 }
 
 
@@ -66,15 +70,55 @@ def _fields(template: str) -> set[str]:
     return {name for _, name, _, _ in string.Formatter().parse(template) if name}
 
 
-@pytest.mark.parametrize("code", sorted(MESSAGES))
-def test_every_entry_formats_with_sample_parameters(code: str) -> None:
-    message = MESSAGES[code]
-    parameters = {name: SAMPLES[name] for name in _fields(message.detail or "")}
+def _formats(message: Message, template: str | None, extra: dict[str, str]) -> None:
+    parameters = {name: SAMPLES[name] for name in _fields(template or "")} | extra
     sentence = message.sentence(parameters)
-    assert (sentence is None) == (message.detail is None)
+    assert (sentence is None) == (template is None)
     if sentence is not None:
         assert "{" not in sentence and "}" not in sentence
         assert sentence == sentence.strip()
+
+
+@pytest.mark.parametrize("code", sorted(MESSAGES))
+def test_every_entry_formats_with_sample_parameters(code: str) -> None:
+    message = MESSAGES[code]
+    if message.case_key is None:
+        assert not message.cases
+        _formats(message, message.detail, {})
+        return
+    assert message.detail is None and message.cases
+    for case, template in message.cases.items():
+        _formats(message, template, {message.case_key: case})
+
+
+def test_a_case_sentence_is_picked_by_its_detail_key() -> None:
+    in_use = MESSAGES["in_use"]
+    assert in_use.status == 409 and in_use.title == IN_USE_TITLE
+    assert (
+        in_use.sentence({"name": "KDA 482M", "use": "vehicle_revenue"})
+        == "KDA 482M has revenue entries: retire it instead."
+    )
+    with pytest.raises(KeyError):
+        in_use.sentence({"name": "KDA 482M", "use": "vehicle_unknown"})
+    with pytest.raises(KeyError):
+        in_use.sentence({"name": "KDA 482M"})
+
+
+def test_every_in_use_case_is_one_the_routines_raise() -> None:
+    text = (find_db_dir() / "routines" / "40_setup" / "refuse_in_use.sql").read_text(
+        encoding="utf-8"
+    )
+    pairs = re.findall(r"WHEN '([a-z_]+):[a-z_.]+' THEN '([a-z_]+)'", text)
+    records = {"main_category", "category", "item", "vehicle", "company"}
+    assert {record for record, _ in pairs} == records
+    raised = {f"{record}_{use}" for record, use in pairs} | {f"{r}_other" for r in records}
+    direct = {
+        use
+        for path in (find_db_dir() / "routines" / "30_tenancy").glob("*.sql")
+        for use in re.findall(r"'use', '([a-z_]+)'", path.read_text(encoding="utf-8"))
+    }
+    assert direct == {"person_records", "role_people"}
+    assert set(MESSAGES["in_use"].cases) == raised | direct
 
 
 def test_the_catalogue_holds_every_documented_code_and_nothing_else() -> None:
@@ -85,7 +129,9 @@ def test_the_catalogue_holds_every_documented_code_and_nothing_else() -> None:
 def test_each_sentence_is_the_documented_one(code: str) -> None:
     message = MESSAGES[code]
     documented = _documented()[code]
-    if message.detail is None:
+    if message.cases:
+        assert documented == [message.title, *message.cases.values()]
+    elif message.detail is None:
         assert message.title in documented or documented == []
     elif message.title not in (INVALID_TITLE, FORBIDDEN_TITLE, None):
         assert documented[:2] == [message.title, message.detail]

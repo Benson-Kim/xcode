@@ -26,6 +26,7 @@ class OrganizationRows:
     user: UUID
     user2: UUID
     role: UUID
+    custom_role: UUID
     company: UUID
     vehicle: UUID
     vehicle2: UUID
@@ -177,6 +178,17 @@ def _seed(conn: Conn, slug: str) -> OrganizationRows:
     )
     conn.execute(
         "INSERT INTO tenancy.roles (organization_id, name) VALUES (%(org)s, 'Revenue clerk')", p
+    )
+    p["custom_role"] = _one(
+        conn,
+        "INSERT INTO tenancy.roles (organization_id, name) VALUES (%(org)s, 'Night crew') "
+        "RETURNING id",
+        p,
+    )
+    conn.execute(
+        "INSERT INTO tenancy.role_grants (organization_id, role_id, permission) "
+        "VALUES (%(org)s, %(custom_role)s, 'revenue.view')",
+        p,
     )
     conn.execute(
         "INSERT INTO tenancy.person_roles (organization_id, user_id, role_id) "

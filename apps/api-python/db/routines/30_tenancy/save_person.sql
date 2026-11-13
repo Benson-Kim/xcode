@@ -1,7 +1,7 @@
 -- tenancy.save_person(p_user_id uuid, p_first_name text, p_last_name text, p_email text, p_phone text, p_role text, p_scope_mode text, p_company_ids uuid[], p_vehicle_ids uuid[], p_permissions text[], p_approval_limit numeric, p_back_limit_mode text, p_back_limit_count integer, p_back_limit_from date, p_expected_version bigint, p_now timestamptz) RETURNS api.write_result
 -- Purpose: create (p_user_id NULL) or update a person in the sixteen-step order of the people contract: input shape, role, how far back they may change records (no mode: 7 days on create, unchanged on update; a fixed date not after the business date), the visible person and their version, the grant rules of tenancy.check_person_grant, contact uniqueness; then the user, membership, role, scope and override rows, the session side effects of an update and the sign-in notices of a new email or number (to the old and new address, or the current one), and one change-log entry.
 -- Callers: api.people_create (after tenancy.enter_organization with people.add), api.people_update (with people.edit).
--- Reads: identity.users, tenancy.organizations and tenancy.organization_localizations (the business date), tenancy.memberships, tenancy.roles, tenancy.person_roles, tenancy.role_defaults, tenancy.permission_overrides, tenancy.data_scopes, tenancy.data_scope_companies, tenancy.data_scope_vehicles. Writes: identity.users, identity.trusted_devices, identity.refresh_tokens, tenancy.memberships, tenancy.roles, tenancy.person_roles, tenancy.permission_overrides, tenancy.data_scopes, tenancy.data_scope_companies, tenancy.data_scope_vehicles, tenancy.sign_in_notices (on a new email or number), tenancy.audit_events, and through tenancy.record_change tenancy.change_log and tenancy.organizations.settings_version.
+-- Reads: identity.users, tenancy.organizations and tenancy.organization_localizations (the business date), tenancy.memberships, tenancy.roles (a custom role held KEY SHARE), tenancy.person_roles, tenancy.role_defaults, tenancy.permission_overrides, tenancy.data_scopes, tenancy.data_scope_companies, tenancy.data_scope_vehicles. Writes: identity.users, identity.trusted_devices, identity.refresh_tokens, tenancy.memberships, tenancy.roles, tenancy.person_roles, tenancy.permission_overrides, tenancy.data_scopes, tenancy.data_scope_companies, tenancy.data_scope_vehicles, tenancy.sign_in_notices (on a new email or number), tenancy.audit_events, and through tenancy.record_change tenancy.change_log and tenancy.organizations.settings_version.
 -- Raises: XC422 people_names_required, XC422 people_email_invalid, XC422 people_phone_invalid, XC422 people_scope_mode, XC422 people_scope_empty, XC422 people_scope_duplicate, XC422 people_permissions_invalid, XC422 people_role_unknown, XC422 people_back_limit_invalid, XC422 people_back_limit_date_future, XC422 time_zone_invalid via tenancy.business_date, XC404 not_found, XC422 people_version_required, XC409 version_conflict, XC403 people_back_limit_not_held, XC422 people_contact_taken, XC403 people_all_companies_needs_all via tenancy.check_person_grant, XC422 people_companies_unknown via tenancy.check_person_grant, XC422 people_vehicles_unknown via tenancy.check_person_grant, XC403 people_companies_outside_scope via tenancy.check_person_grant, XC403 people_vehicles_outside_scope via tenancy.check_person_grant, XC403 people_hidden_scope_kind via tenancy.check_person_grant, XC422 people_self_edit via tenancy.check_person_grant, XC403 people_owner_grant via tenancy.check_person_grant, XC403 people_owner_edit via tenancy.check_person_grant, XC422 people_permission_unknown via tenancy.check_person_grant, XC403 people_role_not_held via tenancy.check_person_grant, XC403 people_access_manage_needed via tenancy.check_person_grant, XC403 people_permission_not_held via tenancy.check_person_grant, XC403 people_sign_in_scope via tenancy.check_person_grant, XC403 people_sign_in_holdings via tenancy.check_person_grant.
 -- Tests: tests/db/test_access_routines.py.
 -- The grant rules run between the version check and the contact check (steps 10 to 15), so the
@@ -101,6 +101,14 @@ BEGIN
   SELECT DISTINCT d.role_name INTO v_role
   FROM tenancy.role_defaults AS d
   WHERE lower(d.role_name) = lower(p_role);
+  -- A custom role is held KEY SHARE from here: a role change or delete waits for this save,
+  -- and a deleted role is not found (tenancy.save_role, api.access_role_delete).
+  IF v_role IS NULL THEN
+    SELECT r.name INTO v_role
+    FROM tenancy.roles AS r
+    WHERE r.organization_id = v_organization_id AND NOT r.built_in AND lower(r.name) = lower(p_role)
+    FOR KEY SHARE;
+  END IF;
   IF v_role IS NULL THEN
     PERFORM tenancy.refuse('people_role_unknown', 'XC422');
   END IF;

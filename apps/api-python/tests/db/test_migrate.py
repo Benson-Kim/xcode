@@ -26,6 +26,8 @@ from ..support.database import Harness, _with_role
 
 pytestmark = pytest.mark.structure
 
+SUPPORT = Path(__file__).resolve().parent.parent / "support"
+
 
 def _runner(url: str) -> tuple[Runner, psycopg.Connection[dict[str, object]]]:
     conn = open_owner_connection(url)
@@ -405,11 +407,7 @@ def _permissions(
 
 
 def test_the_grant_translation_keeps_what_each_person_could_do(fresh_owner_url: str) -> None:
-    catalogue = json.loads(
-        (
-            Path(__file__).resolve().parent.parent / "support" / "permission_catalogue.json"
-        ).read_text(encoding="utf-8")
-    )
+    catalogue = json.loads((SUPPORT / "permission_catalogue.json").read_text(encoding="utf-8"))
     translations: dict[str, list[str]] = catalogue["translations"]
     sources = {item["key"]: set(item["sources"]) for item in catalogue["retired"]}
     rights = [item["key"] for group in catalogue["groups"] for item in group["items"]]
@@ -418,7 +416,7 @@ def test_the_grant_translation_keeps_what_each_person_could_do(fresh_owner_url: 
         with advisory_lock(conn):
             runner.migrate(to=8)
             people = _seed_people_before_the_catalogue(conn)
-            resolver = find_db_dir() / "routines" / "30_tenancy" / "assigned_permissions.sql"
+            resolver = SUPPORT / "assigned_permissions_before_custom_roles.sql"
             conn.execute(resolver.read_text(encoding="utf-8"))  # type: ignore[arg-type]
             before = [
                 _permissions(conn, "assigned_permissions", org, user) for _, org, user in people

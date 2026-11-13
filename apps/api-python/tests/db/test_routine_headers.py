@@ -27,6 +27,7 @@ DEFINER_HELPERS = {
     "tenancy.belongs_elsewhere",
     "tenancy.deletion_notice_org",
     "tenancy.erase_person_history",
+    "tenancy.forget_contact_history",
     "tenancy.has_demo_membership",
     "tenancy.organization_ids",
     "tenancy.organization_ids_where_demo",

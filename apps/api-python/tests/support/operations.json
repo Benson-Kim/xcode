@@ -18,6 +18,33 @@
   "planned": false
  },
  {
+  "id": "S65",
+  "section": "2.2",
+  "method": "post",
+  "path": "/setup/access/roles",
+  "operationId": "CreateAccessRole",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S66",
+  "section": "2.2",
+  "method": "put",
+  "path": "/setup/access/roles/{id}",
+  "operationId": "UpdateAccessRole",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S67",
+  "section": "2.2",
+  "method": "delete",
+  "path": "/setup/access/roles/{id}",
+  "operationId": "DeleteAccessRole",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
   "id": "S03",
   "section": "2.2",
   "method": "get",
@@ -117,6 +144,15 @@
   "planned": false
  },
  {
+  "id": "S68",
+  "section": "2.2",
+  "method": "delete",
+  "path": "/setup/people/{id}",
+  "operationId": "DeletePerson",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
   "id": "S12",
   "section": "2.3",
   "method": "get",
@@ -158,6 +194,15 @@
   "method": "post",
   "path": "/setup/companies/{id}/restore",
   "operationId": "RestoreSetupCompany",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S60",
+  "section": "2.3",
+  "method": "delete",
+  "path": "/setup/companies/{id}",
+  "operationId": "DeleteSetupCompany",
   "tag": "Setup",
   "planned": false
  },
@@ -212,6 +257,15 @@
   "method": "post",
   "path": "/setup/vehicles/{id}/restore",
   "operationId": "RestoreSetupVehicle",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S61",
+  "section": "2.3",
+  "method": "delete",
+  "path": "/setup/vehicles/{id}",
+  "operationId": "DeleteSetupVehicle",
   "tag": "Setup",
   "planned": false
  },
@@ -342,6 +396,15 @@
   "planned": false
  },
  {
+  "id": "S62",
+  "section": "2.6",
+  "method": "delete",
+  "path": "/setup/expense-categories/{id}",
+  "operationId": "DeleteExpenseCategory",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
   "id": "S37",
   "section": "2.6",
   "method": "post",
@@ -374,6 +437,15 @@
   "method": "post",
   "path": "/setup/expense-items/{id}/restore",
   "operationId": "RestoreExpenseItem",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S63",
+  "section": "2.6",
+  "method": "delete",
+  "path": "/setup/expense-items/{id}",
+  "operationId": "DeleteExpenseItem",
   "tag": "Setup",
   "planned": false
  },
@@ -698,6 +770,15 @@
   "method": "put",
   "path": "/setup/expense-main-categories/{id}",
   "operationId": "RenameExpenseMainCategory",
+  "tag": "Setup",
+  "planned": false
+ },
+ {
+  "id": "S64",
+  "section": "2.12.3",
+  "method": "delete",
+  "path": "/setup/expense-main-categories/{id}",
+  "operationId": "DeleteExpenseMainCategory",
   "tag": "Setup",
   "planned": false
  },

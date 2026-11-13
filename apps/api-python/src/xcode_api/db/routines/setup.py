@@ -39,6 +39,8 @@ from ...domain.setup import (
     RecurringStop,
     SavingCondition,
     SetupPageQuery,
+    SetupRecord,
+    SetupRecordRemoval,
     ShareVehicle,
     TargetSetRemoval,
     TargetSetSave,
@@ -56,6 +58,14 @@ from ...domain.tenancy import TenantContext
 from ...domain.values import WriteResult
 from ..session import call
 from ..types import document, write_result
+
+_DELETE_ROUTINES = {
+    SetupRecord.MAIN_CATEGORY: "setup_expense_main_category_delete",
+    SetupRecord.CATEGORY: "setup_expense_category_delete",
+    SetupRecord.ITEM: "setup_expense_item_delete",
+    SetupRecord.VEHICLE: "setup_vehicle_delete",
+    SetupRecord.COMPANY: "setup_company_delete",
+}
 
 
 def _tenant(context: TenantContext) -> tuple[Any, ...]:
@@ -499,6 +509,14 @@ class SetupRoutines:
             "setup_investment_delete",
             *_tenant(command.context),
             command.entry_id,
+            command.context.now,
+        )
+
+    async def delete_setup_record(self, command: SetupRecordRemoval) -> WriteResult:
+        return await self._write(
+            _DELETE_ROUTINES[command.record],
+            *_tenant(command.context),
+            command.id,
             command.context.now,
         )
 

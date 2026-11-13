@@ -130,6 +130,7 @@ from ..domain.setup import (
     RecurringSave,
     RecurringStop,
     SetupPageQuery,
+    SetupRecordRemoval,
     ShareVehicle,
     TargetSetRemoval,
     TargetSetSave,
@@ -166,10 +167,13 @@ from ..domain.tenancy import (
     PersonLifecycle,
     PersonPinReset,
     PersonQuery,
+    PersonRemoval,
     PersonSave,
     PersonSignOut,
     Preferences,
     PreferencesSave,
+    RoleRemoval,
+    RoleSave,
     ScopeOptions,
     SettingsSave,
     TenantContext,
@@ -360,7 +364,17 @@ class TenancyRepository(Protocol):
         ...
 
     async def access_roles(self, context: TenantContext) -> tuple[AccessRole, ...]:
-        """``api.access_role_list`` (``people.view``): roles by name with expanded defaults."""
+        """``api.access_role_list`` (``people.view``): built-in roles, then custom ones, by
+        name, with expanded permissions."""
+        ...
+
+    async def save_access_role(self, command: RoleSave) -> AccessRole:
+        """``api.access_role_create`` or, with ``role_id``, ``api.access_role_update``
+        (``access.manage``): the role as saved; a stale version is ``Conflict``."""
+        ...
+
+    async def delete_access_role(self, command: RoleRemoval) -> WriteResult:
+        """``api.access_role_delete`` (``access.manage``): a custom role nobody holds."""
         ...
 
     async def scope_options(self, context: TenantContext) -> ScopeOptions:
@@ -397,6 +411,11 @@ class TenancyRepository(Protocol):
     async def erase_person(self, command: PersonErasure) -> WriteResult:
         """``api.people_erase`` (``people.block``): erase the personal details of a blocked
         person who belongs to this organization only; ``unchanged`` when already erased."""
+        ...
+
+    async def delete_person(self, command: PersonRemoval) -> WriteResult:
+        """``api.people_delete`` (``people.manage``): a person nothing refers to, with the
+        account when it belongs to no other organization; ``Conflict`` ``in_use`` otherwise."""
         ...
 
     async def sign_out_person(self, command: PersonSignOut) -> WriteResult:
@@ -669,7 +688,13 @@ class SetupRepository(Protocol):
         ...
 
     async def delete_investment(self, command: InvestmentRemoval) -> WriteResult:
-        """``api.setup_investment_delete``: the one hard delete; answers ``updated``."""
+        """``api.setup_investment_delete``: an investment entry; answers ``updated``."""
+        ...
+
+    async def delete_setup_record(self, command: SetupRecordRemoval) -> WriteResult:
+        """``api.setup_<record>_delete`` (``catalog.stop`` for the catalogue, ``vehicles.edit``,
+        ``companies.edit``): a record nothing refers to; answers ``updated``. A record in use
+        is the ``Conflict`` ``in_use`` whose detail names it and what uses it."""
         ...
 
 

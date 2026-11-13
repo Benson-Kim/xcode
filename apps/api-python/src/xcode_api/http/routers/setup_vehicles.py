@@ -12,6 +12,7 @@ from starlette.responses import Response
 
 from ...application.caller import Caller
 from ...application.setup.create_vehicle import CreateVehicleCommand
+from ...application.setup.delete_setup_record import DeleteSetupRecordCommand
 from ...application.setup.get_vehicle_report import GetVehicleReportQuery
 from ...application.setup.list_company_options import ListCompanyOptionsQuery
 from ...application.setup.list_target_sets import ListTargetSetsQuery
@@ -22,6 +23,7 @@ from ...application.setup.retire_vehicle import RetireVehicleCommand
 from ...application.setup.save_target_set import SaveTargetSetCommand
 from ...application.setup.update_vehicle import UpdateVehicleCommand
 from ...container import Container
+from ...domain.setup import SetupRecord
 from ..dependencies import container, current_caller
 from ..responses import respond
 from ..routing import SetupRoute
@@ -136,6 +138,19 @@ async def restore_vehicle(
 ) -> Response:
     result = await c.restore_vehicle.execute(
         RestoreVehicleCommand(caller, vehicle_id, body.returned_on, body.reason)
+    )
+    return respond(IdResponse(id=result.id))
+
+
+@router.delete(
+    "/vehicles/{id:uuid}",
+    operation_id="DeleteSetupVehicle",
+    response_model=IdResponse,
+    responses=problem_responses(403, 404, 409),
+)
+async def delete_vehicle(vehicle_id: VehicleId, caller: CallerDep, c: ContainerDep) -> Response:
+    result = await c.delete_setup_record.execute(
+        DeleteSetupRecordCommand(caller, SetupRecord.VEHICLE, vehicle_id)
     )
     return respond(IdResponse(id=result.id))
 
