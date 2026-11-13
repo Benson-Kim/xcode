@@ -101,14 +101,23 @@ async def test_my_scope_lists_the_callers_own_reach(
     mine = ok(await api.client.get("/setup/access/me", headers=owner.headers))
     assert mine == {
         "allCompanies": True,
+        "placesVehicles": True,
         "companies": [],
         "vehicles": [],
         "canChange": "Any date",
         "earliest": None,
     }
     theirs = ok(await api.client.get("/setup/access/me", headers=clerk.headers))
-    assert list(theirs) == ["allCompanies", "companies", "vehicles", "canChange", "earliest"]
+    assert list(theirs) == [
+        "allCompanies",
+        "placesVehicles",
+        "companies",
+        "vehicles",
+        "canChange",
+        "earliest",
+    ]
     assert theirs["allCompanies"] is False
+    assert theirs["placesVehicles"] is False
 
 
 @pytest.mark.parametrize(

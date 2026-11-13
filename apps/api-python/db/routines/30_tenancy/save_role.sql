@@ -1,7 +1,7 @@
 -- tenancy.save_role(p_role_id uuid, p_name text, p_permissions text[], p_expected_version bigint, p_now timestamptz) RETURNS jsonb
--- Purpose: create (p_role_id NULL) or change a custom role: a trimmed name of 1 to 100 characters, catalogue permissions each named once; on change a custom role of this organization at the version the actor saw, whose permissions the actor all holds; a name no built-in role has and no other role of the organization has, ignoring case; permissions, dependencies expanded, that the actor all holds. A change of name or permissions bumps the version and the security version of everyone holding the role (their tokens carry its permissions) and logs one roles change with before and after; no change answers the role as it is. Returns tenancy.role_document.
+-- Purpose: create (p_role_id NULL) or change a custom role: a trimmed name of 1 to 100 characters, catalogue permissions each named once; on change a custom role of this organization at the version the actor saw, whose permissions the actor all holds; a name no built-in role has and no other role of the organization has, ignoring case; permissions, dependencies expanded, that the actor all holds. A change of name or permissions bumps the version, and the security version (their tokens carry its permissions) and membership version (an open person edit then conflicts) of everyone holding the role, and logs one roles change with before and after; no change answers the role as it is. Returns tenancy.role_document.
 -- Callers: api.access_role_create, api.access_role_update (after tenancy.enter_organization with access.manage).
--- Reads: tenancy.roles, tenancy.role_grants, tenancy.role_defaults, tenancy.permissions, tenancy.person_roles, and what tenancy.effective_permissions and tenancy.role_permissions read. Writes: tenancy.roles, tenancy.role_grants, identity.users (security_version, through identity.touch_version version), and through tenancy.record_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
+-- Reads: tenancy.roles, tenancy.role_grants, tenancy.role_defaults, tenancy.permissions, tenancy.person_roles, and what tenancy.effective_permissions and tenancy.role_permissions read. Writes: tenancy.roles, tenancy.role_grants, tenancy.memberships (version), identity.users (security_version, through identity.touch_version version), and through tenancy.record_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
 -- Raises: XC422 role_name_invalid, XC422 role_permissions_invalid, XC422 role_permission_unknown, XC404 not_found, XC422 role_built_in, XC409 version_conflict, XC422 role_not_held, XC422 role_name_taken, XC422 role_permission_not_held.
 -- Tests: tests/db/test_role_routines.py.
 -- The role row is locked FOR UPDATE: a person save that gives this role takes KEY SHARE on it
@@ -117,7 +117,26 @@ BEGIN
     END;
     DELETE FROM tenancy.role_grants
     WHERE organization_id = v_organization_id AND role_id = p_role_id;
-    -- Holders in id order, so two changes never lock the same accounts in opposite orders.
+    -- Holders' memberships, then their accounts, each in id order: the order tenancy.save_person
+    -- takes them in. NO KEY, as there: a sign-in routine needs KEY SHARE on the membership. The
+    -- membership version moves so a person edit opened before this change conflicts, rather than
+    -- saving grants or denials against the role's old permissions.
+    PERFORM 1
+    FROM tenancy.memberships AS m
+    WHERE m.organization_id = v_organization_id
+      AND m.user_id IN (
+        SELECT pr.user_id FROM tenancy.person_roles AS pr
+        WHERE pr.organization_id = v_organization_id AND pr.role_id = p_role_id
+      )
+    ORDER BY m.user_id
+    FOR NO KEY UPDATE;
+    UPDATE tenancy.memberships AS m
+    SET version = m.version + 1, updated_at = p_now
+    WHERE m.organization_id = v_organization_id
+      AND m.user_id IN (
+        SELECT pr.user_id FROM tenancy.person_roles AS pr
+        WHERE pr.organization_id = v_organization_id AND pr.role_id = p_role_id
+      );
     PERFORM 1
     FROM identity.users AS u
     WHERE u.id IN (
