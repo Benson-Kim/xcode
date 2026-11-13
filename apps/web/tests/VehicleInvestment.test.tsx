@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { VehiclesPage } from "../components/setup";
 import type { VehicleInvestment } from "../lib/types";
 import { renderInApp } from "./renderInApp";
+import { offered, pick } from "./searchSelect";
 
 const businessDate = "2026-09-21";
 
@@ -260,13 +261,8 @@ async function fillNewVehicle() {
   fireEvent.change(screen.getByLabelText("Fleet number"), {
     target: { value: "9" },
   });
-  await within(screen.getByRole("dialog", { name: "New vehicle" })).findByRole(
-    "option",
-    { name: "North Star" },
-  );
-  fireEvent.change(screen.getByLabelText("PSV company"), {
-    target: { value: "company-1" },
-  });
+  await offered(screen.getByLabelText("PSV company"), "North Star");
+  pick(screen.getByLabelText("PSV company"), "North Star");
   fireEvent.change(screen.getByLabelText("Target, Monday"), {
     target: { value: "1500" },
   });

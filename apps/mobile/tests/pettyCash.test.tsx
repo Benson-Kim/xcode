@@ -1362,3 +1362,132 @@ describe("Home cards", () => {
     ).toBeTruthy();
   });
 });
+
+describe("Adding a missing item from the expense form", () => {
+  async function openForm() {
+    await fireEvent.press(
+      await screen.findByRole("button", { name: "Record expense" }),
+    );
+    await screen.findByRole("button", { name: "Vehicle, not chosen" });
+  }
+
+  it("offers no + Add new to someone without a catalog right", async () => {
+    await signIn(["pettycash.spend"], spender);
+    await openForm();
+    await fireEvent.press(screen.getByRole("button", { name: /^Item, / }));
+    expect(screen.queryByRole("button", { name: "Add new item" })).toBeNull();
+  });
+
+  it("opens the new item with what was typed, saves it and records the expense with it", async () => {
+    const api = await signIn(["pettycash.spend", "catalog.add"], spender);
+    api.on("setup/expense-categories?pageNumber=1&pageSize=100", [
+      200,
+      { items: [{ id: "c-run", name: "Running", active: true }] },
+    ]);
+    let created = false;
+    api.on("setup/expense-categories/c-run/items", () => {
+      created = true;
+      return [200, { id: "i-new" }];
+    });
+    api.on(OPTIONS, () => [
+      200,
+      created
+        ? {
+            ...pettyOptions,
+            items: [
+              ...pettyOptions.items,
+              {
+                id: "i-new",
+                name: "Towing",
+                categoryId: "c-run",
+                categoryName: "Running",
+                bucket: 2,
+              },
+            ],
+          }
+        : pettyOptions,
+    ]);
+    api.on("setup/pettycash/entries", [
+      200,
+      { id: "x", version: 1, status: "waiting", balance: 1 },
+    ]);
+    await openForm();
+    await pick("Vehicle", "KDA 482M, North Star");
+    await fireEvent.changeText(screen.getByLabelText("Units"), "2");
+    await fireEvent.press(screen.getByRole("button", { name: /^Item, / }));
+    await fireEvent.changeText(screen.getByLabelText("Search item"), "Towing");
+    expect(screen.queryAllByRole("radio")).toHaveLength(0);
+    await fireEvent.press(screen.getByRole("button", { name: "Add new item" }));
+
+    expect(screen.getByLabelText("Item name").props.value).toBe("Towing");
+    await pick("Category", "Running");
+    await fireEvent.press(screen.getByRole("button", { name: "Save item" }));
+    await waitFor(() =>
+      expect(
+        bodies(api, "setup/expense-categories/c-run/items", "POST"),
+      ).toEqual([{ name: "Towing" }]),
+    );
+    await waitFor(() => expect(api.sent(OPTIONS).length).toBeGreaterThan(1));
+    expect(screen.getByLabelText("Units").props.value).toBe("2");
+    expect(
+      await screen.findByRole("button", { name: "Item, Towing" }),
+    ).toBeTruthy();
+
+    await fireEvent.changeText(screen.getByLabelText("Amount each"), "500");
+    await fireEvent.press(screen.getByRole("button", { name: "Save expense" }));
+    await waitFor(() =>
+      expect(bodies(api, "setup/pettycash/entries", "POST")).toHaveLength(1),
+    );
+    expect(bodies(api, "setup/pettycash/entries", "POST")[0]).toEqual(
+      expect.objectContaining({ expenseItemId: "i-new", units: 2 }),
+    );
+  });
+
+  it("keeps a single Save on screen while the new item form is open", async () => {
+    const api = await signIn(["pettycash.spend", "catalog.add"], spender);
+    api.on("setup/expense-categories?pageNumber=1&pageSize=100", [
+      200,
+      { items: [{ id: "c-run", name: "Running", active: true }] },
+    ]);
+    await openForm();
+    await fireEvent.press(screen.getByRole("button", { name: /^Item, / }));
+    await fireEvent.changeText(screen.getByLabelText("Search item"), "Towing");
+    await fireEvent.press(screen.getByRole("button", { name: "Add new item" }));
+
+    expect(screen.getByRole("button", { name: "Save item" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save expense" })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Save expense" })).toBeTruthy();
+  });
+
+  it("shows the new item at once and records the expense with it before the options reload", async () => {
+    const api = await signIn(["pettycash.spend", "catalog.add"], spender);
+    api.on("setup/expense-categories?pageNumber=1&pageSize=100", [
+      200,
+      { items: [{ id: "c-run", name: "Running", active: true }] },
+    ]);
+    api.on("setup/expense-categories/c-run/items", [200, { id: "i-new" }]);
+    api.on("setup/pettycash/entries", [
+      200,
+      { id: "x", version: 1, status: "waiting", balance: 1 },
+    ]);
+    await openForm();
+    await pick("Vehicle", "KDA 482M, North Star");
+    await fireEvent.press(screen.getByRole("button", { name: /^Item, / }));
+    await fireEvent.changeText(screen.getByLabelText("Search item"), "Towing");
+    await fireEvent.press(screen.getByRole("button", { name: "Add new item" }));
+    await pick("Category", "Running");
+    await fireEvent.press(screen.getByRole("button", { name: "Save item" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Item, Towing" }),
+    ).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText("Amount each"), "500");
+    await fireEvent.press(screen.getByRole("button", { name: "Save expense" }));
+    await waitFor(() =>
+      expect(bodies(api, "setup/pettycash/entries", "POST")).toEqual([
+        expect.objectContaining({ expenseItemId: "i-new" }),
+      ]),
+    );
+  });
+});

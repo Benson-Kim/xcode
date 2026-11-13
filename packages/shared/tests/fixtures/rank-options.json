@@ -1,0 +1,90 @@
+[
+  {
+    "name": "exact, then starts with, then a word starts with, then contains, then letters in order; others hidden",
+    "query": "bus",
+    "options": [
+      "Minibus parts",
+      "Bus fare",
+      "Tyres",
+      "Rebuses",
+      "School bus",
+      "bus",
+      "Bulbs set"
+    ],
+    "expected": [
+      "bus",
+      "Bus fare",
+      "School bus",
+      "Minibus parts",
+      "Rebuses",
+      "Bulbs set"
+    ]
+  },
+  {
+    "name": "case and accents do not count",
+    "query": "CAFE",
+    "options": ["Café latte", "café", "Cafeteria"],
+    "expected": ["café", "Café latte", "Cafeteria"]
+  },
+  {
+    "name": "equal matches keep their order",
+    "query": "oil",
+    "options": ["Oil filter", "Engine oil", "Oil change", "Gear oil"],
+    "expected": ["Oil filter", "Oil change", "Engine oil", "Gear oil"]
+  },
+  {
+    "name": "an empty query keeps every option in order",
+    "query": "   ",
+    "options": ["Tyres", "Brake pads", "Parking"],
+    "expected": ["Tyres", "Brake pads", "Parking"]
+  },
+  {
+    "name": "spaces in the query are trimmed and collapsed",
+    "query": "  rongai   express ",
+    "options": ["Metro Trans", "Rongai Express"],
+    "expected": ["Rongai Express"]
+  },
+  {
+    "name": "letters in order rank below every closer match",
+    "query": "kdb",
+    "options": ["K D B 1", "KDA 482M", "Kdb 100X"],
+    "expected": ["Kdb 100X", "K D B 1"]
+  },
+  {
+    "name": "a word found in the group ranks above letters in order",
+    "query": "fuel",
+    "options": [
+      { "label": "Full service oil", "group": "Garage and repairs" },
+      { "label": "Diesel", "group": "Fuel" },
+      { "label": "Fuel cap", "group": "Garage and repairs" },
+      { "label": "Petrol", "group": "Fuel" }
+    ],
+    "expected": ["Fuel cap", "Diesel", "Petrol", "Full service oil"]
+  },
+  {
+    "name": "words in any order may match the label or its group",
+    "query": "garage tyres",
+    "options": [
+      { "label": "Parking", "group": "Fees" },
+      { "label": "Brake pads", "group": "Garage and repairs" },
+      { "label": "Tyres", "group": "Garage and repairs" }
+    ],
+    "expected": ["Tyres"]
+  },
+  {
+    "name": "a group name alone finds its options",
+    "query": "fees",
+    "options": [
+      { "label": "Tyres", "group": "Garage and repairs" },
+      { "label": "Parking", "group": "Fees" },
+      { "label": "Toll", "group": "Fees" }
+    ],
+    "expected": ["Parking", "Toll"]
+  },
+  {
+    "name": "markup typed is plain text to match",
+    "query": "<img",
+    "options": ["Image", "<img src=x onerror=alert(1)>"],
+    "expected": ["<img src=x onerror=alert(1)>"]
+  }
+]

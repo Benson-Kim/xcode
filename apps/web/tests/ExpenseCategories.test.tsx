@@ -5,6 +5,7 @@ import { ExpenseCategoriesPage } from "../components/setup";
 import type { ExpenseCategory, ExpenseMainCategory } from "../lib/types";
 import { fakeApi } from "./fakeApi";
 import { renderInApp } from "./renderInApp";
+import { optionsOf, pick } from "./searchSelect";
 
 const mains: ExpenseMainCategory[] = [
   { id: "m-run", name: "Running costs", categoryCount: 1, itemCount: 2 },
@@ -272,12 +273,12 @@ it("adds a category under a main category, or under none, with no Counts as cont
   fireEvent.click(screen.getByRole("button", { name: "New category" }));
   const dialog = within(screen.getByRole("dialog", { name: "New category" }));
   expect(dialog.queryByLabelText("Counts as")).not.toBeInTheDocument();
-  const select = dialog.getByLabelText("Main category");
-  expect(
-    within(select)
-      .getAllByRole("option")
-      .map((option) => option.textContent),
-  ).toEqual(["No main category", "Running costs", "Finance"]);
+  expect(optionsOf(dialog.getByLabelText("Main category"))).toEqual([
+    "No main category",
+    "Running costs",
+    "Finance",
+    "+ Add new",
+  ]);
   fireEvent.click(dialog.getByRole("button", { name: "Save" }));
   expect(dialog.getByRole("alert")).toHaveTextContent(
     "Enter the category name.",
@@ -291,7 +292,7 @@ it("adds a category under a main category, or under none, with no Counts as cont
   fireEvent.change(dialog.getByLabelText("Name"), {
     target: { value: "Insurance" },
   });
-  fireEvent.change(select, { target: { value: "m-fin" } });
+  pick(dialog.getByLabelText("Main category"), "Finance");
   fireEvent.click(dialog.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(api)).toHaveLength(1));
   expect(writes(api)[0]).toEqual([
@@ -321,10 +322,8 @@ it("moves a category to another main category, or to none", async () => {
 
   fireEvent.click(tab(/^Categories/));
   fireEvent.click(screen.getByRole("button", { name: "Edit Loans" }));
-  expect(screen.getByLabelText("Main category")).toHaveValue("m-fin");
-  fireEvent.change(screen.getByLabelText("Main category"), {
-    target: { value: "" },
-  });
+  expect(screen.getByLabelText("Main category")).toHaveValue("Finance");
+  pick(screen.getByLabelText("Main category"), "No main category");
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(api)).toHaveLength(1));
   expect(writes(api)[0]).toEqual([
@@ -336,9 +335,7 @@ it("moves a category to another main category, or to none", async () => {
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Old charges" }),
   );
-  fireEvent.change(screen.getByLabelText("Main category"), {
-    target: { value: "m-run" },
-  });
+  pick(screen.getByLabelText("Main category"), "Running costs");
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(api)).toHaveLength(2));
   expect(writes(api)[1]).toEqual([
@@ -357,9 +354,7 @@ it("adds, renames and moves items on the item routes", async () => {
 
   fireEvent.click(screen.getByRole("button", { name: "New item" }));
   const dialog = within(screen.getByRole("dialog", { name: "New item" }));
-  fireEvent.change(dialog.getByLabelText("Category"), {
-    target: { value: "garage" },
-  });
+  pick(dialog.getByLabelText("Category"), "Garage and repairs");
   fireEvent.click(dialog.getByRole("button", { name: "Save" }));
   expect(dialog.getByRole("alert")).toHaveTextContent("Enter the item name.");
   fireEvent.change(dialog.getByLabelText("Name"), {
@@ -392,9 +387,7 @@ it("adds, renames and moves items on the item routes", async () => {
   ]);
 
   fireEvent.click(screen.getByRole("button", { name: "Edit Loan repayment" }));
-  fireEvent.change(screen.getByLabelText("Category"), {
-    target: { value: "garage" },
-  });
+  pick(screen.getByLabelText("Category"), "Garage and repairs");
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes(api)).toHaveLength(3));
   expect(writes(api)[2]).toEqual([
@@ -491,4 +484,75 @@ it("treats the released expenses.setup key as every catalog right", async () => 
   expect(
     screen.getByRole("button", { name: "Stop Tyres" }),
   ).toBeInTheDocument();
+});
+
+it("adds a missing category from the item form and returns to it with the new category chosen", async () => {
+  const api = serve();
+  renderInApp(<ExpenseCategoriesPage />, { permissions: ["catalog.add"] });
+  await screen.findByText("Tyres");
+
+  fireEvent.click(screen.getByRole("button", { name: "New item" }));
+  let dialog = within(screen.getByRole("dialog", { name: "New item" }));
+  fireEvent.change(dialog.getByLabelText("Name"), {
+    target: { value: "Towing" },
+  });
+  const category = dialog.getByLabelText("Category");
+  fireEvent.focus(category);
+  fireEvent.change(category, { target: { value: "Recovery" } });
+  fireEvent.keyDown(category, { key: "Enter" });
+
+  dialog = within(screen.getByRole("dialog", { name: "New category" }));
+  expect(dialog.getByLabelText("Name")).toHaveValue("Recovery");
+  fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(writes(api)).toEqual([
+      [
+        "POST",
+        "setup/expense-categories",
+        { name: "Recovery", mainCategoryId: null },
+      ],
+    ]),
+  );
+
+  dialog = within(await screen.findByRole("dialog", { name: "New item" }));
+  expect(dialog.getByLabelText("Name")).toHaveValue("Towing");
+  fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(writes(api)).toHaveLength(2));
+  expect(writes(api)[1]).toEqual([
+    "POST",
+    "setup/expense-categories/new-id/items",
+    { name: "Towing" },
+  ]);
+});
+
+it("goes back to the item form untouched when the added category is cancelled", async () => {
+  const api = serve();
+  renderInApp(<ExpenseCategoriesPage />, { permissions: ["catalog.add"] });
+  await screen.findByText("Tyres");
+
+  fireEvent.click(screen.getByRole("button", { name: "New item" }));
+  let dialog = within(screen.getByRole("dialog", { name: "New item" }));
+  fireEvent.change(dialog.getByLabelText("Name"), {
+    target: { value: "Towing" },
+  });
+  pick(dialog.getByLabelText("Category"), "Garage and repairs");
+  pick(dialog.getByLabelText("Category"), "+ Add new");
+  dialog = within(screen.getByRole("dialog", { name: "New category" }));
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+
+  dialog = within(screen.getByRole("dialog", { name: "New item" }));
+  expect(dialog.getByLabelText("Name")).toHaveValue("Towing");
+  expect(dialog.getByLabelText("Category")).toHaveValue("Garage and repairs");
+  expect(writes(api)).toEqual([]);
+});
+
+it("offers no + Add new in the category list to someone who may only edit", async () => {
+  serve();
+  renderInApp(<ExpenseCategoriesPage />, { permissions: ["catalog.edit"] });
+  await screen.findByText("Tyres");
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit Tyres" }));
+  expect(optionsOf(screen.getByLabelText("Category"))).not.toContain(
+    "+ Add new",
+  );
 });

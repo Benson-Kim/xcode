@@ -22,7 +22,8 @@ import { useFormats } from "../lib/formats";
 import { LineSkeleton, SectionTitle } from "../shell/parts";
 import { Button, ErrorText, Field, Text, useTheme } from "../ui";
 import { newEntryId, send, useLoaded, type Outcome } from "./client";
-import { DayStepper, Picker } from "./parts";
+import { NewItemForm } from "./NewItemForm";
+import { DayStepper, Picker, type Option } from "./parts";
 
 type Common = {
   businessDate: string;
@@ -33,6 +34,8 @@ type Common = {
   // The entry changed or went away while the form was open: the screen shows the message and reloads.
   onStale: (message: string) => void;
   onSessionEnded: () => void;
+  // The person may add expense items, so the item list ends in "+ Add new".
+  canAddItem?: boolean;
 };
 
 type EntryFormProps = Common & { entry?: PettyCashEntry; date: string };
@@ -180,40 +183,15 @@ export function ExpenseForm({ entry, date: start, ...common }: EntryFormProps) {
   const [date, setDate] = useState(entry?.date ?? start);
   const [vehicleId, setVehicleId] = useState(entry?.vehicleId ?? "");
   const [itemId, setItemId] = useState(entry?.expenseItemId ?? "");
+  const [newItem, setNewItem] = useState<string | null>(null);
+  const [addedItem, setAddedItem] = useState<Option | null>(null);
   const [units, setUnits] = useState(entry ? String(entry.units) : "1");
   const [amount, setAmount] = useState(entry ? String(entry.unitAmount) : "");
   const [note, setNote] = useState(entry?.note ?? "");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const options = useOptions(date, true, common);
   const { busy, error, save } = useSave(common);
-
-  const vehicles = (options.data?.vehicles ?? [])
-    .filter((vehicle) => vehicle.active || vehicle.id === entry?.vehicleId)
-    .map((vehicle) => ({
-      value: vehicle.id,
-      label: vehicle.registration,
-      sub: vehicle.companyName,
-    }));
-  if (entry?.vehicleId && !vehicles.some((v) => v.value === entry.vehicleId))
-    vehicles.push({
-      value: entry.vehicleId,
-      label: entry.registration ?? "Vehicle",
-      sub: "",
-    });
-  const items = (options.data?.items ?? []).map((item) => ({
-    value: item.id,
-    label: item.name,
-    sub: item.categoryName,
-  }));
-  if (
-    entry?.expenseItemId &&
-    !items.some((i) => i.value === entry.expenseItemId)
-  )
-    items.push({
-      value: entry.expenseItemId,
-      label: entry.expenseItemName ?? "Item",
-      sub: "",
-    });
+  const { vehicles, items } = expenseChoices(options.data, entry, addedItem);
 
   function submit() {
     const next: Record<string, string> = {};
@@ -273,14 +251,30 @@ export function ExpenseForm({ entry, date: start, ...common }: EntryFormProps) {
             error={errors.vehicle}
             empty="No vehicles on this day."
           />
-          <Picker
-            label="Item"
-            options={items}
-            value={itemId}
-            onChange={setItemId}
-            error={errors.item}
-            empty="No expense items are set up."
-          />
+          {newItem !== null ? (
+            <NewItemForm
+              name={newItem}
+              stamp={common.stamp}
+              onSessionEnded={common.onSessionEnded}
+              onCreated={(item) => {
+                setNewItem(null);
+                setAddedItem(item);
+                setItemId(item.value);
+                options.retry();
+              }}
+              onCancel={() => setNewItem(null)}
+            />
+          ) : (
+            <Picker
+              label="Item"
+              options={items}
+              value={itemId}
+              onChange={setItemId}
+              onAdd={common.canAddItem ? setNewItem : undefined}
+              error={errors.item}
+              empty="No expense items are set up."
+            />
+          )}
         </>
       ) : null}
       <AmountFields
@@ -298,15 +292,66 @@ export function ExpenseForm({ entry, date: start, ...common }: EntryFormProps) {
         onChangeText={setNote}
         maxLength={PETTY_CASH_NOTE_LIMIT}
       />
-      <Footer
-        busy={busy}
-        error={error}
-        submit={submit}
-        onCancel={common.onCancel}
-        saveLabel="Save expense"
-      />
+      {newItem === null ? (
+        <Footer
+          busy={busy}
+          error={error}
+          submit={submit}
+          onCancel={common.onCancel}
+          saveLabel="Save expense"
+        />
+      ) : null}
     </View>
   );
+}
+
+const withChoice = (choices: Option[], extra: Option | null) =>
+  extra && !choices.some((choice) => choice.value === extra.value)
+    ? [...choices, extra]
+    : choices;
+
+// The vehicles and items an expense picks from: the day's options, the entry's own vehicle and item even if they are
+// no longer offered, and an item just added here until the reloaded options list it.
+function expenseChoices(
+  data: PettyCashOptions | null,
+  entry: PettyCashEntry | undefined,
+  addedItem: Option | null,
+) {
+  const vehicles = withChoice(
+    (data?.vehicles ?? [])
+      .filter((vehicle) => vehicle.active || vehicle.id === entry?.vehicleId)
+      .map((vehicle) => ({
+        value: vehicle.id,
+        label: vehicle.registration,
+        sub: vehicle.companyName,
+      })),
+    entry?.vehicleId
+      ? {
+          value: entry.vehicleId,
+          label: entry.registration ?? "Vehicle",
+          sub: "",
+        }
+      : null,
+  );
+  const offered = (data?.items ?? []).map((item) => ({
+    value: item.id,
+    label: item.name,
+    sub: item.categoryName,
+  }));
+  const items = withChoice(
+    withChoice(
+      offered,
+      entry?.expenseItemId
+        ? {
+            value: entry.expenseItemId,
+            label: entry.expenseItemName ?? "Item",
+            sub: "",
+          }
+        : null,
+    ),
+    addedItem,
+  );
+  return { vehicles, items };
 }
 
 export function CreditForm({ entry, date: start, ...common }: EntryFormProps) {

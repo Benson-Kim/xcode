@@ -1,10 +1,11 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { RecurringEditor } from "../components/RecurringEditor";
 import type { ExpenseItemOption } from "../lib/types";
 import { renderInApp } from "./renderInApp";
-import { choose, pick } from "./searchSelect";
+import { choose, listboxOf, offered, pick } from "./searchSelect";
 
 // The organization's business date in these tests; where it matters, the computer clock is set well past it.
 const businessDate = "2026-09-21";
@@ -312,4 +313,119 @@ it("says the server's reason when a save is refused", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Only a saving has a revenue rule.",
   );
+});
+
+const towing: ExpenseItemOption = {
+  id: "i9",
+  name: "Towing",
+  categoryId: "g",
+  categoryName: "Garage and repairs",
+  bucket: 1,
+};
+
+// The item catalog the "+ Add new" form reads and writes; anything else is the scheduled expense being saved.
+function serveCatalog() {
+  const reply = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200 });
+  const page = (items: unknown[]) => ({
+    items,
+    pageNumber: 1,
+    pageSize: 100,
+    total: items.length,
+  });
+  const served = vi.fn<
+    (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+  >(async (input) => {
+    const path = String(input);
+    if (/^\/api\/setup\/expense-categories(\?|$)/.test(path))
+      return reply(
+        page([
+          {
+            id: "g",
+            name: "Garage and repairs",
+            bucket: null,
+            active: true,
+            stoppedOn: null,
+            mainCategoryId: null,
+            mainCategoryName: null,
+            items: [],
+          },
+        ]),
+      );
+    if (/^\/api\/setup\/expense-main-categories(\?|$)/.test(path))
+      return reply(page([]));
+    if (path === "/api/setup/expense-categories/g/items")
+      return reply({ id: "i9" });
+    return reply({ id: "item-1" });
+  });
+  vi.stubGlobal("fetch", served);
+  return served;
+}
+
+function EditorWithCatalog({ onSaved }: { onSaved: () => Promise<void> }) {
+  const [items, setItems] = useState(expenseItems);
+  return (
+    <RecurringEditor
+      vehicles={[vehicle, second]}
+      expenseItems={items}
+      onItemsChanged={() => setItems([...expenseItems, towing])}
+      fullScope
+      onCancel={vi.fn()}
+      onSaved={onSaved}
+    />
+  );
+}
+
+it("adds a missing item from the scheduled expense form, chooses it and keeps the amount", async () => {
+  const served = serveCatalog();
+  const onSaved = vi.fn(async () => undefined);
+  renderInApp(
+    <EditorWithCatalog onSaved={onSaved} />,
+    { permissions: ["catalog.add"] },
+    { businessDate },
+  );
+  fireEvent.change(screen.getByLabelText("Amount per vehicle, KES"), {
+    target: { value: "3000" },
+  });
+  const field = screen.getByLabelText("Item");
+  fireEvent.focus(field);
+  fireEvent.change(field, { target: { value: "Towing" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+
+  const added = within(await screen.findByRole("dialog", { name: "New item" }));
+  expect(added.getByLabelText("Name")).toHaveValue("Towing");
+  await offered(added.getByLabelText("Category"), "Garage and repairs");
+  pick(added.getByLabelText("Category"), "Garage and repairs");
+  fireEvent.click(added.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(screen.getByLabelText("Item")).toHaveValue("Towing"),
+  );
+  expect(screen.getByLabelText("Amount per vehicle, KES")).toHaveValue("3,000");
+  choose(screen.getByLabelText("Runs"), "Every year");
+  choose(screen.getByLabelText("Date"), "15th");
+  choose(screen.getByLabelText("Month"), "March");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  const saved = served.mock.calls.at(-1)!;
+  expect(JSON.parse(String(saved[1]?.body))).toEqual(
+    expect.objectContaining({
+      name: "Towing",
+      expenseItemId: "i9",
+      allocations: [
+        { vehicleId: "vehicle-1", amount: 3000 },
+        { vehicleId: "vehicle-2", amount: 3000 },
+      ],
+    }),
+  );
+});
+
+it("offers no + Add new in the item list without a catalog right", () => {
+  renderEditor();
+  fireEvent.focus(screen.getByLabelText("Item"));
+  expect(
+    within(listboxOf(screen.getByLabelText("Item"))).queryByRole("option", {
+      name: "+ Add new",
+    }),
+  ).not.toBeInTheDocument();
 });

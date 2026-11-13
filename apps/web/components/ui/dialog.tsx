@@ -51,8 +51,9 @@ export function Dialog({
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      onClose={() => {
-        if (openRef.current) onClose();
+      // React hands a nested dialog's close to this handler too; only this dialog's own close counts.
+      onClose={(event) => {
+        if (event.target === event.currentTarget && openRef.current) onClose();
       }}
       // The reset takes away the browser's own centring; on a phone the sheet sits on the bottom edge.
       className={cn(

@@ -17,7 +17,12 @@ import { AppShell } from "../components/AppShell";
 import { appearanceFixture } from "./renderInApp";
 
 // The shell loads each page lazily; a cold first import on a busy machine can outlast findBy's one-second wait.
-beforeAll(() => import("../components/setup/RecurringPage"));
+beforeAll(() =>
+  Promise.all([
+    import("../components/setup/RecurringPage"),
+    import("../components/setup/ExpenseCategoriesPage"),
+  ]),
+);
 
 function signIn(permissions: string[]) {
   vi.stubGlobal(

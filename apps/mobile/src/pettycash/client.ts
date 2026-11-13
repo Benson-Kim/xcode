@@ -26,8 +26,11 @@ export type Outcome<T> =
 
 type Problem = { detail?: string; title?: string };
 
+export const send = <T>(method: "POST" | "PUT", path: string, body: unknown) =>
+  sendTo<T>(method, `setup/pettycash/${path}`, body);
+
 // The API's detail says what to fix. 409 and 404 mean the phone's copy is out of date, so the caller reloads.
-export async function send<T>(
+export async function sendTo<T>(
   method: "POST" | "PUT",
   path: string,
   body: unknown,
@@ -35,7 +38,7 @@ export async function send<T>(
   try {
     const { status, body: reply } = await apiSendResult<T & Problem>(
       method,
-      `setup/pettycash/${path}`,
+      path,
       body,
     );
     if (status >= 200 && status < 300) return { ok: true, data: reply };

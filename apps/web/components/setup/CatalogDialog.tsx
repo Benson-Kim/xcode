@@ -1,14 +1,12 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
-
 import type { ExpenseCategory, ExpenseMainCategory } from "../../lib/types";
 import {
   Button,
   Dialog,
   ErrorText,
   Field,
-  SelectInput,
+  SearchSelect,
   TextInput,
 } from "../ui";
 
@@ -31,23 +29,29 @@ const KIND_NAMES: Record<CatalogKind, string> = {
 
 export function CatalogDialog({
   form,
-  setForm,
+  onChange,
   mains,
   categories,
   busy,
   onSave,
   onClose,
+  onAddLink,
+  loadError = "",
 }: {
   form: CatalogForm;
-  setForm: Dispatch<SetStateAction<CatalogForm | null>>;
+  onChange: (form: CatalogForm) => void;
   mains: ExpenseMainCategory[];
   categories: ExpenseCategory[];
   busy: boolean;
+  // Why the main categories or categories to choose from did not load.
+  loadError?: string;
   onSave: () => void;
   onClose: () => void;
+  // Given, the main category or category list ends in "+ Add new".
+  onAddLink?: (typed: string) => void;
 }) {
   const change = (next: Partial<CatalogForm>) =>
-    setForm({ ...form, ...next, error: "" });
+    onChange({ ...form, ...next, error: "" });
   return (
     <Dialog
       open
@@ -81,33 +85,34 @@ export function CatalogDialog({
             onChange={(event) => change({ name: event.target.value })}
           />
         </Field>
+        {loadError && form.kind !== "main" && (
+          <ErrorText>{loadError}</ErrorText>
+        )}
         {form.kind === "cat" && (
           <Field id="catalog-main" label="Main category">
-            <SelectInput
+            <SearchSelect
+              options={[
+                { value: "", label: "No main category" },
+                ...mains.map((main) => ({ value: main.id, label: main.name })),
+              ]}
               value={form.link}
-              onChange={(event) => change({ link: event.target.value })}
-            >
-              <option value="">No main category</option>
-              {mains.map((main) => (
-                <option key={main.id} value={main.id}>
-                  {main.name}
-                </option>
-              ))}
-            </SelectInput>
+              onChange={(link) => change({ link })}
+              onAdd={onAddLink}
+            />
           </Field>
         )}
         {form.kind === "item" && (
           <Field id="catalog-category" label="Category">
-            <SelectInput
+            <SearchSelect
+              options={categories.map((category) => ({
+                value: category.id,
+                label: category.name,
+              }))}
               value={form.link}
-              onChange={(event) => change({ link: event.target.value })}
-            >
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </SelectInput>
+              placeholder="Choose the category"
+              onChange={(link) => change({ link })}
+              onAdd={onAddLink}
+            />
           </Field>
         )}
         {form.error && <ErrorText>{form.error}</ErrorText>}

@@ -41,6 +41,24 @@ it("does not call onClose again when the parent closes it from its own onClose",
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
+it("leaves the dialog underneath open when a dialog inside it closes", () => {
+  const outer = vi.fn();
+  const inner = vi.fn();
+  render(
+    <Dialog open title="Expense" onClose={outer}>
+      <Dialog open title="New item" onClose={inner}>
+        body
+      </Dialog>
+    </Dialog>,
+  );
+  fireEvent(
+    screen.getByRole("dialog", { name: "New item" }),
+    new Event("close"),
+  );
+  expect(inner).toHaveBeenCalledTimes(1);
+  expect(outer).not.toHaveBeenCalled();
+});
+
 it("stays silent when the parent closes it without asking", () => {
   const onClose = vi.fn();
   const { rerender } = render(

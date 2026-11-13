@@ -22,6 +22,7 @@ import { vehicleLabel } from "@xcode/shared/revenue";
 
 import { useResource } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
+import { useQuickAdds } from "../setup/useQuickAdds";
 import {
   Banner,
   Button,
@@ -187,6 +188,12 @@ function EntryForm({
 
   // The choices follow the date on the form; while the next ones load, the last ones stay.
   const options = useResource<PettyCashOptions>(optionsPath(date));
+  const quickAdd = useQuickAdds({
+    onItem: setItemId,
+    onVehicle: (id) => setVehicleId(id),
+    reload: options.reload,
+    date,
+  });
   const [held, setHeld] = useState<PettyCashOptions | undefined>(options.data);
   if (options.data && options.data !== held) setHeld(options.data);
   const choices = options.data ?? held;
@@ -292,112 +299,119 @@ function EntryForm({
   }
 
   return (
-    <form
-      id={formId}
-      noValidate
-      onSubmit={submit}
-      className="flex flex-col gap-3.5"
-    >
-      {options.error && !choices && <Banner>{options.error}</Banner>}
-      <DateStep
-        date={date}
-        earliest={earliest}
-        latest={businessDate}
-        onChange={setDate}
-      />
-      {pickHolder && (
-        <HolderField
-          holders={holderChoices}
-          value={holder}
-          error={errors.holder}
-          floats={floats}
-          showBalance={kind !== "expense"}
-          autoFocus={!holder}
-          onChange={setHolder}
+    <>
+      <form
+        id={formId}
+        noValidate
+        onSubmit={submit}
+        className="flex flex-col gap-3.5"
+      >
+        {options.error && !choices && <Banner>{options.error}</Banner>}
+        <DateStep
+          date={date}
+          earliest={earliest}
+          latest={businessDate}
+          onChange={setDate}
         />
-      )}
-      {kind === "expense" ? (
-        <>
-          <Field id="pc-vehicle" label="Vehicle" error={errors.vehicle}>
-            <SearchSelect
-              options={vehicleChoices.map((vehicle) => ({
-                value: vehicle.id,
-                label: vehicleLabel(vehicle),
-              }))}
-              value={vehicleId}
-              placeholder="Choose vehicle"
-              onChange={setVehicleId}
-            />
-          </Field>
-          <Field id="pc-item" label="Item" error={errors.item}>
-            <SearchSelect
-              options={itemOptions(itemChoices)}
-              value={itemId}
-              placeholder="Search item"
-              onChange={setItemId}
-            />
-          </Field>
-          <div className="mrow">
-            <Field id="pc-units" label="Qty" error={errors.units}>
-              <TextInput
-                inputMode="decimal"
-                autoComplete="off"
-                className="num"
-                value={units}
-                onChange={(event) => setUnits(event.target.value)}
+        {pickHolder && (
+          <HolderField
+            holders={holderChoices}
+            value={holder}
+            error={errors.holder}
+            floats={floats}
+            showBalance={kind !== "expense"}
+            autoFocus={!holder}
+            onChange={setHolder}
+          />
+        )}
+        {kind === "expense" ? (
+          <>
+            <Field id="pc-vehicle" label="Vehicle" error={errors.vehicle}>
+              <SearchSelect
+                options={quickAdd.withVehicles(
+                  vehicleChoices.map((vehicle) => ({
+                    value: vehicle.id,
+                    label: vehicleLabel(vehicle),
+                  })),
+                )}
+                value={vehicleId}
+                placeholder="Choose vehicle"
+                onChange={setVehicleId}
+                onAdd={quickAdd.addVehicle}
               />
             </Field>
+            <Field id="pc-item" label="Item" error={errors.item}>
+              <SearchSelect
+                options={quickAdd.withItems(itemOptions(itemChoices))}
+                value={itemId}
+                placeholder="Search item"
+                onChange={setItemId}
+                onAdd={quickAdd.addItem}
+              />
+            </Field>
+            <div className="mrow">
+              <Field id="pc-units" label="Qty" error={errors.units}>
+                <TextInput
+                  inputMode="decimal"
+                  autoComplete="off"
+                  className="num"
+                  value={units}
+                  onChange={(event) => setUnits(event.target.value)}
+                />
+              </Field>
+              <Field
+                id="pc-amount"
+                label={`Unit cost, ${formats.currencyCode()}`}
+                error={errors.amount}
+              >
+                <AmountInput
+                  autoFocus={!pickHolder || Boolean(holder)}
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                />
+              </Field>
+            </div>
+            <div className="mtot">
+              <span>Total amount</span>
+              <b className="num">{formats.kes(total ?? 0)}</b>
+            </div>
+          </>
+        ) : (
+          <>
             <Field
               id="pc-amount"
-              label={`Unit cost, ${formats.currencyCode()}`}
+              label={`Amount, ${formats.currencyCode()}`}
               error={errors.amount}
             >
               <AmountInput
-                autoFocus={!pickHolder || Boolean(holder)}
+                autoFocus={Boolean(holder)}
                 value={amount}
                 onChange={(event) => setAmount(event.target.value)}
               />
             </Field>
-          </div>
-          <div className="mtot">
-            <span>Total amount</span>
-            <b className="num">{formats.kes(total ?? 0)}</b>
-          </div>
-        </>
-      ) : (
-        <>
-          <Field
-            id="pc-amount"
-            label={`Amount, ${formats.currencyCode()}`}
-            error={errors.amount}
-          >
-            <AmountInput
-              autoFocus={Boolean(holder)}
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-            />
-          </Field>
-          {kind === "credit" && (
-            <Field id="pc-note" label="Reason">
-              <TextInput
-                maxLength={PETTY_CASH_NOTE_LIMIT}
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-              />
-            </Field>
-          )}
-        </>
-      )}
-      <ErrorSummary count={Object.keys(errors).length} />
-      {error && <Banner>{error}</Banner>}
-      <DialogFooter>
-        <Button tone="outline" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button type="submit" form={formId} tone="ok" disabled={saving}>
-          {kind === "cash" ? "Issue cash" : "Save"}
-        </Button>
-      </DialogFooter>
-    </form>
+            {kind === "credit" && (
+              <Field id="pc-note" label="Reason">
+                <TextInput
+                  maxLength={PETTY_CASH_NOTE_LIMIT}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                />
+              </Field>
+            )}
+          </>
+        )}
+        <ErrorSummary count={Object.keys(errors).length} />
+        {error && <Banner>{error}</Banner>}
+        <DialogFooter>
+          <Button tone="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} tone="ok" disabled={saving}>
+            {kind === "cash" ? "Issue cash" : "Save"}
+          </Button>
+        </DialogFooter>
+      </form>
+      {quickAdd.dialogs}
+    </>
   );
 }

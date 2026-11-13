@@ -13,6 +13,7 @@ import { TargetsDialog } from "../components/setup/TargetsDialog";
 import { ToastProvider } from "../components/ui";
 import { fakeApi } from "./fakeApi";
 import { renderInApp } from "./renderInApp";
+import { offered, pick } from "./searchSelect";
 
 // The business date is Monday 21 Sep 2026.
 const businessDate = "2026-09-21";
@@ -183,10 +184,8 @@ it("refuses a new vehicle without a registration, a fleet number or every day ta
   fireEvent.change(dialog.getByLabelText("Fleet number"), {
     target: { value: "30" },
   });
-  await dialog.findByRole("option", { name: "North Star" });
-  fireEvent.change(dialog.getByLabelText("PSV company"), {
-    target: { value: "company-1" },
-  });
+  await offered(dialog.getByLabelText("PSV company"), "North Star");
+  pick(dialog.getByLabelText("PSV company"), "North Star");
   fireEvent.change(dialog.getByLabelText("Target, Monday"), {
     target: { value: "1800" },
   });

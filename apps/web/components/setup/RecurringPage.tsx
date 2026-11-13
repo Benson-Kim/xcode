@@ -158,6 +158,7 @@ export function RecurringPage({
       vehiclesLoading={options.loading}
       vehicles={editorVehicles(options.data ?? [], editedItem)}
       expenseItems={expenseItems.data}
+      onItemsChanged={expenseItems.reload}
       fullScope={mine.data?.allCompanies ?? false}
       loadError={options.error || expenseItems.error}
       preselectVehicle={editing === "new" ? newForVehicle : undefined}

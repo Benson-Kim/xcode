@@ -6,6 +6,7 @@ import { PeopleAccessView } from "../components/PeopleAccessView";
 import { VehiclesPage } from "../components/setup";
 import type { Person } from "../lib/types";
 import { renderInApp } from "./renderInApp";
+import { optionsOf } from "./searchSelect";
 
 // A selection must always be one of the options on screen, or say what it holds: never a value the control
 // cannot show, which reads as something else and is saved as it is.
@@ -81,12 +82,8 @@ it("never starts a new vehicle on an archived company the list is filtered by, o
 
   const company = screen.getByLabelText("PSV company");
   expect(company).toHaveValue("");
-  expect(
-    within(company).queryByRole("option", { name: "Old Fleet" }),
-  ).not.toBeInTheDocument();
-  expect(
-    within(company).getByRole("option", { name: "North Star" }),
-  ).toBeInTheDocument();
+  expect(optionsOf(company)).not.toContain("Old Fleet");
+  expect(optionsOf(company)).toContain("North Star");
 });
 
 it("still starts a new vehicle on the company the list is filtered by when it is active", async () => {
@@ -113,7 +110,7 @@ it("still starts a new vehicle on the company the list is filtered by when it is
     target: { value: "company-2" },
   });
   fireEvent.click(screen.getByRole("button", { name: "New vehicle" }));
-  expect(screen.getByLabelText("PSV company")).toHaveValue("company-2");
+  expect(screen.getByLabelText("PSV company")).toHaveValue("Metro Link");
 });
 
 const person = (over: Partial<Person>): Person => ({

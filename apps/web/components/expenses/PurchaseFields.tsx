@@ -14,11 +14,13 @@ export function VehicleField({
   vehicleId,
   options,
   onVehicle,
+  onAddVehicle,
   onSplit,
 }: {
   vehicleId: string;
   options: SearchOption[];
   onVehicle: (id: string) => void;
+  onAddVehicle?: (typed: string) => void;
   // Left out where the expense cannot be split (a row being changed).
   onSplit?: () => void;
 }) {
@@ -39,6 +41,7 @@ export function VehicleField({
         value={vehicleId}
         placeholder="Choose the vehicle"
         onChange={onVehicle}
+        onAdd={onAddVehicle}
       />
     </Field>
   );
@@ -49,6 +52,7 @@ export function PurchaseFields({
   itemId,
   onItem,
   itemOptions,
+  onAddItem,
   units,
   onUnits,
   unitsProblem,
@@ -60,6 +64,7 @@ export function PurchaseFields({
   itemId: string;
   onItem: (value: string) => void;
   itemOptions: SearchOption[];
+  onAddItem?: (typed: string) => void;
   units: string;
   onUnits: (value: string) => void;
   unitsProblem: string;
@@ -77,6 +82,7 @@ export function PurchaseFields({
           value={itemId}
           placeholder="Search item"
           onChange={onItem}
+          onAdd={onAddItem}
         />
       </Field>
       <div className="mrow">

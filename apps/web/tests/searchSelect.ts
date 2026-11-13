@@ -13,7 +13,7 @@ export function pick(input: HTMLElement, option: string | RegExp) {
 }
 
 // An option's name as assistive technology reads it: its text without the parts hidden from it, such as the group.
-function nameOf(option: HTMLElement) {
+export function nameOf(option: HTMLElement) {
   const copy = option.cloneNode(true) as HTMLElement;
   copy
     .querySelectorAll('[aria-hidden="true"]')

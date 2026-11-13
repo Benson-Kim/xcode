@@ -9,6 +9,7 @@ import {
   type PettyCashEntry,
   type PettyCashPeriod,
 } from "@xcode/shared/pettyCash";
+import { rankOptions } from "@xcode/shared/search";
 
 import { IconButton } from "../shell/parts";
 import { Field, Icon, Text, useTheme } from "../ui";
@@ -187,12 +188,14 @@ export type Option = { value: string; label: string; sub?: string };
 const LIST_LIMIT = 30;
 const SEARCH_AFTER = 8;
 
-// A closed field that opens to a list of choices, narrowed by typing once the list is long.
+// A closed field that opens to a list of choices, best match first once something is typed. The search shows
+// once the list is long, or always when "+ Add new" closes the list: it hands over what was typed.
 export function Picker({
   label,
   options,
   value,
   onChange,
+  onAdd,
   error,
   empty,
 }: {
@@ -200,6 +203,7 @@ export function Picker({
   options: Option[];
   value: string;
   onChange: (value: string) => void;
+  onAdd?: (typed: string) => void;
   error?: string;
   empty?: string;
 }) {
@@ -207,11 +211,9 @@ export function Picker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const selected = options.find((option) => option.value === value);
-  const needle = query.trim().toLowerCase();
-  const shown = options.filter(
-    (option) =>
-      !needle ||
-      `${option.label} ${option.sub ?? ""}`.toLowerCase().includes(needle),
+  const shown = rankOptions(
+    query,
+    options.map((option) => ({ ...option, group: option.sub })),
   );
   return (
     <View style={styles.picker}>
@@ -253,7 +255,7 @@ export function Picker({
             { borderColor: colors.cardLine, backgroundColor: colors.surface },
           ]}
         >
-          {options.length > SEARCH_AFTER ? (
+          {onAdd || options.length > SEARCH_AFTER ? (
             <View style={{ padding: 12 }}>
               <Field
                 label={`Search ${label.toLowerCase()}`}
@@ -271,59 +273,34 @@ export function Picker({
                 : "Nothing matches."}
             </Text>
           ) : (
-            shown.slice(0, LIST_LIMIT).map((option) => {
-              const checked = option.value === value;
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="radio"
-                  accessibilityLabel={
-                    option.sub ? `${option.label}, ${option.sub}` : option.label
-                  }
-                  accessibilityState={{ checked, selected: checked }}
-                  onPress={() => {
-                    onChange(option.value);
-                    setOpen(false);
-                    setQuery("");
-                  }}
-                  style={[
-                    styles.choice,
-                    { borderTopColor: colors.divider },
-                    checked && { backgroundColor: colors.blueTint },
-                  ]}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text weight={checked ? "bold" : "regular"}>
-                      {option.label}
-                    </Text>
-                    {option.sub ? (
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          lineHeight: 18,
-                          color: colors.grey,
-                        }}
-                      >
-                        {option.sub}
-                      </Text>
-                    ) : null}
-                  </View>
-                  {checked ? (
-                    <Text
-                      weight="semibold"
-                      style={{ fontSize: 14, color: colors.blue }}
-                    >
-                      Chosen
-                    </Text>
-                  ) : null}
-                </Pressable>
-              );
-            })
+            shown.slice(0, LIST_LIMIT).map((option) => (
+              <PickerChoice
+                key={option.value}
+                option={option}
+                checked={option.value === value}
+                onPress={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                  setQuery("");
+                }}
+              />
+            ))
           )}
           {shown.length > LIST_LIMIT ? (
             <Text style={{ padding: 12, fontSize: 14, color: colors.grey }}>
               {`Showing ${LIST_LIMIT} of ${shown.length}. Type to narrow the list.`}
             </Text>
+          ) : null}
+          {onAdd ? (
+            <AddNewChoice
+              label={label}
+              typed={query.trim()}
+              onPress={() => {
+                setOpen(false);
+                setQuery("");
+                onAdd(query.trim());
+              }}
+            />
           ) : null}
         </View>
       ) : null}
@@ -502,6 +479,77 @@ function Chip({
         {children}
       </Text>
     </View>
+  );
+}
+
+function PickerChoice({
+  option,
+  checked,
+  onPress,
+}: {
+  option: Option;
+  checked: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={
+        option.sub ? `${option.label}, ${option.sub}` : option.label
+      }
+      accessibilityState={{ checked, selected: checked }}
+      onPress={onPress}
+      style={[
+        styles.choice,
+        { borderTopColor: colors.divider },
+        checked && { backgroundColor: colors.blueTint },
+      ]}
+    >
+      <View style={{ flex: 1 }}>
+        <Text weight={checked ? "bold" : "regular"}>{option.label}</Text>
+        {option.sub ? (
+          <Text style={{ fontSize: 13, lineHeight: 18, color: colors.grey }}>
+            {option.sub}
+          </Text>
+        ) : null}
+      </View>
+      {checked ? (
+        <Text weight="semibold" style={{ fontSize: 14, color: colors.blue }}>
+          Chosen
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+// The last row of an addable list: what was typed goes to the create form.
+function AddNewChoice({
+  label,
+  typed,
+  onPress,
+}: {
+  label: string;
+  typed: string;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Add new ${label.toLowerCase()}`}
+      onPress={onPress}
+      style={[styles.choice, { borderTopColor: colors.divider }]}
+    >
+      <Text weight="semibold" style={{ color: colors.blue }}>
+        + Add new
+      </Text>
+      {typed ? (
+        <Text numberOfLines={1} style={{ color: colors.grey }}>
+          {typed}
+        </Text>
+      ) : null}
+    </Pressable>
   );
 }
 

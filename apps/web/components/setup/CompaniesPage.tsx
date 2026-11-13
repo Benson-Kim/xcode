@@ -20,6 +20,7 @@ import {
   useToast,
 } from "../ui";
 import { usePagedList } from "../usePagedList";
+import { AddCompanyDialog } from "./AddCompanyDialog";
 import type { Company } from "./shared";
 
 // Whether the company carries an archive date, even one still ahead of the business date. Older rows had none, so inactive counts too.
@@ -28,7 +29,6 @@ const archivedOnRecord = (company: Company) =>
 
 export function CompaniesPage() {
   const [adding, setAdding] = useState(false);
-  const [name, setName] = useState("");
   const [addError, setAddError] = useState("");
   // Changes carry no typed reason: the server writes one for the change log.
   const [renaming, setRenaming] = useState<{
@@ -43,33 +43,6 @@ export function CompaniesPage() {
 
   const toast = useToast();
   const { formatDateOnly } = useFormats();
-
-  async function add() {
-    const trimmed = name.trim();
-    if (!trimmed) return setAddError("Enter the company name.");
-    if (
-      rows.some(
-        (company) => company.name.toLowerCase() === trimmed.toLowerCase(),
-      )
-    )
-      return setAddError("This company already exists.");
-    setBusy(true);
-    try {
-      await apiRequest("setup/companies", {
-        method: "POST",
-        body: JSON.stringify({ name: trimmed }),
-      });
-      setName("");
-      setAddError("");
-      setAdding(false);
-      toast(`${trimmed} added.`);
-      companies.reload();
-    } catch (value) {
-      setAddError((value as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function saveRename(company: Company) {
     if (!renaming) return;
@@ -124,12 +97,6 @@ export function CompaniesPage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  function closeAdd() {
-    setAdding(false);
-    setName("");
-    setAddError("");
   }
 
   const renamingCompany = renaming
@@ -220,47 +187,16 @@ export function CompaniesPage() {
           </Tr>
         ))}
       </DataTable>
-      <Dialog
-        open={adding}
-        title="New company"
-        size="sm"
-        onClose={closeAdd}
-        footer={
-          <>
-            <Button tone="outline" onClick={closeAdd}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              form="company-add-form"
-              tone="ok"
-              disabled={busy}
-            >
-              Save
-            </Button>
-          </>
-        }
-      >
-        <form
-          id="company-add-form"
-          className="contents"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void add();
+      {adding && (
+        <AddCompanyDialog
+          taken={rows.map((company) => company.name)}
+          onAdded={() => {
+            setAdding(false);
+            companies.reload();
           }}
-        >
-          <Field id="new-company" label="Name" error={adding ? addError : ""}>
-            <TextInput
-              autoFocus
-              value={name}
-              onChange={(event) => {
-                setName(event.target.value);
-                setAddError("");
-              }}
-            />
-          </Field>
-        </form>
-      </Dialog>
+          onClose={() => setAdding(false)}
+        />
+      )}
       <Dialog
         open={Boolean(renaming && renamingCompany)}
         title="Edit company"
