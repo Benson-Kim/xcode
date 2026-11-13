@@ -40,6 +40,10 @@ BEGIN
   FROM tenancy.memberships AS m
   WHERE m.organization_id = p_organization_id AND m.user_id = p_user_id
   FOR NO KEY UPDATE;
+  -- Gone when a delete or erase held it meanwhile.
+  IF NOT FOUND THEN
+    PERFORM tenancy.refuse('not_found', 'XC404');
+  END IF;
   PERFORM identity.lock_user(p_user_id);
 
   IF NOT EXISTS (

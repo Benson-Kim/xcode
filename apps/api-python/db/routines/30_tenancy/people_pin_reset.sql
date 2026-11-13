@@ -41,6 +41,10 @@ BEGIN
   FROM tenancy.memberships AS m
   WHERE m.organization_id = p_organization_id AND m.user_id = p_user_id
   FOR NO KEY UPDATE;
+  -- Gone when a delete or erase held it meanwhile.
+  IF NOT FOUND THEN
+    PERFORM tenancy.refuse('not_found', 'XC404');
+  END IF;
   v_user := identity.lock_user(p_user_id);
   IF v_user.pin_hash IS NULL OR v_user.pin_reset_required THEN
     RETURN ROW(p_user_id, v_member.version, 'unchanged')::api.write_result;

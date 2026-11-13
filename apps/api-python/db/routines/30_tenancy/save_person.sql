@@ -142,6 +142,10 @@ BEGIN
     FROM tenancy.memberships AS m
     WHERE m.organization_id = v_organization_id AND m.user_id = p_user_id
     FOR NO KEY UPDATE;
+    -- Gone when a delete or erase held it meanwhile.
+    IF NOT FOUND THEN
+      PERFORM tenancy.refuse('not_found', 'XC404');
+    END IF;
     v_user := identity.lock_user(p_user_id);
     IF p_expected_version IS NULL THEN
       PERFORM tenancy.refuse('people_version_required', 'XC422');
