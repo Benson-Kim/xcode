@@ -54,6 +54,18 @@ function serve(lists: unknown[][]) {
         JSON.stringify([{ id: "company-1", name: "North Star" }]),
         { status: 200 },
       );
+    if (input.includes("/access/me"))
+      return new Response(
+        JSON.stringify({
+          allCompanies: true,
+          placesVehicles: true,
+          companies: [],
+          vehicles: [],
+          canChange: "Any date",
+          earliest: null,
+        }),
+        { status: 200 },
+      );
     if (input.includes("/recurring"))
       return new Response(
         JSON.stringify({

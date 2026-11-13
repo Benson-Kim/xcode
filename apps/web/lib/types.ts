@@ -52,6 +52,8 @@ export type ScopeOptions = {
 // out from the session, so "Your access" cannot drift from what a request is actually allowed to reach.
 export type MyScope = ScopeOptions & {
   allCompanies: boolean;
+  // The scope lets them add a vehicle: every company, or companies named in it (not vehicles alone).
+  placesVehicles?: boolean;
   // v2.32: how far back this person may change records, in words, and the earliest date allowed (null for none).
   canChange?: string;
   earliest?: string | null;

@@ -10,10 +10,7 @@ import {
   type CompanyChoice,
 } from "./VehiclesPage";
 
-export function useVehicleAddRight() {
-  const { can } = useSession();
-  return can("vehicles.manage") || can("vehicles.add");
-}
+export { useVehicleAddRight } from "./VehiclesPage";
 
 // The new vehicle pop up, opened from another form's vehicle list with what was typed there. Saving hands the new
 // vehicle back; cancelling closes it and leaves that form as it was. An entry dated before the business date has

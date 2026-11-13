@@ -1654,6 +1654,34 @@ describe("Adding a missing vehicle from the expense form", () => {
     },
   );
 
+  it("offers no + Add new in the vehicle list when the person's scope names vehicles only", async () => {
+    const api = await signIn(VEHICLE_ADDER, (routes) => {
+      vehicleSetup(routes);
+      routes.on("setup/access/me", [
+        200,
+        {
+          allCompanies: false,
+          placesVehicles: false,
+          companies: [],
+          vehicles: [],
+          canChange: "Any date",
+          earliest: null,
+        },
+      ]);
+    });
+    await openForm();
+    await waitFor(() => expect(api.sent("setup/access/me")).toHaveLength(1));
+    await fireEvent.press(screen.getByRole("button", { name: /^Vehicle, / }));
+    expect(
+      screen.getByRole("radio", { name: "KDA 482M, North Star" }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Add new vehicle" }),
+      ).toBeNull(),
+    );
+  });
+
   it("opens the new vehicle with what was typed, saves it, chooses it and records the expense with it", async () => {
     const api = await signIn(VEHICLE_ADDER, vehicleSetup);
     let created = false;
