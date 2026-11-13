@@ -124,6 +124,7 @@ describe("NAV", () => {
       "Vehicles",
       "Expense categories",
       "People and access",
+      "Roles",
       "Change log",
       "Organization settings",
     ]);

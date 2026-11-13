@@ -6,6 +6,7 @@ import {
   isRecorded,
   loadWholeWeek,
   mergeWeekPages,
+  normaliseRegistration,
   parseRevenueAmount,
   remainingWeekPages,
   REVENUE_AMOUNT_ERROR,
@@ -238,4 +239,14 @@ it("labels a vehicle with its fleet number once one is set", () => {
     "KDG 412M",
   );
   expect(vehicleLabel({ registration: "KDG 412M" })).toBe("KDG 412M");
+});
+
+it("puts a registration in the stored form, or refuses it", () => {
+  expect(normaliseRegistration("KDN 204B")).toBe("KDN 204B");
+  expect(normaliseRegistration(" kdn204b ")).toBe("KDN 204B");
+  expect(normaliseRegistration("kdn-204-b")).toBe("KDN 204B");
+  expect(normaliseRegistration("KDN 204")).toBeNull();
+  expect(normaliseRegistration("ADN 204B")).toBeNull();
+  expect(normaliseRegistration("KDN 2045B")).toBeNull();
+  expect(normaliseRegistration("")).toBeNull();
 });
