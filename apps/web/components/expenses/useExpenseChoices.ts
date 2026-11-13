@@ -13,6 +13,14 @@ import type { SearchOption } from "../ui";
 
 export const isDateShape = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
 
+export const expenseVehicleLabel = (vehicle: {
+  registration: string;
+  companyName?: string | null;
+}) =>
+  vehicle.companyName
+    ? `${vehicle.registration}, ${vehicle.companyName}`
+    : vehicle.registration;
+
 // The vehicles and items to pick from on a date. While the next ones load the last ones stay, and the vehicle and
 // item of a row being changed are listed even if they are no longer offered.
 export function useExpenseChoices(date: string, entry?: ExpenseLedgerRow) {
@@ -55,9 +63,7 @@ export function useExpenseChoices(date: string, entry?: ExpenseLedgerRow) {
 
   const vehicleOptions: SearchOption[] = vehicleChoices.map((vehicle) => ({
     value: vehicle.id,
-    label: vehicle.companyName
-      ? `${vehicle.registration}, ${vehicle.companyName}`
-      : vehicle.registration,
+    label: expenseVehicleLabel(vehicle),
   }));
 
   return {
@@ -65,5 +71,7 @@ export function useExpenseChoices(date: string, entry?: ExpenseLedgerRow) {
     vehicleOptions,
     itemChoices,
     error: choices ? "" : options.error,
+    // For the "+ Add new" pop ups: reloads these lists, and names an added vehicle as they do.
+    listing: { reload: options.reload, labelVehicle: expenseVehicleLabel },
   };
 }

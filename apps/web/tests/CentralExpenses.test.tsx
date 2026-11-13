@@ -13,6 +13,7 @@ import {
   BUSINESS_DATE,
   ledgerReads,
   manyRows,
+  OPTIONS,
   permissionsOf,
   serveExpenses,
 } from "./expensesServer";
@@ -21,7 +22,7 @@ import {
   permissionsOf as pettyPermissions,
 } from "./pettyCashServer";
 import { appearanceFixture, renderInApp } from "./renderInApp";
-import { choose, offered, pick } from "./searchSelect";
+import { choose, offered, optionsOf, pick } from "./searchSelect";
 
 // The shell loads Petty cash lazily; a cold first import can outlast findBy's one-second wait.
 beforeAll(() => import("../components/pettycash/PettyCashPage"));
@@ -826,4 +827,281 @@ it("offers no Export without reports.export", async () => {
   expect(
     screen.queryByRole("button", { name: "Export" }),
   ).not.toBeInTheDocument();
+});
+
+const category = (
+  id: string,
+  name: string,
+  stoppedOn: string | null = null,
+) => ({
+  id,
+  name,
+  bucket: null,
+  active: stoppedOn === null,
+  stoppedOn,
+  mainCategoryId: null,
+  mainCategoryName: null,
+  items: [],
+});
+
+// The catalog the new item form loads: one category in use, any others given, no main categories.
+function withCatalog(
+  api: ReturnType<typeof serveExpenses>,
+  others: ReturnType<typeof category>[] = [],
+) {
+  const items = [category("g", "Garage and repairs"), ...others];
+  api.on("GET setup/expense-categories*", [
+    200,
+    { items, pageNumber: 1, pageSize: 100, total: items.length },
+  ]);
+  api.on("GET setup/expense-main-categories*", [
+    200,
+    { items: [], pageNumber: 1, pageSize: 100, total: 0 },
+  ]);
+  return api;
+}
+
+it("adds a missing item from the expense form, chooses it and keeps what was already filled", async () => {
+  const api = withCatalog(serveExpenses());
+  api.on("POST setup/expense-categories/g/items", [200, { id: "i9" }]);
+  renderPage(api, ["expenses.view", "expenses.capture", "catalog.add"]);
+  const dialog = await openRecord();
+  pick(within(dialog).getByLabelText("Vehicle"), "KDA 482M, Rongai Express");
+  changeTo(within(dialog).getByLabelText("Qty"), "2");
+  const item = within(dialog).getByLabelText("Item");
+  fireEvent.focus(item);
+  changeTo(item, "Towing");
+  fireEvent.keyDown(item, { key: "Enter" });
+
+  const added = await screen.findByRole("dialog", { name: "New item" });
+  expect(within(added).getByLabelText("Name")).toHaveValue("Towing");
+  pick(within(added).getByLabelText("Category"), "Garage and repairs");
+  fireEvent.click(within(added).getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(api.sent("POST setup/expense-categories/g/items")).toEqual([
+      { name: "Towing" },
+    ]),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "New item" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(item).toHaveValue("Towing");
+  expect(within(dialog).getByLabelText("Qty")).toHaveValue("2");
+  expect(within(dialog).getByLabelText("Vehicle")).toHaveValue(
+    "KDA 482M, Rongai Express",
+  );
+  changeTo(within(dialog).getByLabelText("Unit cost, KES"), "500");
+  fireEvent.click(save(dialog));
+  await waitFor(() =>
+    expect(api.sent("POST setup/expenses/entries")).toEqual([
+      expect.objectContaining({ expenseItemId: "i9", units: 2 }),
+    ]),
+  );
+});
+
+it("closes only the new item form on Escape and keeps the expense form as filled", async () => {
+  renderPage(withCatalog(serveExpenses()), [
+    "expenses.view",
+    "expenses.capture",
+    "catalog.add",
+  ]);
+  const dialog = await openRecord();
+  changeTo(within(dialog).getByLabelText("Qty"), "2");
+  const item = within(dialog).getByLabelText("Item");
+  fireEvent.focus(item);
+  changeTo(item, "Towing");
+  fireEvent.keyDown(item, { key: "Enter" });
+
+  const added = await screen.findByRole("dialog", { name: "New item" });
+  fireEvent(added, new Event("close"));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "New item" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(dialog).toHaveAttribute("open");
+  expect(within(dialog).getByLabelText("Qty")).toHaveValue("2");
+});
+
+it("offers no + Add new in the item list without a catalog right", async () => {
+  renderPage();
+  const dialog = await openRecord();
+  fireEvent.focus(within(dialog).getByLabelText("Item"));
+  expect(
+    within(dialog).queryByRole("option", { name: "+ Add new" }),
+  ).not.toBeInTheDocument();
+});
+
+it("opens the new vehicle form with the registration typed, and cancelling it keeps the expense as filled", async () => {
+  const api = serveExpenses();
+  api.on("GET setup/vehicles/company-options", [200, []]);
+  renderPage(api, ["expenses.view", "expenses.capture", "vehicles.add"]);
+  const dialog = await openRecord();
+  changeTo(within(dialog).getByLabelText("Qty"), "3");
+  const vehicle = within(dialog).getByLabelText("Vehicle");
+  fireEvent.focus(vehicle);
+  changeTo(vehicle, "kde 300z");
+  fireEvent.keyDown(vehicle, { key: "Enter" });
+
+  const added = await screen.findByRole("dialog", { name: "New vehicle" });
+  expect(within(added).getByLabelText("Registration")).toHaveValue("KDE 300Z");
+  fireEvent.click(within(added).getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "New vehicle" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(within(dialog).getByLabelText("Qty")).toHaveValue("3");
+  expect(api.sent("POST setup/vehicles")).toEqual([]);
+});
+
+it("puts a vehicle added from a split row on that row and keeps the others", async () => {
+  const api = serveExpenses();
+  const added = {
+    id: "v9",
+    companyId: "c1",
+    companyName: "Rongai Express",
+    registration: "KDE 300Z",
+    active: true,
+  };
+  api.on("setup/expenses/options*", () => [
+    200,
+    api.sent("POST setup/vehicles").length
+      ? { ...OPTIONS, vehicles: [...OPTIONS.vehicles, added] }
+      : OPTIONS,
+  ]);
+  api.on("GET setup/vehicles/company-options", [
+    200,
+    [{ id: "c1", name: "Rongai Express" }],
+  ]);
+  api.on("POST setup/vehicles", [200, { id: "v9" }]);
+  renderPage(api, ["expenses.view", "expenses.capture", "vehicles.add"]);
+  const dialog = await openRecord();
+  fillPurchase(dialog, "1", "100");
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Split across vehicles" }),
+  );
+  pick(within(dialog).getByLabelText("Vehicle 1"), /^KDA 482M/);
+  const second = within(dialog).getByLabelText("Vehicle 2");
+  fireEvent.focus(second);
+  changeTo(second, "kde 300z");
+  fireEvent.keyDown(second, { key: "Enter" });
+
+  const form = within(
+    await screen.findByRole("dialog", { name: "New vehicle" }),
+  );
+  expect(form.getByLabelText("Registration")).toHaveValue("KDE 300Z");
+  changeTo(form.getByLabelText("Fleet number"), "30");
+  await offered(form.getByLabelText("PSV company"), "Rongai Express");
+  pick(form.getByLabelText("PSV company"), "Rongai Express");
+  changeTo(form.getByLabelText("Target, Monday"), "1800");
+  fireEvent.click(form.getByRole("button", { name: "Same every day" }));
+  fireEvent.click(form.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "New vehicle" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(api.sent("POST setup/vehicles")).toEqual([
+    expect.objectContaining({ registration: "KDE 300Z", companyId: "c1" }),
+  ]);
+  await waitFor(() =>
+    expect(within(dialog).getByLabelText("Vehicle 2")).toHaveValue(
+      "KDE 300Z, Rongai Express",
+    ),
+  );
+  expect(within(dialog).getByLabelText("Vehicle 1")).toHaveValue(
+    "KDA 482M, Rongai Express",
+  );
+  expect(within(dialog).getByLabelText("Qty")).toHaveValue("1");
+});
+
+async function openNewItem(dialog: HTMLElement) {
+  const item = within(dialog).getByLabelText("Item");
+  fireEvent.focus(item);
+  changeTo(item, "Towing");
+  fireEvent.keyDown(item, { key: "Enter" });
+  return within(await screen.findByRole("dialog", { name: "New item" }));
+}
+
+it("offers only the categories in use in the new item form", async () => {
+  renderPage(
+    withCatalog(serveExpenses(), [category("s", "Old fees", "2026-01-01")]),
+    ["expenses.view", "expenses.capture", "catalog.add"],
+  );
+  const added = await openNewItem(await openRecord());
+  const field = added.getByLabelText("Category");
+  await offered(field, "Garage and repairs");
+  expect(optionsOf(field)).not.toContain("Old fees");
+});
+
+it("says in the new item form why its categories did not load", async () => {
+  const api = serveExpenses();
+  api.on("GET setup/expense-categories*", [
+    403,
+    { detail: "You need Expense items to do this." },
+  ]);
+  api.on("GET setup/expense-main-categories*", [
+    200,
+    { items: [], pageNumber: 1, pageSize: 100, total: 0 },
+  ]);
+  renderPage(api, ["expenses.view", "expenses.capture", "expenses.setup"]);
+  const added = await openNewItem(await openRecord());
+  expect(
+    await added.findByText("You need Expense items to do this."),
+  ).toBeInTheDocument();
+});
+
+it("adds a vehicle for an earlier day that joins on that day, and shows it chosen before the list reloads", async () => {
+  const api = serveExpenses();
+  api.on("GET setup/vehicles/company-options", [
+    200,
+    [{ id: "c1", name: "Rongai Express" }],
+  ]);
+  api.on("POST setup/vehicles", [200, { id: "v9" }]);
+  renderPage(api, ["expenses.view", "expenses.capture", "vehicles.add"]);
+  const dialog = await openRecord();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Previous day" }));
+  fillPurchase(dialog, "1", "100");
+  const vehicle = within(dialog).getByLabelText("Vehicle");
+  fireEvent.focus(vehicle);
+  changeTo(vehicle, "kde 300z");
+  fireEvent.keyDown(vehicle, { key: "Enter" });
+
+  const form = within(
+    await screen.findByRole("dialog", { name: "New vehicle" }),
+  );
+  expect(form.getByText(/the entry's date/)).toBeInTheDocument();
+  changeTo(form.getByLabelText("Fleet number"), "30");
+  await offered(form.getByLabelText("PSV company"), "Rongai Express");
+  pick(form.getByLabelText("PSV company"), "Rongai Express");
+  changeTo(form.getByLabelText("Target, Monday"), "1800");
+  fireEvent.click(form.getByRole("button", { name: "Same every day" }));
+  fireEvent.click(form.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "New vehicle" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(api.sent("POST setup/vehicles")).toEqual([
+    expect.objectContaining({
+      registration: "KDE 300Z",
+      joinedOn: "2026-10-08",
+    }),
+  ]);
+  expect(vehicle).toHaveValue("KDE 300Z, Rongai Express");
+  fireEvent.click(save(dialog));
+  await waitFor(() =>
+    expect(api.sent("POST setup/expenses/entries")).toEqual([
+      expect.objectContaining({
+        date: "2026-10-08",
+        allocations: [{ vehicleId: "v9", amount: 100 }],
+      }),
+    ]),
+  );
 });

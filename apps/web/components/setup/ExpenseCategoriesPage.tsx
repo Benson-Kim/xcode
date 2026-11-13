@@ -9,7 +9,6 @@ import {
   EXPENSE_MAIN_CATEGORIES_PATH,
 } from "../../lib/endpoints/catalog";
 import { useFormats } from "../../lib/formats";
-import { useSession } from "../../lib/session-context";
 import type {
   ExpenseCategory,
   ExpenseItem,
@@ -26,11 +25,8 @@ import {
   Tr,
   useToast,
 } from "../ui";
-import {
-  CatalogDialog,
-  type CatalogForm,
-  type CatalogKind,
-} from "./CatalogDialog";
+import { CatalogDialog, type CatalogKind } from "./CatalogDialog";
+import { useCatalogEditor, useCatalogRights } from "./useCatalogEditor";
 
 type Tab = "mains" | "cats" | "items";
 
@@ -56,7 +52,6 @@ export function ExpenseCategoriesPage({
 }: {
   canManage?: boolean;
 }) {
-  const { can } = useSession();
   const toast = useToast();
   const { formatDateOnly } = useFormats();
   const categories = useStreamedList<ExpenseCategory>(
@@ -68,14 +63,13 @@ export function ExpenseCategoriesPage({
     100,
   );
   const [tab, setTab] = useState<Tab>("items");
-  const [form, setForm] = useState<CatalogForm | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   // The released expenses.setup key stands for adding, editing and stopping together.
-  const manage = canManage || can("expenses.setup");
-  const canAdd = manage || can("catalog.add");
-  const canEdit = manage || can("catalog.edit");
-  const canStop = manage || can("catalog.stop");
+  const rights = useCatalogRights(canManage);
+  const canAdd = rights.add;
+  const canEdit = rights.edit;
+  const canStop = rights.stop;
 
   const sortedCategories = [...categories.items].sort(byName);
   const rows = sortedCategories.flatMap((category) =>
@@ -89,111 +83,15 @@ export function ExpenseCategoriesPage({
     category.mainCategoryName ??
     mains.items.find((main) => main.id === category.mainCategoryId)?.name ??
     null;
-
-  function open(kind: CatalogKind, id: string | null = null) {
-    const category = sortedCategories.find((candidate) => candidate.id === id);
-    const item = rows.find((row) => row.item.id === id)?.item;
-    const main = mains.items.find((candidate) => candidate.id === id);
-    setForm({
-      kind,
-      id,
-      name:
-        (kind === "main" ? main : kind === "cat" ? category : item)?.name ?? "",
-      link:
-        kind === "cat"
-          ? (category?.mainCategoryId ?? "")
-          : kind === "item"
-            ? (item?.categoryId ?? sortedCategories[0]?.id ?? "")
-            : "",
-      error: "",
-    });
-  }
-
-  function problem(current: CatalogForm, name: string) {
-    const lower = name.toLowerCase();
-    const taken = (names: { id: string; name: string }[]) =>
-      names.some(
-        (other) =>
-          other.id !== current.id && other.name.toLowerCase() === lower,
-      );
-    const clash = `${name} is already here.`;
-    if (current.kind === "main")
-      return !name
-        ? "Enter the main category name."
-        : taken(mains.items)
-          ? clash
-          : "";
-    if (current.kind === "cat")
-      return !name
-        ? "Enter the category name."
-        : taken(categories.items)
-          ? clash
-          : "";
-    if (!name) return "Enter the item name.";
-    if (!current.link) return "Choose the category.";
-    return taken(
-      categories.items.find((category) => category.id === current.link)
-        ?.items ?? [],
-    )
-      ? clash
-      : "";
-  }
-
-  async function submit(current: CatalogForm) {
-    const name = current.name.trim();
-    const refused = problem(current, name);
-    if (refused) return setForm({ ...current, error: refused });
-    const original =
-      current.kind === "main"
-        ? mains.items.find((main) => main.id === current.id)
-        : current.kind === "cat"
-          ? categories.items.find((category) => category.id === current.id)
-          : rows.find((row) => row.item.id === current.id)?.item;
-    const unchanged =
-      original !== undefined &&
-      name === original.name &&
-      (current.kind === "cat"
-        ? current.link === ((original as ExpenseCategory).mainCategoryId ?? "")
-        : current.kind === "item"
-          ? current.link === (original as ExpenseItem).categoryId
-          : true);
-    if (unchanged) return setForm(null);
-    setBusy(true);
-    try {
-      if (current.kind === "main")
-        await (current.id
-          ? catalogApi.renameMain(current.id, name)
-          : catalogApi.createMain(name));
-      else if (current.kind === "cat") {
-        const body = { name, mainCategoryId: current.link || null };
-        await (current.id
-          ? catalogApi.updateCategory(current.id, body)
-          : catalogApi.createCategory(body));
-      } else if (current.id) {
-        const moved = current.link !== (original as ExpenseItem).categoryId;
-        await catalogApi.updateItem(current.id, {
-          name,
-          ...(moved ? { categoryId: current.link } : {}),
-        });
-      } else await catalogApi.createItem(current.link, name);
-      toast(
-        current.id
-          ? "Saved"
-          : current.kind === "main"
-            ? "Main category added"
-            : current.kind === "cat"
-              ? "Category added"
-              : "Item added",
-      );
+  const editor = useCatalogEditor({
+    mains: mains.items,
+    categories: sortedCategories,
+    onSaved: () => {
       categories.reload();
       mains.reload();
-      setForm(null);
-    } catch (value) {
-      setForm({ ...current, error: (value as Error).message });
-    } finally {
-      setBusy(false);
-    }
-  }
+    },
+  });
+  const open = editor.open;
 
   async function toggle(item: ExpenseItem) {
     // The stored stop date decides, not active: that follows the business date, so a stop dated ahead of it still needs resuming to cancel.
@@ -395,15 +293,17 @@ export function ExpenseCategoriesPage({
           </DataTable>
         )}
       </Tabs>
-      {form && (
+      {editor.form && (
         <CatalogDialog
-          form={form}
-          setForm={setForm}
+          key={editor.form.kind}
+          form={editor.form}
+          onChange={editor.change}
           mains={mains.items}
           categories={sortedCategories}
-          busy={busy}
-          onSave={() => void submit(form)}
-          onClose={() => setForm(null)}
+          busy={editor.busy}
+          onSave={() => void editor.submit()}
+          onClose={editor.close}
+          onAddLink={canAdd ? editor.addLink : undefined}
         />
       )}
     </>

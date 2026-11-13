@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 
 import { CompaniesPage, VehiclesPage } from "../components/setup";
 import { renderInApp } from "./renderInApp";
+import { offered, optionsOf, pick } from "./searchSelect";
 
 // C7: only stopping a scheduled item and removing access ask for a typed reason. Companies and vehicles are saved
 // without one, and the server writes the reason for the change log.
@@ -127,9 +128,8 @@ it("adds, edits, retires and restores a vehicle without a typed reason", async (
   fireEvent.change(screen.getByLabelText("Registration"), {
     target: { value: "kdg905b" },
   });
-  fireEvent.change(screen.getByLabelText("PSV company"), {
-    target: { value: company.id },
-  });
+  await offered(screen.getByLabelText("PSV company"), company.name);
+  pick(screen.getByLabelText("PSV company"), company.name);
   fireEvent.change(screen.getByLabelText("Fleet number"), {
     target: { value: "21" },
   });
@@ -222,5 +222,90 @@ it("cancels an archive dated ahead of the business date with Restore instead of 
     expect(writes(fetchMock)).toEqual([
       ["/api/setup/companies/company-3/restore", "POST", {}],
     ]),
+  );
+});
+
+it("adds a missing company from the new vehicle form, chooses it and keeps the registration", async () => {
+  const fetchMock = serve({ vehicles: [vehicle], companies: [company] });
+  renderInApp(
+    <VehiclesPage />,
+    { permissions: ["vehicles.manage", "companies.manage"] },
+    { businessDate },
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "New vehicle" }));
+  fireEvent.change(screen.getByLabelText("Registration"), {
+    target: { value: "kdg905b" },
+  });
+  const field = screen.getByLabelText("PSV company");
+  await offered(field, company.name);
+  fireEvent.change(field, { target: { value: "Coast Line" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+
+  const added = within(screen.getByRole("dialog", { name: "New company" }));
+  expect(added.getByLabelText("Name")).toHaveValue("Coast Line");
+  fireEvent.click(added.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(writes(fetchMock)).toEqual([
+      ["/api/setup/companies", "POST", { name: "Coast Line" }],
+    ]),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "New company" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(screen.getByLabelText("PSV company")).toHaveValue("Coast Line");
+  expect(screen.getByLabelText("Registration")).toHaveValue("KDG905B");
+});
+
+it("lists a company added from the vehicle form once the reloaded list holds it too", async () => {
+  const companies = [company];
+  const fetchMock = serve({ vehicles: [vehicle], companies });
+  renderInApp(
+    <VehiclesPage />,
+    { permissions: ["vehicles.manage", "companies.manage"] },
+    { businessDate },
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "New vehicle" }));
+  const field = screen.getByLabelText("PSV company");
+  await offered(field, company.name);
+  const loads = () =>
+    fetchMock.mock.calls.filter(([url]) =>
+      url.startsWith("/api/setup/companies?"),
+    ).length;
+  const before = loads();
+  fireEvent.change(field, { target: { value: "Coast Line" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  companies.push({
+    id: "new-id",
+    name: "Coast Line",
+    vehicleCount: 0,
+    active: true,
+  });
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "New company" })).getByRole(
+      "button",
+      { name: "Save" },
+    ),
+  );
+  await waitFor(() => expect(loads()).toBeGreaterThan(before));
+  await offered(field, "Coast Line");
+  expect(optionsOf(field).filter((name) => name === "Coast Line")).toHaveLength(
+    1,
+  );
+  expect(field).toHaveValue("Coast Line");
+});
+
+it("offers no + Add new company to someone who may only manage vehicles", async () => {
+  serve({ vehicles: [vehicle], companies: [company] });
+  renderInApp(
+    <VehiclesPage />,
+    { permissions: ["vehicles.manage", "companies.view"] },
+    { businessDate },
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "New vehicle" }));
+  await offered(screen.getByLabelText("PSV company"), company.name);
+  expect(optionsOf(screen.getByLabelText("PSV company"))).not.toContain(
+    "+ Add new",
   );
 });

@@ -1,9 +1,28 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { useState } from "react";
 import { expect, it, vi } from "vitest";
 
 import { Field, SearchSelect, type SearchOption } from "../components/ui";
-import { listboxOf, optionsOf, pick } from "./searchSelect";
+import { listboxOf, nameOf, optionsOf, pick } from "./searchSelect";
+
+type RankVector = {
+  name: string;
+  query: string;
+  options: (string | { label: string; group?: string })[];
+  expected: string[];
+};
+
+const RANK_VECTORS = JSON.parse(
+  readFileSync(
+    join(
+      __dirname,
+      "../../../packages/shared/tests/fixtures/rank-options.json",
+    ),
+    "utf8",
+  ),
+) as RankVector[];
 
 const OPTIONS: SearchOption[] = [
   { value: "v1", label: "KDA 482M, Rongai Express" },
@@ -255,4 +274,102 @@ it("does not open while disabled", () => {
     />,
   );
   expect(input()).toBeDisabled();
+});
+
+it.each(RANK_VECTORS)("ranks as the shared rule does: $name", (vector) => {
+  render(
+    <SearchSelect
+      aria-label="Vehicle"
+      options={vector.options.map((option, index) => ({
+        value: `o${index}`,
+        ...(typeof option === "string" ? { label: option } : option),
+      }))}
+      value=""
+      onChange={() => {}}
+    />,
+  );
+  fireEvent.focus(input());
+  fireEvent.change(input(), { target: { value: vector.query } });
+  expect(
+    within(listboxOf(input())).queryAllByRole("option").map(nameOf),
+  ).toEqual(vector.expected);
+});
+
+function AddHarness({ onAdd }: { onAdd?: (typed: string) => void }) {
+  return (
+    <SearchSelect
+      aria-label="Vehicle"
+      options={OPTIONS}
+      value=""
+      onChange={() => {}}
+      onAdd={onAdd}
+    />
+  );
+}
+
+it("offers no way to add without onAdd, as for someone who may not create the record", () => {
+  render(<AddHarness />);
+  expect(optionsOf(input())).not.toContain("+ Add new");
+  fireEvent.change(input(), { target: { value: "zzz" } });
+  expect(within(listboxOf(input())).queryAllByRole("option")).toHaveLength(0);
+});
+
+it("pins + Add new as the last option, under the ranked matches", () => {
+  render(<AddHarness onAdd={() => {}} />);
+  fireEvent.focus(input());
+  fireEvent.change(input(), { target: { value: "rongai" } });
+  expect(within(listboxOf(input())).getAllByRole("option").map(nameOf)).toEqual(
+    ["KDA 482M, Rongai Express", "KDB 100X, Rongai Express", "+ Add new"],
+  );
+});
+
+it("reaches + Add new with the arrow keys and hands Enter what was typed", () => {
+  const onAdd = vi.fn();
+  render(<AddHarness onAdd={onAdd} />);
+  fireEvent.focus(input());
+  fireEvent.change(input(), { target: { value: "  KDE 300Z " } });
+  const highlighted = () =>
+    document.getElementById(input().getAttribute("aria-activedescendant")!);
+  expect(highlighted()).toHaveTextContent("+ Add new");
+  fireEvent.keyDown(input(), { key: "ArrowUp" });
+  fireEvent.keyDown(input(), { key: "ArrowDown" });
+  expect(highlighted()).toHaveTextContent("+ Add new");
+  fireEvent.keyDown(input(), { key: "Enter" });
+  expect(onAdd).toHaveBeenCalledWith("KDE 300Z");
+  expect(input()).toHaveAttribute("aria-expanded", "false");
+});
+
+it("wraps from the first match up to + Add new, and adds on a click", () => {
+  const onAdd = vi.fn();
+  render(<AddHarness onAdd={onAdd} />);
+  fireEvent.focus(input());
+  fireEvent.keyDown(input(), { key: "ArrowUp" });
+  expect(
+    document.getElementById(input().getAttribute("aria-activedescendant")!),
+  ).toHaveTextContent("+ Add new");
+  fireEvent.click(
+    within(listboxOf(input())).getByRole("option", { name: "+ Add new" }),
+  );
+  expect(onAdd).toHaveBeenCalledWith("");
+});
+
+it("never adds on Tab, which only moves on", () => {
+  const onAdd = vi.fn();
+  render(<AddHarness onAdd={onAdd} />);
+  fireEvent.focus(input());
+  fireEvent.change(input(), { target: { value: "zzz" } });
+  fireEvent.keyDown(input(), { key: "Tab" });
+  expect(onAdd).not.toHaveBeenCalled();
+  expect(input()).toHaveAttribute("aria-expanded", "false");
+});
+
+it("shows typed markup as plain text, never as elements", () => {
+  const typed = '<img src=x onerror="window.__xss=1"><b>bold</b>';
+  render(<AddHarness onAdd={() => {}} />);
+  fireEvent.focus(input());
+  fireEvent.change(input(), { target: { value: typed } });
+  const listbox = listboxOf(input());
+  expect(listbox.querySelector("img, b, script")).toBeNull();
+  expect(listbox).toHaveTextContent(typed);
+  expect((window as { __xss?: number }).__xss).toBeUndefined();
 });

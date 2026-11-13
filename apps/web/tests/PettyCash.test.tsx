@@ -18,6 +18,7 @@ import {
   overviewOf,
   paths,
   permissionsOf,
+  OPTIONS,
   REJECTED,
   servePettyCash,
   writes,
@@ -2335,4 +2336,139 @@ it("offers no Export without reports.export", async () => {
   expect(
     screen.queryByRole("button", { name: "Export" }),
   ).not.toBeInTheDocument();
+});
+
+it("adds a missing item from the spending form, chooses it and keeps the amounts", async () => {
+  let created = false;
+  const fetcher = servePettyCash({
+    answer: (path, init) => {
+      if (/^\/api\/setup\/expense-categories(\?|$)/.test(path))
+        return json({
+          items: [
+            {
+              id: "g",
+              name: "Garage and repairs",
+              bucket: null,
+              active: true,
+              stoppedOn: null,
+              mainCategoryId: null,
+              mainCategoryName: null,
+              items: [],
+            },
+          ],
+          pageNumber: 1,
+          pageSize: 100,
+          total: 1,
+        });
+      if (/^\/api\/setup\/expense-main-categories(\?|$)/.test(path))
+        return json({ items: [], pageNumber: 1, pageSize: 100, total: 0 });
+      if (
+        init?.method === "POST" &&
+        path === "/api/setup/expense-categories/g/items"
+      ) {
+        created = true;
+        return json({ id: "i9" });
+      }
+      if (created && path.startsWith("/api/setup/pettycash/options"))
+        return json({
+          ...OPTIONS,
+          items: [
+            ...OPTIONS.items,
+            {
+              id: "i9",
+              name: "Towing",
+              categoryId: "g",
+              categoryName: "Garage and repairs",
+              bucket: 1,
+            },
+          ],
+        });
+    },
+  });
+  renderInApp(<PettyCashPage />, { permissions: ["catalog.add"] });
+  const dialog = await openDialog("Record spending", "Record spending");
+  await offered(within(dialog).getByLabelText("Vehicle"), "KDA 482M");
+  pick(within(dialog).getByLabelText("Vehicle"), /^KDA 482M/);
+  fireEvent.change(within(dialog).getByLabelText("Qty"), {
+    target: { value: "2" },
+  });
+  fireEvent.change(within(dialog).getByLabelText("Unit cost, KES"), {
+    target: { value: "800" },
+  });
+  const item = within(dialog).getByLabelText("Item");
+  fireEvent.focus(item);
+  fireEvent.change(item, { target: { value: "Towing" } });
+  fireEvent.keyDown(item, { key: "Enter" });
+
+  const added = within(await screen.findByRole("dialog", { name: "New item" }));
+  expect(added.getByLabelText("Name")).toHaveValue("Towing");
+  await offered(added.getByLabelText("Category"), "Garage and repairs");
+  pick(added.getByLabelText("Category"), "Garage and repairs");
+  fireEvent.click(added.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(within(dialog).getByLabelText("Item")).toHaveValue("Towing"),
+  );
+  expect(within(dialog).getByLabelText("Qty")).toHaveValue("2");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  await screen.findByText(/recorded on KDA 482M/);
+  expect(
+    writes(fetcher).filter(
+      (write) => write.path === "/api/setup/pettycash/entries",
+    )[0].body,
+  ).toEqual(
+    expect.objectContaining({
+      vehicleId: "v1",
+      expenseItemId: "i9",
+      units: 2,
+      unitAmount: 800,
+    }),
+  );
+});
+
+it("offers no + Add new for items or vehicles without the rights to create them", async () => {
+  servePettyCash();
+  renderInApp(<PettyCashPage />);
+  const dialog = await openDialog("Record spending", "Record spending");
+  await offered(within(dialog).getByLabelText("Vehicle"), "KDA 482M");
+  for (const label of ["Vehicle", "Item"]) {
+    fireEvent.focus(within(dialog).getByLabelText(label));
+    expect(
+      within(listboxOf(within(dialog).getByLabelText(label))).queryByRole(
+        "option",
+        { name: "+ Add new" },
+      ),
+    ).not.toBeInTheDocument();
+  }
+});
+
+it("opens the new vehicle form from the spending form with the registration typed, and cancelling keeps the amounts", async () => {
+  const fetcher = servePettyCash({
+    answer: (path) => {
+      if (path === "/api/setup/vehicles/company-options") return json([]);
+    },
+  });
+  renderInApp(<PettyCashPage />, { permissions: ["vehicles.add"] });
+  const dialog = await openDialog("Record spending", "Record spending");
+  await offered(within(dialog).getByLabelText("Vehicle"), "KDA 482M");
+  fireEvent.change(within(dialog).getByLabelText("Unit cost, KES"), {
+    target: { value: "800" },
+  });
+  const vehicle = within(dialog).getByLabelText("Vehicle");
+  fireEvent.focus(vehicle);
+  fireEvent.change(vehicle, { target: { value: "kde 300z" } });
+  fireEvent.keyDown(vehicle, { key: "Enter" });
+
+  const added = within(
+    await screen.findByRole("dialog", { name: "New vehicle" }),
+  );
+  expect(added.getByLabelText("Registration")).toHaveValue("KDE 300Z");
+  fireEvent.click(added.getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "New vehicle" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(within(dialog).getByLabelText("Unit cost, KES")).toHaveValue("800");
+  expect(writes(fetcher)).toEqual([]);
 });

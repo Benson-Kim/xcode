@@ -48,6 +48,7 @@ import {
   RowAction,
   RowButton,
   SegmentedControl,
+  SearchSelect,
   SelectInput,
   Stat,
   StatGrid,
@@ -62,6 +63,7 @@ import {
   useToast,
 } from "../ui";
 import { usePagedList } from "../usePagedList";
+import { AddCompanyDialog } from "./AddCompanyDialog";
 import {
   DayTargetGrid,
   EMPTY_TARGETS,
@@ -80,7 +82,7 @@ import {
 import { TargetsDialog } from "./TargetsDialog";
 import { VehicleInvestmentTab } from "./VehicleInvestment";
 
-type CompanyChoice = { id: string; name: string; active?: boolean };
+export type CompanyChoice = { id: string; name: string; active?: boolean };
 
 // The released vehicles.manage key stands for adding, editing and setting targets together.
 function useVehicleRights() {
@@ -301,6 +303,10 @@ export function VehiclesPage({
           onOpenRecurring={onOpenRecurring}
           onAddRecurring={onAddRecurring}
           onClose={() => setEditing(null)}
+          onCompaniesChanged={() => {
+            companyList.reload();
+            companyOptions.reload();
+          }}
           onSaved={(saved) => {
             vehicles.reload();
             setEditing({ id: saved.id, saved, rows });
@@ -389,7 +395,7 @@ function useCompaniesSeen(rows: Vehicle[]) {
   return [...seen, ...unseen];
 }
 
-function companyChoices(
+export function companyChoices(
   vehicles: Vehicle[],
   companies?: Company[],
   options?: CompanyChoice[],
@@ -429,7 +435,7 @@ function normaliseRegistration(value: string) {
 // Saving, retiring and restoring carry no typed reason: the server writes one for the change log.
 type VehicleTab = "details" | "report" | "scheduled" | "investment";
 
-function VehicleEditor({
+export function VehicleEditor({
   vehicle,
   defaultCompany,
   companies,
@@ -438,10 +444,18 @@ function VehicleEditor({
   onAddRecurring,
   onClose,
   onSaved,
+  onCompaniesChanged,
+  initialRegistration = "",
+  joinsOn,
 }: {
   vehicle?: Vehicle;
   defaultCompany: string;
   companies: CompanyChoice[];
+  // A new vehicle's registration as typed in another form's vehicle list.
+  initialRegistration?: string;
+  // A new vehicle's join date before the business date, such as the date of the entry it is added from.
+  joinsOn?: string;
+  onCompaniesChanged?: () => void;
   today?: string;
   onOpenRecurring?: (itemId: string) => void;
   onAddRecurring?: (vehicleId: string) => void;
@@ -460,7 +474,7 @@ function VehicleEditor({
     initialInvestment: string;
     dayTargets: string[];
   }>({
-    registration: vehicle?.registration ?? "",
+    registration: vehicle?.registration ?? initialRegistration,
     fleetNumber: vehicle?.fleetNumber ?? "",
     companyId: vehicle?.companyId ?? defaultCompany,
     initialInvestment: vehicle?.initialInvestment
@@ -491,8 +505,18 @@ function VehicleEditor({
   const shownTab = tabs.some((option) => option.value === tab)
     ? tab
     : (tabs[0]?.value ?? "details");
+  const [newCompany, setNewCompany] = useState<string | null>(null);
+  const [addedCompanies, setAddedCompanies] = useState<CompanyChoice[]>([]);
+  // A company added here is listed until the reloaded list holds it.
+  const companyList = [
+    ...companies,
+    ...addedCompanies.filter(
+      (added) => !companies.some((company) => company.id === added.id),
+    ),
+  ];
+  const canAddCompany = can("companies.manage") || can("companies.add");
   const companyName =
-    companies.find((company) => company.id === form.companyId)?.name ??
+    companyList.find((company) => company.id === form.companyId)?.name ??
     vehicle?.companyName;
   // Retired means it has a leave date; a vehicle that is not active without one joins after the business date.
   const retired = Boolean(vehicle?.leftOn);
@@ -554,7 +578,7 @@ function VehicleEditor({
     const fleetNumber = form.fleetNumber.trim();
     const investment = Number(form.initialInvestment) || 0;
     const dayTargets = targetFigures(form.dayTargets);
-    const joinedOn = vehicle?.joinedOn ?? today;
+    const joinedOn = vehicle?.joinedOn ?? joinsOn ?? today;
     const problem = !registration
       ? "Enter the registration like KDN 204B."
       : !fleetNumber
@@ -645,26 +669,22 @@ function VehicleEditor({
   );
   const companyField = (
     <Field id="vehicle-company" label="PSV company">
-      <SelectInput
-        value={form.companyId}
-        disabled={retired}
-        onChange={(event) =>
-          setForm({ ...form, companyId: event.target.value })
-        }
-      >
-        <option value="">Choose a company</option>
-        {companies
+      <SearchSelect
+        options={companyList
           .filter(
             (company) =>
               company.active !== false || company.id === vehicle?.companyId,
           )
-          .map((company) => (
-            <option key={company.id} value={company.id}>
-              {company.name}
-              {company.active === false ? " (archived)" : ""}
-            </option>
-          ))}
-      </SelectInput>
+          .map((company) => ({
+            value: company.id,
+            label: `${company.name}${company.active === false ? " (archived)" : ""}`,
+          }))}
+        value={form.companyId}
+        placeholder="Choose a company"
+        disabled={retired}
+        onChange={(companyId) => setForm({ ...form, companyId })}
+        onAdd={canAddCompany && !retired ? setNewCompany : undefined}
+      />
     </Field>
   );
   const investmentField = (
@@ -696,6 +716,12 @@ function VehicleEditor({
         )}
         {isNew ? (
           <>
+            {joinsOn && (
+              <Note tone="info">
+                Joins the fleet on {formatDateOnly(joinsOn)}, the entry&apos;s
+                date.
+              </Note>
+            )}
             <FieldPair>
               {registrationField}
               {fleetField}
@@ -864,6 +890,19 @@ function VehicleEditor({
             <VehicleInvestmentTab vehicle={vehicle} today={today} />
           )}
         </Tabs>
+      )}
+      {newCompany !== null && (
+        <AddCompanyDialog
+          initialName={newCompany}
+          taken={companyList.map((company) => company.name)}
+          onAdded={(company) => {
+            setNewCompany(null);
+            setAddedCompanies((known) => [...known, company]);
+            setForm((current) => ({ ...current, companyId: company.id }));
+            onCompaniesChanged?.();
+          }}
+          onClose={() => setNewCompany(null)}
+        />
       )}
     </Dialog>
   );

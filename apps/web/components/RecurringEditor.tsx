@@ -24,6 +24,7 @@ import {
   RECURRING_FREQUENCY_OPTIONS,
 } from "./recurringPresentation";
 import type { RecurringItem, VehicleOption } from "./setup/shared";
+import { useQuickAdds } from "./setup/useQuickAdds";
 import {
   Button,
   CurrencyInput,
@@ -42,6 +43,8 @@ type Props = {
   vehiclesLoading?: boolean;
   // The active expense items a scheduled expense can pick (GET expense-items/options).
   expenseItems?: ExpenseItemOption[];
+  // Reloads expenseItems after "+ Add new" made an item.
+  onItemsChanged?: () => void;
   // Whether the editor sees every vehicle: only then can "All vehicles" be chosen.
   fullScope?: boolean;
   canEdit?: boolean;
@@ -62,6 +65,7 @@ export function RecurringEditor({
   vehicles,
   vehiclesLoading = false,
   expenseItems,
+  onItemsChanged,
   fullScope = false,
   canEdit = true,
   preselectVehicle,
@@ -95,6 +99,10 @@ export function RecurringEditor({
   };
   const chosen = chosenVehicles(fields, fleet);
   const summary = runSummary(fields, item, chosen.length, today, formats);
+  const quickAdd = useQuickAdds({
+    onItem: (id) => set("expenseItemId", id),
+    reload: onItemsChanged,
+  });
   const itemOptions: SearchOption[] = (expenseItems ?? []).map((option) => ({
     value: option.id,
     label: option.name,
@@ -213,7 +221,7 @@ export function RecurringEditor({
         ) : (
           <Field id="fItemQ" label="Item">
             <SearchSelect
-              options={itemOptions}
+              options={quickAdd.withItems(itemOptions)}
               value={fields.expenseItemId}
               placeholder={
                 expenseItems === undefined && canEdit && !item
@@ -222,6 +230,7 @@ export function RecurringEditor({
               }
               disabled={disabled}
               onChange={(value) => set("expenseItemId", value)}
+              onAdd={disabled ? undefined : quickAdd.addItem}
             />
           </Field>
         )}
@@ -463,6 +472,7 @@ export function RecurringEditor({
           </div>
         )}
       </form>
+      {quickAdd.dialogs}
     </Dialog>
   );
 }

@@ -19,6 +19,19 @@ import {
 
 export type Split = { vehicleId: string; amount: string };
 
+// A purchase split from its single vehicle: that vehicle on the first row, an empty second row.
+export const startSplit = (vehicleId: string): Split[] => [
+  { vehicleId, amount: "" },
+  { vehicleId: "", amount: "" },
+];
+
+export const withRowVehicle = (
+  splits: Split[],
+  row: number,
+  vehicleId: string,
+): Split[] =>
+  splits.map((split, at) => (at === row ? { ...split, vehicleId } : split));
+
 // What the rows add up to against the total: the amounts (0 where one cannot be read), what is left to allocate
 // (negative when over), whether a vehicle is picked twice, and whether the rows can be saved.
 export function splitState(splits: Split[], total: number | null) {
@@ -44,6 +57,20 @@ export function splitState(splits: Split[], total: number | null) {
   return { amounts, left, duplicate, valid };
 }
 
+// The vehicles a purchase is charged to: each split row with its amount, or the single vehicle with the total.
+export function allocationsOf(
+  splits: Split[] | null,
+  vehicleId: string,
+  total: number,
+) {
+  if (!splits) return [{ vehicleId, amount: total }];
+  const { amounts } = splitState(splits, total);
+  return splits.map((row, at) => ({
+    vehicleId: row.vehicleId,
+    amount: amounts[at],
+  }));
+}
+
 // One purchase over several vehicles: a vehicle and an amount on each row, and a line saying whether they balance.
 export function SplitRows({
   splits,
@@ -51,11 +78,13 @@ export function SplitRows({
   vehicleOptions,
   onChange,
   onSingle,
+  onAddVehicle,
 }: {
   splits: Split[];
   total: number | null;
   vehicleOptions: SearchOption[];
   onChange: (splits: Split[]) => void;
+  onAddVehicle?: (typed: string, row: number) => void;
   // One row is left: back to a single vehicle.
   onSingle: (vehicleId: string) => void;
 }) {
@@ -108,6 +137,7 @@ export function SplitRows({
               value={split.vehicleId}
               placeholder="Choose vehicle"
               onChange={(id) => change(index, { vehicleId: id })}
+              onAdd={onAddVehicle && ((typed) => onAddVehicle(typed, index))}
             />
             <AmountInput
               aria-label={`Amount for vehicle ${index + 1}`}

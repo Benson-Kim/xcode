@@ -16,6 +16,7 @@
     "./periods": "./src/periods.ts",
     "./permissions": "./src/permissions.ts",
     "./reports": "./src/reports.ts",
+    "./search": "./src/search.ts",
     "./tokens": "./src/tokens.ts"
   },
   "scripts": {

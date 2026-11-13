@@ -27,9 +27,17 @@ import { DialogFooter, FormDialog } from "../pettycash/DialogFooter";
 import { itemOptions } from "../pettycash/itemOptions";
 import { newEntryId, sendJson } from "../pettycash/request";
 import { useDialogAction } from "../pettycash/useDialogAction";
+import { useQuickAdds } from "../setup/useQuickAdds";
 import { Banner, Button } from "../ui";
 import { PurchaseFields, VehicleField } from "./PurchaseFields";
-import { SplitRows, splitState, type Split } from "./SplitRows";
+import {
+  allocationsOf,
+  SplitRows,
+  splitState,
+  startSplit,
+  withRowVehicle,
+  type Split,
+} from "./SplitRows";
 import { isDateShape, useExpenseChoices } from "./useExpenseChoices";
 
 // null is closed, {} a new expense, { entry } a central row being changed.
@@ -108,6 +116,22 @@ function recordedText(
     : `${formats.kes(total)} recorded on ${registration}.`;
 }
 
+// The quantity and unit cost as typed, read: the total, and what is wrong with either.
+function figuresOf(units: string, cost: string) {
+  const parsedCost = parsePettyCashAmount(cost);
+  const count = parsePettyCashUnits(units);
+  return {
+    parsedCost,
+    count,
+    total:
+      parsedCost.ok && count !== null
+        ? expenseTotal(count, parsedCost.amount)
+        : null,
+    unitsProblem: units.trim() && count === null ? PETTY_CASH_UNITS_ERROR : "",
+    costProblem: cost.trim() && !parsedCost.ok ? parsedCost.error : "",
+  };
+}
+
 const dateProblemOf = (date: string, businessDate: string) =>
   !isDateShape(date)
     ? "Enter the date."
@@ -152,18 +176,23 @@ function ExpenseForm({
     vehicleOptions,
     itemChoices,
     error: choicesError,
+    listing,
   } = useExpenseChoices(day, entry);
+  const quickAdd = useQuickAdds({
+    ...listing,
+    onItem: setItemId,
+    onVehicle: (id, row) =>
+      row === null
+        ? setVehicleId(id)
+        : setSplits((current) => current && withRowVehicle(current, row, id)),
+    date: day,
+  });
 
-  const parsedCost = parsePettyCashAmount(cost);
-  const count = parsePettyCashUnits(units);
-  const total =
-    parsedCost.ok && count !== null
-      ? expenseTotal(count, parsedCost.amount)
-      : null;
+  const { parsedCost, count, total, unitsProblem, costProblem } = figuresOf(
+    units,
+    cost,
+  );
   const dateProblem = dateProblemOf(day, businessDate);
-  const unitsProblem =
-    units.trim() && count === null ? PETTY_CASH_UNITS_ERROR : "";
-  const costProblem = cost.trim() && !parsedCost.ok ? parsedCost.error : "";
 
   const split = splits ? splitState(splits, total) : null;
   const valid =
@@ -185,12 +214,7 @@ function ExpenseForm({
         units: count,
         unitAmount: parsedCost.amount,
         note: null,
-        allocations: split
-          ? splits!.map((row, at) => ({
-              vehicleId: row.vehicleId,
-              amount: split.amounts[at],
-            }))
-          : [{ vehicleId, amount: total }],
+        allocations: allocationsOf(splits, vehicleId, total),
       });
       if (entry) return onSaved("Saved.");
       const picked = vehicleChoices.find((v) => v.id === vehicleId);
@@ -201,78 +225,76 @@ function ExpenseForm({
   }
 
   return (
-    <form
-      id={formId}
-      noValidate
-      onSubmit={submit}
-      className="flex flex-col gap-3.5"
-    >
-      {choicesError && <Banner>{choicesError}</Banner>}
-      <DateStep
-        date={day}
-        earliest={earliest}
-        latest={businessDate}
-        onChange={setDate}
-      />
-      {dateProblem && <div className="ferr">{dateProblem}</div>}
-      {!splits && (
-        <VehicleField
-          vehicleId={vehicleId}
-          options={vehicleOptions}
-          onVehicle={setVehicleId}
-          onSplit={
-            entry
-              ? undefined
-              : () =>
-                  setSplits([
-                    { vehicleId, amount: "" },
-                    { vehicleId: "", amount: "" },
-                  ])
-          }
+    <>
+      <form
+        id={formId}
+        noValidate
+        onSubmit={submit}
+        className="flex flex-col gap-3.5"
+      >
+        {choicesError && <Banner>{choicesError}</Banner>}
+        <DateStep
+          date={day}
+          earliest={earliest}
+          latest={businessDate}
+          onChange={setDate}
         />
-      )}
-      <PurchaseFields
-        itemId={itemId}
-        onItem={setItemId}
-        itemOptions={itemOptions(itemChoices)}
-        units={units}
-        onUnits={setUnits}
-        unitsProblem={unitsProblem}
-        cost={cost}
-        onCost={setCost}
-        costProblem={costProblem}
-        total={total}
-      />
-      {splits && (
-        <SplitRows
-          splits={splits}
+        {dateProblem && <div className="ferr">{dateProblem}</div>}
+        {!splits && (
+          <VehicleField
+            vehicleId={vehicleId}
+            options={quickAdd.withVehicles(vehicleOptions)}
+            onVehicle={setVehicleId}
+            onAddVehicle={quickAdd.addVehicle}
+            onSplit={entry ? undefined : () => setSplits(startSplit(vehicleId))}
+          />
+        )}
+        <PurchaseFields
+          itemId={itemId}
+          onItem={setItemId}
+          itemOptions={quickAdd.withItems(itemOptions(itemChoices))}
+          onAddItem={quickAdd.addItem}
+          units={units}
+          onUnits={setUnits}
+          unitsProblem={unitsProblem}
+          cost={cost}
+          onCost={setCost}
+          costProblem={costProblem}
           total={total}
-          vehicleOptions={vehicleOptions}
-          onChange={setSplits}
-          onSingle={(id) => {
-            setVehicleId(id);
-            setSplits(null);
-          }}
         />
-      )}
-      {error && (
-        <div className="ferr" role="alert">
-          {error}
-        </div>
-      )}
-      <DialogFooter>
-        <Button tone="outline" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          type="submit"
-          form={formId}
-          tone="ok"
-          disabled={saving || !valid}
-        >
-          {splits ? `Save ${splits.length} entries` : "Save"}
-        </Button>
-      </DialogFooter>
-    </form>
+        {splits && (
+          <SplitRows
+            splits={splits}
+            total={total}
+            vehicleOptions={quickAdd.withVehicles(vehicleOptions)}
+            onChange={setSplits}
+            onAddVehicle={quickAdd.addVehicle}
+            onSingle={(id) => {
+              setVehicleId(id);
+              setSplits(null);
+            }}
+          />
+        )}
+        {error && (
+          <div className="ferr" role="alert">
+            {error}
+          </div>
+        )}
+        <DialogFooter>
+          <Button tone="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form={formId}
+            tone="ok"
+            disabled={saving || !valid}
+          >
+            {splits ? `Save ${splits.length} entries` : "Save"}
+          </Button>
+        </DialogFooter>
+      </form>
+      {quickAdd.dialogs}
+    </>
   );
 }

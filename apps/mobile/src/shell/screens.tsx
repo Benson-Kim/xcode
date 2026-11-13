@@ -382,6 +382,10 @@ export function ModuleScreen({
           offline={offline}
           businessDate={businessDate}
           start={start}
+          canAddItem={
+            permissionChecker(person.permissions)("expenses.setup") ||
+            permissionChecker(person.permissions)("catalog.add")
+          }
           onSessionEnded={onSessionEnded}
         />
       ) : null}
