@@ -233,7 +233,7 @@ export function TrustedDevicesDialog({
       busy={busy}
       onClose={onClose}
       footer={
-        <Button tone="outline" onClick={onClose}>
+        <Button tone="outline" disabled={busy} onClick={onClose}>
           Close
         </Button>
       }

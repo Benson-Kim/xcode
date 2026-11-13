@@ -887,7 +887,7 @@ export function VehicleEditor({
       footer={
         onDetails ? (
           <>
-            <Button tone="outline" onClick={onClose}>
+            <Button tone="outline" disabled={busy} onClick={onClose}>
               Cancel
             </Button>
             <Button
@@ -900,7 +900,7 @@ export function VehicleEditor({
             </Button>
           </>
         ) : (
-          <Button tone="outline" onClick={onClose}>
+          <Button tone="outline" disabled={busy} onClick={onClose}>
             Back
           </Button>
         )

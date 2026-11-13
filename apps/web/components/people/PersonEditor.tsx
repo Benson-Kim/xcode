@@ -116,7 +116,7 @@ export function PersonEditor({
       onClose={onClose}
       footer={
         <>
-          <Button tone="outline" onClick={onClose}>
+          <Button tone="outline" disabled={actions.busy} onClick={onClose}>
             {editable ? "Cancel" : "Close"}
           </Button>
           {editable && (

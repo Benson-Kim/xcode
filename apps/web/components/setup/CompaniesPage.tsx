@@ -202,7 +202,11 @@ export function CompaniesPage() {
         onClose={() => setRenaming(null)}
         footer={
           <>
-            <Button tone="outline" onClick={() => setRenaming(null)}>
+            <Button
+              tone="outline"
+              disabled={busy}
+              onClick={() => setRenaming(null)}
+            >
               Cancel
             </Button>
             <Button

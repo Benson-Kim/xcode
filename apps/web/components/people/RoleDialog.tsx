@@ -101,7 +101,7 @@ export function RoleDialog({
       onClose={onClose}
       footer={
         <>
-          <Button tone="outline" onClick={onClose}>
+          <Button tone="outline" disabled={busy} onClick={onClose}>
             {editable ? "Cancel" : "Close"}
           </Button>
           {editable && (

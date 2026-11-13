@@ -129,10 +129,12 @@ function useFocusRing() {
 
 function SheetHead({
   target,
+  busy,
   onClose,
   onOpenGap,
 }: {
   target: Target;
+  busy: boolean;
   onClose: () => void;
   onOpenGap: (date: string) => void;
 }) {
@@ -155,7 +157,12 @@ function SheetHead({
               : formats.formatWeekdayDate(target.date)}
           </Text>
         </View>
-        <IconButton icon="close" label="Close" onPress={onClose} />
+        <IconButton
+          icon="close"
+          label="Close"
+          disabled={busy}
+          onPress={onClose}
+        />
       </View>
       {target.earlier ? (
         <View
@@ -166,6 +173,7 @@ function SheetHead({
           </Text>
           <Button
             tone="outline"
+            disabled={busy}
             onPress={() => onOpenGap(target.earlier!)}
             style={{ width: "auto", height: 44 }}
           >
@@ -357,7 +365,12 @@ export function CaptureSheet({
   const submit = () => void form.save();
   return (
     <Sheet busy={form.saving} onClose={onClose}>
-      <SheetHead target={target} onClose={onClose} onOpenGap={onOpenGap} />
+      <SheetHead
+        target={target}
+        busy={form.saving}
+        onClose={onClose}
+        onOpenGap={onOpenGap}
+      />
       <AmountField
         value={form.amount}
         autoFocus={!form.reason}

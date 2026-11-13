@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   screen,
   waitFor,
@@ -1497,6 +1498,43 @@ describe("Adding a missing item from the expense form", () => {
     );
   });
 
+  it("keeps Cancel off while the new item saves, then chooses it", async () => {
+    const api = await signIn(["pettycash.spend", "catalog.add"], spender);
+    api.on("setup/expense-categories?page=1&pageSize=100", [
+      200,
+      { items: [{ id: "c-run", name: "Running", active: true }], total: 1 },
+    ]);
+    let answer: () => void = () => {};
+    api.on(
+      "setup/expense-categories/c-run/items",
+      () =>
+        new Promise((resolve) => {
+          answer = () => resolve([200, { id: "i-new" }]);
+        }),
+    );
+    await openForm();
+    await fireEvent.press(screen.getByRole("button", { name: /^Item, / }));
+    await fireEvent.changeText(screen.getByLabelText("Search item"), "Towing");
+    await fireEvent.press(screen.getByRole("button", { name: "Add new item" }));
+    await pick("Category", "Running");
+    await fireEvent.press(screen.getByRole("button", { name: "Save item" }));
+    await waitFor(() =>
+      expect(
+        bodies(api, "setup/expense-categories/c-run/items", "POST"),
+      ).toHaveLength(1),
+    );
+
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeDisabled();
+    await fireEvent.press(cancel);
+    expect(screen.getByRole("button", { name: "Save item" })).toBeTruthy();
+
+    await act(async () => answer());
+    expect(
+      await screen.findByRole("button", { name: "Item, Towing" }),
+    ).toBeTruthy();
+  });
+
   it("returns to the unlock pad when the session ends while the new item is saved", async () => {
     const api = await signIn(["pettycash.spend", "catalog.add"], spender);
     api.on("setup/expense-categories?page=1&pageSize=100", [
@@ -1713,6 +1751,34 @@ describe("Adding a missing vehicle from the expense form", () => {
       screen.getByRole("button", { name: "Vehicle, not chosen" }),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save expense" })).toBeTruthy();
+  });
+
+  it("keeps Cancel off while the new vehicle saves, then chooses it", async () => {
+    const api = await signIn(VEHICLE_ADDER, vehicleSetup);
+    let answer: () => void = () => {};
+    api.on(
+      "setup/vehicles",
+      () =>
+        new Promise((resolve) => {
+          answer = () => resolve([200, { id: "v-new" }]);
+        }),
+    );
+    await openForm();
+    await startAdding("KDE 300Z");
+    await fillAndSave();
+    await waitFor(() =>
+      expect(bodies(api, "setup/vehicles", "POST")).toHaveLength(1),
+    );
+
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeDisabled();
+    await fireEvent.press(cancel);
+    expect(screen.getByRole("button", { name: "Save vehicle" })).toBeTruthy();
+
+    await act(async () => answer());
+    expect(
+      await screen.findByRole("button", { name: "Vehicle, KDE 300Z" }),
+    ).toBeTruthy();
   });
 
   it("returns to the unlock pad when the session ends while the new vehicle is saved", async () => {

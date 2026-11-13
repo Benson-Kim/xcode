@@ -52,7 +52,7 @@ export function AddCompanyDialog({
       onClose={onClose}
       footer={
         <>
-          <Button tone="outline" onClick={onClose}>
+          <Button tone="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
           <Button
