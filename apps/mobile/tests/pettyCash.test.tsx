@@ -1380,9 +1380,9 @@ describe("Adding a missing item from the expense form", () => {
 
   it("opens the new item with what was typed, saves it and records the expense with it", async () => {
     const api = await signIn(["pettycash.spend", "catalog.add"], spender);
-    api.on("setup/expense-categories?pageNumber=1&pageSize=100", [
+    api.on("setup/expense-categories?page=1&pageSize=100", [
       200,
-      { items: [{ id: "c-run", name: "Running", active: true }] },
+      { items: [{ id: "c-run", name: "Running", active: true }], total: 1 },
     ]);
     let created = false;
     api.on("setup/expense-categories/c-run/items", () => {
@@ -1445,9 +1445,9 @@ describe("Adding a missing item from the expense form", () => {
 
   it("keeps a single Save on screen while the new item form is open", async () => {
     const api = await signIn(["pettycash.spend", "catalog.add"], spender);
-    api.on("setup/expense-categories?pageNumber=1&pageSize=100", [
+    api.on("setup/expense-categories?page=1&pageSize=100", [
       200,
-      { items: [{ id: "c-run", name: "Running", active: true }] },
+      { items: [{ id: "c-run", name: "Running", active: true }], total: 1 },
     ]);
     await openForm();
     await fireEvent.press(screen.getByRole("button", { name: /^Item, / }));
@@ -1460,11 +1460,68 @@ describe("Adding a missing item from the expense form", () => {
     expect(screen.getByRole("button", { name: "Save expense" })).toBeTruthy();
   });
 
+  it("offers the categories past the first page of a hundred", async () => {
+    const api = await signIn(["pettycash.spend", "catalog.add"], spender);
+    const first = Array.from({ length: 100 }, (_, index) => ({
+      id: `c-${index}`,
+      name: `Category ${index}`,
+      active: true,
+    }));
+    api.on("setup/expense-categories?page=1&pageSize=100", [
+      200,
+      { items: first, total: 101 },
+    ]);
+    api.on("setup/expense-categories?page=2&pageSize=100", [
+      200,
+      { items: [{ id: "c-tyres", name: "Tyres", active: true }], total: 101 },
+    ]);
+    api.on("setup/expense-categories/c-tyres/items", [200, { id: "i-new" }]);
+    await openForm();
+    await fireEvent.press(screen.getByRole("button", { name: /^Item, / }));
+    await fireEvent.changeText(screen.getByLabelText("Search item"), "Retread");
+    await fireEvent.press(screen.getByRole("button", { name: "Add new item" }));
+
+    await fireEvent.press(
+      await screen.findByRole("button", { name: /^Category, / }),
+    );
+    await fireEvent.changeText(
+      screen.getByLabelText("Search category"),
+      "Tyres",
+    );
+    await fireEvent.press(await screen.findByRole("radio", { name: "Tyres" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Save item" }));
+    await waitFor(() =>
+      expect(
+        bodies(api, "setup/expense-categories/c-tyres/items", "POST"),
+      ).toEqual([{ name: "Retread" }]),
+    );
+  });
+
+  it("returns to the unlock pad when the session ends while the new item is saved", async () => {
+    const api = await signIn(["pettycash.spend", "catalog.add"], spender);
+    api.on("setup/expense-categories?page=1&pageSize=100", [
+      200,
+      { items: [{ id: "c-run", name: "Running", active: true }], total: 1 },
+    ]);
+    await openForm();
+    await fireEvent.press(screen.getByRole("button", { name: /^Item, / }));
+    await fireEvent.changeText(screen.getByLabelText("Search item"), "Towing");
+    await fireEvent.press(screen.getByRole("button", { name: "Add new item" }));
+    await pick("Category", "Running");
+    api.on("setup/expense-categories/c-run/items", [401, {}]);
+    api.on("auth/refresh", [401, { status: "authentication_failed" }]);
+
+    await fireEvent.press(screen.getByRole("button", { name: "Save item" }));
+
+    await screen.findByText("Welcome back, Brian");
+    expect(screen.queryByRole("button", { name: "Save item" })).toBeNull();
+  });
+
   it("shows the new item at once and records the expense with it before the options reload", async () => {
     const api = await signIn(["pettycash.spend", "catalog.add"], spender);
-    api.on("setup/expense-categories?pageNumber=1&pageSize=100", [
+    api.on("setup/expense-categories?page=1&pageSize=100", [
       200,
-      { items: [{ id: "c-run", name: "Running", active: true }] },
+      { items: [{ id: "c-run", name: "Running", active: true }], total: 1 },
     ]);
     api.on("setup/expense-categories/c-run/items", [200, { id: "i-new" }]);
     api.on("setup/pettycash/entries", [

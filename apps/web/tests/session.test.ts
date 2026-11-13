@@ -223,6 +223,43 @@ it("does nothing when the check cannot reach the server", async () => {
   expect(watch.expired).not.toHaveBeenCalled();
 });
 
+it("keeps the session when the refresh after a 401 cannot reach the server", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(json(401))
+      .mockRejectedValueOnce(new TypeError("offline")),
+  );
+  const expired = vi.fn();
+  const stop = onSessionExpired(expired);
+
+  await expect(fetchWithSession("/api/setup/companies")).rejects.toThrow(
+    TypeError,
+  );
+
+  stop();
+  expect(expired).not.toHaveBeenCalled();
+});
+
+it("does nothing when the check's refresh cannot reach the server", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(json(401))
+    .mockRejectedValueOnce(new TypeError("offline"));
+  const watch = watched(fetcher);
+
+  comeBack();
+  await settle();
+
+  watch.stop();
+  expect(fetcher.mock.calls.map(([input]) => input)).toEqual([
+    "/api/auth/session",
+    "/api/auth/refresh",
+  ]);
+  expect(watch.expired).not.toHaveBeenCalled();
+});
+
 it("checks at most once every 30 seconds and not while hidden", async () => {
   const fetcher = vi.fn().mockResolvedValue(json(200));
   const watch = watched(fetcher);

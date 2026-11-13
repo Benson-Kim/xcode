@@ -1,13 +1,13 @@
-import { checkedFetch, SecurityCheckError } from "./checkedFetch";
+import { checkedFetch } from "./checkedFetch";
 import { clearDataCache } from "./data/cache";
 
 const SESSION_EXPIRED = "xcode:session-expired";
 
 let refreshing: Promise<boolean> | null = null;
 
-// One refresh at a time: concurrent requests that hit a 401 wait on the same attempt. A refresh that a security
-// check intercepted never reached the server, so it is neither a success nor proof the session ended: it rejects
-// instead of resolving false (which would sign the person out).
+// One refresh at a time: concurrent requests that hit a 401 wait on the same attempt. Only the server's answer
+// decides: a refresh that got none (the network failed, or a security check intercepted it) is neither a success nor
+// proof the session ended, so it rejects instead of resolving false (which would sign the person out).
 // Tabs share the refresh cookie, so they renew one at a time under a Web Lock: a tab that waited sends the cookie the
 // one before it stored. Without Web Locks another tab may still renew first: the server then answers
 // refresh_superseded, so the refresh is asked once more, after a moment for that tab's new cookie to land. A second
@@ -40,14 +40,9 @@ async function renew() {
 }
 
 function refreshSession() {
-  refreshing ??= oneTabAtATime(renew)
-    .catch((error) => {
-      if (error instanceof SecurityCheckError) throw error;
-      return false;
-    })
-    .finally(() => {
-      refreshing = null;
-    });
+  refreshing ??= oneTabAtATime(renew).finally(() => {
+    refreshing = null;
+  });
   return refreshing;
 }
 
