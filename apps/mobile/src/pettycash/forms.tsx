@@ -23,6 +23,7 @@ import { LineSkeleton, SectionTitle } from "../shell/parts";
 import { Button, ErrorText, Field, Text, useTheme } from "../ui";
 import { newEntryId, send, useLoaded, type Outcome } from "./client";
 import { NewItemForm } from "./NewItemForm";
+import { NewVehicleForm, type AddedVehicle } from "./NewVehicleForm";
 import { DayStepper, Picker, type Option } from "./parts";
 
 type Common = {
@@ -34,8 +35,9 @@ type Common = {
   // The entry changed or went away while the form was open: the screen shows the message and reloads.
   onStale: (message: string) => void;
   onSessionEnded: () => void;
-  // The person may add expense items, so the item list ends in "+ Add new".
+  // The person may add expense items, or vehicles, so that list ends in "+ Add new".
   canAddItem?: boolean;
+  canAddVehicle?: boolean;
 };
 
 type EntryFormProps = Common & { entry?: PettyCashEntry; date: string };
@@ -177,21 +179,50 @@ function AmountFields({
   );
 }
 
+type Added = { item: Option | null; vehicle: AddedVehicle | null };
+
+// "+ Add new" on the expense's item and vehicle lists: one new item or vehicle form at a time, each list offering it
+// only with the right to create. What was added is kept so it stays a choice until the reloaded options list it.
+function useQuickAdd() {
+  const [adding, setAdding] = useState<{
+    kind: keyof Added;
+    typed: string;
+  } | null>(null);
+  const [added, setAdded] = useState<Added>({ item: null, vehicle: null });
+  return {
+    adding,
+    added,
+    adder: (kind: keyof Added, allowed?: boolean) =>
+      allowed && !adding
+        ? (typed: string) => setAdding({ kind, typed })
+        : undefined,
+    cancel: () => setAdding(null),
+    keep: (change: Partial<Added>) => {
+      setAdding(null);
+      setAdded((current) => ({ ...current, ...change }));
+    },
+  };
+}
+
 export function ExpenseForm({ entry, date: start, ...common }: EntryFormProps) {
   const formats = useFormats();
   const [id] = useState(() => entry?.id ?? newEntryId());
   const [date, setDate] = useState(entry?.date ?? start);
   const [vehicleId, setVehicleId] = useState(entry?.vehicleId ?? "");
   const [itemId, setItemId] = useState(entry?.expenseItemId ?? "");
-  const [newItem, setNewItem] = useState<string | null>(null);
-  const [addedItem, setAddedItem] = useState<Option | null>(null);
+  const quick = useQuickAdd();
   const [units, setUnits] = useState(entry ? String(entry.units) : "1");
   const [amount, setAmount] = useState(entry ? String(entry.unitAmount) : "");
   const [note, setNote] = useState(entry?.note ?? "");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const options = useOptions(date, true, common);
   const { busy, error, save } = useSave(common);
-  const { vehicles, items } = expenseChoices(options.data, entry, addedItem);
+  const { vehicles, items } = expenseChoices(
+    options.data,
+    entry,
+    quick.added,
+    date,
+  );
 
   function submit() {
     const next: Record<string, string> = {};
@@ -248,33 +279,47 @@ export function ExpenseForm({ entry, date: start, ...common }: EntryFormProps) {
             options={vehicles}
             value={vehicleId}
             onChange={setVehicleId}
+            onAdd={quick.adder("vehicle", common.canAddVehicle)}
             error={errors.vehicle}
             empty="No vehicles on this day."
           />
-          {newItem !== null ? (
+          {quick.adding?.kind === "vehicle" ? (
+            <NewVehicleForm
+              registration={quick.adding.typed}
+              date={date}
+              businessDate={common.businessDate}
+              stamp={common.stamp}
+              onSessionEnded={common.onSessionEnded}
+              onCreated={(vehicle) => {
+                quick.keep({ vehicle });
+                setVehicleId(vehicle.option.value);
+                options.retry();
+              }}
+              onCancel={quick.cancel}
+            />
+          ) : null}
+          <Picker
+            label="Item"
+            options={items}
+            value={itemId}
+            onChange={setItemId}
+            onAdd={quick.adder("item", common.canAddItem)}
+            error={errors.item}
+            empty="No expense items are set up."
+          />
+          {quick.adding?.kind === "item" ? (
             <NewItemForm
-              name={newItem}
+              name={quick.adding.typed}
               stamp={common.stamp}
               onSessionEnded={common.onSessionEnded}
               onCreated={(item) => {
-                setNewItem(null);
-                setAddedItem(item);
+                quick.keep({ item });
                 setItemId(item.value);
                 options.retry();
               }}
-              onCancel={() => setNewItem(null)}
+              onCancel={quick.cancel}
             />
-          ) : (
-            <Picker
-              label="Item"
-              options={items}
-              value={itemId}
-              onChange={setItemId}
-              onAdd={common.canAddItem ? setNewItem : undefined}
-              error={errors.item}
-              empty="No expense items are set up."
-            />
-          )}
+          ) : null}
         </>
       ) : null}
       <AmountFields
@@ -292,7 +337,7 @@ export function ExpenseForm({ entry, date: start, ...common }: EntryFormProps) {
         onChangeText={setNote}
         maxLength={PETTY_CASH_NOTE_LIMIT}
       />
-      {newItem === null ? (
+      {quick.adding === null ? (
         <Footer
           busy={busy}
           error={error}
@@ -311,26 +356,33 @@ const withChoice = (choices: Option[], extra: Option | null) =>
     : choices;
 
 // The vehicles and items an expense picks from: the day's options, the entry's own vehicle and item even if they are
-// no longer offered, and an item just added here until the reloaded options list it.
+// no longer offered, and an item or vehicle just added here until the reloaded options list it. An added vehicle is
+// offered only on a date from the day it joins, as the day's options would offer it.
 function expenseChoices(
   data: PettyCashOptions | null,
   entry: PettyCashEntry | undefined,
-  addedItem: Option | null,
+  added: Added,
+  date: string,
 ) {
   const vehicles = withChoice(
-    (data?.vehicles ?? [])
-      .filter((vehicle) => vehicle.active || vehicle.id === entry?.vehicleId)
-      .map((vehicle) => ({
-        value: vehicle.id,
-        label: vehicle.registration,
-        sub: vehicle.companyName,
-      })),
-    entry?.vehicleId
-      ? {
-          value: entry.vehicleId,
-          label: entry.registration ?? "Vehicle",
-          sub: "",
-        }
+    withChoice(
+      (data?.vehicles ?? [])
+        .filter((vehicle) => vehicle.active || vehicle.id === entry?.vehicleId)
+        .map((vehicle) => ({
+          value: vehicle.id,
+          label: vehicle.registration,
+          sub: vehicle.companyName,
+        })),
+      entry?.vehicleId
+        ? {
+            value: entry.vehicleId,
+            label: entry.registration ?? "Vehicle",
+            sub: "",
+          }
+        : null,
+    ),
+    added.vehicle && added.vehicle.joinedOn <= date
+      ? added.vehicle.option
       : null,
   );
   const offered = (data?.items ?? []).map((item) => ({
@@ -349,7 +401,7 @@ function expenseChoices(
           }
         : null,
     ),
-    addedItem,
+    added.item,
   );
   return { vehicles, items };
 }

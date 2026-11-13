@@ -2,7 +2,7 @@ import { useState } from "react";
 import { View } from "react-native";
 
 import { SessionEndedError } from "../lib/api";
-import { Button, ErrorText, Field, Text } from "../ui";
+import { Button, ErrorText, Field, Sheet, Text } from "../ui";
 import { getAllPages, sendTo, useLoaded } from "./client";
 import { Picker, type Option } from "./parts";
 
@@ -11,7 +11,7 @@ type Category = { id: string; name: string; active?: boolean };
 const CATEGORIES = "setup/expense-categories";
 
 // The catalog's new item, opened from the item list with what was typed there. Saving hands the new item back to
-// the expense as an option of its item list, cancelling goes back to it as it was.
+// the expense as an option of its item list; cancelling, or a tap outside the sheet, goes back to it as it was.
 export function NewItemForm({
   name,
   stamp,
@@ -72,7 +72,7 @@ export function NewItemForm({
   }
 
   return (
-    <View style={{ gap: 12 }}>
+    <Sheet busy={saving} onClose={onCancel}>
       <Text weight="bold" style={{ fontSize: 17 }}>
         New item
       </Text>
@@ -109,6 +109,6 @@ export function NewItemForm({
           Save item
         </Button>
       </View>
-    </View>
+    </Sheet>
   );
 }

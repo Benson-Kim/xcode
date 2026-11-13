@@ -1548,3 +1548,229 @@ describe("Adding a missing item from the expense form", () => {
     );
   });
 });
+
+describe("Adding a missing vehicle from the expense form", () => {
+  const VEHICLE_ADDER = ["pettycash.spend", "vehicles.add"];
+  const optionsOn = (date: string) => `setup/pettycash/options?date=${date}`;
+  const newVehicle = {
+    id: "v-new",
+    companyId: "company-1",
+    companyName: "North Star",
+    registration: "KDE 300Z",
+    active: true,
+  };
+
+  function vehicleSetup(api: ReturnType<typeof fakeApi>) {
+    spender(api);
+    api.on("setup/vehicles/company-options", [
+      200,
+      [{ id: "company-1", name: "North Star" }],
+    ]);
+    api.on("setup/pettycash/entries", [
+      200,
+      { id: "x", version: 1, status: "waiting", balance: 1 },
+    ]);
+  }
+
+  async function openForm() {
+    await fireEvent.press(
+      await screen.findByRole("button", { name: "Record expense" }),
+    );
+    await screen.findByRole("button", { name: "Vehicle, not chosen" });
+  }
+
+  async function startAdding(typed: string) {
+    await fireEvent.press(screen.getByRole("button", { name: /^Vehicle, / }));
+    await fireEvent.changeText(screen.getByLabelText("Search vehicle"), typed);
+    await fireEvent.press(
+      screen.getByRole("button", { name: "Add new vehicle" }),
+    );
+  }
+
+  async function fillAndSave() {
+    await fireEvent.changeText(screen.getByLabelText("Fleet number"), "31");
+    await pick("PSV company", "North Star");
+    await fireEvent.changeText(
+      screen.getByLabelText("Target for Monday"),
+      "3,000",
+    );
+    await fireEvent.press(
+      screen.getByRole("button", { name: "Same every day" }),
+    );
+    await fireEvent.press(screen.getByRole("button", { name: "Save vehicle" }));
+  }
+
+  it.each([
+    ["vehicles.add", true],
+    ["vehicles.manage", true],
+    ["catalog.add", false],
+  ])(
+    "with %s, the vehicle list ends in + Add new: %s",
+    async (right, shown) => {
+      await signIn(["pettycash.spend", right], vehicleSetup);
+      await openForm();
+      await fireEvent.press(screen.getByRole("button", { name: /^Vehicle, / }));
+      expect(
+        screen.queryByRole("button", { name: "Add new vehicle" }) !== null,
+      ).toBe(shown);
+    },
+  );
+
+  it("opens the new vehicle with what was typed, saves it, chooses it and records the expense with it", async () => {
+    const api = await signIn(VEHICLE_ADDER, vehicleSetup);
+    let created = false;
+    api.on("setup/vehicles", () => {
+      created = true;
+      return [200, { id: "v-new" }];
+    });
+    api.on(OPTIONS, () => [
+      200,
+      created
+        ? { ...pettyOptions, vehicles: [...pettyOptions.vehicles, newVehicle] }
+        : pettyOptions,
+    ]);
+    await openForm();
+    await fireEvent.changeText(screen.getByLabelText("Units"), "2");
+    await startAdding("kde300z");
+
+    expect(screen.getByLabelText("Registration").props.value).toBe("KDE300Z");
+    expect(screen.queryByRole("button", { name: "Save expense" })).toBeNull();
+    await fillAndSave();
+    await waitFor(() =>
+      expect(bodies(api, "setup/vehicles", "POST")).toEqual([
+        {
+          registration: "KDE 300Z",
+          companyId: "company-1",
+          joinedOn: DAY,
+          fleetNumber: "31",
+          dayTargets: [3000, 3000, 3000, 3000, 3000, 3000, 3000],
+        },
+      ]),
+    );
+    await waitFor(() => expect(api.sent(OPTIONS).length).toBeGreaterThan(1));
+    expect(
+      await screen.findByRole("button", { name: "Vehicle, KDE 300Z" }),
+    ).toBeTruthy();
+    expect(screen.getByLabelText("Units").props.value).toBe("2");
+    await fireEvent.press(screen.getByRole("button", { name: /^Vehicle, / }));
+    expect(
+      screen.getAllByRole("radio", { name: "KDE 300Z, North Star" }),
+    ).toHaveLength(1);
+    await fireEvent.press(
+      screen.getByRole("radio", { name: "KDE 300Z, North Star" }),
+    );
+
+    await pick("Item", "Tyre repair, Repairs");
+    await fireEvent.changeText(screen.getByLabelText("Amount each"), "500");
+    await fireEvent.press(screen.getByRole("button", { name: "Save expense" }));
+    await waitFor(() =>
+      expect(bodies(api, "setup/pettycash/entries", "POST")).toEqual([
+        expect.objectContaining({ vehicleId: "v-new", units: 2 }),
+      ]),
+    );
+  });
+
+  it("shows the new vehicle at once and records the expense with it before the options reload", async () => {
+    const api = await signIn(VEHICLE_ADDER, vehicleSetup);
+    api.on("setup/vehicles", [200, { id: "v-new" }]);
+    await openForm();
+    await startAdding("KDE 300Z");
+    await fillAndSave();
+
+    expect(
+      await screen.findByRole("button", { name: "Vehicle, KDE 300Z" }),
+    ).toBeTruthy();
+    await pick("Item", "Tyre repair, Repairs");
+    await fireEvent.changeText(screen.getByLabelText("Amount each"), "500");
+    await fireEvent.press(screen.getByRole("button", { name: "Save expense" }));
+    await waitFor(() =>
+      expect(bodies(api, "setup/pettycash/entries", "POST")).toEqual([
+        expect.objectContaining({ vehicleId: "v-new" }),
+      ]),
+    );
+  });
+
+  it("says what is missing, sends nothing, and cancels back to the expense", async () => {
+    const api = await signIn(VEHICLE_ADDER, vehicleSetup);
+    await openForm();
+    await startAdding("KDE 30");
+    await fireEvent.changeText(
+      screen.getByLabelText("Target for Monday"),
+      "3000",
+    );
+    await fireEvent.press(screen.getByRole("button", { name: "Save vehicle" }));
+
+    expect(
+      await screen.findByText("Enter the registration like KDN 204B."),
+    ).toBeTruthy();
+    expect(screen.getByText("Enter the fleet number.")).toBeTruthy();
+    expect(screen.getByText("Choose the PSV company.")).toBeTruthy();
+    expect(screen.getByText("Enter the target for every day.")).toBeTruthy();
+    expect(bodies(api, "setup/vehicles", "POST")).toHaveLength(0);
+
+    await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.getByRole("button", { name: "Vehicle, not chosen" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save expense" })).toBeTruthy();
+  });
+
+  it("returns to the unlock pad when the session ends while the new vehicle is saved", async () => {
+    const api = await signIn(VEHICLE_ADDER, vehicleSetup);
+    await openForm();
+    await startAdding("KDE 300Z");
+    api.on("setup/vehicles", [401, {}]);
+    api.on("auth/refresh", [401, { status: "authentication_failed" }]);
+    await fillAndSave();
+
+    await screen.findByText("Welcome back, Brian");
+    expect(screen.queryByRole("button", { name: "Save vehicle" })).toBeNull();
+  });
+
+  it("joins an earlier entry's day, and stops offering the vehicle on a day before it joins", async () => {
+    const api = await signIn(VEHICLE_ADDER, vehicleSetup);
+    api.on(optionsOn("2026-09-28"), [200, pettyOptions]);
+    api.on(optionsOn("2026-09-27"), [200, pettyOptions]);
+    api.on("setup/vehicles", [200, { id: "v-new" }]);
+    await openForm();
+    await fireEvent.press(
+      screen.getByRole("button", { name: "Previous date" }),
+    );
+    await screen.findByRole("button", { name: "Vehicle, not chosen" });
+    await startAdding("KDE 300Z");
+
+    expect(
+      screen.getByText(/^Joins the fleet on .+, the expense's date\.$/),
+    ).toBeTruthy();
+    await fillAndSave();
+    await waitFor(() =>
+      expect(bodies(api, "setup/vehicles", "POST")).toEqual([
+        expect.objectContaining({ joinedOn: "2026-09-28" }),
+      ]),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Vehicle, KDE 300Z" }),
+    ).toBeTruthy();
+
+    await fireEvent.press(
+      screen.getByRole("button", { name: "Previous date" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Vehicle, not chosen" }),
+    ).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: /^Vehicle, / }));
+    expect(
+      screen.queryByRole("radio", { name: "KDE 300Z, North Star" }),
+    ).toBeNull();
+    await fireEvent.press(
+      screen.getByRole("radio", { name: "KDA 482M, North Star" }),
+    );
+
+    await fireEvent.press(screen.getByRole("button", { name: "Next date" }));
+    await screen.findByRole("button", { name: "Vehicle, KDA 482M" });
+    await fireEvent.press(screen.getByRole("button", { name: /^Vehicle, / }));
+    expect(
+      await screen.findByRole("radio", { name: "KDE 300Z, North Star" }),
+    ).toBeTruthy();
+  });
+});

@@ -4,6 +4,8 @@ export { Banner, DemoBox, ErrorText } from "./Feedback";
 export { ErrorBoundary } from "./ErrorBoundary";
 export { Field } from "./Field";
 export { Icon, type IconName } from "./Icon";
+export { Sheet } from "./Sheet";
+export { ShowPinToggle } from "./ShowPinToggle";
 export { Text } from "./Text";
 export {
   ThemeProvider,

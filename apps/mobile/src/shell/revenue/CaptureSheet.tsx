@@ -1,15 +1,5 @@
 import { useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  View,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import {
   REVENUE_NOTE_LIMIT,
@@ -21,7 +11,15 @@ import {
 
 import { useFormats } from "../../lib/formats";
 import type { NewCapture } from "../../revenue/queue";
-import { Button, ErrorText, Text, alpha, fonts, useTheme } from "../../ui";
+import {
+  Button,
+  ErrorText,
+  Sheet,
+  Text,
+  alpha,
+  fonts,
+  useTheme,
+} from "../../ui";
 import { IconButton } from "../parts";
 import { gapText } from "./HeaderNav";
 import type { Target } from "./model";
@@ -355,72 +353,38 @@ export function CaptureSheet({
   // Closes the sheet and moves the screen to the vehicle's earlier gap.
   onOpenGap: (date: string) => void;
 }) {
-  const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
   const form = useCaptureForm({ target, canReason, onSave });
   const submit = () => void form.save();
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={[styles.scrim, { backgroundColor: colors.scrim }]}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <View
-          accessibilityViewIsModal
-          style={[styles.sheet, { backgroundColor: colors.surface }]}
-        >
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={[
-              styles.sheetContent,
-              { paddingBottom: 28 + insets.bottom },
-            ]}
-          >
-            <SheetHead
-              target={target}
-              onClose={onClose}
-              onOpenGap={onOpenGap}
-            />
-            <AmountField
-              value={form.amount}
-              autoFocus={!form.reason}
-              onChange={form.changeAmount}
+    <Sheet busy={form.saving} onClose={onClose}>
+      <SheetHead target={target} onClose={onClose} onOpenGap={onOpenGap} />
+      <AmountField
+        value={form.amount}
+        autoFocus={!form.reason}
+        onChange={form.changeAmount}
+        onSubmit={submit}
+      />
+      {canReason && (
+        <>
+          <ReasonPicker reason={form.reason} onPick={form.pickReason} />
+          {form.reason === "Other" && (
+            <NoteField
+              value={form.note}
+              onChange={form.changeNote}
               onSubmit={submit}
             />
-            {canReason && (
-              <>
-                <ReasonPicker reason={form.reason} onPick={form.pickReason} />
-                {form.reason === "Other" && (
-                  <NoteField
-                    value={form.note}
-                    onChange={form.changeNote}
-                    onSubmit={submit}
-                  />
-                )}
-              </>
-            )}
-            <ErrorText>{form.error}</ErrorText>
-            <Button onPress={submit} busy={form.saving} busyText="Saving…">
-              Save
-            </Button>
-          </ScrollView>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
+          )}
+        </>
+      )}
+      <ErrorText>{form.error}</ErrorText>
+      <Button onPress={submit} busy={form.saving} busyText="Saving…">
+        Save
+      </Button>
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  scrim: { flex: 1, justifyContent: "flex-end" },
-  sheet: {
-    width: "100%",
-    maxWidth: 420,
-    maxHeight: "92%",
-    alignSelf: "center",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-  },
-  sheetContent: { gap: 14, padding: 20, paddingBottom: 28 },
   sheetHead: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   info: {
     paddingVertical: 10,

@@ -73,6 +73,20 @@ const shapes = {
       <Path d="M18 6L6 18" />
     </>
   ),
+  eye: (
+    <>
+      <Path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+      <Circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  eyeOff: (
+    <>
+      <Path d="M9.9 5.2A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-2.2 3.2" />
+      <Path d="M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6" />
+      <Path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+      <Path d="M2 2l20 20" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof shapes;
