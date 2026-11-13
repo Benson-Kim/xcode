@@ -7,6 +7,7 @@ non-UUID 404, the statement budget, and the session side effects seen through
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 from uuid import UUID
@@ -15,6 +16,7 @@ import pytest
 
 from ..support.client import ApiFactory, AuthApi, envelope
 from ..support.fakes import role_rights
+from ..support.scenario import PIN_HASH, set_user
 from ..support.setup_client import (
     FORBIDDEN,
     INVALID,
@@ -348,9 +350,50 @@ async def test_an_update_needs_the_loaded_version(api: AuthApi, owner: Member) -
     renamed = person(firstName="Janet", version=1)
     response, count = await statements(api.client.put(path, json=renamed, headers=owner.headers))
     assert ok(response) == {"id": person_id}
-    assert count == 3, "the third statement asks whether an invitation is due for mailing"
+    assert count == 4, (
+        "the third statement asks whether an invitation is due for mailing, "
+        "the fourth claims the sign-in notices the change wrote"
+    )
     problem(await api.client.put(path, json=renamed, headers=owner.headers), 409, STALE)
     assert ok(await api.client.get(path, headers=owner.headers))["version"] == 2
+
+
+async def _sign_in_mails(api: AuthApi, count: int) -> list[tuple[str, str]]:
+    for _ in range(500):
+        mails = [m for m in api.mail.sent if m.tags.get("purpose") == "sign_in_change"]
+        if len(mails) >= count:
+            return sorted((m.tags["kind"], m.to) for m in mails)
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"expected {count} sign-in notices")
+
+
+async def _create_with_pin(api: AuthApi, owner: Member) -> str:
+    person_id = await create(api, owner)
+    set_user(api.owner, UUID(person_id), pin_hash=PIN_HASH)
+    return person_id
+
+
+async def test_a_new_sign_in_email_is_told_to_the_old_and_the_new_address(
+    api: AuthApi, owner: Member
+) -> None:
+    person_id = await _create_with_pin(api, owner)
+    changed = person(email="janet.njeri@example.com", version=1)
+    ok(await api.client.put(f"/setup/people/{person_id}", json=changed, headers=owner.headers))
+    assert await _sign_in_mails(api, 2) == [
+        ("new", "janet.njeri@example.com"),
+        ("old", "jane.njeri@example.com"),
+    ]
+    (old,) = [m for m in api.mail.sent if m.tags.get("kind") == "old"]
+    assert "It is now j***@example.com." in old.text
+
+
+async def test_a_new_mobile_number_is_told_to_the_current_address(
+    api: AuthApi, owner: Member
+) -> None:
+    person_id = await _create_with_pin(api, owner)
+    changed = person(phoneNumber="0722000999", version=1)
+    ok(await api.client.put(f"/setup/people/{person_id}", json=changed, headers=owner.headers))
+    assert await _sign_in_mails(api, 1) == [("current", "jane.njeri@example.com")]
 
 
 async def test_editing_yourself_is_refused(api: AuthApi, owner: Member) -> None:

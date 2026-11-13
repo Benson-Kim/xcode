@@ -4,6 +4,7 @@
 -- Reads: identity.users, identity.review_accounts, tenancy.memberships, tenancy.roles, tenancy.person_roles, and what tenancy.organization_ids_where_demo reads. Writes: ops.operator_actions, identity.review_accounts, identity.users, identity.trusted_devices, identity.refresh_tokens, and what ops.seed_demo_organization, ops.seed_demo_user, ops.seed_catalogue, ops.seed_companies and ops.seed_fleet write.
 -- Raises: XC422 people_email_invalid, XC422 people_phone_invalid, XC409 organization_not_single, XC409 people_contact_taken, XC409 review_phone_differs.
 -- Tests: tests/db/test_review_account.py, tests/api/test_cli.py.
+-- Two runs at once make one demo organization: the demo-organization advisory transaction lock, which api.ops_seed_demo also takes, is held before the demo organization is looked for, so a later run waits and then uses the one the first created.
 -- The email names the login: an email or phone that belongs to a person who is not a review login is refused, and a renewal must give the phone the login already has. A login added to an existing demo organization is added by its first Owner who is not a review login, else by its first Owner. identity.matching_code accepts the code only after the PIN was right on the device.
 
 CREATE OR REPLACE FUNCTION api.ops_review_account_create(
@@ -45,6 +46,7 @@ BEGIN
     PERFORM tenancy.refuse('people_phone_invalid', 'XC422');
   END IF;
 
+  PERFORM pg_advisory_xact_lock(hashtext('demo-organization'));
   v_demo := tenancy.organization_ids_where_demo(true);
   IF cardinality(v_demo) > 1 THEN
     PERFORM tenancy.refuse('organization_not_single', 'XC409');

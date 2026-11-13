@@ -871,6 +871,13 @@ async def test_the_rate_limit_counts_bearer_routes_before_authentication(
     assert current_statement_count() == 0
 
 
+async def test_the_session_check_without_credentials_is_401(make_api: ApiFactory) -> None:
+    api = await make_api()
+    response = await api.client.get("/auth/session")
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
 async def test_no_pin_code_token_phone_or_email_reaches_the_log(
     make_api: ApiFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -1,9 +1,10 @@
 -- api.ops_seed_demo(p_operator text, p_request_id text, p_environment text, p_pins jsonb, p_now timestamptz) RETURNS jsonb
--- Purpose: in a development database, create the demo organization through ops.seed_demo_organization (or flag an older demo-fleet organization as demo), with its four logins, expense catalogue and six weeks of fleet history, adding only what is missing, so a second run changes nothing already there; a database holding any other organization is never seeded.
+-- Purpose: in a development database, create the demo organization through ops.seed_demo_organization, or reuse the one organization flagged demo (a real organization may sit beside it), with its four logins, expense catalogue and six weeks of fleet history, adding only what is missing, so a second run changes nothing already there; a database holding organizations but none flagged demo is never seeded.
 -- Callers: OpsRoutines.seed_demo; CLI seed-demo.
--- Reads: tenancy.organizations, setup.expense_categories, setup.fleet_vehicles, setup.psv_companies. Writes: ops.operator_actions, tenancy.organizations (the demo flag), tenancy.roles, and through ops.seed_demo_organization, ops.seed_demo_user, ops.seed_catalogue, ops.seed_companies and ops.seed_fleet the people, catalogue, companies, vehicles, targets, scheduled items, investments, revenue and petty-cash rows with their change log.
+-- Reads: tenancy.organizations (through tenancy.organization_ids_where_demo and tenancy.organization_ids), setup.expense_categories, setup.fleet_vehicles, setup.psv_companies. Writes: ops.operator_actions, tenancy.roles, and through ops.seed_demo_organization, ops.seed_demo_user, ops.seed_catalogue, ops.seed_companies and ops.seed_fleet the people, catalogue, companies, vehicles, targets, scheduled items, investments, revenue and petty-cash rows with their change log.
 -- Raises: XC403 seed_development_only, XC409 organization_not_single, XC409 seed_exists.
 -- Tests: tests/db/test_ops_routines.py.
+-- The demo-organization advisory transaction lock, shared with api.ops_review_account_create, is held before the organizations are looked up, so two runs at once make one demo organization.
 -- p_pins maps a login's email to a PIN hash made by the CLI; it is set only on an account this run created, and a login missing from it has no PIN. Everything is written as the demo Owner through the business routines, at instants counted back from p_now, so the change log reads as if the organization had been used.
 
 CREATE OR REPLACE FUNCTION api.ops_seed_demo(
@@ -38,23 +39,21 @@ BEGIN
     PERFORM tenancy.refuse('seed_development_only', 'XC403');
   END IF;
 
-  v_organizations := tenancy.organization_ids();
+  PERFORM pg_advisory_xact_lock(hashtext('demo-organization'));
+  v_organizations := tenancy.organization_ids_where_demo(true);
   IF cardinality(v_organizations) > 1 THEN
     PERFORM tenancy.refuse('organization_not_single', 'XC409');
   END IF;
   IF cardinality(v_organizations) = 1 THEN
     v_organization_id := v_organizations[1];
     PERFORM tenancy.enter_organization_as_operator(v_organization_id);
-    IF (
-      SELECT o.slug FROM tenancy.organizations AS o WHERE o.id = v_organization_id
-    ) <> 'demo-fleet' THEN
+  ELSE
+    IF cardinality(tenancy.organization_ids()) > 0 THEN
       PERFORM tenancy.refuse('seed_exists', 'XC409');
     END IF;
-  ELSE
     v_organization_id := ops.seed_demo_organization(p_now - make_interval(days => 43));
     v_created := true;
   END IF;
-  UPDATE tenancy.organizations SET demo = true WHERE id = v_organization_id AND NOT demo;
   PERFORM tenancy.seed_roles(v_organization_id);
 
   v_fleet := NOT EXISTS (

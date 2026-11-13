@@ -77,7 +77,7 @@ def executor(owner_url: str) -> Iterator[Conn]:
 
 
 def test_every_tenant_table_is_covered() -> None:
-    assert len(TENANT_TABLES) == 36
+    assert len(TENANT_TABLES) == 37
 
 
 @pytest.mark.parametrize("table", TENANT_TABLES, ids=lambda t: t.qualified)

@@ -155,6 +155,7 @@ from ..domain.tenancy import (
     MyScope,
     OrganizationSettings,
     PendingDeletionNotice,
+    PendingSignInNotice,
     PeoplePage,
     PeopleQuery,
     PermissionGroup,
@@ -437,6 +438,25 @@ class TenancyRepository(Protocol):
     ) -> list[PendingDeletionNotice]:
         """``api.deletion_notice_claim``: take up to ``limit`` pending notices whose last send is
         over 5 minutes old for another send; those used up or no longer needed are ended."""
+        ...
+
+    async def record_sign_in_notice(self, notice_id: UUID, sent: bool, now: datetime) -> None:
+        """``api.sign_in_notice_result``: ``sent``, or ``failed`` once its sends are used up,
+        only while the notice is pending; either way its address is cleared."""
+        ...
+
+    async def claim_sign_in_notices(
+        self,
+        now: datetime,
+        limit: int,
+        *,
+        context: TenantContext | None = None,
+        user_id: UUID | None = None,
+    ) -> list[PendingSignInNotice]:
+        """``api.sign_in_notice_claim``: with the change's context (``people.edit``) and the
+        person, take up to ``limit`` of their notices never yet sent (right after the change
+        commits); without, up to ``limit`` pending notices whose last send is over 5 minutes old
+        (the sweep). Those used up or no longer needed are ended."""
         ...
 
     async def list_history(self, query: HistoryQuery) -> HistoryPage:

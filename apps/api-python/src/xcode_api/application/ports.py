@@ -10,6 +10,7 @@ from uuid import UUID
 
 from ..domain.identity import AccessGrant, CodePurpose, TokenClaims
 from ..domain.reports import ReportDocument
+from ..domain.tenancy import SignInNoticeKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +70,22 @@ class DeletionNotice:
     requester_name: str
     organization_name: str
     request_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SignInNotice:
+    """One notice that a person's sign-in email or mobile number changed: the address it goes to
+    and which one that is (the replaced email, the new one, or the current one), the person's
+    first name, who made the change (``None`` once they left), the organization name and, for
+    the replaced email, the new address masked. Names are member-typed and untrusted; the
+    address and the hint are never in ``repr``."""
+
+    to: str = field(repr=False)
+    kind: SignInNoticeKind
+    first_name: str
+    actor_name: str | None
+    organization_name: str
+    new_address_hint: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +220,24 @@ class DeletionNotifier(Protocol):
     def notify(
         self,
         notice: DeletionNotice,
+        *,
+        on_sent: Callable[[], Awaitable[None]],
+        on_failure: Callable[[], Awaitable[None]],
+    ) -> None: ...
+
+
+@runtime_checkable
+class SignInNotifier(Protocol):
+    """Tells a person their sign-in email or mobile number changed, after the reply. Adapter:
+    ``infra/mail.py`` ``QueuedSignInNotifier``.
+
+    ``notify`` queues one message and never raises; once delivery ends, ``on_sent`` or
+    ``on_failure`` runs so the caller can record the outcome in the notice outbox.
+    """
+
+    def notify(
+        self,
+        notice: SignInNotice,
         *,
         on_sent: Callable[[], Awaitable[None]],
         on_failure: Callable[[], Awaitable[None]],

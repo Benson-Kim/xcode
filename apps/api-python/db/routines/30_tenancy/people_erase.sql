@@ -1,7 +1,7 @@
 -- api.people_erase(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_user_id uuid, p_expected_version bigint, p_reason text, p_now timestamptz) RETURNS api.write_result
--- Purpose: erase a blocked person who belongs to this organization only (a typed reason required): the account loses its email, mobile number and PIN and is marked erased, the membership becomes Former member, this organization's people and sign-in history of the person loses their name and contact details, and device names, open codes, the live invitation and an App Review sign-in code go; money and history rows keep the id. Repeating on an erased person the actor can see answers unchanged without a version.
+-- Purpose: erase a blocked person who belongs to this organization only (a typed reason required): the account loses its email, mobile number and PIN and is marked erased, the membership becomes Former member, this organization's people and sign-in history of the person loses their name and contact details, and device names, open codes, the live invitation, unsent sign-in notices and an App Review sign-in code go; money and history rows keep the id. Repeating on an erased person the actor can see answers unchanged without a version.
 -- Callers: TenancyRoutines.erase_person; ErasePerson (POST /setup/people/{id}/erasure).
--- Reads: tenancy.memberships, identity.users, and what tenancy.person_in_view, tenancy.people_visible, tenancy.role_of and tenancy.belongs_elsewhere read. Writes: identity.users, tenancy.memberships, identity.trusted_devices, identity.refresh_tokens, identity.verification_codes, identity.invitations (revoked 'removed'), identity.review_accounts through identity.erase_review_login, tenancy.change_log and tenancy.audit_events through tenancy.erase_person_history, and through tenancy.record_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
+-- Reads: tenancy.memberships, identity.users, and what tenancy.person_in_view, tenancy.people_visible, tenancy.role_of and tenancy.belongs_elsewhere read. Writes: identity.users, tenancy.memberships, identity.trusted_devices, identity.refresh_tokens, identity.verification_codes, identity.invitations (revoked 'removed'), tenancy.sign_in_notices (pending ones dropped, without their address), identity.review_accounts through identity.erase_review_login, tenancy.change_log and tenancy.audit_events through tenancy.erase_person_history, and through tenancy.record_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 people_self_erase, XC404 not_found, XC403 people_owner_edit, XC422 people_erase_active, XC422 people_erase_shared, XC409 version_conflict, XC422 reason_length.
 -- Tests: tests/db/test_erasure_routines.py, tests/db/test_fakes_match_routines.py, tests/api/test_person_erasure.py.
 
@@ -89,6 +89,8 @@ BEGIN
   WHERE user_id = p_user_id AND name IS DISTINCT FROM 'Device';
   UPDATE identity.verification_codes SET consumed = true WHERE user_id = p_user_id AND NOT consumed;
   PERFORM identity.revoke_invitations(p_user_id, 'removed', p_now);
+  UPDATE tenancy.sign_in_notices SET state = 'dropped', address = NULL
+  WHERE organization_id = p_organization_id AND user_id = p_user_id AND state = 'pending';
   PERFORM identity.touch_version(p_user_id);
   PERFORM tenancy.record_change(
     'people', p_user_id, NULL, '{"Erased":false}'::json, '{"Erased":true}'::json,

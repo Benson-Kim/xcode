@@ -249,6 +249,7 @@ from xcode_api.domain.tenancy import (
     OrganizationDetails,
     OrganizationSettings,
     PendingDeletionNotice,
+    PendingSignInNotice,
     PeoplePage,
     PeopleQuery,
     PermissionGroup,
@@ -274,6 +275,7 @@ from xcode_api.domain.tenancy import (
     ScopeOptions,
     SecurityPolicy,
     SettingsSave,
+    SignInNoticeKind,
     TenantContext,
     ThemeMode,
     UserPreferences,
@@ -2295,6 +2297,8 @@ class FakeTenancyRepository:
         self.revenue_row = False
         self.logo: LogoUpload | None = None
         self.deletion_notice_results: list[tuple[UUID, bool]] = []
+        self.sign_in_notices: list[tuple[UUID, PendingSignInNotice]] = []
+        self.sign_in_notice_results: list[tuple[UUID, bool]] = []
         self.preference_rows: dict[UUID, UserPreferences] = {}
         self.log: list[HistoryEntry] = []
         self.invitations: dict[UUID, InvitationHashes] = {}
@@ -2507,6 +2511,8 @@ class FakeTenancyRepository:
                 id=member.user_id, version=member.version, outcome=WriteOutcome.UNCHANGED
             )
         before = member.snapshot()
+        if "sign-in details" in changes and member.has_pin:
+            self._queue_sign_in_notices(command.context, member, fields["email"])
         for name, value in fields.items():
             setattr(member, name, value)
         member.version += 1
@@ -2711,6 +2717,50 @@ class FakeTenancyRepository:
         self, now: datetime, limit: int
     ) -> list[PendingDeletionNotice]:
         return []
+
+    def _queue_sign_in_notices(
+        self, context: TenantContext, member: FakeMember, new_email: str
+    ) -> None:
+        actor = self.members.get(context.actor_id)
+        actor_name = f"{actor.first_name} {actor.last_name}" if actor else None
+        kinds = (
+            [(SignInNoticeKind.OLD, member.email), (SignInNoticeKind.NEW, new_email)]
+            if new_email != member.email
+            else [(SignInNoticeKind.CURRENT, new_email)]
+        )
+        local, _, domain = new_email.partition("@")
+        for kind, address in kinds:
+            notice = PendingSignInNotice(
+                uuid4(),
+                self.organization_id,
+                address,
+                kind,
+                member.first_name,
+                actor_name,
+                self.name,
+                f"{local[:1]}***@{domain}" if kind is SignInNoticeKind.OLD else None,
+            )
+            self.sign_in_notices.append((member.user_id, notice))
+
+    async def record_sign_in_notice(self, notice_id: UUID, sent: bool, now: datetime) -> None:
+        self.sign_in_notice_results.append((notice_id, sent))
+
+    async def claim_sign_in_notices(
+        self,
+        now: datetime,
+        limit: int,
+        *,
+        context: TenantContext | None = None,
+        user_id: UUID | None = None,
+    ) -> list[PendingSignInNotice]:
+        if context is None:
+            return []
+        self._enter(context, "people.edit")
+        if user_id is None:
+            return []
+        claimed = [n for owner, n in self.sign_in_notices if owner == user_id][:limit]
+        self.sign_in_notices = [(o, n) for o, n in self.sign_in_notices if n not in claimed]
+        return claimed
 
     # --- change log -------------------------------------------------------------------------
 

@@ -1,8 +1,9 @@
 -- api.ops_provision_user(p_operator text, p_request_id text, p_email text, p_phone text, p_role text, p_first_name text, p_last_name text, p_organization_name text, p_now timestamptz) RETURNS jsonb
--- Purpose: create or re-activate a person in the database's one real organization (created with defaults and seeded roles when none exists); a demo organization is never provisioned into, and a review login or a person of a demo organization is refused; a changed or revived existing account loses every session and device.
+-- Purpose: create or re-activate a person in the database's one real organization (created with defaults and seeded roles when none exists); a demo organization is never provisioned into, and a review login or a person with any membership of a demo organization, active or not, is refused; a changed or revived existing account loses every session and device.
 -- Callers: OpsRoutines.provision_user; CLI provision-user.
--- Reads: identity.users, identity.review_accounts, tenancy.organizations, tenancy.memberships, tenancy.roles, tenancy.person_roles. Writes: ops.operator_actions, tenancy.organizations and its localization, branding and security-policy rows, tenancy.roles, identity.users, tenancy.memberships, tenancy.person_roles, tenancy.data_scopes, identity.trusted_devices, identity.refresh_tokens.
+-- Reads: identity.users, identity.review_accounts, tenancy.organizations, tenancy.memberships, tenancy.roles, tenancy.person_roles, and what tenancy.has_demo_membership and tenancy.insert_organization_with_free_slug read. Writes: ops.operator_actions, tenancy.organizations (through tenancy.insert_organization_with_free_slug: the slug is my-fleet or the first free my-fleet-2, my-fleet-3 and so on, a demo organization's slug being invisible here) and its localization, branding and security-policy rows, tenancy.roles, identity.users, tenancy.memberships, tenancy.person_roles, tenancy.data_scopes, identity.trusted_devices, identity.refresh_tokens.
 -- Raises: XC422 people_email_invalid, XC422 people_phone_invalid, XC422 people_role_unknown, XC422 people_names_required, XC422 organization_name_slug, XC409 people_contact_taken, XC409 organization_not_single.
+-- The real-organization advisory transaction lock is held before the real organization is looked up, so two provisions at once on an empty database make one real organization.
 -- Tests: tests/db/test_ops_routines.py, tests/api/test_cli.py.
 
 CREATE OR REPLACE FUNCTION api.ops_provision_user(
@@ -78,19 +79,20 @@ BEGIN
   ) THEN
     PERFORM tenancy.refuse('people_contact_taken', 'XC409');
   END IF;
-  -- The App Review login and the people of a demo organization stay out of the real one.
+  -- The App Review login and the people of a demo organization, deactivated ones too, stay out of the real one.
   IF EXISTS (
     SELECT 1 FROM identity.users AS u
     WHERE u.email = v_email
       AND (
         EXISTS (SELECT 1 FROM identity.review_accounts AS ra WHERE ra.user_id = u.id)
-        OR identity.active_organization(u.id) = ANY (tenancy.organization_ids_where_demo(true))
+        OR tenancy.has_demo_membership(u.id)
       )
   ) THEN
     PERFORM tenancy.refuse('people_contact_taken', 'XC409');
   END IF;
 
   -- One real organization per database: reuse it, or create it with the default settings rows.
+  PERFORM pg_advisory_xact_lock(hashtext('real-organization'));
   v_organizations := tenancy.organization_ids_where_demo(false);
   IF cardinality(v_organizations) > 1 THEN
     PERFORM tenancy.refuse('organization_not_single', 'XC409');
@@ -101,8 +103,9 @@ BEGIN
   ELSE
     v_organization_id := gen_random_uuid();
     PERFORM tenancy.enter_organization_as_operator(v_organization_id);
-    INSERT INTO tenancy.organizations (id, slug, name, created_at, updated_at)
-    VALUES (v_organization_id, 'my-fleet', coalesce(v_organization_name, 'My fleet'), p_now, p_now);
+    PERFORM tenancy.insert_organization_with_free_slug(
+      v_organization_id, 'my-fleet', coalesce(v_organization_name, 'My fleet'), false, p_now
+    );
     INSERT INTO tenancy.organization_localizations (organization_id, created_at, updated_at)
     VALUES (v_organization_id, p_now, p_now);
     INSERT INTO tenancy.organization_brandings (organization_id, created_at, updated_at)

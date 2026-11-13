@@ -79,6 +79,7 @@ UNASSIGNED_USERS_WARNING = "{count} active users have no organization membership
 INVITATION_SWEEP_SECONDS = 60.0
 INVITATION_SWEEP_LIMIT = 20
 DELETION_NOTICE_SWEEP_LIMIT = 20
+SIGN_IN_NOTICE_SWEEP_LIMIT = 20
 
 
 class ContractVersionMismatch(RuntimeError):  # noqa: N818 - a named startup failure, not an Error type
@@ -114,6 +115,12 @@ def create_app(
             lambda: _sweep_deletion_notices(container),
         )
         deletion_notice_sweep.start()
+        sign_in_notice_sweep = PeriodicJob(
+            "sign_in_notice_sweep",
+            INVITATION_SWEEP_SECONDS,
+            lambda: _sweep_sign_in_notices(container),
+        )
+        sign_in_notice_sweep.start()
         app.state.started = True
         try:
             yield
@@ -121,6 +128,7 @@ def create_app(
             app.state.started = False
             await invitation_sweep.stop()
             await deletion_notice_sweep.stop()
+            await sign_in_notice_sweep.stop()
             await container.mail_queue.drain(settings.shutdown_grace_seconds)
             # Shutdown can run in another context than startup, where a reset token is refused.
             active_metrics.set(previous_metrics)
@@ -217,6 +225,13 @@ async def _sweep_deletion_notices(container: Container) -> None:
     claimed = await container.deletion_notices.sweep(DELETION_NOTICE_SWEEP_LIMIT)
     if claimed:
         logger.info("deletion_notice.sweep", claimed=claimed)
+
+
+async def _sweep_sign_in_notices(container: Container) -> None:
+    """Re-send sign-in notices whose mail was lost or failed."""
+    claimed = await container.sign_in_notices.sweep(SIGN_IN_NOTICE_SWEEP_LIMIT)
+    if claimed:
+        logger.info("sign_in_notice.sweep", claimed=claimed)
 
 
 async def _warn_unassigned_users(container: Container) -> None:

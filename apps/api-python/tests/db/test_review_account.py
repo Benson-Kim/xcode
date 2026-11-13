@@ -8,11 +8,13 @@ other."""
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any
 from uuid import UUID
 
 import psycopg
 import pytest
+from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from xcode_api.db.migrate import find_db_dir
@@ -156,6 +158,81 @@ def test_without_a_demo_organization_one_is_made_beside_the_real_one(
     again = _create(operator_conn, pin_hash=NEW_PIN_HASH, code_hash=NEW_CODE_HASH)
     assert (UUID(again["organization_id"]), again["created_organization"]) == (demo_id, False)
     assert _state(owner_conn, demo_id)["vehicles"] == demo["vehicles"]
+    assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations WHERE demo") == 1
+
+
+@pytest.mark.parametrize(
+    ("taken", "expected"),
+    [(["demo-fleet"], "demo-fleet-2"), (["demo-fleet", "demo-fleet-2"], "demo-fleet-3")],
+)
+def test_a_real_organization_holding_the_demo_slug_keeps_it(
+    operator_conn: Conn, owner_conn: Conn, taken: list[str], expected: str
+) -> None:
+    real = make_account(operator_conn, owner_conn)
+    owner_conn.execute(
+        "UPDATE tenancy.organizations SET slug = %s WHERE id = %s", (taken[0], real.organization_id)
+    )
+    for slug in taken[1:]:
+        seed_organization(owner_conn, slug)
+    others = owner_conn.execute(
+        "SELECT to_jsonb(o) AS row FROM tenancy.organizations AS o ORDER BY o.id"
+    ).fetchall()
+    before = _state(owner_conn, real.organization_id)
+    _seeding(operator_conn)
+    result = _create(operator_conn)
+    assert result["created_organization"] is True
+    demo_id = UUID(result["organization_id"])
+    assert _state(owner_conn, real.organization_id) == before
+    rest = owner_conn.execute(
+        "SELECT to_jsonb(o) AS row FROM tenancy.organizations AS o WHERE o.id <> %s ORDER BY o.id",
+        (demo_id,),
+    ).fetchall()
+    assert rest == others
+    demo = _state(owner_conn, demo_id)["organization"]
+    assert (demo["slug"], demo["name"], demo["demo"]) == (expected, "Demo Fleet", True)
+
+    again = _create(operator_conn, pin_hash=NEW_PIN_HASH, code_hash=NEW_CODE_HASH)
+    assert (UUID(again["organization_id"]), again["created_organization"]) == (demo_id, False)
+    assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations WHERE demo") == 1
+
+
+def test_two_first_runs_at_once_make_one_demo_organization(
+    operator_conn: Conn, owner_conn: Conn
+) -> None:
+    make_account(operator_conn, owner_conn)
+    results: list[Any] = []
+    with psycopg.connect(
+        operator_conn.info.dsn,
+        password=operator_conn.info.password,
+        autocommit=True,
+        row_factory=dict_row,
+    ) as late:
+        _seeding(operator_conn)
+        _seeding(late)
+        started = threading.Event()
+
+        def run_late() -> None:
+            started.set()
+            try:
+                results.append(_create(late, email="second.review@example.com", phone="0798765433"))
+            except psycopg.Error as error:
+                results.append((error.sqlstate, error.diag.message_primary))
+
+        with operator_conn.transaction():
+            first = _create(operator_conn)
+            worker = threading.Thread(target=run_late)
+            worker.start()
+            assert started.wait(10)
+            worker.join(0.5)
+            # The second run waits on the demo-organization lock until the first commits.
+            assert worker.is_alive()
+        worker.join(120)
+    assert not worker.is_alive()
+    assert len(results) == 1
+    second = results[0]
+    assert isinstance(second, dict), second
+    assert (first["created_organization"], second["created_organization"]) == (True, False)
+    assert second["organization_id"] == first["organization_id"]
     assert _one(owner_conn, "SELECT count(*) FROM tenancy.organizations WHERE demo") == 1
 
 
@@ -351,6 +428,9 @@ _WRITES_DEMO = re.compile(
     r"\bdemo\s*=\s*true\b|INSERT\s+INTO\s+tenancy\.organizations\s*\([^)]*\bdemo\b",
     re.IGNORECASE,
 )
+_PASSES_DEMO = re.compile(
+    r"\binsert_organization_with_free_slug\s*\([^;]*,\s*true\s*,[^;]*\)", re.IGNORECASE
+)
 _CALLS_DEMO_ORGANIZATION = re.compile(r"(?<!FUNCTION )\bops\.seed_demo_organization\s*\(")
 
 
@@ -368,7 +448,8 @@ def test_only_the_operator_routine_writes_a_review_code() -> None:
 
 
 def test_only_the_demo_seeds_set_the_demo_flag() -> None:
-    assert _writers(_WRITES_DEMO) == {"seed_demo_organization.sql", "ops_seed_demo.sql"}
+    assert _writers(_WRITES_DEMO) == {"insert_organization_with_free_slug.sql"}
+    assert _writers(_PASSES_DEMO) == {"seed_demo_organization.sql"}
 
 
 def test_only_the_seed_and_the_review_login_create_the_demo_organization() -> None:
@@ -376,3 +457,18 @@ def test_only_the_seed_and_the_review_login_create_the_demo_organization() -> No
         "ops_seed_demo.sql",
         "ops_review_account_create.sql",
     }
+
+
+_DEMO_LOCK = "pg_advisory_xact_lock(hashtext('demo-organization'))"
+
+
+@pytest.mark.parametrize("name", ["ops_seed_demo.sql", "ops_review_account_create.sql"])
+def test_each_demo_creator_takes_the_demo_lock_before_looking(name: str) -> None:
+    (path,) = _ROUTINES.rglob(name)
+    code = re.sub(r"--[^\n]*", "", path.read_text(encoding="utf-8"))
+    lock = code.find(_DEMO_LOCK)
+    assert lock >= 0, f"{name} does not take the demo-organization lock"
+    assert lock < code.find("tenancy.organization_ids"), "the lock comes before the lookup"
+    creation = _CALLS_DEMO_ORGANIZATION.search(code)
+    assert creation is not None
+    assert lock < creation.start()

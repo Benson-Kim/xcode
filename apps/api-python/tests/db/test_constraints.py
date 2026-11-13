@@ -100,6 +100,7 @@ _USER = "UPDATE identity.users SET {} WHERE id = %(user)s"
 _CODE = "UPDATE identity.verification_codes SET {} WHERE id = %(code)s"
 _INVITE = "UPDATE identity.invitations SET {} WHERE id = %(invitation)s"
 _NOTICE = "UPDATE tenancy.deletion_notices SET {} WHERE organization_id = %(org)s"
+_SIGN_IN = "UPDATE tenancy.sign_in_notices SET {} WHERE organization_id = %(org)s"
 _ATTEMPT = "UPDATE identity.sign_in_attempts SET {} WHERE user_id = %(user)s"
 _ORG = "UPDATE tenancy.organizations SET {} WHERE id = %(org)s"
 _MEMBER = "UPDATE tenancy.memberships SET {} WHERE organization_id = %(org)s AND user_id = %(user)s"
@@ -194,6 +195,11 @@ CHECK_CASES = [
     Case("ck_deletion_notices_state", _set(_NOTICE, "state = 'lost'")),
     Case("ck_deletion_notices_attempts", _set(_NOTICE, "attempts = -1")),
     Case("ck_deletion_notices_sent", _set(_NOTICE, "state = 'sent'")),
+    Case("ck_sign_in_notices_kind", _set(_SIGN_IN, "kind = 'other'")),
+    Case("ck_sign_in_notices_state", _set(_SIGN_IN, "state = 'lost', address = NULL")),
+    Case("ck_sign_in_notices_address", _set(_SIGN_IN, "address = NULL")),
+    Case("ck_sign_in_notices_attempts", _set(_SIGN_IN, "attempts = -1")),
+    Case("ck_sign_in_notices_sent", _set(_SIGN_IN, "state = 'sent', address = NULL")),
     Case(
         "ck_invitations_revoke_reason",
         _set(_INVITE, "revoked_at = now(), revoke_reason = 'expired'"),
@@ -995,7 +1001,7 @@ def test_composite_foreign_keys_refuse_another_organizations_rows(seeded: Seeded
         seeded.params(),
     )
     composite = [fk for fk in _foreign_keys(conn) if _is_composite(fk)]
-    assert len(composite) == 48
+    assert len(composite) == 50
     for fk in composite:
         columns = fk["source_columns"][1:]
         target_columns = fk["target_columns"][1:]

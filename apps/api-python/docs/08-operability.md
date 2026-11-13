@@ -84,6 +84,11 @@ owner URL and nothing of the API's own configuration or secrets.
 - Deletion notice sweep: `deletion_notice.sweep` (INFO, `claimed`) when a run re-sent lost or
   failed account-deletion notices; `job.failed` (ERROR, `job=deletion_notice_sweep`) when a run
   failed. It runs every 60 s; a notice is given up as `failed` after 5 sends.
+- Sign-in notice sweep: `sign_in_notice.sweep` (INFO, `claimed`) when a run re-sent lost or
+  failed notices of a changed sign-in email or mobile number; `job.failed` (ERROR,
+  `job=sign_in_notice_sweep`) when a run failed; `sign_in_notice.claim_failed` (ERROR) when
+  the claim right after a people update failed, which leaves the notices to the sweep. It runs
+  every 60 s; a notice is given up as `failed` after 5 sends.
 
 ## 3. Request id and tracing
 
@@ -174,8 +179,8 @@ drains for at most `XCODE_SHUTDOWN_GRACE_SECONDS`; pool closes; exit 0.
 | `clear-pause --email` | clears a sign-in pause (never the untrusted-device cap) | `xcode_operator` (routine `api.ops_clear_pause`) |
 | `revoke-sessions --email` | bumps `security_version`, revokes refresh tokens and device trust; the user signs in again with a code | `xcode_operator` (routine `api.ops_revoke_sessions`) |
 | `account-state --email` | prints status, pause, attempt counters, trusted-device and live-token counts for a support call; never a hash | `xcode_operator` (routine `api.ops_account_state`) |
-| `seed-demo` | development only; refuses otherwise; idempotent | `xcode_operator` (routine `api.ops_seed_demo`; `docs/13-open-questions.md` question 7) |
-| `review-account create --email --phone` | the App Review login: an Owner of the database's one organization flagged as demo. The first run creates that organization (Demo Fleet) beside the real one, with the demo seed's catalogue, companies and six weeks of fleet history, and takes up to 2 minutes; the real organization and its people are never touched, and `provision-user` never works in the demo one. Prints `created_user=` and `created_organization=` (`yes` or `no`). Creates or renews the person and prints a new four-digit PIN and six-digit code once; the code answers the new-device step after the PIN (it is never emailed, never settable over HTTP), and every sign-in with it is in the sign-in history. Validates the API's full settings: the code is stored as the API's keyed digest, so `XCODE_AUTH_SIGNING_KEY` must be the API's (exit 2 when unset), and the command is run again after that key changes. A second run replaces both secrets | `xcode_operator` (routine `api.ops_review_account_create`) |
+| `seed-demo` | development only; refuses otherwise; idempotent; reuses the organization flagged demo (a real one may sit beside it), creates it only in an empty database, and refuses (`seed_exists`) when other organizations exist and none is demo | `xcode_operator` (routine `api.ops_seed_demo`; `docs/13-open-questions.md` question 7) |
+| `review-account create --email --phone` | the App Review login: an Owner of the database's one organization flagged as demo. The first run creates that organization (Demo Fleet, slug `demo-fleet`, or `demo-fleet-2` when the real organization already uses that slug) beside the real one, with the demo seed's catalogue, companies and six weeks of fleet history, and takes up to 2 minutes; the real organization and its people are never touched, and `provision-user` never works in the demo one. Prints `created_user=` and `created_organization=` (`yes` or `no`). Creates or renews the person and prints a new four-digit PIN and six-digit code once; the code answers the new-device step after the PIN (it is never emailed, never settable over HTTP), and every sign-in with it is in the sign-in history. Validates the API's full settings: the code is stored as the API's keyed digest, so `XCODE_AUTH_SIGNING_KEY` must be the API's (exit 2 when unset), and the command is run again after that key changes. A second run replaces both secrets | `xcode_operator` (routine `api.ops_review_account_create`) |
 | `openapi > file` | prints the OpenAPI document for contract comparison | none |
 | `settings-check` | validates the `XCODE_*` settings of the API process and prints the startup summary (secrets shown only as set or unset); exit 2 naming every bad variable | none |
 

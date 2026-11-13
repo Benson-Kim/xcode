@@ -24,6 +24,7 @@ from ...domain.tenancy import (
     MyScope,
     OrganizationSettings,
     PendingDeletionNotice,
+    PendingSignInNotice,
     PeoplePage,
     PeopleQuery,
     PermissionGroup,
@@ -221,6 +222,25 @@ class TenancyRoutines:
         if not isinstance(value, list):
             raise IntegrityBug(f"api.{routine} returned no array")
         return [document(item, PendingDeletionNotice, f"api.{routine}") for item in value]
+
+    async def record_sign_in_notice(self, notice_id: UUID, sent: bool, now: datetime) -> None:
+        await call(self._pool, "sign_in_notice_result", notice_id, sent, now)
+
+    async def claim_sign_in_notices(
+        self,
+        now: datetime,
+        limit: int,
+        *,
+        context: TenantContext | None = None,
+        user_id: UUID | None = None,
+    ) -> list[PendingSignInNotice]:
+        routine = "sign_in_notice_claim"
+        tenant = _tenant(context) if context is not None else (None, None, None)
+        rows = await call(self._pool, routine, now, limit, *tenant, user_id)
+        value = _single(rows, routine)
+        if not isinstance(value, list):
+            raise IntegrityBug(f"api.{routine} returned no array")
+        return [document(item, PendingSignInNotice, f"api.{routine}") for item in value]
 
     async def list_history(self, query: HistoryQuery) -> HistoryPage:
         f = query.filter
