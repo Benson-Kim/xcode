@@ -47,12 +47,14 @@ export function PettyCashScreen({
   businessDate,
   start,
   canAddItem = false,
+  canAddVehicle = false,
   onSessionEnded,
 }: {
   offline: boolean;
   businessDate?: string;
   start?: PettyCashSection;
   canAddItem?: boolean;
+  canAddVehicle?: boolean;
   onSessionEnded: () => void;
 }) {
   const formats = useFormats();
@@ -194,6 +196,7 @@ export function PettyCashScreen({
     permissions: permissions!,
     stamp,
     canAddItem,
+    canAddVehicle,
     onCancel: () => setForm(null),
     onSaved: (message: string) => finish("ok", message),
     onStale: (message: string) => finish("error", message),

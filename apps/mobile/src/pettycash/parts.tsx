@@ -189,7 +189,8 @@ const LIST_LIMIT = 30;
 const SEARCH_AFTER = 8;
 
 // A closed field that opens to a list of choices, best match first once something is typed. The search shows
-// once the list is long, or always when "+ Add new" closes the list: it hands over what was typed.
+// once the list is long, or always when "+ Add new" heads the list: it hands over what was typed, and sits first so
+// no one scrolls to reach it.
 export function Picker({
   label,
   options,
@@ -266,6 +267,17 @@ export function Picker({
               />
             </View>
           ) : null}
+          {onAdd ? (
+            <AddNewChoice
+              label={label}
+              typed={query.trim()}
+              onPress={() => {
+                setOpen(false);
+                setQuery("");
+                onAdd(query.trim());
+              }}
+            />
+          ) : null}
           {shown.length === 0 ? (
             <Text style={{ padding: 16, color: colors.grey }}>
               {options.length === 0
@@ -290,17 +302,6 @@ export function Picker({
             <Text style={{ padding: 12, fontSize: 14, color: colors.grey }}>
               {`Showing ${LIST_LIMIT} of ${shown.length}. Type to narrow the list.`}
             </Text>
-          ) : null}
-          {onAdd ? (
-            <AddNewChoice
-              label={label}
-              typed={query.trim()}
-              onPress={() => {
-                setOpen(false);
-                setQuery("");
-                onAdd(query.trim());
-              }}
-            />
           ) : null}
         </View>
       ) : null}

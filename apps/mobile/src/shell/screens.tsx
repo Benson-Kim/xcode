@@ -371,9 +371,9 @@ export function ModuleScreen({
         .filter((item) => person.permissions.includes(item.key))
         .map((item) => item.label),
     );
+  const has = permissionChecker(person.permissions);
   const petty = tab === "spend" && canOpenPettyCash(person.permissions);
-  const others =
-    tab !== "spend" || permissionChecker(person.permissions)("bills.view");
+  const others = tab !== "spend" || has("bills.view");
   return (
     <View style={styles.screen}>
       <ScreenTitle>{definition.label}</ScreenTitle>
@@ -382,10 +382,8 @@ export function ModuleScreen({
           offline={offline}
           businessDate={businessDate}
           start={start}
-          canAddItem={
-            permissionChecker(person.permissions)("expenses.setup") ||
-            permissionChecker(person.permissions)("catalog.add")
-          }
+          canAddItem={has("expenses.setup") || has("catalog.add")}
+          canAddVehicle={has("vehicles.manage") || has("vehicles.add")}
           onSessionEnded={onSessionEnded}
         />
       ) : null}

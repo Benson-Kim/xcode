@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -9,7 +9,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 
-import { ErrorText, Icon, Text, useTheme } from "../ui";
+import { ErrorText, Icon, ShowPinToggle, Text, useTheme } from "../ui";
 
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "back"];
 
@@ -47,23 +47,9 @@ export function PinPad({
   onDelete,
   links,
 }: Props) {
-  const { colors, reducedMotion, fontScale } = useTheme();
+  const { colors, fontScale } = useTheme();
   const { height } = useWindowDimensions();
   const short = height < 700;
-  const offset = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (!shake || reducedMotion) return;
-    Animated.sequence(
-      [-6, 6, -6, 0].map((toValue) =>
-        Animated.timing(offset, {
-          toValue,
-          duration: 75,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-      ),
-    ).start();
-  }, [shake, reducedMotion, offset]);
 
   const latest = useRef({ onDigit, onDelete, busy });
   latest.current = { onDigit, onDelete, busy };
@@ -129,27 +115,7 @@ export function PinPad({
       )}
 
       <View style={styles.entry}>
-        <Text weight="semibold" style={{ fontSize: 15 }}>
-          {label}
-        </Text>
-        <Animated.View
-          accessible
-          accessibilityRole="image"
-          accessibilityLabel={`${value.length} of ${length} numbers entered`}
-          accessibilityLiveRegion="polite"
-          style={[styles.dots, { transform: [{ translateX: offset }] }]}
-        >
-          {Array.from({ length }, (_, index) => (
-            <View
-              key={index}
-              style={[
-                styles.dot,
-                { borderColor: colors.navy },
-                index < value.length && { backgroundColor: colors.navy },
-              ]}
-            />
-          ))}
-        </Animated.View>
+        <PinEntry label={label} length={length} value={value} shake={shake} />
         <View style={styles.errorBox}>
           {status ? (
             <Checking status={status} />
@@ -202,6 +168,76 @@ export function PinPad({
   );
 }
 
+// The PIN's label and dots, shaken on a wrong entry. Show PIN puts the typed digits in place of their dots.
+function PinEntry({
+  label,
+  length,
+  value,
+  shake,
+}: Pick<Props, "label" | "length" | "value" | "shake">) {
+  const { colors, reducedMotion } = useTheme();
+  const offset = useRef(new Animated.Value(0)).current;
+  const [shown, setShown] = useState(false);
+  const entered = `${value.length} of ${length} numbers entered`;
+
+  useEffect(() => {
+    if (!shake || reducedMotion) return;
+    Animated.sequence(
+      [-6, 6, -6, 0].map((toValue) =>
+        Animated.timing(offset, {
+          toValue,
+          duration: 75,
+          useNativeDriver: Platform.OS !== "web",
+        }),
+      ),
+    ).start();
+  }, [shake, reducedMotion, offset]);
+
+  return (
+    <>
+      <View style={styles.labelRow}>
+        <Text weight="semibold" style={{ fontSize: 15 }}>
+          {label}
+        </Text>
+        <ShowPinToggle
+          shown={shown}
+          onToggle={() => setShown((current) => !current)}
+        />
+      </View>
+      <Animated.View
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={
+          shown && value ? `${value.split("").join(" ")}, ${entered}` : entered
+        }
+        accessibilityLiveRegion="polite"
+        style={[styles.dots, { transform: [{ translateX: offset }] }]}
+      >
+        {Array.from({ length }, (_, index) =>
+          shown && index < value.length ? (
+            <Text
+              key={index}
+              weight="bold"
+              style={[styles.digit, { color: colors.navy }]}
+            >
+              {value[index]}
+            </Text>
+          ) : (
+            <View
+              key={index}
+              style={[
+                styles.dot,
+                { borderColor: colors.navy },
+                index < value.length && { backgroundColor: colors.navy },
+              ]}
+            />
+          ),
+        )}
+      </Animated.View>
+    </>
+  );
+}
+
 // The spinner runs natively, so it keeps turning even while the JS thread is busy.
 function Checking({ status }: { status: string }) {
   const { colors } = useTheme();
@@ -237,8 +273,15 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, lineHeight: 28, textAlign: "center" },
   sub: { textAlign: "center" },
   entry: { alignItems: "center", gap: 12 },
-  dots: { flexDirection: "row", gap: 18 },
+  labelRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  dots: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 18,
+    minHeight: 26,
+  },
   dot: { width: 16, height: 16, borderRadius: 8, borderWidth: 2 },
+  digit: { minWidth: 16, fontSize: 22, lineHeight: 26, textAlign: "center" },
   errorBox: { minHeight: 44, alignSelf: "stretch" },
   status: {
     flexDirection: "row",
