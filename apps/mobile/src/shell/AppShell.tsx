@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SessionEndedError, apiGet } from "../lib/api";
 import type { StoredPerson } from "../lib/storage";
+import { useSessionCheck } from "../lib/useSessionCheck";
 import type { PettyCashSection } from "../pettycash/PettyCashScreen";
 import { queueCounts, useRevenueQueue } from "../revenue/queue";
 import { Icon, Text, useTheme } from "../ui";
@@ -46,6 +47,7 @@ export function AppShell({
     ended.current = onSessionEnded;
   });
   const sessionEnded = useCallback(() => ended.current(), []);
+  useSessionCheck(offline, sessionEnded);
   // Revenue captured on this phone and not yet accepted by the API.
   const queue = useRevenueQueue(person.userId, sessionEnded);
   const counts = queueCounts(queue.entries);

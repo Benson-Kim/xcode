@@ -103,6 +103,28 @@ export async function readSession(): Promise<{
   }
 }
 
+export const SESSION_CHECK_INTERVAL_MS = 30_000;
+
+// A session the server ended (an email change, a removal) is otherwise noticed only on the next request. When the tab
+// comes back into view the session is asked about, at most once every 30 seconds. A 401 that a refresh cannot mend
+// runs the usual signed-out path through fetchWithSession; a network error or a blocked check changes nothing.
+export function watchSession(now: () => number = Date.now) {
+  let last = Number.NEGATIVE_INFINITY;
+  const check = () => {
+    if (document.visibilityState === "hidden") return;
+    const time = now();
+    if (time - last < SESSION_CHECK_INTERVAL_MS) return;
+    last = time;
+    void fetchWithSession("/api/auth/session").catch(() => undefined);
+  };
+  document.addEventListener("visibilitychange", check);
+  window.addEventListener("focus", check);
+  return () => {
+    document.removeEventListener("visibilitychange", check);
+    window.removeEventListener("focus", check);
+  };
+}
+
 export function onSessionExpired(listener: () => void) {
   window.addEventListener(SESSION_EXPIRED, listener);
   return () => window.removeEventListener(SESSION_EXPIRED, listener);

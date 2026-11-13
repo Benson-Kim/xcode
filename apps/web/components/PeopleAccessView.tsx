@@ -19,6 +19,7 @@ import type {
   ScopeOptions,
 } from "../lib/types";
 import { BlockDialog } from "./people/BlockDialog";
+import { EraseDialog } from "./people/EraseDialog";
 import { PeopleList } from "./people/PeopleList";
 import { PersonEditor } from "./people/PersonEditor";
 import { Banner, Button, ListPager, PageHeader, useToast } from "./ui";
@@ -47,6 +48,7 @@ export function PeopleAccessView({
   const mine = useResource<MyScope>(canManage ? "setup/access/me" : null);
   const [editing, setEditing] = useState<Person | "new" | null>(null);
   const [blocking, setBlocking] = useState<Person | null>(null);
+  const [erasing, setErasing] = useState<Person | null>(null);
   // The list comes a server page at a time.
   const people = usePagedList<Person>(PEOPLE_PATH);
   const error = streamError(people) || roles.error || catalog.error;
@@ -97,6 +99,7 @@ export function PeopleAccessView({
         selfId={session?.userId}
         onEdit={setEditing}
         onBlock={setBlocking}
+        onErase={setErasing}
       />
       <ListPager list={people} />
       {editor}
@@ -108,6 +111,16 @@ export function PeopleAccessView({
             people.reload();
           }}
           onClose={() => setBlocking(null)}
+        />
+      )}
+      {erasing && (
+        <EraseDialog
+          person={erasing}
+          onDone={() => {
+            setErasing(null);
+            people.reload();
+          }}
+          onClose={() => setErasing(null)}
         />
       )}
     </>

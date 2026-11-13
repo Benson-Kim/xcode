@@ -14,7 +14,12 @@ import { formatPhone, initials, normalisePhone } from "@xcode/shared/format";
 import { authApi, readDevice } from "../lib/api";
 import { SecurityCheckError } from "../lib/checkedFetch";
 import { useResource } from "../lib/data";
-import { onSessionExpired, readSession, restoreSession } from "../lib/session";
+import {
+  onSessionExpired,
+  readSession,
+  restoreSession,
+  watchSession,
+} from "../lib/session";
 import { AppShell } from "./AppShell";
 import { AuthFrame } from "./auth/AuthFrame";
 import { NewPinFields, newPinProblem } from "./auth/NewPinFields";
@@ -146,6 +151,8 @@ export function AuthPanel() {
       }),
     [startDevice],
   );
+
+  useEffect(() => (signedIn ? watchSession() : undefined), [signedIn]);
 
   const lock = useCallback(() => {
     void readSession().then(async (person) => {

@@ -250,6 +250,88 @@ it("blocks a person with a reason, and unblocks without one", async () => {
   );
 });
 
+const blockedPerson = () =>
+  personFixture({
+    status: "blocked",
+    active: false,
+    modules: [],
+    version: 5,
+  });
+
+it("offers Erase only for blocked people and only with people.block", async () => {
+  fake.on(PEOPLE, [200, peoplePage([grace()])]);
+  open();
+  await screen.findByRole("button", { name: "Block Grace Achieng" });
+  expect(
+    screen.queryByRole("button", { name: /^Erase/ }),
+  ).not.toBeInTheDocument();
+});
+
+it("hides Erase from a blocked person without people.block", async () => {
+  fake.on(PEOPLE, [200, peoplePage([blockedPerson()])]);
+  open(["people.view", "people.edit"]);
+  await screen.findByRole("button", { name: "Edit Grace Achieng" });
+  expect(
+    screen.queryByRole("button", { name: /^Erase/ }),
+  ).not.toBeInTheDocument();
+});
+
+it("erases a blocked person only after the consequence is shown and a reason is typed, then reloads the list", async () => {
+  fake.on(PEOPLE, [200, peoplePage([blockedPerson()])]);
+  open();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Erase Grace Achieng" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Erase person" });
+  expect(within(dialog).getByText(/cannot be undone/)).toBeInTheDocument();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Erase permanently" }),
+  );
+  expect(
+    await within(dialog).findByText("Enter the reason."),
+  ).toBeInTheDocument();
+  expect(fake.sent("POST setup/people/person-2/erasure")).toHaveLength(0);
+  const loads = fake.calls.filter((call) => call.path === PEOPLE).length;
+  fireEvent.change(within(dialog).getByLabelText("Reason"), {
+    target: { value: "Asked for deletion" },
+  });
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Erase permanently" }),
+  );
+  await waitFor(() =>
+    expect(fake.sent("POST setup/people/person-2/erasure")).toEqual([
+      { version: 5, reason: "Asked for deletion" },
+    ]),
+  );
+  await waitFor(() =>
+    expect(fake.calls.filter((call) => call.path === PEOPLE).length).toBe(
+      loads + 1,
+    ),
+  );
+});
+
+it("shows the API's answer when the erasure is refused", async () => {
+  fake.on(PEOPLE, [200, peoplePage([blockedPerson()])]);
+  fake.on(
+    "POST setup/people/person-2/erasure",
+    problem(409, "Conflict", "Someone else saved this person first."),
+  );
+  open();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Erase Grace Achieng" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Erase person" });
+  fireEvent.change(within(dialog).getByLabelText("Reason"), {
+    target: { value: "Asked for deletion" },
+  });
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Erase permanently" }),
+  );
+  expect(
+    await within(dialog).findByText(/Someone else saved this person first/),
+  ).toBeInTheDocument();
+});
+
 it("opens the person pop up on Details with a side menu, and saves a new person on 7 days back", async () => {
   await openNewPerson();
   const rail = screen.getByRole("navigation", { name: "Sections" });
