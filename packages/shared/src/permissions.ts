@@ -130,6 +130,22 @@ export type PermissionItem = {
 };
 export type PermissionGroup = { name: string; items: PermissionItem[] };
 
+// A role as GET /setup/access/roles serves it: a name and the permissions a person given it starts with. Built-in
+// roles come with every organization and cannot be changed or deleted. A change carries the version it was based on
+// and is refused (409) when stale; a name clash is a 400.
+export type AccessRole = {
+  id: string;
+  name: string;
+  permissions: string[];
+  builtIn: boolean;
+  version: number;
+};
+export type SaveAccessRole = {
+  name: string;
+  permissions: string[];
+  version?: number;
+};
+
 // Without `any` the item is for everyone; with an empty `any` it is for nobody.
 export type NavRule = {
   readonly label?: string;
@@ -169,6 +185,8 @@ export const NAV = {
   },
   savings: { label: "Savings", any: ["savings.view"] },
   people: { label: "People and access", any: ["people.view"] },
+  // The roles a person can be given; changing them needs access.manage.
+  roles: { label: "Roles", any: ["people.view"] },
   history: { label: "Change log", any: ["audit.view"] },
   settings: { label: "Organization settings", any: ["organization.manage"] },
 } as const satisfies Record<string, NavRule & { label: string }>;
@@ -196,6 +214,7 @@ export const SETUP_NAV = [
   "vehicles",
   "expenses",
   "people",
+  "roles",
   "history",
   "settings",
 ] as const satisfies readonly NavId[];

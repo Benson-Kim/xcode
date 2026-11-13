@@ -153,6 +153,17 @@ export function vehicleLabel(vehicle: {
     : vehicle.registration;
 }
 
+const REGISTRATION = /^K[A-Z]{2}[0-9]{3}[A-Z]$/;
+
+// A registration as the server stores it ("kdn-204b" is "KDN 204B"), or null when it is not K, two letters, three
+// digits and a letter.
+export function normaliseRegistration(value: string): string | null {
+  const compact = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return REGISTRATION.test(compact)
+    ? `${compact.slice(0, 3)} ${compact.slice(3)}`
+    : null;
+}
+
 export interface RevenueDayTotal {
   date: string;
   amount: number;
