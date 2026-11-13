@@ -1,6 +1,6 @@
 """Expense catalogue routes (``docs/06-http-contract.md`` section 2.6). Each
 handler builds the command, tells one use case and maps the outcome; the routines decide every
-rule. Stop and restore read no body."""
+rule. Stop, restore and delete read no body."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from ...application.caller import Caller
 from ...application.setup.create_expense_category import CreateExpenseCategoryCommand
 from ...application.setup.create_expense_item import CreateExpenseItemCommand
 from ...application.setup.create_expense_main_category import CreateExpenseMainCategoryCommand
+from ...application.setup.delete_setup_record import DeleteSetupRecordCommand
 from ...application.setup.list_expense_categories import ListExpenseCategoriesQuery
 from ...application.setup.list_expense_item_options import ListExpenseItemOptionsQuery
 from ...application.setup.list_expense_main_categories import ListExpenseMainCategoriesQuery
@@ -23,6 +24,7 @@ from ...application.setup.set_expense_category_stopped import SetExpenseCategory
 from ...application.setup.set_expense_item_stopped import SetExpenseItemStoppedCommand
 from ...application.setup.update_expense_category import UpdateExpenseCategoryCommand
 from ...container import Container
+from ...domain.setup import SetupRecord
 from ..dependencies import container, current_caller
 from ..responses import respond
 from ..routing import SetupRoute
@@ -145,6 +147,18 @@ async def _category_stopped(
     return respond(IdResponse(id=result.id))
 
 
+@router.delete(
+    "/expense-categories/{id:uuid}",
+    operation_id="DeleteExpenseCategory",
+    response_model=IdResponse,
+    responses=problem_responses(403, 404, 409),
+)
+async def delete_expense_category(
+    category_id: RecordId, caller: CallerDep, c: ContainerDep
+) -> Response:
+    return await _delete(c, caller, SetupRecord.CATEGORY, category_id)
+
+
 @router.post(
     "/expense-categories/{id:uuid}/items",
     operation_id="CreateExpenseItem",
@@ -202,6 +216,16 @@ async def _item_stopped(c: Container, caller: Caller, item_id: UUID, stopped: bo
     return respond(IdResponse(id=result.id))
 
 
+@router.delete(
+    "/expense-items/{id:uuid}",
+    operation_id="DeleteExpenseItem",
+    response_model=IdResponse,
+    responses=problem_responses(403, 404, 409),
+)
+async def delete_expense_item(item_id: RecordId, caller: CallerDep, c: ContainerDep) -> Response:
+    return await _delete(c, caller, SetupRecord.ITEM, item_id)
+
+
 @router.get(
     "/expense-main-categories",
     operation_id="ListExpenseMainCategories",
@@ -251,5 +275,24 @@ async def rename_expense_main_category(
 ) -> Response:
     result = await c.rename_expense_main_category.execute(
         RenameExpenseMainCategoryCommand(caller, main_category_id, body.name)
+    )
+    return respond(IdResponse(id=result.id))
+
+
+@router.delete(
+    "/expense-main-categories/{id:uuid}",
+    operation_id="DeleteExpenseMainCategory",
+    response_model=IdResponse,
+    responses=problem_responses(403, 404, 409),
+)
+async def delete_expense_main_category(
+    main_category_id: RecordId, caller: CallerDep, c: ContainerDep
+) -> Response:
+    return await _delete(c, caller, SetupRecord.MAIN_CATEGORY, main_category_id)
+
+
+async def _delete(c: Container, caller: Caller, record: SetupRecord, record_id: UUID) -> Response:
+    result = await c.delete_setup_record.execute(
+        DeleteSetupRecordCommand(caller, record, record_id)
     )
     return respond(IdResponse(id=result.id))

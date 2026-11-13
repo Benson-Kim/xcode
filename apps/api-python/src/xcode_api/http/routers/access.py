@@ -11,6 +11,8 @@ from fastapi import APIRouter, Body, Depends, Path, Query
 from starlette.responses import Response
 
 from ...application.access.create_person import CreatePersonCommand
+from ...application.access.delete_access_role import DeleteAccessRoleCommand
+from ...application.access.delete_person import DeletePersonCommand
 from ...application.access.erase_person import ErasePersonCommand
 from ...application.access.get_access_catalog import GetAccessCatalogQuery
 from ...application.access.get_my_scope import GetMyScopeQuery
@@ -22,6 +24,7 @@ from ...application.access.list_people import ListPeopleQuery
 from ...application.access.remove_person_device import RemovePersonDeviceCommand
 from ...application.access.request_account_deletion import RequestAccountDeletionCommand
 from ...application.access.require_pin_reset import RequirePinResetCommand
+from ...application.access.save_access_role import SaveAccessRoleCommand
 from ...application.access.set_person_active import SetPersonActiveCommand
 from ...application.access.sign_out_person import SignOutPersonCommand
 from ...application.access.update_person import UpdatePersonCommand
@@ -39,8 +42,10 @@ from ..schemas.access import (
     PersonDto,
     PersonErasureRequest,
     PersonLifecycleRequest,
+    SaveAccessRole,
     SavePerson,
     ScopeOptions,
+    UpdateAccessRole,
 )
 from ..schemas.common import Page, problem_responses
 
@@ -49,6 +54,7 @@ ContainerDep = Annotated[Container, Depends(container)]
 PageNumber = Annotated[int, Query(alias="page", ge=-(2**31), le=2**31 - 1)]
 PageSize = Annotated[int, Query(alias="pageSize", ge=-(2**31), le=2**31 - 1)]
 PersonId = Annotated[UUID, Path(alias="id")]
+RoleId = Annotated[UUID, Path(alias="id")]
 DeviceId = Annotated[UUID, Path(alias="deviceId")]
 
 router = APIRouter(prefix="/setup", tags=["Setup"], route_class=SetupRoute)
@@ -74,6 +80,50 @@ async def get_access_catalog(caller: CallerDep, c: ContainerDep) -> Response:
 async def list_access_roles(caller: CallerDep, c: ContainerDep) -> Response:
     roles = await c.list_access_roles.execute(ListAccessRolesQuery(caller))
     return respond([AccessRole.from_record(role) for role in roles])
+
+
+@router.post(
+    "/access/roles",
+    operation_id="CreateAccessRole",
+    response_model=AccessRole,
+    responses=problem_responses(400, 403),
+)
+async def create_access_role(body: SaveAccessRole, caller: CallerDep, c: ContainerDep) -> Response:
+    """A custom role. The name is unique ignoring case and is not a built-in role's; the
+    permissions are catalogue keys the caller holds, and come back with their dependencies."""
+    role = await c.save_access_role.execute(
+        SaveAccessRoleCommand(caller, None, body.name, body.permission_keys())
+    )
+    return respond(AccessRole.from_record(role))
+
+
+@router.put(
+    "/access/roles/{id:uuid}",
+    operation_id="UpdateAccessRole",
+    response_model=AccessRole,
+    responses=problem_responses(400, 403, 404, 409),
+)
+async def update_access_role(
+    role_id: RoleId, body: UpdateAccessRole, caller: CallerDep, c: ContainerDep
+) -> Response:
+    """Rename a custom role or change its permissions at the version the caller saw: 409 only
+    for a stale version. Everyone holding the role signs in again to get the change."""
+    role = await c.save_access_role.execute(
+        SaveAccessRoleCommand(caller, role_id, body.name, body.permission_keys(), body.version)
+    )
+    return respond(AccessRole.from_record(role))
+
+
+@router.delete(
+    "/access/roles/{id:uuid}",
+    operation_id="DeleteAccessRole",
+    response_model=IdResponse,
+    responses=problem_responses(400, 403, 404, 409),
+)
+async def delete_access_role(role_id: RoleId, caller: CallerDep, c: ContainerDep) -> Response:
+    """A custom role nobody holds, active or blocked; 409 says how many people hold it."""
+    result = await c.delete_access_role.execute(DeleteAccessRoleCommand(caller, role_id))
+    return respond(IdResponse(id=result.id))
 
 
 @router.get(
@@ -175,6 +225,19 @@ async def update_person(
     result = await c.update_person.execute(
         UpdatePersonCommand(caller, person_id, body.details(), body.version)
     )
+    return respond(IdResponse(id=result.id))
+
+
+@router.delete(
+    "/people/{id:uuid}",
+    operation_id="DeletePerson",
+    response_model=IdResponse,
+    responses=problem_responses(403, 404, 409),
+)
+async def delete_person(person_id: PersonId, caller: CallerDep, c: ContainerDep) -> Response:
+    """Permanent, and only for a person nothing refers to (409 otherwise: block them instead).
+    The account goes too when they belong to no other organization."""
+    result = await c.delete_person.execute(DeletePersonCommand(caller, person_id))
     return respond(IdResponse(id=result.id))
 
 

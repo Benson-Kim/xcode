@@ -75,7 +75,7 @@ async def test_roles_need_people_view_and_list_by_name(
         "Owner",
         "Revenue clerk",
     ]
-    assert all(list(role) == ["id", "name", "permissions"] for role in roles)
+    assert all(list(role) == ["id", "name", "permissions", "builtIn", "version"] for role in roles)
     assert roles[3]["permissions"] == ["dash.gaps", "revenue.view", "revenue.capture"]
     assert len(roles[2]["permissions"]) == 59
     refused = await api.client.get("/setup/access/roles", headers=clerk.headers)

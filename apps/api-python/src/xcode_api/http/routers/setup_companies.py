@@ -12,10 +12,12 @@ from starlette.responses import Response
 from ...application.caller import Caller
 from ...application.setup.archive_company import ArchiveCompanyCommand
 from ...application.setup.create_company import CreateCompanyCommand
+from ...application.setup.delete_setup_record import DeleteSetupRecordCommand
 from ...application.setup.list_companies import ListCompaniesQuery
 from ...application.setup.rename_company import RenameCompanyCommand
 from ...application.setup.restore_company import RestoreCompanyCommand
 from ...container import Container
+from ...domain.setup import SetupRecord
 from ..dependencies import container, current_caller
 from ..responses import respond
 from ..routing import SetupRoute
@@ -101,4 +103,17 @@ async def restore_company(
     company_id: CompanyId, body: CompanyLifecycleRequest, caller: CallerDep, c: ContainerDep
 ) -> Response:
     result = await c.restore_company.execute(RestoreCompanyCommand(caller, company_id, body.reason))
+    return respond(IdResponse(id=result.id))
+
+
+@router.delete(
+    "/companies/{id:uuid}",
+    operation_id="DeleteSetupCompany",
+    response_model=IdResponse,
+    responses=problem_responses(403, 404, 409),
+)
+async def delete_company(company_id: CompanyId, caller: CallerDep, c: ContainerDep) -> Response:
+    result = await c.delete_setup_record.execute(
+        DeleteSetupRecordCommand(caller, SetupRecord.COMPANY, company_id)
+    )
     return respond(IdResponse(id=result.id))

@@ -52,7 +52,7 @@ def test_every_declared_table_exists(owner_conn: Conn) -> None:
         "WHERE schemaname IN ('identity', 'tenancy', 'setup', 'revenue', 'pettycash', 'expenses')"
     ).fetchall()
     assert {r["qualified"] for r in rows} == {t.qualified for t in TABLES}
-    assert len(TABLES) == 55
+    assert len(TABLES) == 56
 
 
 def test_tenant_tables_are_exactly_those_with_an_organization(owner_conn: Conn) -> None:
@@ -154,11 +154,11 @@ def test_verify_reports_rls_on_a_code_table(owner_conn: Conn) -> None:
 
 
 def test_verify_reports_an_extra_write_privilege(owner_conn: Conn) -> None:
-    owner_conn.execute("GRANT DELETE ON setup.fleet_vehicles TO xcode_api_executor")
+    owner_conn.execute("GRANT DELETE ON setup.recurring_items TO xcode_api_executor")
     result = _check(owner_conn, "table privileges match the declared writes")
     assert result.failures == [
         "xcode_api_executor holds ['DELETE', 'INSERT', 'SELECT', 'UPDATE'] on "
-        "setup.fleet_vehicles, expected ['INSERT', 'SELECT', 'UPDATE']"
+        "setup.recurring_items, expected ['INSERT', 'SELECT', 'UPDATE']"
     ]
 
 

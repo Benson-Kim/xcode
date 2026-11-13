@@ -21,24 +21,37 @@ NOT_FOUND_TITLE = "Record not found in your scope."
 INVALID_TITLE = "Invalid setup change"
 STALE_TITLE = "Settings changed. Reload before saving."
 CONFLICT_TITLE = "A conflicting record exists. Reload before saving."
+IN_USE_TITLE = "This record is in use, so it cannot be deleted."
+
+_NO_CASES: Mapping[str, str] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
 class Message:
     """How one refusal code answers. ``detail`` is a template whose ``{name}`` fields come
     from the routine's ``DETAIL``; ``extensions`` names the ``DETAIL`` keys copied onto the
-    problem body (camelCase); ``plain`` bodies are ``{"detail": ...}`` with no title."""
+    problem body (camelCase); ``plain`` bodies are ``{"detail": ...}`` with no title. A code
+    with a sentence per case names the ``DETAIL`` key that picks it in ``case_key`` and holds
+    the templates in ``cases`` instead of ``detail``."""
 
     status: int
     title: str | None
     detail: str | None
     extensions: tuple[str, ...] = ()
     plain: bool = False
+    case_key: str | None = None
+    cases: Mapping[str, str] = _NO_CASES
+
+    def template(self, parameters: Mapping[str, Any]) -> str | None:
+        if self.case_key is None:
+            return self.detail
+        return self.cases[parameters[self.case_key]]
 
     def sentence(self, parameters: Mapping[str, Any]) -> str | None:
-        if self.detail is None:
+        template = self.template(parameters)
+        if template is None:
             return None
-        return _FORMATTER.vformat(self.detail, (), _Parameters(parameters))
+        return _FORMATTER.vformat(template, (), _Parameters(parameters))
 
 
 class _Parameters(dict[str, Any]):
@@ -128,6 +141,17 @@ MESSAGES: Mapping[str, Message] = MappingProxyType(
         "people_self_sign_out": _invalid("Use sign out for your own session."),
         "people_self_sign_in": _invalid("Use the profile menu for your own PIN and devices."),
         "people_self_erase": _invalid("You cannot erase your own details here."),
+        "people_self_delete": _forbidden("You cannot delete yourself."),
+        # Roles
+        "role_name_invalid": _invalid("A role name of 1\u2013100 characters is required."),
+        "role_name_taken": _invalid("Another role already has this name."),
+        "role_permissions_invalid": _invalid("Choose at least one permission, each once."),
+        "role_permission_unknown": _invalid("A role can only have permissions from the list."),
+        "role_permission_not_held": _invalid("You can only give a role permissions you hold."),
+        "role_not_held": _invalid(
+            "You can only change or delete a role whose permissions you all hold."
+        ),
+        "role_built_in": _invalid("Built-in roles cannot be changed or deleted."),
         "people_erase_active": _invalid("Block this person before erasing their details."),
         "people_erase_shared": _invalid(
             "This person also belongs to another organization, so their details cannot be erased."
@@ -199,6 +223,52 @@ MESSAGES: Mapping[str, Message] = MappingProxyType(
         "report_range_required": _invalid("Choose a period, or a from and through date."),
         "report_range_invalid": _invalid(
             "Report range must be at most 367 days and cannot include the future."
+        ),
+        # Setup deletes
+        "in_use": Message(
+            409,
+            IN_USE_TITLE,
+            None,
+            case_key="use",
+            cases=MappingProxyType(
+                {
+                    "main_category_categories": "{name} has categories: delete or move them first.",
+                    "main_category_other": "{name} is used by other records.",
+                    "category_items": "{name} has items: delete them first, or stop it instead.",
+                    "category_other": "{name} is used by other records: stop it instead.",
+                    "item_expenses": "{name} is used by expenses: stop it instead.",
+                    "item_pettycash": "{name} is used by petty cash entries: stop it instead.",
+                    "item_schedules": "{name} is used by scheduled items: stop it instead.",
+                    "item_other": "{name} is used by other records: stop it instead.",
+                    "vehicle_revenue": "{name} has revenue entries: retire it instead.",
+                    "vehicle_pettycash": "{name} has petty cash entries: retire it instead.",
+                    "vehicle_expenses": "{name} has expenses: retire it instead.",
+                    "vehicle_investments": (
+                        "{name} has investment entries: delete them first, or retire it instead."
+                    ),
+                    "vehicle_away": "{name} has been away from the fleet: retire it instead.",
+                    "vehicle_schedules": "{name} is in scheduled items: retire it instead.",
+                    "vehicle_savings": "{name} has savings: retire it instead.",
+                    "vehicle_scope": (
+                        "{name} is in someone's data scope: take it out of their access first,"
+                        " or retire it instead."
+                    ),
+                    "vehicle_other": "{name} is used by other records: retire it instead.",
+                    "company_vehicles": (
+                        "{name} has vehicles: delete or move them first, or archive it instead."
+                    ),
+                    "company_scope": (
+                        "{name} is in someone's data scope: take it out of their access first,"
+                        " or archive it instead."
+                    ),
+                    "company_other": "{name} is used by other records: archive it instead.",
+                    "person_records": (
+                        "{name} has records: block them instead, and erase their details if"
+                        " those must go."
+                    ),
+                    "role_people": "{name} is held by {people}: give them another role first.",
+                }
+            ),
         ),
         # Scheduled items
         "recurring_savings_item": _invalid("Savings must not have an expense item."),

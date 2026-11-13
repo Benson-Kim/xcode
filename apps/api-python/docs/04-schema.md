@@ -37,20 +37,20 @@ Reading rules:
 
 | # | Table | .NET table | Tenant | Writes | Notes |
 |---|---|---|---|---|---|
-| 1 | `identity.users` | `Users` | no | I U | never deleted |
+| 1 | `identity.users` | `Users` | no | I U D | deleted only with a person's last membership, while nothing refers to them (`api.people_delete`, 0022) |
 | 2 | `identity.verification_codes` | `VerificationCodes` | no | I U | consumed, not deleted |
 | 3 | `identity.trusted_devices` | `TrustedDevices` | no | I U | revoked, not deleted |
 | 4 | `identity.refresh_tokens` | `RefreshTokens` | no | I U | revoked, not deleted |
 | 5 | `identity.sign_in_attempts` | new | no | I | security audit trail |
 | 6 | `tenancy.organizations` | `Organizations` | self (policy on `id`) | I U | insert only through `api.ops_*` |
-| 7 | `tenancy.memberships` | `Memberships` | yes | I U | |
+| 7 | `tenancy.memberships` | `Memberships` | yes | I U D | deleted only while nothing refers to the person (`api.people_delete`, 0022) |
 | 8 | `tenancy.organization_localizations` | `Localizations` | yes | I U | one row per organization |
 | 9 | `tenancy.organization_brandings` | `Brandings` | yes | I U | one row per organization |
 | 10 | `tenancy.organization_logos` | `Logos` | yes | I U D | hard delete is the contract |
 | 11 | `tenancy.organization_security_policies` | `SecurityPolicies` | yes | I U | one row per organization |
-| 12 | `tenancy.user_preferences` | `UserPreferences` | yes | I U | |
-| 13 | `tenancy.roles` | `Roles` | yes | I | seeded at organization creation |
-| 14 | `tenancy.person_roles` | `PersonRoles` | yes | I U | one row per membership |
+| 12 | `tenancy.user_preferences` | `UserPreferences` | yes | I U D | deleted with the membership (`api.people_delete`, 0022) |
+| 13 | `tenancy.roles` | `Roles` | yes | I U D | the four built-in roles seeded at organization creation; custom roles added, changed and deleted (0022, section 15) |
+| 14 | `tenancy.person_roles` | `PersonRoles` | yes | I U D | one row per membership; deleted with it (0022) |
 | 15 | `tenancy.permission_overrides` | `PermissionOverrides` | yes | I U D | |
 | 16 | `tenancy.permissions` | in code (`PermissionCatalog`) | no (global) | none | seeded by migration |
 | 17 | `tenancy.permission_dependencies` | in code | no | none | seeded by migration |
@@ -60,16 +60,16 @@ Reading rules:
 | 21 | `tenancy.data_scope_vehicles` | `SetupVehicleScopes` | yes | I D | |
 | 22 | `tenancy.change_log` | `OrganizationSettingsVersion` | yes | I | the organization history |
 | 23 | `tenancy.audit_events` | `AuditEvents` | yes | I | security trail, never served |
-| 24 | `setup.psv_companies` | `PsvCompany` | yes | I U | never deleted |
-| 25 | `setup.fleet_vehicles` | `FleetVehicle` | yes | I U | never deleted; registration immutable |
+| 24 | `setup.psv_companies` | `PsvCompany` | yes | I U D | deleted only while nothing refers to it (`api.setup_company_delete`, 0021) |
+| 25 | `setup.fleet_vehicles` | `FleetVehicle` | yes | I U D | registration immutable; deleted only while nothing but its own target sets refers to it (`api.setup_vehicle_delete`, 0021) |
 | 26 | `setup.vehicle_targets` | `VehicleTarget` | yes | I | append-only |
 | 27 | `setup.vehicle_away_periods` | `VehicleAwayPeriod` | yes | I | append-only, non-overlapping |
-| 28 | `setup.vehicle_investments` | `VehicleInvestment` | yes | I U D | the one editable, deletable setup record |
+| 28 | `setup.vehicle_investments` | `VehicleInvestment` | yes | I U D | an editable, deletable setup record |
 | 29 | `setup.recurring_items` | `RecurringItem` | yes | I U | never deleted |
 | 30 | `setup.recurring_versions` | `RecurringVersion` | yes | I | append-only |
 | 31 | `setup.recurring_allocations` | `RecurringAllocation` | yes | I | append-only |
-| 32 | `setup.expense_categories` | `ExpenseCategory` | yes | I U | never deleted |
-| 33 | `setup.expense_items` | `ExpenseItem` | yes | I U | never deleted |
+| 32 | `setup.expense_categories` | `ExpenseCategory` | yes | I U D | deleted only while nothing refers to it (`api.setup_expense_category_delete`, 0021) |
+| 33 | `setup.expense_items` | `ExpenseItem` | yes | I U D | deleted only while nothing refers to it (`api.setup_expense_item_delete`, 0021) |
 | 34 | `setup.recurring_kinds` | `RecurringKindLookup` | no | none | code table |
 | 35 | `setup.recurrence_frequencies` | `RecurrenceFrequencyLookup` | no | none | code table |
 | 36 | `setup.expense_buckets` | `ExpenseBucketLookup` | no | none | code table |
@@ -77,6 +77,7 @@ Reading rules:
 | 38 | `revenue.no_earnings_reasons` | in code (`RevenueNoEarningsReason`) | no | none | code table |
 | 39 | `ops.schema_migrations`, `ops.routine_versions`, `ops.operator_actions`, `ops.rate_limit_windows` | `__EFMigrationsHistory`, new | no | see prompt 01 | created by prompt 01 |
 | 40 | `pettycash.entries` | `PettyCashEntries` (uncommitted feature) | yes | I U | soft-removed, never deleted; section 6.2 |
+| 41 | `tenancy.role_grants` | new | yes | I D | a custom role's permissions, dependencies expanded (0022, section 15.2) |
 
 Dropped, not ported: `RolePermissions` (nothing reads or writes it), `CostCategoryLookup`
 and `RecurringVersion.Category` (already removed in .NET). The three .NET lookup tables
@@ -347,6 +348,8 @@ PK `(organization_id, user_id)`, FK memberships.
 `(organization_id, lower(name))`, `created_at`. The four catalog roles are inserted by
 `tenancy.seed_roles(organization_id)` when an organization is created and by the data
 migration; `api.access_role_list` is read-only (the .NET "GET that writes" is retired).
+Since `0022` roles carry `built_in` and `version`, and an organization may add custom roles
+whose permissions live in `tenancy.role_grants` (section 15).
 
 `tenancy.person_roles`: PK `(organization_id, user_id)` FK memberships; `role_id uuid NOT
 NULL`, FK `(organization_id, role_id) -> tenancy.roles`; `updated_at`. One role per person
@@ -759,6 +762,8 @@ depend on them; the helpers are routines because they change with the rules.
 | `0018_erasure.sql` | `identity.users.erased_at` (timestamptz, null until erased); `email` and `phone_number` become nullable, with `ck_users_erased_email` and `ck_users_erased_phone_number` (each is null exactly when `erased_at` is set; the unique indexes allow the nulls) and `ck_users_erased_removed` (an erased account is `removed` with no PIN); owner-owned helpers `tenancy.erased_snapshot` (no grants), and `tenancy.erase_person_history`, `identity.erase_review_login` and `tenancy.belongs_elsewhere` (SECURITY DEFINER, `EXECUTE` to `xcode_api_executor` only), called only by `api.people_erase`; the down file refuses while an erased account exists |
 | `0019_deletion_notices.sql` | table `tenancy.deletion_notices` (`organization_id`, `requester_id` and `recipient_id`, both memberships of that organization, `created_at`, `state` in `pending`/`sent`/`failed`/`dropped`, `attempts`, `attempted_at`, `sent_at` set exactly when sent), the pending sweep index on `(organization_id, created_at)`, the requester and recipient indexes, RLS and `SELECT, INSERT, UPDATE` to the executor |
 | `0020_sign_in_notices.sql` | table `tenancy.sign_in_notices` (`organization_id`, `user_id` a membership of that organization, `actor_id` a membership set null when it goes, `kind` in `old`/`new`/`current`, `address` present exactly while `pending`, `created_at`, `state` in `pending`/`sent`/`failed`/`dropped`, `attempts`, `attempted_at`, `sent_at` set exactly when sent), the pending sweep index on `(organization_id, created_at)`, the user and actor indexes, RLS and `SELECT, INSERT, UPDATE` to the executor |
+| `0021_setup_deletes.sql` | `DELETE` on `setup.expense_main_categories`, `setup.expense_categories`, `setup.expense_items`, `setup.fleet_vehicles` and `setup.psv_companies` to the executor, for the setup delete routines, which delete a row only while no foreign key refers to it (the violation becomes `XC409 in_use`); the down file drops those routines and takes the grant back |
+| `0022_custom_roles_and_person_delete.sql` | section 15: `tenancy.roles.built_in` (generated, true exactly for the four catalogue role names) and `version` (`ck_roles_version`); table `tenancy.role_grants` with RLS and `SELECT, INSERT, DELETE` to the executor; `UPDATE, DELETE` on `tenancy.roles` and `DELETE` on `tenancy.memberships`, `tenancy.person_roles`, `tenancy.user_preferences` and `identity.users` to the executor; the owner-owned helpers `tenancy.contactless_snapshot` and `tenancy.forget_contact_history`; the `roles` change-log section; the down file refuses while a custom role or `roles` history exists |
 
 Each file: one transaction (the runner's), `SET LOCAL lock_timeout = '10s'`, no data except
 code rows and the catalog (`0004` ends with a `DO` block that refuses unless the catalogue has
@@ -975,7 +980,7 @@ already read whole, so no index.
   in the migration's notice. `setup.vehicle_targets` stays, read-only (the `INSERT` grant is
   revoked), until `0011_revenue` drops it.
 
-`setup.expense_main_categories` (new; tenant table; writes I U):
+`setup.expense_main_categories` (new; tenant table; writes I U, and D since 0021):
 
 | Column | Type | Null | Constraint |
 |---|---|---|---|
@@ -1178,3 +1183,62 @@ Drops, in reverse order: the petty-cash group index, check and columns; `setup.s
 `reports` stay (they belong to `db/roles/020_schemas.sql`, like every schema), and routine bodies are the runner's. A down migration over data refuses when any
 `centralexpenses` or `reports` change-log row exists (a `DO` block counts them), because those rows cannot satisfy the
 restored check.
+
+## 15. Custom roles and person delete (migration `0022_custom_roles_and_person_delete`)
+
+The routes are S65 to S68 of `docs/06-http-contract.md`; the routines are `docs/05-routines.md` section 15.
+
+### 15.1 `tenancy.roles` (writes I U D)
+
+| Column | Type | Null | Constraint |
+|---|---|---|---|
+| `built_in` | boolean | no | `GENERATED ALWAYS AS (lower(name) IN ('owner', 'office admin', 'fleet manager', 'revenue clerk')) STORED`: true exactly for the four catalogue roles, so no insert can set it wrong |
+| `version` | bigint | no | `DEFAULT 1`, `ck_roles_version` (`>= 1`); the concurrency token of a role edit |
+
+The unique `lower(name)` per organization keeps a custom role from taking a built-in name. The executor gains `UPDATE`
+(rename, version) and `DELETE`; the routines change and delete custom roles only (`role_built_in` otherwise).
+
+### 15.2 `tenancy.role_grants` (new; tenant table; writes I D)
+
+| Column | Type | Null | Constraint |
+|---|---|---|---|
+| `organization_id` | uuid | no | PK part, `fk_role_grants_organization` -> `tenancy.organizations` |
+| `role_id` | uuid | no | PK part, `fk_role_grants_role` `(organization_id, role_id)` -> `tenancy.roles` |
+| `permission` | text | no | PK part, `fk_role_grants_permission` -> `tenancy.permissions (key)` |
+
+`pk_role_grants (organization_id, role_id, permission)`, which also serves the lookup by role. RLS with
+`tenant_isolation`; `SELECT, INSERT, DELETE` to the executor, since a change replaces the role's rows. It holds a custom
+role's permissions, dependencies expanded, never `organization.manage`. A built-in role has no rows and keeps reading
+`tenancy.role_defaults`. The role key is `NO ACTION`, so `api.access_role_delete` deletes the rows before the role.
+
+### 15.3 Person delete
+
+`DELETE` on `tenancy.memberships`, `tenancy.person_roles`, `tenancy.user_preferences` and `identity.users` to the
+executor, for `api.people_delete` alone. Every column that refers to a person has a foreign key, so those deletes fail
+while anything still refers to the person, and the routine answers `XC409 in_use`. What hangs on the membership goes by
+its declared `ON DELETE CASCADE` (invitations, sign-in notices, deletion notices), and so does what hangs on the account
+when it goes too (verification codes, trusted devices, refresh tokens, invitations, the App Review login).
+
+The history of a deleted person keeps their name but not their contact details. The executor may only add history rows,
+so two helpers owned by the migration owner do this:
+
+- `tenancy.contactless_snapshot(text)`: immutable SQL, `EXECUTE` to the executor. For a JSON object snapshot it sets
+  `Email`, `PhoneNumber`, `email` and `phone_number` to null and keeps the key order; any other value comes back as it is.
+- `tenancy.forget_contact_history(uuid, uuid)`: `SECURITY DEFINER` plpgsql, `EXECUTE` to the executor only. It rewrites,
+  through `contactless_snapshot`, the `people` and `signIn` change-log rows and the audit events about the person in the
+  current organization. It does nothing while the person still has a membership there.
+
+### 15.4 Change log
+
+`ck_change_log_section` is re-created with `roles` added, for the role routines.
+
+### 15.5 `0022_custom_roles_and_person_delete.down.sql`
+
+A `DO` block refuses while a custom role (`NOT built_in`) exists, since it would lose its permissions, or while a `roles`
+change-log row exists, since the restored check could not hold it. Otherwise the down file:
+- re-creates the section check without `roles`;
+- drops the role and person-delete routines and the two history helpers;
+- takes back the `UPDATE` and `DELETE` grants;
+- drops `tenancy.role_grants`, then `ck_roles_version`, `version` and `built_in`.
+
+Deleted people stay deleted, and their history stays without contact details.

@@ -282,7 +282,10 @@ header must be added to the exclusion list of that test.
 | ID | Route | Permission | Success | operationId | Routine | Budget |
 |---|---|---|---|---|---|---|
 | S01 | `GET /setup/access/catalog` | member | `PermissionGroup[]` in catalog order | `GetAccessCatalog` | `api.access_catalog_list` | 2 |
-| S02 | `GET /setup/access/roles` | `people.view` | `AccessRole[]` by name | `ListAccessRoles` | `api.access_role_list` (read-only; roles are pre-seeded) | 2 |
+| S02 | `GET /setup/access/roles` | `people.view` | `AccessRole[]` `{id, name, permissions, builtIn, version}`, built-in roles first, then by name | `ListAccessRoles` | `api.access_role_list` (the built-in roles are pre-seeded) | 2 |
+| S65 | `POST /setup/access/roles` (new; body `{name, permissions}`) | `access.manage`; catalogue keys only, never `organization.manage`, only permissions the caller holds; the name 1–100 characters, unique ignoring case and not a built-in role's (400, never 409) | 200 `AccessRole`, permissions with their dependencies | `CreateAccessRole` | `api.access_role_create` | 2 |
+| S66 | `PUT /setup/access/roles/{id}` (new; body `{name, permissions, version}`) | as S65, and the caller holds all the role's current permissions; built-in roles 400 | 200 `AccessRole`; 409 only for a stale `version`; everyone holding the role signs in again (security version) | `UpdateAccessRole` | `api.access_role_update` | 2 |
+| S67 | `DELETE /setup/access/roles/{id}` (new; no body) | `access.manage`; the caller holds all its permissions; built-in roles 400 | 200 `{id}`; 409 `in_use` while anyone, active or blocked, holds it | `DeleteAccessRole` | `api.access_role_delete` | 2 |
 | S03 | `GET /setup/access/scope-options` | `people.manage` | `ScopeOptions` | `GetAccessScopeOptions` | `api.access_scope_options` | 2 |
 | S04 | `GET /setup/access/me` | member | `MyScope` | `GetMyAccessScope` | `api.access_my_scope` | 2 |
 | S58 | `POST /setup/me/deletion-request` (no body; the subject is always the caller) | member | 202, no body, the same whether or not a request was made in the last 24 hours; after the reply, one email to each other member who holds `people.block` (the right blocking and erasing need) on the first request only | `RequestMyAccountDeletion` | `api.me_deletion_request` | 2 |
@@ -294,6 +297,7 @@ header must be added to the exclusion list of that test.
 | S10 | `POST /setup/people/{id}/deactivate` | `people.manage`; optional body; typed reason required | 200 `{id}` | `DeactivatePerson` | `api.people_set_active` | 2 |
 | S59 | `POST /setup/people/{id}/erasure` (body `{version, reason}`; irreversible) | `people.block`; the person blocked first, a member of no other organization, not the caller; a non-Owner may not erase an Owner; typed reason required | 200 `{id}`; the same on a repeat for an erased person, who is then 404 on S06 and left out of S05 | `ErasePerson` | `api.people_erase` | 2 |
 | S11 | `POST /setup/people/{id}/sign-out` | `people.manage` | 200 `{id}` | `SignOutPerson` | `api.people_sign_out` | 2 |
+| S68 | `DELETE /setup/people/{id}` (new; no body; permanent) | `people.block`, as for block and erase; not the caller (403); a non-Owner may not delete an Owner (403) | 200 `{id}`: the membership with its role, overrides, scope, preferences, invitations and notices, and the account when it belongs to no other organization; 409 `in_use` while any record refers to the person (block them instead) | `DeletePerson` | `api.people_delete` | 2 |
 
 S05 filters (.NET `AccessUseCases.List`, `ListFilterTests`): `role` keeps people holding the
 role of that name, letter case ignored as on SQL Server's default collation and as role
@@ -320,12 +324,14 @@ an editor limited to some companies can never make someone vanish from their own
 | S14 | `PUT /setup/companies/{id}` | `companies.manage` | `{id}` | `RenameSetupCompany` | `api.setup_company_rename` | 2 |
 | S15 | `POST /setup/companies/{id}/archive` | `companies.manage` | `{id}` | `ArchiveSetupCompany` | `api.setup_company_archive` | 2 |
 | S16 | `POST /setup/companies/{id}/restore` | `companies.manage` | `{id}` | `RestoreSetupCompany` | `api.setup_company_restore` | 2 |
+| S60 | `DELETE /setup/companies/{id}` (new; no body) | `companies.edit` | `{id}`; 409 `in_use` while vehicles or a data scope refer to it (archive it instead) | `DeleteSetupCompany` | `api.setup_company_delete` | 2 |
 | S17 | `GET /setup/vehicles?page&pageSize&companyId` | any of `vehicles.manage`, `invest.view` | `Page<VehicleDto>` (targets hidden from investment viewers) | `ListSetupVehicles` | `api.setup_vehicle_list` | 2 |
 | S18 | `POST /setup/vehicles` | `vehicles.manage` | `{id}` | `CreateSetupVehicle` | `api.setup_vehicle_create` | 2 |
 | S19 | `PUT /setup/vehicles/{id}` | `vehicles.manage` | `{id}` | `UpdateSetupVehicle` | `api.setup_vehicle_update` | 2 |
 | S20 | `GET /setup/vehicles/company-options` | `vehicles.manage` | `CompanyOption[]` | `ListVehicleCompanyOptions` | `api.setup_company_options` | 2 |
 | S21 | `POST /setup/vehicles/{id}/retire` | `vehicles.manage` | `{id}` | `RetireSetupVehicle` | `api.setup_vehicle_retire` | 2 |
 | S22 | `POST /setup/vehicles/{id}/restore` | `vehicles.manage` | `{id}` | `RestoreSetupVehicle` | `api.setup_vehicle_restore` | 2 |
+| S61 | `DELETE /setup/vehicles/{id}` (new; no body; its target sets go with it) | `vehicles.edit` | `{id}`; 409 `in_use` while revenue, petty cash, expenses, investment entries, away periods, scheduled items, savings or a data scope refer to it (retire it instead) | `DeleteSetupVehicle` | `api.setup_vehicle_delete` | 2 |
 | S23 | `GET /setup/vehicles/{id}/report?period` or `?from&through` | `vehicles.manage` | `VehicleReport` | `GetSetupVehicleReport` | `api.setup_vehicle_report` | 2 |
 
 S17 `companyId` (.NET `SetupRepository.Vehicles`, `ListFilterTests`) keeps that company's
@@ -372,10 +378,12 @@ to cache it per settings version is a later decision (`docs/01-architecture.md` 
 | S34 | `PUT /setup/expense-categories/{id}` | `expenses.setup` | `{id}` | `UpdateExpenseCategory` | `api.setup_expense_category_update` | 2 |
 | S35 | `POST /setup/expense-categories/{id}/stop` | `expenses.setup` | `{id}` | `StopExpenseCategory` | `api.setup_expense_category_set_stopped` | 2 |
 | S36 | `POST /setup/expense-categories/{id}/restore` | `expenses.setup` | `{id}` | `RestoreExpenseCategory` | `api.setup_expense_category_set_stopped` | 2 |
+| S62 | `DELETE /setup/expense-categories/{id}` (new; no body) | `catalog.stop` | `{id}`; 409 `in_use` while it has items (stop it instead) | `DeleteExpenseCategory` | `api.setup_expense_category_delete` | 2 |
 | S37 | `POST /setup/expense-categories/{id}/items` | `expenses.setup` | `{id}` (item) | `CreateExpenseItem` | `api.setup_expense_item_create` | 2 |
 | S38 | `PUT /setup/expense-items/{id}` | `expenses.setup` | `{id}` | `RenameExpenseItem` | `api.setup_expense_item_rename` | 2 |
 | S39 | `POST /setup/expense-items/{id}/stop` | `expenses.setup` | `{id}` | `StopExpenseItem` | `api.setup_expense_item_set_stopped` | 2 |
 | S40 | `POST /setup/expense-items/{id}/restore` | `expenses.setup` | `{id}` | `RestoreExpenseItem` | `api.setup_expense_item_set_stopped` | 2 |
+| S63 | `DELETE /setup/expense-items/{id}` (new; no body) | `catalog.stop` | `{id}`; 409 `in_use` while expenses, petty cash entries or scheduled items use it (stop it instead) | `DeleteExpenseItem` | `api.setup_expense_item_delete` | 2 |
 
 ### 2.7 Investment (`inv 2.9`)
 
@@ -564,6 +572,7 @@ S11 (`POST /setup/people/{id}/sign-out`) is "Remove all" under `people.sign_in`.
 | S50 | `GET /setup/expense-main-categories?page&pageSize` | any of `catalog.view`, `expenses.view`, `scheduled.view` | `Page<MainCategory>` plus `categoriesWithoutMain` | `ListExpenseMainCategories` | `api.setup_expense_main_category_list` | 2 |
 | S51 | `POST /setup/expense-main-categories` | `catalog.add`; body `{name}` | `{id}` | `CreateExpenseMainCategory` | `api.setup_expense_main_category_create` | 2 |
 | S52 | `PUT /setup/expense-main-categories/{id}` | `catalog.edit`; body `{name}` | `{id}` | `RenameExpenseMainCategory` | `api.setup_expense_main_category_rename` | 2 |
+| S64 | `DELETE /setup/expense-main-categories/{id}` (new; no body) | `catalog.stop` | `{id}`; 409 `in_use` while it has categories | `DeleteExpenseMainCategory` | `api.setup_expense_main_category_delete` | 2 |
 
 `TargetSet`: `{id, startsOn, days, weekTotal, inForce, canRemove}`. `MainCategory`: `{id,
 name, categoryCount, itemCount}`.
@@ -868,6 +877,14 @@ People and access (`inv 2.3`):
 | `people_self_sign_in` | 400 | `Use the profile menu for your own PIN and devices.` |
 | `people_invite_not_needed` | 400 | `This person has already set up their PIN and needs no invitation.` |
 | `people_self_erase` | 400 | `You cannot erase your own details here.` (a member asks for deletion with S58) |
+| `people_self_delete` | 403 | `You cannot delete yourself.` |
+| `role_name_invalid` | 400 | `A role name of 1–100 characters is required.` |
+| `role_name_taken` | 400 | `Another role already has this name.` |
+| `role_permissions_invalid` | 400 | `Choose at least one permission, each once.` |
+| `role_permission_unknown` | 400 | `A role can only have permissions from the list.` |
+| `role_permission_not_held` | 400 | `You can only give a role permissions you hold.` |
+| `role_not_held` | 400 | `You can only change or delete a role whose permissions you all hold.` |
+| `role_built_in` | 400 | `Built-in roles cannot be changed or deleted.` |
 | `people_erase_active` | 400 | `Block this person before erasing their details.` (also an account not yet removed) |
 | `people_erase_shared` | 400 | `This person also belongs to another organization, so their details cannot be erased.` |
 | `people_back_limit_invalid` | 400 | `Choose how far back this person can change records: none, 0 to 3650 days or 0 to 120 months.` |
@@ -908,6 +925,12 @@ Companies and vehicles (`inv 2.4`, `inv 2.5`; parameters in braces):
 | `report_period_invalid` | 400 | `Period must be week or month.` |
 | `report_range_required` | 400 | `Choose a period, or a from and through date.` |
 | `report_range_invalid` | 400 | `Report range must be at most 367 days and cannot include the future.` |
+
+Deletes (`DELETE` of a main category, category, item, vehicle or company, S60 to S64; a role, S67; a person, S68). The routine sends `name` (the record's name, a vehicle's registration, a person's full name) and `use` (the record kind and what refers to it; a role also sends `people`, "1 person" or "3 people"), and `use` picks the sentence:
+
+| Code | Status | Sentence |
+|---|---|---|
+| `in_use` | 409 | `This record is in use, so it cannot be deleted.` (title), then the detail by use: main_category_categories: `{name} has categories: delete or move them first.`; main_category_other: `{name} is used by other records.`; category_items: `{name} has items: delete them first, or stop it instead.`; category_other: `{name} is used by other records: stop it instead.`; item_expenses: `{name} is used by expenses: stop it instead.`; item_pettycash: `{name} is used by petty cash entries: stop it instead.`; item_schedules: `{name} is used by scheduled items: stop it instead.`; item_other: `{name} is used by other records: stop it instead.`; vehicle_revenue: `{name} has revenue entries: retire it instead.`; vehicle_pettycash: `{name} has petty cash entries: retire it instead.`; vehicle_expenses: `{name} has expenses: retire it instead.`; vehicle_investments: `{name} has investment entries: delete them first, or retire it instead.`; vehicle_away: `{name} has been away from the fleet: retire it instead.`; vehicle_schedules: `{name} is in scheduled items: retire it instead.`; vehicle_savings: `{name} has savings: retire it instead.`; vehicle_scope: `{name} is in someone's data scope: take it out of their access first, or retire it instead.`; vehicle_other: `{name} is used by other records: retire it instead.`; company_vehicles: `{name} has vehicles: delete or move them first, or archive it instead.`; company_scope: `{name} is in someone's data scope: take it out of their access first, or archive it instead.`; company_other: `{name} is used by other records: archive it instead.`; person_records: `{name} has records: block them instead, and erase their details if those must go.`; role_people: `{name} is held by {people}: give them another role first.` |
 
 Scheduled items (`inv 2.6`):
 

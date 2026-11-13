@@ -28,8 +28,11 @@ from xcode_api.domain.tenancy import (
     PersonLifecycle,
     PersonPinReset,
     PersonQuery,
+    PersonRemoval,
     PersonSave,
     PersonSignOut,
+    RoleRemoval,
+    RoleSave,
     SettingsSave,
     TenantContext,
 )
@@ -364,6 +367,46 @@ async def leave_vehicles_empty_only_seeing_every_company(world: TenancyWorld) ->
     await _history(world, history(section="people"))
 
 
+async def delete_a_person_and_forget_their_contact_details(world: TenancyWorld) -> None:
+    owner = world.owner
+    user_id = await _create(world, jane())
+    assert user_id is not None
+    await _update(world, user_id, jane(phone_number="0722000222"), 1)
+    delete = world.repository.delete_person
+    await world.record(delete(PersonRemoval(owner, owner.actor_id)))
+    await world.record(delete(PersonRemoval(owner, user_id)))
+    await world.record(delete(PersonRemoval(owner, user_id)))
+    await world.record(world.repository.get_person(PersonQuery(owner, user_id)))
+    await world.record(world.repository.list_people(PeopleQuery(owner, 1, 25)))
+    await _history(world, history(section="people"))
+
+
+async def keep_a_custom_role_until_nobody_holds_it(world: TenancyWorld) -> None:
+    owner = world.owner
+    rights = role_rights("Revenue clerk")
+    save = world.repository.save_access_role
+    remove = world.repository.delete_access_role
+    roles = await world.record(world.repository.access_roles(owner))
+    assert roles
+    built_in = roles[0]
+    role = await world.record(save(RoleSave(owner, None, " Dispatch ", rights, None)))
+    assert role is not None
+    await world.record(save(RoleSave(owner, None, "revenue CLERK", rights, None)))
+    await world.record(save(RoleSave(owner, None, "Night shift", ("organization.manage",), None)))
+    await world.record(save(RoleSave(owner, built_in.id, "Bosses", rights, built_in.version)))
+    await world.record(save(RoleSave(owner, role.id, "Dispatchers", rights, 1)))
+    await world.record(save(RoleSave(owner, role.id, "Dispatch desk", rights, 1)))
+    user_id = await _create(world, jane(role="Dispatchers"))
+    assert user_id is not None
+    await world.record(remove(RoleRemoval(owner, built_in.id)))
+    await world.record(remove(RoleRemoval(owner, role.id)))
+    await world.record(world.repository.delete_person(PersonRemoval(owner, user_id)))
+    await world.record(remove(RoleRemoval(owner, role.id)))
+    await world.record(remove(RoleRemoval(owner, role.id)))
+    await world.record(world.repository.access_roles(owner))
+    await _history(world, history(section="roles"))
+
+
 CASES = (
     TenancyCase("create_and_read_a_person", create_and_read_a_person),
     TenancyCase("refuse_a_malformed_person", refuse_a_malformed_person),
@@ -378,5 +421,12 @@ CASES = (
     TenancyCase(
         "leave_vehicles_empty_only_seeing_every_company",
         leave_vehicles_empty_only_seeing_every_company,
+    ),
+    TenancyCase(
+        "delete_a_person_and_forget_their_contact_details",
+        delete_a_person_and_forget_their_contact_details,
+    ),
+    TenancyCase(
+        "keep_a_custom_role_until_nobody_holds_it", keep_a_custom_role_until_nobody_holds_it
     ),
 )

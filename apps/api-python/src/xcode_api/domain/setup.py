@@ -89,6 +89,16 @@ class RunState(StrEnum):
     HELD = "held"
 
 
+class SetupRecord(StrEnum):
+    """The setup records that can be deleted while nothing refers to them."""
+
+    MAIN_CATEGORY = "main_category"
+    CATEGORY = "category"
+    ITEM = "item"
+    VEHICLE = "vehicle"
+    COMPANY = "company"
+
+
 @dataclass(frozen=True, slots=True)
 class PsvCompany:
     organization_id: UUID
@@ -871,3 +881,10 @@ class InvestmentUpdate:
 class InvestmentRemoval:
     context: TenantContext
     entry_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class SetupRecordRemoval:
+    context: TenantContext
+    record: SetupRecord
+    id: UUID

@@ -36,6 +36,8 @@ from xcode_api.domain.setup import (
     SavingCondition,
     SavingOpening,
     SetupPageQuery,
+    SetupRecord,
+    SetupRecordRemoval,
     Share,
     TargetSetRemoval,
     TargetSetSave,
@@ -377,6 +379,46 @@ async def delete_an_investment(world: SetupWorld) -> None:
     await world.history("investment")
 
 
+async def delete_records_nothing_refers_to(world: SetupWorld) -> None:
+    owner = world.tenancy.owner
+    north = await world.company("North Star")
+    spare = await world.company("Spare Line")
+    kda = await world.vehicle(north, "KDA 482M", date(2026, 10, 1), 7000)
+    kdb = await world.vehicle(north, "KDB 111A", date(2026, 10, 1), 7000)
+    deposit = InvestmentDetails(date(2026, 10, 2), "Deposit", Decimal(500))
+    await world.record(world.setup.create_investment(InvestmentCreate(owner, kda, deposit)))
+    main = await world.record(
+        world.setup.create_expense_main_category(MainCategorySave(owner, None, "Running"))
+    )
+    fuel = await world.record(
+        world.setup.create_expense_category(ExpenseCategorySave(owner, None, "Fuel", main.id, True))
+    )
+    diesel = await world.record(
+        world.setup.create_expense_item(ExpenseItemCreate(owner, fuel.id, "Diesel"))
+    )
+
+    async def delete(record: SetupRecord, record_id: UUID) -> None:
+        await world.record(
+            world.setup.delete_setup_record(SetupRecordRemoval(owner, record, record_id))
+        )
+
+    await delete(SetupRecord.MAIN_CATEGORY, main.id)
+    await delete(SetupRecord.CATEGORY, fuel.id)
+    await delete(SetupRecord.VEHICLE, kda)
+    await delete(SetupRecord.COMPANY, north)
+    await delete(SetupRecord.ITEM, UNKNOWN)
+    await delete(SetupRecord.ITEM, diesel.id)
+    await delete(SetupRecord.CATEGORY, fuel.id)
+    await delete(SetupRecord.MAIN_CATEGORY, main.id)
+    await delete(SetupRecord.VEHICLE, kdb)
+    await delete(SetupRecord.VEHICLE, kdb)
+    await delete(SetupRecord.COMPANY, spare)
+    await world.record(world.setup.list_companies(SetupPageQuery(owner, 1, 25)))
+    await world.record(world.setup.list_expense_main_categories(SetupPageQuery(owner, 1, 25)))
+    for section in ("expenses", "vehicles", "companies"):
+        await world.history(section)
+
+
 async def pause_and_run_scheduled_items(world: SetupWorld) -> None:
     """A saving with a revenue rule and an opening, a plain saving and a weekly cost: their
     runs, the month summary and the list, around a pause and a resume."""
@@ -466,5 +508,6 @@ CASES = (
     SetupCase("arrange_main_categories", arrange_main_categories),
     SetupCase("revise_a_scheduled_item", revise_a_scheduled_item),
     SetupCase("delete_an_investment", delete_an_investment),
+    SetupCase("delete_records_nothing_refers_to", delete_records_nothing_refers_to),
     SetupCase("pause_and_run_scheduled_items", pause_and_run_scheduled_items),
 )

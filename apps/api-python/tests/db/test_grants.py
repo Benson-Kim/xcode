@@ -98,7 +98,6 @@ def test_append_only_tables_refuse_update_and_delete(executor: Conn) -> None:
     append_only = [t for t in TABLES if t.writes == "I"]
     assert {t.qualified for t in append_only} == {
         "identity.sign_in_attempts",
-        "tenancy.roles",
         "tenancy.change_log",
         "tenancy.audit_events",
         "setup.vehicle_away_periods",
@@ -112,33 +111,60 @@ def test_append_only_tables_refuse_update_and_delete(executor: Conn) -> None:
                 executor.execute(_statement(executor, table, privilege))
 
 
-def test_no_routine_body_rewrites_history_or_deletes_a_setup_record() -> None:
-    # Versions, shares, targets and away periods are append-only; companies, vehicles,
-    # scheduled items and the catalogue are never deleted. The grants refuse it (above); no
-    # routine body even says it.
+def test_no_routine_body_rewrites_history_or_deletes_a_setup_record_but_its_own_delete() -> None:
+    # Versions, shares, targets and away periods are append-only and scheduled items are
+    # never deleted: the grants refuse it (above) and no routine body even says it. Companies,
+    # vehicles and the catalogue are deleted by their own delete routine only, which the
+    # foreign keys stop while anything refers to the record.
     append_only = (
         "vehicle_away_periods",
         "recurring_versions",
         "recurring_allocations",
         "saving_runs",
     )
-    never_deleted = (
-        *append_only,
-        "psv_companies",
-        "fleet_vehicles",
-        "recurring_items",
-        "expense_main_categories",
-        "expense_categories",
-        "expense_items",
-    )
-    forbidden = [f"update setup.{name} " for name in append_only]
-    forbidden += [f"delete from setup.{name} " for name in never_deleted]
+    never_deleted = (*append_only, "recurring_items")
+    deleted_only_by = {
+        "psv_companies": "setup_company_delete.sql",
+        "fleet_vehicles": "setup_vehicle_delete.sql",
+        "expense_main_categories": "setup_expense_main_category_delete.sql",
+        "expense_categories": "setup_expense_category_delete.sql",
+        "expense_items": "setup_expense_item_delete.sql",
+    }
+    forbidden: list[tuple[str, str | None]] = [(f"update setup.{n} ", None) for n in append_only]
+    forbidden += [(f"delete from setup.{name} ", None) for name in never_deleted]
+    forbidden += [(f"delete from setup.{name} ", file) for name, file in deleted_only_by.items()]
     offenders = []
+    deleters: dict[str, str] = {}
     for path in sorted((find_db_dir() / "routines").rglob("*.sql")):
         code = [line.split("--", 1)[0] for line in path.read_text(encoding="utf-8").splitlines()]
         words = " ".join(" ".join(code).lower().split()) + " "
-        offenders += [(path.name, statement) for statement in forbidden if statement in words]
+        for statement, allowed in forbidden:
+            if statement not in words:
+                continue
+            if path.name == allowed:
+                deleters[statement] = path.name
+            else:
+                offenders.append((path.name, statement))
     assert offenders == []
+    assert deleters == {f"delete from setup.{n} ": f for n, f in deleted_only_by.items()}
+
+
+def test_only_the_delete_routines_delete_people_accounts_and_roles() -> None:
+    owners = {
+        "delete from tenancy.memberships ": "people_delete.sql",
+        "delete from identity.users ": "people_delete.sql",
+        "delete from tenancy.person_roles ": "people_delete.sql",
+        "delete from tenancy.user_preferences ": "people_delete.sql",
+        "delete from tenancy.roles ": "access_role_delete.sql",
+    }
+    found: dict[str, set[str]] = {statement: set() for statement in owners}
+    for path in sorted((find_db_dir() / "routines").rglob("*.sql")):
+        code = [line.split("--", 1)[0] for line in path.read_text(encoding="utf-8").splitlines()]
+        words = " ".join(" ".join(code).lower().split()) + " "
+        for statement in owners:
+            if statement in words:
+                found[statement].add(path.name)
+    assert found == {statement: {name} for statement, name in owners.items()}
 
 
 @pytest.mark.parametrize(

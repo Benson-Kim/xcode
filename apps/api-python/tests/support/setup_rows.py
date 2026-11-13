@@ -132,6 +132,41 @@ def add_record(
     )
 
 
+def add_central_expense(
+    owner: Conn,
+    org: UUID,
+    vehicle: UUID,
+    item: UUID,
+    *,
+    recorder: UUID,
+    day: date = date(2026, 3, 2),
+) -> None:
+    """A central expense row for one vehicle, seeded as owner without the change log."""
+    owner.execute(
+        "WITH n AS (SELECT gen_random_uuid() AS id) INSERT INTO expenses.entries (organization_id, "
+        "id, entry_date, vehicle_id, expense_item_id, units, unit_amount, note, group_id, "
+        "group_size, group_total, group_units, group_unit_amount, recorded_by, recorded_at, "
+        "updated_by, updated_at) SELECT %(org)s, n.id, %(day)s, %(vehicle)s, %(item)s, 2, 250, "
+        "'Front tyres', n.id, 1, 500, 2, 250, %(user)s, now(), %(user)s, now() FROM n",
+        {"org": org, "day": day, "vehicle": vehicle, "item": item, "user": recorder},
+    )
+
+
+def add_pettycash_spend(
+    owner: Conn, org: UUID, vehicle: UUID, item: UUID, *, holder: UUID, day: date = date(2026, 3, 2)
+) -> None:
+    """A reviewed petty-cash spend that was later removed: removed entries still refer to the
+    vehicle and the item."""
+    owner.execute(
+        "INSERT INTO pettycash.entries (organization_id, holder_id, kind, entry_date, vehicle_id, "
+        "expense_item_id, unit_amount, status, reviewed_by, reviewed_at, recorded_by, "
+        "recorded_at, updated_by, updated_at, removed_by, removed_at, removal_reason) "
+        "VALUES (%(org)s, %(user)s, 2, %(day)s, %(vehicle)s, %(item)s, 450, 2, %(user)s, now(), "
+        "%(user)s, now(), %(user)s, now(), %(user)s, now(), 'Recorded twice.')",
+        {"org": org, "day": day, "vehicle": vehicle, "item": item, "user": holder},
+    )
+
+
 def add_investment(
     owner: Conn,
     org: UUID,

@@ -1,6 +1,6 @@
 -- tenancy.compact_json(p_value json) RETURNS json
 -- Purpose: the same JSON with no white space between tokens and every key in its original order, the form the change-log snapshots are stored in.
--- Callers: the snapshot builders (tenancy.person_snapshot, tenancy.settings_snapshot, tenancy.logo_snapshot) and tenancy.redact_person_snapshot.
+-- Callers: the snapshot builders (tenancy.person_snapshot, tenancy.settings_snapshot, tenancy.logo_snapshot), tenancy.redact_person_snapshot, tenancy.save_role and api.access_role_delete.
 -- Reads: nothing. Writes: nothing.
 -- Raises: none.
 -- Tests: tests/db/test_access_routines.py, tests/db/test_organization_routines.py.

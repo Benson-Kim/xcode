@@ -1,7 +1,7 @@
 -- tenancy.assigned_permissions(p_organization_id uuid, p_user_id uuid) RETURNS text[]
--- Purpose: the permissions a person's role and overrides give them whether or not the membership is active: role defaults plus granted overrides, dependencies expanded, denied overrides removed, then every key whose dependencies are not all held removed; catalogue order.
+-- Purpose: the permissions a person's role and overrides give them whether or not the membership is active: a built-in role's defaults or a custom role's permissions (tenancy.role_grants) plus granted overrides, dependencies expanded, denied overrides removed, then every key whose dependencies are not all held removed; catalogue order.
 -- Callers: tenancy.effective_permissions (active members only), tenancy.person_document and tenancy.person_snapshot (an inactive person keeps the permissions assigned to them), tenancy.check_person_grant.
--- Reads: tenancy.memberships, tenancy.person_roles, tenancy.roles, tenancy.role_defaults, tenancy.permission_overrides, tenancy.permission_dependencies, tenancy.permissions. Writes: nothing.
+-- Reads: tenancy.memberships, tenancy.person_roles, tenancy.roles, tenancy.role_defaults, tenancy.role_grants, tenancy.permission_overrides, tenancy.permission_dependencies, tenancy.permissions. Writes: nothing.
 -- Raises: none.
 -- Tests: tests/db/test_tenancy_helpers.py, tests/db/test_access_routines.py.
 -- Reads tenant rows under row-level security: the organization setting must already name p_organization_id.
@@ -34,6 +34,14 @@ AS $$
       ON r.organization_id = pr.organization_id AND r.id = pr.role_id
     JOIN tenancy.role_defaults AS d
       ON lower(d.role_name) = lower(r.name)
+    WHERE r.built_in
+    UNION
+    SELECT g.permission
+    FROM member
+    JOIN tenancy.person_roles AS pr
+      ON pr.organization_id = member.organization_id AND pr.user_id = member.user_id
+    JOIN tenancy.role_grants AS g
+      ON g.organization_id = pr.organization_id AND g.role_id = pr.role_id
     UNION
     SELECT overrides.permission FROM overrides WHERE overrides.granted
   ),

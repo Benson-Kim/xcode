@@ -304,6 +304,7 @@ CHECK_CASES = [
         "WHERE role_name = 'Revenue clerk' AND permission = 'dash.gaps'",
     ),
     Case("ck_roles_name", "UPDATE tenancy.roles SET name = '' WHERE id = %(role)s"),
+    Case("ck_roles_version", "UPDATE tenancy.roles SET version = 0 WHERE id = %(role)s"),
     Case(
         "ck_psv_companies_name",
         "UPDATE setup.psv_companies SET name = ' Metro Trans' WHERE id = %(company)s",
@@ -930,6 +931,11 @@ REFERENCE_CASES = [
         "INSERT INTO tenancy.role_defaults VALUES ('Owner', 'no.such_key')",
     ),
     Case(
+        "fk_role_grants_permission",
+        "INSERT INTO tenancy.role_grants (organization_id, role_id, permission) "
+        "VALUES (%(org)s, %(custom_role)s, 'no.such_key')",
+    ),
+    Case(
         "fk_permission_overrides_permission",
         "INSERT INTO tenancy.permission_overrides (organization_id, user_id, permission, granted) "
         "VALUES (%(org)s, %(user)s, 'no.such_key', true)",
@@ -1001,7 +1007,7 @@ def test_composite_foreign_keys_refuse_another_organizations_rows(seeded: Seeded
         seeded.params(),
     )
     composite = [fk for fk in _foreign_keys(conn) if _is_composite(fk)]
-    assert len(composite) == 50
+    assert len(composite) == 51
     for fk in composite:
         columns = fk["source_columns"][1:]
         target_columns = fk["target_columns"][1:]
