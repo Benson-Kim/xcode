@@ -1,7 +1,28 @@
 import type { Role } from "../../lib/types";
 import { CurrencyInput, Skeleton } from "../ui";
 import type { Errors, PersonForm } from "./model";
+import { isBuiltIn } from "./RoleDialog";
 import type { PersonFormState } from "./usePersonForm";
+
+const option = (role: Role) => (
+  <option key={role.id} value={role.name}>
+    {role.name}
+  </option>
+);
+
+// The job picker: the built-in roles, and once the organization has its own, those in a group of their own.
+function RoleOptions({ roles }: { roles: Role[] }) {
+  const own = roles.filter((role) => !isBuiltIn(role));
+  if (!own.length) return <>{roles.map(option)}</>;
+  return (
+    <>
+      <optgroup label="Built in">
+        {roles.filter(isBuiltIn).map(option)}
+      </optgroup>
+      <optgroup label="Your roles">{own.map(option)}</optgroup>
+    </>
+  );
+}
 
 // The Details pane of the person pop up (v2.32): names, job, mobile number, email for codes, and the petty cash
 // float. No helper sentences.
@@ -59,11 +80,7 @@ export function DetailsPane({
               aria-invalid={errors.role ? true : undefined}
               onChange={(event) => pf.changeRole(event.target.value)}
             >
-              {pf.assignable.map((role) => (
-                <option key={role.id} value={role.name}>
-                  {role.name}
-                </option>
-              ))}
+              <RoleOptions roles={pf.assignable} />
             </select>
           )}
         </div>

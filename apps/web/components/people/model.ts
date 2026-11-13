@@ -12,6 +12,7 @@ import type {
   BackLimit,
   BackLimitMode,
   Permission,
+  PermissionGroup,
   Person,
   PersonInvitation,
   PersonStatus,
@@ -146,7 +147,53 @@ export function withoutDependents(
   return selected.filter((item) => !removed.has(item));
 }
 
+// The tick cards' behaviour, for a person's permissions or a role's defaults.
+export type PermissionTicks = {
+  permissions: string[];
+  setPermission: (key: string, checked: boolean) => void;
+  setModule: (group: PermissionGroup, checked: boolean) => void;
+};
+
+export function permissionTicks(
+  groups: PermissionGroup[] | undefined,
+  permissions: string[],
+  onChange: (next: string[]) => void,
+): PermissionTicks {
+  const all = (groups ?? []).flatMap((group) => group.items);
+  const tick = (held: string[], key: string, checked: boolean) =>
+    checked ? withNeeds(held, key, all) : withoutDependents(held, key, all);
+  return {
+    permissions,
+    setPermission: (key, checked) => onChange(tick(permissions, key, checked)),
+    // The module's "All" box: every right of the module, or none of them.
+    setModule: (group, checked) =>
+      onChange(
+        group.items.reduce(
+          (held, item) => tick(held, item.key, checked),
+          permissions,
+        ),
+      ),
+  };
+}
+
 type Actor = { role: string; permissions: string[] } | null | undefined;
+
+// Who may block, erase or delete a person: block, erase and delete with people.block; never
+// yourself, and the Owner only by the Owner. Erase is for a blocked person only.
+export function removalRights(
+  person: Person | undefined,
+  session: (Actor & { userId?: string }) | null | undefined,
+  can: { block: boolean; remove: boolean },
+) {
+  const reachable = Boolean(
+    person &&
+    person.id !== session?.userId &&
+    (person.role !== "Owner" || session?.role === "Owner"),
+  );
+  const blocked = Boolean(person && personStatus(person) === "blocked");
+  const block = reachable && can.block;
+  return { block, erase: block && blocked, remove: reachable && can.remove };
+}
 
 // Only an Owner may give the Owner role, but an owner's own role is still listed, so the locked picker shows it.
 export function assignableRoles(
@@ -306,7 +353,7 @@ export type ErrorKey =
 
 export type Errors = Partial<Record<ErrorKey, string>>;
 
-export type Pane = "det" | "lim" | "sig" | "acc";
+export type Pane = "det" | "lim" | "sig" | "acc" | "rem";
 
 // The pane that holds the first problem, so a save error opens it.
 export function paneFor(errors: Errors): Pane | null {

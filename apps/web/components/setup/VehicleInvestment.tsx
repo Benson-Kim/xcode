@@ -317,6 +317,7 @@ export function VehicleInvestmentTab({
         open={Boolean(adding)}
         title="Add investment"
         subtitle={vehicle.registration}
+        busy={busy}
         onClose={() => setAdding(null)}
         footer={
           <>

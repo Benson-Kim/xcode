@@ -175,7 +175,7 @@ it("shows an owner's role as Owner to someone who may not give that role", async
   ]);
   renderInApp(<PeopleAccessView />, {
     role: "Office admin",
-    permissions: ["people.view", "people.manage"],
+    permissions: ["people.view", "people.edit"],
   });
 
   fireEvent.click(
@@ -211,7 +211,7 @@ it("says what a person's scope holds beyond the companies and vehicles listed", 
   ]);
   const { unmount } = renderInApp(<PeopleAccessView />, {
     role: "Office admin",
-    permissions: ["people.view", "people.manage"],
+    permissions: ["people.view", "people.edit"],
   });
 
   fireEvent.click(
@@ -229,7 +229,7 @@ it("says what a person's scope holds beyond the companies and vehicles listed", 
 
   renderInApp(<PeopleAccessView />, {
     role: "Office admin",
-    permissions: ["people.view", "people.manage"],
+    permissions: ["people.view", "people.edit"],
   });
   fireEvent.click(
     await screen.findByRole("button", { name: /^(Edit|View) Peter Otieno$/ }),

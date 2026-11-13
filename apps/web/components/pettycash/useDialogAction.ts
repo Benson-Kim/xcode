@@ -2,13 +2,16 @@
 
 import { useState } from "react";
 
+import { useDialogBusy } from "../ui";
 import { failureMessage, isConflict } from "./request";
 
-// Runs a save from a dialog: it disables the buttons while it runs, shows a refusal in the dialog, and hands a
-// conflict (someone changed the entry first) to the page, which reloads and explains it.
+// Runs a save from a dialog: it disables the buttons and keeps the dialog open to a click outside while it runs,
+// shows a refusal in the dialog, and hands a conflict (someone changed the entry first) to the page, which reloads
+// and explains it.
 export function useDialogAction(onConflict: (message: string) => void) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  useDialogBusy(saving);
 
   async function run(action: () => Promise<void>) {
     setSaving(true);

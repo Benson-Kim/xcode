@@ -38,8 +38,9 @@ function useMatching(options: readonly SearchOption[], query: string | null) {
 // (.combolist), each option (.copt) with its group in small type beside it. The list floats over the rows and fields
 // below it, so a dropdown in a table row or a form never pushes them down or gets clipped. Typing ranks the
 // options, best match first, the arrow keys move through them (the highlighted one is aria-selected), Enter or Tab
-// takes it, Escape closes. A click or a tap takes an option too. Given onAdd, "+ Add new" is the last option: it
-// hands over what was typed, so the caller can open its create form with it.
+// takes it, Escape closes. A click or a tap takes an option too. Given onAdd, "+ Add new" is the first option, kept in
+// view while the list scrolls: it hands over what was typed, so the caller can open its create form with it. The
+// best match stays highlighted, so Enter after typing still takes it; with no match, Enter adds.
 export function SearchSelect({
   options,
   value,
@@ -155,31 +156,29 @@ function useCombo({
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState<string | null>(null);
-  const [active, setActive] = useState(0);
+  const [highlight, setActive] = useState<number | null>(null);
 
   const chosen = options.find((option) => option.value === value);
   const shown = useMatching(options, query);
-  const addAt = onAdd ? shown.length : -1;
-  const count = shown.length + (onAdd ? 1 : 0);
+  const lead = onAdd ? 1 : 0;
+  const addAt = onAdd ? 0 : -1;
+  const count = shown.length + lead;
+  const active = highlight ?? (shown.length ? lead : 0);
 
   const optionId = (index: number) => `${listId}-${index}`;
   const activeId = open && active < count ? optionId(active) : undefined;
   useAnchoredPosition(open, box, list, { gap: 6, matchWidth: true });
 
   function show() {
+    const at = options.findIndex((option) => option.value === value);
     setQuery(null);
-    setActive(
-      Math.max(
-        0,
-        options.findIndex((option) => option.value === value),
-      ),
-    );
+    setActive(at < 0 ? null : at + lead);
     setOpen(true);
   }
 
   function type(text: string) {
     setQuery(text);
-    setActive(0);
+    setActive(null);
     setOpen(true);
   }
 
@@ -201,12 +200,12 @@ function useCombo({
 
   function take() {
     if (active === addAt) add();
-    else pick(shown[active]);
+    else pick(shown[active - lead]);
   }
 
   function move(step: number) {
     if (!open) return show();
-    if (count) setActive((at) => (at + step + count) % count);
+    if (count) setActive((active + step + count) % count);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -227,7 +226,8 @@ function useCombo({
         event.preventDefault();
         return take();
       case "Tab":
-        if (open && query !== null && active !== addAt) pick(shown[active]);
+        if (open && query !== null && active !== addAt)
+          pick(shown[active - lead]);
         else close();
         return;
       case "Escape":
@@ -277,7 +277,7 @@ function Listbox({
   onHover: (index: number) => void;
   add?: { label: string; typed: string; onPick: () => void };
 }) {
-  const addAt = shown.length;
+  const lead = add ? 1 : 0;
   return (
     <div
       ref={listRef}
@@ -286,6 +286,17 @@ function Listbox({
       hidden={!open}
       className="combolist fixed min-w-44"
     >
+      {add && (
+        <Option
+          id={`${id}-0`}
+          option={{ value: "", label: add.label }}
+          note={add.typed}
+          highlighted={active === 0}
+          className="cadd"
+          onPick={add.onPick}
+          onHover={() => onHover(0)}
+        />
+      )}
       {shown.length === 0 && (
         <div role="presentation" className="cnone">
           {emptyText}
@@ -294,24 +305,13 @@ function Listbox({
       {shown.map((option, index) => (
         <Option
           key={option.value}
-          id={`${id}-${index}`}
+          id={`${id}-${index + lead}`}
           option={option}
-          highlighted={index === active}
+          highlighted={index + lead === active}
           onPick={() => onPick(option)}
-          onHover={() => onHover(index)}
+          onHover={() => onHover(index + lead)}
         />
       ))}
-      {add && (
-        <Option
-          id={`${id}-${addAt}`}
-          option={{ value: "", label: add.label }}
-          note={add.typed}
-          highlighted={addAt === active}
-          className="sticky bottom-0 border-t border-line bg-(--shell) text-teal"
-          onPick={add.onPick}
-          onHover={() => onHover(addAt)}
-        />
-      )}
     </div>
   );
 }

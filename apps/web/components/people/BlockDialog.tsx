@@ -52,6 +52,7 @@ export function BlockDialog({
       size="sm"
       title={blocked ? "Unblock person" : "Block person"}
       subtitle={name}
+      busy={busy}
       onClose={onClose}
       footer={
         <>

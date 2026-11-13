@@ -1,5 +1,7 @@
+import type { SaveAccessRole } from "@xcode/shared/permissions";
+
 import { apiRequest } from "../data";
-import type { BackLimit, Person } from "../types";
+import type { BackLimit, Person, Role } from "../types";
 
 export const PEOPLE_PATH = "setup/people";
 export const ROLES_PATH = "setup/access/roles";
@@ -7,6 +9,17 @@ export const CATALOG_PATH = "setup/access/catalog";
 export const SCOPE_PATH = "setup/access/scope-options";
 
 export const personPath = (id: string) => `${PEOPLE_PATH}/${id}`;
+export const rolePath = (id: string) => `${ROLES_PATH}/${id}`;
+
+export const rolesApi = {
+  save: (role: Role | undefined, body: SaveAccessRole) =>
+    apiRequest(role ? rolePath(role.id) : ROLES_PATH, {
+      method: role ? "PUT" : "POST",
+      body: JSON.stringify(body),
+    }),
+  // The server refuses (409) a role someone holds; its detail says how many.
+  remove: (id: string) => apiRequest(rolePath(id), { method: "DELETE" }),
+};
 
 export type SavePersonRequest = {
   firstName: string;
@@ -46,6 +59,8 @@ export const peopleApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  // Permanent, with people.block: the server refuses (409) someone who has any records.
+  remove: (id: string) => apiRequest(personPath(id), { method: "DELETE" }),
   // "Make [name] reset the PIN": removes their devices and forces a new PIN at the next sign in (v2.33).
   pinReset: (id: string) =>
     apiRequest(`${personPath(id)}/pin-reset`, { method: "POST" }),

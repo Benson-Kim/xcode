@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { apiRequest, streamError } from "../../lib/data";
 import { useFormats } from "../../lib/formats";
+import { useSession } from "../../lib/session-context";
 import {
   Banner,
   Button,
@@ -21,6 +22,7 @@ import {
 } from "../ui";
 import { usePagedList } from "../usePagedList";
 import { AddCompanyDialog } from "./AddCompanyDialog";
+import { useDeleteRecord } from "./DeleteRecordDialog";
 import type { Company } from "./shared";
 
 // Whether the company carries an archive date, even one still ahead of the business date. Older rows had none, so inactive counts too.
@@ -40,6 +42,9 @@ export function CompaniesPage() {
 
   const companies = usePagedList<Company>("setup/companies");
   const rows = companies.items;
+  const { can } = useSession();
+  const canDelete = can("companies.manage") || can("companies.edit");
+  const deletion = useDeleteRecord(companies.reload);
 
   const toast = useToast();
   const { formatDateOnly } = useFormats();
@@ -155,34 +160,25 @@ export function CompaniesPage() {
               </StatusBadge>
             </Td>
             <Td numeric>
-              <div className="tacts">
-                {company.active !== false && (
-                  <RowAction
-                    disabled={busy}
-                    onClick={() =>
-                      setRenaming({
-                        id: company.id,
-                        name: company.name,
-                        error: "",
-                      })
-                    }
-                    aria-label={`Edit ${company.name}`}
-                  >
-                    Edit
-                  </RowAction>
-                )}
-                {/* An archive dated ahead has not taken effect, so it can still be cancelled with Restore. */}
-                <RowAction
-                  tone={archivedOnRecord(company) ? "ok" : "warn"}
-                  disabled={busy}
-                  aria-label={`${archivedOnRecord(company) ? "Restore" : "Archive"} ${company.name}`}
-                  onClick={() =>
-                    void setArchived(company, !archivedOnRecord(company))
-                  }
-                >
-                  {archivedOnRecord(company) ? "Restore" : "Archive"}
-                </RowAction>
-              </div>
+              <CompanyActions
+                company={company}
+                busy={busy}
+                canDelete={canDelete}
+                onEdit={() =>
+                  setRenaming({ id: company.id, name: company.name, error: "" })
+                }
+                onArchive={(archived) => void setArchived(company, archived)}
+                onDelete={() =>
+                  deletion.ask({
+                    noun: "company",
+                    name: company.name,
+                    remove: () =>
+                      apiRequest(`setup/companies/${company.id}`, {
+                        method: "DELETE",
+                      }),
+                  })
+                }
+              />
             </Td>
           </Tr>
         ))}
@@ -202,6 +198,7 @@ export function CompaniesPage() {
         title="Edit company"
         subtitle={renamingCompany?.name}
         size="sm"
+        busy={busy}
         onClose={() => setRenaming(null)}
         footer={
           <>
@@ -249,6 +246,59 @@ export function CompaniesPage() {
         )}
       </Dialog>
       <ListPager list={companies} />
+      {deletion.dialog}
     </>
+  );
+}
+
+// A row's actions: edit, archive or restore, and delete for a company added by mistake (the server refuses one in
+// use).
+function CompanyActions({
+  company,
+  busy,
+  canDelete,
+  onEdit,
+  onArchive,
+  onDelete,
+}: {
+  company: Company;
+  busy: boolean;
+  canDelete: boolean;
+  onEdit: () => void;
+  onArchive: (archived: boolean) => void;
+  onDelete: () => void;
+}) {
+  const archived = archivedOnRecord(company);
+  return (
+    <div className="tacts">
+      {company.active !== false && (
+        <RowAction
+          disabled={busy}
+          onClick={onEdit}
+          aria-label={`Edit ${company.name}`}
+        >
+          Edit
+        </RowAction>
+      )}
+      {/* An archive dated ahead has not taken effect, so it can still be cancelled with Restore. */}
+      <RowAction
+        tone={archived ? "ok" : "warn"}
+        disabled={busy}
+        aria-label={`${archived ? "Restore" : "Archive"} ${company.name}`}
+        onClick={() => onArchive(!archived)}
+      >
+        {archived ? "Restore" : "Archive"}
+      </RowAction>
+      {canDelete && (
+        <RowAction
+          tone="bad"
+          disabled={busy}
+          aria-label={`Delete ${company.name}`}
+          onClick={onDelete}
+        >
+          Delete
+        </RowAction>
+      )}
+    </div>
   );
 }

@@ -6,6 +6,7 @@ export type View =
   | "centralexpenses"
   | "reports"
   | "people"
+  | "roles"
   | "companies"
   | "vehicles"
   | "expenses"
@@ -29,15 +30,10 @@ export type ChangeLogPage<T> = Omit<Page<T>, "total"> & {
 };
 
 export type {
+  AccessRole as Role,
   PermissionGroup,
   PermissionItem as Permission,
 } from "@xcode/shared/permissions";
-
-export type Role = {
-  id: string;
-  name: string;
-  permissions: string[];
-};
 
 export type ScopeOptions = {
   companies: {

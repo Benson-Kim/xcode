@@ -9,6 +9,7 @@ export * from "./icons";
 export * from "./layout";
 export * from "./nav-icons";
 export * from "./pager";
+export * from "./pin-input";
 export * from "./popover";
 export * from "./reg-plate";
 export * from "./search-select";

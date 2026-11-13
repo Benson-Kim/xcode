@@ -7,7 +7,7 @@ import { AuthError, type TrustedDevice } from "@xcode/shared/auth";
 import { authApi } from "../lib/api";
 import { useFormats } from "../lib/formats";
 import { useSession } from "../lib/session-context";
-import { Banner, Button, Dialog, ListSkeleton, useToast } from "./ui";
+import { Banner, Button, Dialog, ListSkeleton, PinInput, useToast } from "./ui";
 
 // "Change PIN" from the profile menu: the current PIN, the new one and it again. The same PIN rules as sign in.
 export function ChangePinDialog({
@@ -69,10 +69,8 @@ export function ChangePinDialog({
   ) => (
     <div className="f">
       <label htmlFor={id}>{label}</label>
-      <input
-        className="inp num pinin"
+      <PinInput
         id={id}
-        type="password"
         inputMode="numeric"
         maxLength={4}
         autoComplete={autoComplete}
@@ -87,6 +85,7 @@ export function ChangePinDialog({
       open={open}
       size="sm"
       title="Change PIN"
+      busy={busy}
       onClose={close}
       footer={
         <>
@@ -231,6 +230,7 @@ export function TrustedDevicesDialog({
       subtitle={
         session ? `${session.firstName} ${session.lastName}`.trim() : ""
       }
+      busy={busy}
       onClose={onClose}
       footer={
         <Button tone="outline" onClick={onClose}>

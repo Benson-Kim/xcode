@@ -137,7 +137,7 @@ it("lists the three tabs with their counts and tables, read-only with only catal
   fireEvent.click(tab(/^Categories/));
   expect(
     screen.getAllByRole("columnheader").map((header) => header.textContent),
-  ).toEqual(["Category", "Main category", "Items"]);
+  ).toEqual(["Category", "Main category", "Items", "Status"]);
   const old = screen.getByRole("row", { name: /Old charges/ });
   expect(within(old).getByText("Not set")).toHaveClass("chip", "mute");
   const garage = screen.getByRole("row", { name: /Garage and repairs/ });
@@ -274,10 +274,10 @@ it("adds a category under a main category, or under none, with no Counts as cont
   const dialog = within(screen.getByRole("dialog", { name: "New category" }));
   expect(dialog.queryByLabelText("Counts as")).not.toBeInTheDocument();
   expect(optionsOf(dialog.getByLabelText("Main category"))).toEqual([
+    "+ Add new",
     "No main category",
     "Running costs",
     "Finance",
-    "+ Add new",
   ]);
   fireEvent.click(dialog.getByRole("button", { name: "Save" }));
   expect(dialog.getByRole("alert")).toHaveTextContent(
@@ -554,5 +554,167 @@ it("offers no + Add new in the category list to someone who may only edit", asyn
   fireEvent.click(screen.getByRole("button", { name: "Edit Tyres" }));
   expect(optionsOf(screen.getByLabelText("Category"))).not.toContain(
     "+ Add new",
+  );
+});
+
+const IN_USE = {
+  title: "Conflict",
+  code: "in_use",
+  detail: "Old charges has items recorded against it. Stop it instead.",
+};
+
+it("deletes an item after a confirmation that names it, then reloads both lists", async () => {
+  const api = serve();
+  api.on("DELETE setup/expense-items/tyres", [204]);
+  renderInApp(<ExpenseCategoriesPage />, { permissions: ["catalog.stop"] });
+  await screen.findByText("Tyres");
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete Tyres" }));
+  const dialog = within(screen.getByRole("dialog", { name: "Delete item" }));
+  expect(
+    dialog.getByText(
+      "Delete Tyres? This cannot be undone. It can be deleted only while nothing uses it.",
+    ),
+  ).toBeInTheDocument();
+  expect(writes(api)).toEqual([]);
+
+  fireEvent.click(dialog.getByRole("button", { name: "Delete" }));
+  await waitFor(() =>
+    expect(writes(api)).toEqual([["DELETE", "setup/expense-items/tyres", {}]]),
+  );
+  expect(await screen.findByText("Tyres deleted.")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("dialog", { name: "Delete item" }),
+  ).not.toBeInTheDocument();
+  await waitFor(() => expect(reads(api, "setup/expense-categories")).toBe(2));
+  expect(reads(api, "setup/expense-main-categories")).toBe(2);
+});
+
+it("shows the server's in-use refusal in the delete dialog, which stays open until cancelled", async () => {
+  const api = serve();
+  api.on("DELETE setup/expense-categories/old", [409, IN_USE]);
+  renderInApp(<ExpenseCategoriesPage />, { permissions: ["catalog.stop"] });
+  await screen.findByText("Tyres");
+
+  fireEvent.click(tab(/^Categories/));
+  fireEvent.click(screen.getByRole("button", { name: "Delete Old charges" }));
+  const dialog = within(
+    screen.getByRole("dialog", { name: "Delete category" }),
+  );
+  fireEvent.click(dialog.getByRole("button", { name: "Delete" }));
+  expect(await dialog.findByRole("alert")).toHaveTextContent(IN_USE.detail);
+  expect(writes(api)).toEqual([["DELETE", "setup/expense-categories/old", {}]]);
+  expect(screen.queryByText("Old charges deleted.")).not.toBeInTheDocument();
+
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  expect(
+    screen.queryByRole("dialog", { name: "Delete category" }),
+  ).not.toBeInTheDocument();
+  expect(writes(api)).toHaveLength(1);
+});
+
+it("offers Delete on a main category with no categories and a category with no items, only with catalog.stop", async () => {
+  const empty = {
+    id: "m-empty",
+    name: "Spare heading",
+    categoryCount: 0,
+    itemCount: 0,
+  };
+  const api = serve({ mains: [...mains, empty] });
+  api.on("DELETE setup/expense-main-categories/m-empty", [204]);
+  renderInApp(<ExpenseCategoriesPage />, { permissions: ["catalog.stop"] });
+  await screen.findByText("Tyres");
+
+  const deletes = () =>
+    screen
+      .queryAllByRole("button", { name: /^Delete / })
+      .map((button) => button.getAttribute("aria-label"));
+  expect(deletes()).toEqual([
+    "Delete Spares",
+    "Delete Tyres",
+    "Delete Loan repayment",
+  ]);
+  fireEvent.click(tab(/^Categories/));
+  expect(deletes()).toEqual(["Delete Old charges"]);
+  fireEvent.click(tab(/^Main categories/));
+  expect(deletes()).toEqual(["Delete Spare heading"]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete Spare heading" }));
+  fireEvent.click(
+    within(
+      screen.getByRole("dialog", { name: "Delete main category" }),
+    ).getByRole("button", { name: "Delete" }),
+  );
+  await waitFor(() =>
+    expect(writes(api)).toEqual([
+      ["DELETE", "setup/expense-main-categories/m-empty", {}],
+    ]),
+  );
+});
+
+it("offers Delete and Stop with catalog.stop or the released expenses.setup key, never with add and edit alone", async () => {
+  serve();
+  const editor = renderInApp(<ExpenseCategoriesPage />, {
+    permissions: ["catalog.add", "catalog.edit"],
+  });
+  await screen.findByText("Tyres");
+  for (const name of [/^Items/, /^Categories/, /^Main categories/]) {
+    fireEvent.click(tab(name));
+    expect(
+      screen.getAllByRole("button", { name: /^Edit / }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("button", { name: /^(Delete|Stop|Resume) / }),
+    ).not.toBeInTheDocument();
+  }
+  editor.unmount();
+
+  renderInApp(<ExpenseCategoriesPage canManage />, {
+    permissions: ["expenses.setup"],
+  });
+  await screen.findByText("Tyres");
+  fireEvent.click(tab(/^Categories/));
+  expect(
+    screen.getByRole("button", { name: "Delete Old charges" }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "Stop Loans" })).toBeVisible();
+});
+
+it("stops and resumes a category with catalog.stop, showing its status as the items do", async () => {
+  const stopped = {
+    ...catalog[2],
+    id: "gone",
+    name: "Gone charges",
+    active: false,
+    stoppedOn: "2026-09-01",
+  };
+  const api = serve({ categories: [...catalog, stopped] });
+  renderInApp(<ExpenseCategoriesPage />, { permissions: ["catalog.stop"] });
+  await screen.findByText("Tyres");
+
+  fireEvent.click(tab(/^Categories/));
+  const loans = screen.getByRole("row", { name: /Loans/ });
+  expect(within(loans).getByText("In use")).toHaveClass("chip", "ok");
+  expect(
+    within(screen.getByRole("row", { name: /Gone charges/ })).getByText(
+      "Stopped",
+    ),
+  ).toHaveClass("chip", "wait");
+
+  fireEvent.click(screen.getByRole("button", { name: "Stop Loans" }));
+  await waitFor(() =>
+    expect(writes(api)).toEqual([
+      ["POST", "setup/expense-categories/loans/stop", {}],
+    ]),
+  );
+  expect(await screen.findByText("Loans stopped.")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Resume Gone charges" }));
+  await waitFor(() =>
+    expect(writes(api)[1]).toEqual([
+      "POST",
+      "setup/expense-categories/gone/restore",
+      {},
+    ]),
   );
 });

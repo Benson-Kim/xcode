@@ -23,7 +23,7 @@ import {
 import { AppShell } from "./AppShell";
 import { AuthFrame } from "./auth/AuthFrame";
 import { NewPinFields, newPinProblem } from "./auth/NewPinFields";
-import { Skeleton } from "./ui";
+import { PinInput, Skeleton } from "./ui";
 
 // Steps: phone, then pin when the person has one, code when the device is new, at first sign in or for a reset,
 // and newpin after a first sign in or reset code. A trusted device that remembers its person starts at pin with
@@ -474,11 +474,9 @@ export function AuthPanel() {
           )}
           <div className="f">
             <label htmlFor="siPin">PIN</label>
-            <input
-              className="inp num pinin"
+            <PinInput
               id="siPin"
               name="pin"
-              type="password"
               inputMode="numeric"
               maxLength={4}
               autoComplete="current-password"

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { MONTH_NAMES } from "@xcode/shared/dates";
 import { plural, type Formatter } from "@xcode/shared/format";
 import {
+  normaliseRegistration,
   REVENUE_REPORT_PERIODS,
   revenuePeriodLabel,
   vehicleLabel,
@@ -70,6 +71,7 @@ import {
   hasEveryTarget,
   targetFigures,
 } from "./DayTargets";
+import { useDeleteRecord } from "./DeleteRecordDialog";
 import {
   costBucket,
   expenseBucketNames,
@@ -135,6 +137,7 @@ export function VehiclesPage({
     rows?: Vehicle[];
   } | null>(null);
   const [targeting, setTargeting] = useState<string | null>(null);
+  const deletion = useDeleteRecord(vehicles.reload);
   const rows = vehicles.items;
   const targetedVehicle = targeting
     ? rows.find((vehicle) => vehicle.id === targeting)
@@ -264,23 +267,20 @@ export function VehiclesPage({
                 </Td>
               )}
               <Td numeric>
-                <div className="tacts">
-                  {rights.target && (
-                    <RowAction
-                      aria-label={`Targets ${vehicle.registration}`}
-                      disabled={!today}
-                      onClick={() => setTargeting(vehicle.id)}
-                    >
-                      Targets
-                    </RowAction>
-                  )}
-                  <RowAction
-                    aria-label={`${rights.edit ? "Edit" : "Open"} ${vehicle.registration}`}
-                    onClick={() => setEditing({ id: vehicle.id })}
-                  >
-                    {rights.edit ? "Edit" : "Open"}
-                  </RowAction>
-                </div>
+                <VehicleActions
+                  vehicle={vehicle}
+                  rights={rights}
+                  ready={Boolean(today)}
+                  onTargets={() => setTargeting(vehicle.id)}
+                  onOpen={() => setEditing({ id: vehicle.id })}
+                  onDelete={() =>
+                    deletion.ask({
+                      noun: "vehicle",
+                      name: vehicle.registration,
+                      remove: () => vehiclesApi.remove(vehicle.id),
+                    })
+                  }
+                />
               </Td>
             </Tr>
           );
@@ -321,7 +321,54 @@ export function VehiclesPage({
           onChanged={vehicles.reload}
         />
       )}
+      {deletion.dialog}
     </>
+  );
+}
+
+// A row's actions: targets, open or edit, and delete for a vehicle added by mistake (the server refuses one in use).
+function VehicleActions({
+  vehicle,
+  rights,
+  ready,
+  onTargets,
+  onOpen,
+  onDelete,
+}: {
+  vehicle: Vehicle;
+  rights: ReturnType<typeof useVehicleRights>;
+  ready: boolean;
+  onTargets: () => void;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="tacts">
+      {rights.target && (
+        <RowAction
+          aria-label={`Targets ${vehicle.registration}`}
+          disabled={!ready}
+          onClick={onTargets}
+        >
+          Targets
+        </RowAction>
+      )}
+      <RowAction
+        aria-label={`${rights.edit ? "Edit" : "Open"} ${vehicle.registration}`}
+        onClick={onOpen}
+      >
+        {rights.edit ? "Edit" : "Open"}
+      </RowAction>
+      {rights.edit && (
+        <RowAction
+          tone="bad"
+          aria-label={`Delete ${vehicle.registration}`}
+          onClick={onDelete}
+        >
+          Delete
+        </RowAction>
+      )}
+    </div>
   );
 }
 
@@ -421,15 +468,6 @@ export function companyChoices(
   return [...byId.values()].sort((left, right) =>
     left.name.localeCompare(right.name),
   );
-}
-
-const REGISTRATION = /^K[A-Z]{2}[0-9]{3}[A-Z]$/;
-
-function normaliseRegistration(value: string) {
-  const compact = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return REGISTRATION.test(compact)
-    ? `${compact.slice(0, 3)} ${compact.slice(3)}`
-    : null;
 }
 
 // Saving, retiring and restoring carry no typed reason: the server writes one for the change log.
@@ -844,6 +882,7 @@ export function VehicleEditor({
           ? undefined
           : `${rights.edit ? `${vehicleLabel(vehicle)} · ` : ""}${companyName}${retired ? " · Left the fleet" : joinsLater ? ` · Joins ${formatDateOnly(vehicle.joinedOn)}` : ""}`
       }
+      busy={busy}
       onClose={onClose}
       footer={
         onDetails ? (
