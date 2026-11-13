@@ -131,6 +131,9 @@ const PettyCashPage = lazyScreen(() =>
 const PeopleAccessView = lazyScreen(() =>
   import("./PeopleAccessView").then((module) => module.PeopleAccessView),
 );
+const RolesPage = lazyScreen(() =>
+  import("./people/RolesPage").then((module) => module.RolesPage),
+);
 const OrganizationSettingsView = lazyScreen(() =>
   import("./OrganizationSettingsView").then(
     (module) => module.OrganizationSettingsView,
@@ -685,8 +688,8 @@ function Page({
         {...params}
       />
     );
-  if (view === "people")
-    return <PeopleAccessView canManageAccess={can("access.manage")} />;
+  if (view === "people") return <PeopleAccessView />;
+  if (view === "roles") return <RolesPage />;
   if (view === "history") return <HistoryPage />;
   if (view === "settings") return <OrganizationSettingsView />;
   return <PreferencesView />;

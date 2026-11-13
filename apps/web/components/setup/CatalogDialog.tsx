@@ -47,7 +47,7 @@ export function CatalogDialog({
   loadError?: string;
   onSave: () => void;
   onClose: () => void;
-  // Given, the main category or category list ends in "+ Add new".
+  // Given, the main category or category list starts with "+ Add new".
   onAddLink?: (typed: string) => void;
 }) {
   const change = (next: Partial<CatalogForm>) =>
@@ -57,6 +57,7 @@ export function CatalogDialog({
       open
       size="sm"
       title={`${form.id ? "Edit" : "New"} ${KIND_NAMES[form.kind]}`}
+      busy={busy}
       onClose={onClose}
       footer={
         <>

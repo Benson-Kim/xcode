@@ -9,7 +9,7 @@ import {
 
 import { useFormats } from "../../lib/formats";
 import { DialogFooter } from "../pettycash/DialogFooter";
-import { Banner, Button, CurrencyInput } from "../ui";
+import { Banner, Button, CurrencyInput, useDialogBusy } from "../ui";
 import { ConflictChoice } from "./ConflictChoice";
 import { useCaptureEntry } from "./useCaptureEntry";
 
@@ -49,6 +49,7 @@ export function CaptureForm({
     reload,
   });
   const { conflict, saving, error } = entry;
+  useDialogBusy(saving);
   const formId = useId();
   const previous = shiftDate(cell.date, -1);
   const noPrevious = earliest !== null && previous < earliest;

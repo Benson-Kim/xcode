@@ -46,6 +46,12 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M2.5 20a6.5 6.5 0 0113 0M16 4.6a3.5 3.5 0 010 6.8M18 14.2a6.5 6.5 0 013.5 5.8" />
     </>
   ),
+  roles: (
+    <>
+      <path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" />
+      <path d="M9 12l2 2 4-4" />
+    </>
+  ),
   history: (
     <>
       <circle cx="12" cy="12" r="9" />

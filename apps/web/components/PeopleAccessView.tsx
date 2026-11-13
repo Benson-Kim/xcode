@@ -19,28 +19,27 @@ import type {
   ScopeOptions,
 } from "../lib/types";
 import { BlockDialog } from "./people/BlockDialog";
+import { DeletePersonDialog } from "./people/DeletePersonDialog";
 import { EraseDialog } from "./people/EraseDialog";
 import { PeopleList } from "./people/PeopleList";
 import { PersonEditor } from "./people/PersonEditor";
+import type { RemovalAction } from "./people/RemovePane";
 import { Banner, Button, ListPager, PageHeader, useToast } from "./ui";
 import { usePagedList } from "./usePagedList";
 
 // People and access (v2.32, v2.33): one row a person, with what they can reach by module, their vehicles, how far
-// back they may change records, and where they are with signing in. Edit opens the person pop up; Block and
-// Unblock act from the row.
-export function PeopleAccessView({
-  canManageAccess = false,
-}: {
-  canManageAccess?: boolean;
-}) {
+// back they may change records, and where they are with signing in. Edit opens the person pop up; Block, Unblock
+// and Erase are on the row too.
+export function PeopleAccessView() {
   const { can, session } = useSession();
   const { appearance } = useAppearance();
   const toast = useToast();
-  const legacy = can("people.manage") || canManageAccess;
-  const canAdd = can("people.add") || legacy;
-  const canEdit = can("people.edit") || legacy;
-  const canBlock = can("people.block") || legacy;
-  const canSignIn = can("people.sign_in") || legacy;
+  // Each action needs the right the API checks for it: people.manage is derived from any of these, so it gates none.
+  const canAdd = can("people.add");
+  const canEdit = can("people.edit");
+  const canBlock = can("people.block");
+  const canDelete = canBlock;
+  const canSignIn = can("people.sign_in");
   const canManage = canAdd || canEdit;
   const roles = useResource<Role[]>(ROLES_PATH);
   const catalog = useResource<PermissionGroup[]>(CATALOG_PATH);
@@ -49,10 +48,25 @@ export function PeopleAccessView({
   const [editing, setEditing] = useState<Person | "new" | null>(null);
   const [blocking, setBlocking] = useState<Person | null>(null);
   const [erasing, setErasing] = useState<Person | null>(null);
+  const [deleting, setDeleting] = useState<Person | null>(null);
   // The list comes a server page at a time.
   const people = usePagedList<Person>(PEOPLE_PATH);
   const error = streamError(people) || roles.error || catalog.error;
   const today = appearance?.businessDate ?? "";
+  const done = () => {
+    setBlocking(null);
+    setErasing(null);
+    setDeleting(null);
+    people.reload();
+  };
+  // Block, Erase and Delete each confirm in their own dialog, opened from the row or the person pop up.
+  const startRemoval = (person: Person, action: RemovalAction) => {
+    setEditing(null);
+    setDeleting(null);
+    if (action === "block") setBlocking(person);
+    else if (action === "erase") setErasing(person);
+    else setDeleting(person);
+  };
 
   const editor = editing && (
     <PersonEditor
@@ -64,6 +78,9 @@ export function PeopleAccessView({
       today={today}
       canManage={editing === "new" ? canAdd : canEdit}
       canSignIn={canSignIn}
+      canBlock={canBlock}
+      canDelete={canDelete}
+      onRemoval={startRemoval}
       onClose={() => setEditing(null)}
       onSaved={(_name, isNew, email) => {
         setEditing(null);
@@ -96,31 +113,32 @@ export function PeopleAccessView({
         scope={scope.data}
         canEdit={canEdit}
         canBlock={canBlock}
-        selfId={session?.userId}
+        viewer={session}
         onEdit={setEditing}
-        onBlock={setBlocking}
-        onErase={setErasing}
+        onRemoval={startRemoval}
       />
       <ListPager list={people} />
       {editor}
       {blocking && (
         <BlockDialog
           person={blocking}
-          onDone={() => {
-            setBlocking(null);
-            people.reload();
-          }}
+          onDone={done}
           onClose={() => setBlocking(null)}
         />
       )}
       {erasing && (
         <EraseDialog
           person={erasing}
-          onDone={() => {
-            setErasing(null);
-            people.reload();
-          }}
+          onDone={done}
           onClose={() => setErasing(null)}
+        />
+      )}
+      {deleting && (
+        <DeletePersonDialog
+          person={deleting}
+          onDone={done}
+          onClose={() => setDeleting(null)}
+          onInstead={(action) => startRemoval(deleting, action)}
         />
       )}
     </>

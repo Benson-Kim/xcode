@@ -48,6 +48,7 @@ export function AddCompanyDialog({
       open
       title="New company"
       size="sm"
+      busy={busy}
       onClose={onClose}
       footer={
         <>

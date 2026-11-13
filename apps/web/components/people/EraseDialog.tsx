@@ -46,6 +46,7 @@ export function EraseDialog({
       size="sm"
       title="Erase person"
       subtitle={name}
+      busy={busy}
       onClose={onClose}
       footer={
         <>

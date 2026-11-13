@@ -1,21 +1,15 @@
 import { useState } from "react";
 
 import { useSession } from "../../lib/session-context";
-import type {
-  Permission,
-  PermissionGroup,
-  Person,
-  Role,
-} from "../../lib/types";
+import type { PermissionGroup, Person, Role } from "../../lib/types";
 import {
   APPROVALS,
   assignableRoles,
   FLOAT_RIGHT,
   initialForm,
   type PersonForm,
+  permissionTicks,
   roleDefaults,
-  withNeeds,
-  withoutDependents,
 } from "./model";
 
 export function usePersonForm(
@@ -41,28 +35,9 @@ export function usePersonForm(
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  function setPermission(key: string, checked: boolean) {
-    setField(
-      "permissions",
-      checked
-        ? withNeeds(permissions, key, all)
-        : withoutDependents(permissions, key, all),
-    );
-  }
-
-  function togglePermission(item: Permission, checked: boolean) {
-    setPermission(item.key, checked);
-  }
-
-  // The module's "All" box: every right of the module, or none of them.
-  function setModule(group: PermissionGroup, checked: boolean) {
-    let next = permissions;
-    for (const item of group.items)
-      next = checked
-        ? withNeeds(next, item.key, all)
-        : withoutDependents(next, item.key, all);
-    setField("permissions", next);
-  }
+  const ticks = permissionTicks(groups, permissions, (next) =>
+    setField("permissions", next),
+  );
 
   function changeRole(role: string) {
     setForm((current) => ({
@@ -106,9 +81,8 @@ export function usePersonForm(
     permissions,
     needsLimit: permissions.some((key) => APPROVALS.includes(key)),
     holdsFloat: permissions.includes(FLOAT_RIGHT),
-    setFloat: (holds: boolean) => setPermission(FLOAT_RIGHT, holds),
-    togglePermission,
-    setModule,
+    setFloat: (holds: boolean) => ticks.setPermission(FLOAT_RIGHT, holds),
+    ticks,
     changeRole,
     toggleVehicle,
     setAllVehicles,

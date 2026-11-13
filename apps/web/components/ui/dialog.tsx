@@ -1,20 +1,43 @@
 "use client";
 
-import { createContext, useEffect, useId, useRef, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { cn } from "./cn";
 import { CloseIcon } from "./icons";
 
 export const InDialogContext = createContext(false);
+const HoldContext = createContext<((on: boolean) => void) | null>(null);
+
+// Keeps the dialog this form sits in open to a click outside while busy, such as while its save runs.
+export function useDialogBusy(busy: boolean) {
+  const hold = useContext(HoldContext);
+  useEffect(() => {
+    if (!busy || !hold) return;
+    hold(true);
+    return () => hold(false);
+  }, [busy, hold]);
+}
 
 // The design's one pop up shell (<dialog class="sm|md|lg">): title bar (.mh), scrolling body (.mb) and the actions
-// pinned under it (.mf). A centred card on a desk screen, a bottom sheet on a phone. Escape and the close button both
-// call onClose, once. The native close event that follows a close the parent asked for is ignored.
+// pinned under it (.mf). A centred card on a desk screen, a bottom sheet on a phone. Escape, the close button and a
+// click outside call onClose, once. The click counts only when the press starts and ends outside, so a selection
+// dragged out of the dialog keeps it open, and it does nothing while the dialog is busy. The native close event that
+// follows a close the parent asked for is ignored.
 export function Dialog({
   open,
   title,
   subtitle,
   size,
+  busy = false,
   onClose,
   footer,
   children,
@@ -27,6 +50,8 @@ export function Dialog({
   size?: "sm" | "md" | "lg" | "tg" | "xl";
   // A line under the title, such as who recorded what is being changed.
   subtitle?: string;
+  // Saving: a click outside leaves it open.
+  busy?: boolean;
   onClose: () => void;
   // Actions pinned under the body.
   footer?: ReactNode;
@@ -35,6 +60,13 @@ export function Dialog({
   const ref = useRef<HTMLDialogElement>(null);
   const openRef = useRef(open);
   const titleId = useId();
+  const [holds, setHolds] = useState(0);
+  const hold = useCallback(
+    (on: boolean) => setHolds((count) => count + (on ? 1 : -1)),
+    [],
+  );
+  // The box has no padding and its parts fill it, so a press on the dialog itself is a press on its backdrop.
+  const pressedOutside = useRef(false);
   useEffect(() => {
     openRef.current = open;
     const dialog = ref.current;
@@ -54,6 +86,15 @@ export function Dialog({
       // React hands a nested dialog's close to this handler too; only this dialog's own close counts.
       onClose={(event) => {
         if (event.target === event.currentTarget && openRef.current) onClose();
+      }}
+      onMouseDown={(event) => {
+        pressedOutside.current = event.target === event.currentTarget;
+      }}
+      onClick={(event) => {
+        const outside =
+          pressedOutside.current && event.target === event.currentTarget;
+        pressedOutside.current = false;
+        if (outside && !busy && holds === 0) onClose();
       }}
       // The reset takes away the browser's own centring; on a phone the sheet sits on the bottom edge.
       className={cn(
@@ -76,7 +117,9 @@ export function Dialog({
         </button>
       </div>
       <InDialogContext.Provider value>
-        <div className="mb">{children}</div>
+        <HoldContext.Provider value={hold}>
+          <div className="mb">{children}</div>
+        </HoldContext.Provider>
       </InDialogContext.Provider>
       {footer && <div className="mf">{footer}</div>}
     </dialog>

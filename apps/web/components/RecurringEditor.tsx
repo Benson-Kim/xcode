@@ -184,6 +184,7 @@ export function RecurringEditor({
       open
       size={saving ? "md" : undefined}
       title={`${item ? "Edit" : "New"} ${saving ? "saving" : "scheduled expense"}`}
+      busy={busy}
       onClose={onCancel}
       footer={
         <>

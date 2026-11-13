@@ -43,4 +43,6 @@ export const vehiclesApi = {
     apiRequest<{ id: string }>(`setup/vehicle-targets/${targetId}/remove`, {
       method: "POST",
     }),
+  remove: (id: string) =>
+    apiRequest<unknown>(vehiclePath(id), { method: "DELETE" }),
 };

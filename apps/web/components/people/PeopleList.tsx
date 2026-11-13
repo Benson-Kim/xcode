@@ -3,7 +3,14 @@ import { formatPhone, initials } from "@xcode/shared/format";
 import { useFormats } from "../../lib/formats";
 import type { Person, ScopeOptions } from "../../lib/types";
 import { DataTable, RowAction, Td, Tr } from "../ui";
-import { FLOAT_RIGHT, personStatus, scopeLabel, statusChip } from "./model";
+import {
+  FLOAT_RIGHT,
+  personStatus,
+  removalRights,
+  scopeLabel,
+  statusChip,
+} from "./model";
+import type { RemovalAction } from "./RemovePane";
 
 type Props = {
   items: Person[];
@@ -14,10 +21,9 @@ type Props = {
   scope?: ScopeOptions;
   canEdit: boolean;
   canBlock: boolean;
-  selfId?: string;
+  viewer: Parameters<typeof removalRights>[1];
   onEdit: (person: Person) => void;
-  onBlock: (person: Person) => void;
-  onErase: (person: Person) => void;
+  onRemoval: (person: Person, action: RemovalAction) => void;
 };
 
 export function StatusChip({ person }: { person: Person }) {
@@ -63,16 +69,19 @@ function PersonRow({
   scope,
   canEdit,
   canBlock,
-  selfId,
+  viewer,
   onEdit,
-  onBlock,
-  onErase,
+  onRemoval,
 }: Omit<Props, "items" | "total" | "loading" | "pendingRows" | "failed"> & {
   person: Person;
 }) {
   const { formatDateTime } = useFormats();
   const blocked = personStatus(person) === "blocked";
   const name = `${person.firstName} ${person.lastName}`;
+  const rights = removalRights(person, viewer, {
+    block: canBlock,
+    remove: false,
+  });
   return (
     <Tr>
       <Td label="Person">
@@ -126,22 +135,22 @@ function PersonRow({
               View
             </RowAction>
           )}
-          {canBlock && person.id !== selfId && (
+          {rights.block && (
             <button
               type="button"
               className={blocked ? "act ok" : "act bad"}
               aria-label={`${blocked ? "Unblock" : "Block"} ${name}`}
-              onClick={() => onBlock(person)}
+              onClick={() => onRemoval(person, "block")}
             >
               {blocked ? "Unblock" : "Block"}
             </button>
           )}
-          {canBlock && blocked && person.id !== selfId && (
+          {rights.erase && (
             <button
               type="button"
               className="act bad"
               aria-label={`Erase ${name}`}
-              onClick={() => onErase(person)}
+              onClick={() => onRemoval(person, "erase")}
             >
               Erase
             </button>
@@ -178,10 +187,9 @@ export function PeopleList(props: Props) {
           scope={props.scope}
           canEdit={props.canEdit}
           canBlock={props.canBlock}
-          selfId={props.selfId}
+          viewer={props.viewer}
           onEdit={props.onEdit}
-          onBlock={props.onBlock}
-          onErase={props.onErase}
+          onRemoval={props.onRemoval}
         />
       ))}
     </DataTable>

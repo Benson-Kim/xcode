@@ -38,4 +38,16 @@ export const catalogApi = {
       "POST",
       {},
     ),
+  setCategoryStopped: (id: string, stopped: boolean) =>
+    send<{ id: string }>(
+      `${EXPENSE_CATEGORIES_PATH}/${id}/${stopped ? "stop" : "restore"}`,
+      "POST",
+      {},
+    ),
+  deleteMain: (id: string) =>
+    send<unknown>(`${EXPENSE_MAIN_CATEGORIES_PATH}/${id}`, "DELETE"),
+  deleteCategory: (id: string) =>
+    send<unknown>(`${EXPENSE_CATEGORIES_PATH}/${id}`, "DELETE"),
+  deleteItem: (id: string) =>
+    send<unknown>(`setup/expense-items/${id}`, "DELETE"),
 };

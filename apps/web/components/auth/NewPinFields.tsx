@@ -1,3 +1,5 @@
+import { PinInput } from "../ui";
+
 // What is wrong with a new PIN before it is sent, or null.
 export function newPinProblem(newPin: string, repeatPin: string) {
   if (!/^\d{4}$/.test(newPin)) return "The PIN is 4 digits.";
@@ -23,11 +25,9 @@ export function NewPinFields({
     <>
       <div className="f">
         <label htmlFor="siNew">New PIN</label>
-        <input
-          className="inp num pinin"
+        <PinInput
           id="siNew"
           name="newPin"
-          type="password"
           inputMode="numeric"
           maxLength={4}
           autoComplete="new-password"
@@ -38,11 +38,9 @@ export function NewPinFields({
       </div>
       <div className="f">
         <label htmlFor="siNew2">Repeat PIN</label>
-        <input
-          className="inp num pinin"
+        <PinInput
           id="siNew2"
           name="repeatPin"
-          type="password"
           inputMode="numeric"
           maxLength={4}
           autoComplete="new-password"

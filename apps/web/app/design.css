@@ -3386,6 +3386,62 @@ dialog {
   margin-left: auto;
 }
 
+/* The profile pop over shares the class "prof" with its button: it keeps the pop over's solid look in every state,
+   and its items stretch so their text lines up with the name and date above. */
+.pop.prof,
+.pop.prof:hover {
+  align-items: stretch;
+  background: var(--shell);
+  color: var(--ink);
+}
+.pop.prof .plist {
+  margin: -4px -12px;
+}
+
+/* "+ Add new" leads a dropdown's list and stays in view while the options scroll under it. */
+.copt.cadd {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--shell);
+  border-bottom: 1px solid var(--line);
+  color: var(--teal);
+}
+.copt.cadd[aria-selected="true"],
+.copt.cadd:hover {
+  background: var(--teal-wash);
+}
+
+/* A PIN field's show/hide button sits inside the field on the right; the digits stay centred. */
+.pinw {
+  position: relative;
+}
+.pinw .inp {
+  padding-inline: 46px;
+}
+.pinw .pineye {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--slate);
+}
+.pinw .pineye:hover:not(:disabled) {
+  background: var(--paper);
+  color: var(--ink);
+}
+.pinw .pineye:disabled {
+  opacity: 0.5;
+}
+
 /* The week grid's vehicle cell is a row header: it takes the row's hover like the design's first cell. */
 .grid tbody tr:hover > th:first-child {
   background: var(--paper);

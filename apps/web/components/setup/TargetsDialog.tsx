@@ -104,6 +104,7 @@ export function TargetsDialog({
       size={TARGETS_SIZE}
       title="Targets"
       subtitle={vehicleLabel(vehicle)}
+      busy={busy}
       onClose={onClose}
       footer={
         <>

@@ -110,6 +110,7 @@ const MENU = [
   "Vehicles",
   "Expense items",
   "People and access",
+  "Roles",
   "Change log",
   "Organization settings",
 ];
@@ -151,6 +152,7 @@ it("groups Expenses and Setup under their own headings, around Reports", async (
     "Vehicles",
     "Expense items",
     "People and access",
+    "Roles",
     "Change log",
     "Organization settings",
   ]);

@@ -314,13 +314,16 @@ it("offers no way to add without onAdd, as for someone who may not create the re
   expect(within(listboxOf(input())).queryAllByRole("option")).toHaveLength(0);
 });
 
-it("pins + Add new as the last option, under the ranked matches", () => {
+it("leads with + Add new, above the ranked matches, keeping the best match highlighted", () => {
   render(<AddHarness onAdd={() => {}} />);
   fireEvent.focus(input());
   fireEvent.change(input(), { target: { value: "rongai" } });
   expect(within(listboxOf(input())).getAllByRole("option").map(nameOf)).toEqual(
-    ["KDA 482M, Rongai Express", "KDB 100X, Rongai Express", "+ Add new"],
+    ["+ Add new", "KDA 482M, Rongai Express", "KDB 100X, Rongai Express"],
   );
+  expect(
+    document.getElementById(input().getAttribute("aria-activedescendant")!),
+  ).toHaveTextContent("KDA 482M");
 });
 
 it("reaches + Add new with the arrow keys and hands Enter what was typed", () => {
@@ -339,7 +342,7 @@ it("reaches + Add new with the arrow keys and hands Enter what was typed", () =>
   expect(input()).toHaveAttribute("aria-expanded", "false");
 });
 
-it("wraps from the first match up to + Add new, and adds on a click", () => {
+it("moves from the first match up to + Add new, and adds on a click", () => {
   const onAdd = vi.fn();
   render(<AddHarness onAdd={onAdd} />);
   fireEvent.focus(input());

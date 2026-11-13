@@ -1,11 +1,7 @@
 import { useRef, useState } from "react";
 
-import { plural } from "@xcode/shared/format";
-import { RIGHTS } from "@xcode/shared/permissions";
-
 import { useResource } from "../../lib/data";
 import { personPath } from "../../lib/endpoints/people";
-import { useFormats } from "../../lib/formats";
 import { useSession } from "../../lib/session-context";
 import type {
   PermissionGroup,
@@ -14,16 +10,11 @@ import type {
   ScopeOptions,
 } from "../../lib/types";
 import { Banner, Button, Dialog } from "../ui";
-import {
-  backLimitText,
-  type Pane,
-  paneFor,
-  personStatus,
-  readBackLimit,
-  statusChip,
-} from "./model";
+import { type Pane, paneFor, removalRights } from "./model";
 import { AccessPane } from "./PermissionsCard";
 import { DetailsPane } from "./PersonCards";
+import { PersonRail } from "./PersonRail";
+import { type RemovalAction, RemovePane } from "./RemovePane";
 import { VehiclesAndDatesPane } from "./ScopeCard";
 import { SignInPane } from "./SignInPane";
 import { usePersonActions } from "./usePersonActions";
@@ -39,13 +30,16 @@ type Props = {
   today: string;
   canManage: boolean;
   canSignIn: boolean;
+  canBlock: boolean;
+  canDelete: boolean;
+  onRemoval: (person: Person, action: RemovalAction) => void;
   onClose: () => void;
   onSaved: (name: string, isNew: boolean, email: string) => void;
   onChanged: () => void;
 };
 
 // The person pop up (v2.32, v2.33): a side menu with a live summary of each section, and one pane at a time on
-// the right. Details; Vehicles and dates; Sign in; Access, one card per module.
+// the right. Details; Vehicles and dates; Sign in; Block or delete; Access, one card per module.
 export function PersonEditor({
   person,
   roles,
@@ -55,12 +49,14 @@ export function PersonEditor({
   today,
   canManage,
   canSignIn,
+  canBlock,
+  canDelete,
+  onRemoval,
   onClose,
   onSaved,
   onChanged,
 }: Props) {
   const { session } = useSession();
-  const { formatDateOnly } = useFormats();
   const pf = usePersonForm(person, roles, groups);
   // The "Sign in" pane comes with the person's own record.
   const detail = useResource<Person>(person ? personPath(person.id) : null);
@@ -75,7 +71,6 @@ export function PersonEditor({
     },
   });
   const { errors } = actions;
-  const { form } = pf;
   const [pane, setPane] = useState<Pane>("det");
   const paneRef = useRef<HTMLDivElement>(null);
 
@@ -83,6 +78,10 @@ export function PersonEditor({
   const ownerLock = person?.role === "Owner" && session?.role !== "Owner";
   const editable = canManage && !self && !ownerLock;
   const ready = Boolean(roles && groups);
+  const removal = removalRights(person, session, {
+    block: canBlock,
+    remove: canDelete,
+  });
 
   // A save error opens the pane that holds the problem.
   const [seenErrors, setSeenErrors] = useState(errors);
@@ -105,45 +104,7 @@ export function PersonEditor({
     else paneRef.current?.scrollTo?.(0, 0);
   }
 
-  const limitWords = backLimitText(readBackLimit(form), formatDateOnly);
-  const vehiclesWords =
-    form.scopeMode === "all"
-      ? "All vehicles"
-      : form.scopeMode === "companies"
-        ? plural(form.companyIds.length, "company", "companies")
-        : plural(form.vehicleIds.length, "vehicle", "vehicles");
   const signIn = detail.data?.signIn;
-  const signWords = person
-    ? `${statusChip(signIn?.status ?? personStatus(person)).label}${
-        signIn?.devices.length
-          ? ` · ${plural(signIn.devices.length, "device", "devices")}`
-          : ""
-      }`
-    : "Not signed in yet";
-  const held = pf.permissions;
-  const total = groups
-    ? groups.reduce((sum, group) => sum + group.items.length, 0)
-    : RIGHTS.length;
-
-  const navButton = (
-    target: Pane,
-    label: string,
-    small?: { text: string; className?: string; two?: boolean },
-    group?: number,
-  ) => (
-    <button
-      key={`${target}-${group ?? ""}`}
-      type="button"
-      className={
-        group !== undefined ? "pnav sub" : small?.two ? "pnav two" : "pnav"
-      }
-      aria-current={pane === target && group === undefined ? "true" : undefined}
-      onClick={() => show(target, group)}
-    >
-      <span>{label}</span>
-      {small && <small className={small.className}>{small.text}</small>}
-    </button>
-  );
 
   return (
     <Dialog
@@ -151,6 +112,7 @@ export function PersonEditor({
       size="xl"
       title={person ? `${person.firstName} ${person.lastName}` : "New person"}
       subtitle={person?.role ?? ""}
+      busy={actions.busy}
       onClose={onClose}
       footer={
         <>
@@ -170,37 +132,15 @@ export function PersonEditor({
       }
     >
       <div className="pwrap">
-        <nav className="prail" aria-label="Sections">
-          {navButton("det", "Details")}
-          {navButton("lim", "Vehicles and dates", {
-            text: `${vehiclesWords} · ${limitWords}`,
-            two: true,
-          })}
-          {navButton("sig", "Sign in", { text: signWords, two: true })}
-          {navButton("acc", "Access", {
-            text: `${held.length} of ${total}`,
-          })}
-          {groups?.map((group, index) => {
-            const count = group.items.filter((item) =>
-              held.includes(item.key),
-            ).length;
-            return navButton(
-              "acc",
-              group.name,
-              {
-                text:
-                  count === group.items.length
-                    ? "All"
-                    : count
-                      ? `${count} of ${group.items.length}`
-                      : "Off",
-                className:
-                  count === group.items.length ? "on" : count ? "" : "off",
-              },
-              index,
-            );
-          })}
-        </nav>
+        <PersonRail
+          pane={pane}
+          onShow={show}
+          pf={pf}
+          person={person}
+          signIn={signIn}
+          groups={groups}
+          removable={removal.block || removal.remove}
+        />
         <div className="ppane" id="ppane" ref={paneRef}>
           {actions.saveError && <Banner>{actions.saveError}</Banner>}
           {!canManage && person ? (
@@ -246,10 +186,19 @@ export function PersonEditor({
             />
             {detail.error && <Banner>{detail.error}</Banner>}
           </div>
+          {person && (removal.block || removal.remove) && (
+            <div className="psecn" id="pp-rem" hidden={pane !== "rem"}>
+              <RemovePane
+                person={person}
+                rights={removal}
+                onAction={(action) => onRemoval(person, action)}
+              />
+            </div>
+          )}
           <div className="psecn" id="pp-acc" hidden={pane !== "acc"}>
             <AccessPane
               groups={groups}
-              pf={pf}
+              ticks={pf.ticks}
               ready={ready}
               editable={editable}
               error={errors.permissions}

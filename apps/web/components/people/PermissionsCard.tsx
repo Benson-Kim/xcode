@@ -5,7 +5,7 @@ import type {
   Permission as PermissionItem,
 } from "../../lib/types";
 import { ListSkeleton } from "../ui";
-import type { PersonFormState } from "./usePersonForm";
+import type { PermissionTicks } from "./model";
 
 // The rights of one module, as the API serves them in catalogue order: sections (petty cash) start a column.
 function bySection(items: PermissionItem[]) {
@@ -22,15 +22,15 @@ function bySection(items: PermissionItem[]) {
 function ModuleCard({
   group,
   index,
-  pf,
+  ticks,
   editable,
 }: {
   group: PermissionGroup;
   index: number;
-  pf: PersonFormState;
+  ticks: PermissionTicks;
   editable: boolean;
 }) {
-  const { permissions } = pf;
+  const { permissions } = ticks;
   const sections = bySection(group.items);
   const wide = sections.some((section) => section.name);
   const allOn = group.items.every((item) => permissions.includes(item.key));
@@ -41,7 +41,9 @@ function ModuleCard({
         className="pk"
         checked={permissions.includes(item.key)}
         disabled={!editable}
-        onChange={(event) => pf.togglePermission(item, event.target.checked)}
+        onChange={(event) =>
+          ticks.setPermission(item.key, event.target.checked)
+        }
       />
       {item.label}
     </label>
@@ -57,7 +59,7 @@ function ModuleCard({
               checked={allOn}
               disabled={!editable}
               aria-label={`All of ${group.name}`}
-              onChange={(event) => pf.setModule(group, event.target.checked)}
+              onChange={(event) => ticks.setModule(group, event.target.checked)}
             />
             All
           </label>
@@ -79,16 +81,16 @@ function ModuleCard({
   );
 }
 
-// The Access pane (v2.32): the tick cards, one per module.
+// The Access pane (v2.32): the tick cards, one per module, for a person's permissions or a role's defaults.
 export function AccessPane({
   groups,
-  pf,
+  ticks,
   ready,
   editable,
   error,
 }: {
   groups?: PermissionGroup[];
-  pf: PersonFormState;
+  ticks: PermissionTicks;
   ready: boolean;
   editable: boolean;
   error?: string;
@@ -108,7 +110,7 @@ export function AccessPane({
               key={group.name}
               group={group}
               index={index}
-              pf={pf}
+              ticks={ticks}
               editable={editable}
             />
           ))}
