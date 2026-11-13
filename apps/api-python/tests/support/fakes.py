@@ -2514,6 +2514,7 @@ class FakeTenancyRepository:
         member = self._enter(context)
         return MyScope(
             all_companies=True,
+            places_vehicles=True,
             companies=(),
             vehicles=(),
             can_change=back_limit_words(

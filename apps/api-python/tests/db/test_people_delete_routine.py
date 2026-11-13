@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -21,6 +22,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from psycopg.rows import dict_row
 
 from ..support.rows import seed_organization
 from ..support.scenario import T0, TRUSTED, Conn, store_code, store_token, trust
@@ -316,6 +318,32 @@ USES: dict[str, Callable[[Conn, Member, Yard], object]] = {
 
 
 # --- the effect -----------------------------------------------------------------------------
+
+
+def test_a_second_delete_waiting_on_the_first_finds_nobody(
+    app_url: str, owner: Member, clerk: Member
+) -> None:
+    results: list[Any] = []
+    with (
+        psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as one,
+        psycopg.connect(app_url, autocommit=True, row_factory=dict_row) as two,
+    ):
+
+        def late() -> None:
+            try:
+                results.append(_delete(two, owner, clerk.id))
+            except psycopg.Error as error:
+                results.append((error.sqlstate, error.diag.message_primary))
+
+        with one.transaction():
+            _delete(one, owner, clerk.id)
+            worker = threading.Thread(target=late)
+            worker.start()
+            worker.join(0.5)
+            # The second delete waits for the first one's lock on the membership.
+            assert worker.is_alive()
+        worker.join(10)
+    assert results == [("XC404", "not_found")]
 
 
 def test_a_person_nothing_refers_to_goes_with_everything_that_hangs_on_them(
