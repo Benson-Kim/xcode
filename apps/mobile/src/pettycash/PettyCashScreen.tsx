@@ -73,6 +73,13 @@ export function PettyCashScreen({
     stamp,
     onSessionEnded,
   );
+  // The API refuses a vehicle add from a scope that names vehicles only. Until the server has answered, the right
+  // alone decides, as the API still checks the scope.
+  const reach = useLoaded<{ placesVehicles?: boolean }>(
+    canAddVehicle && !offline ? "setup/access/me" : null,
+    stamp,
+    onSessionEnded,
+  );
   // The last answer stays for its permissions while the next one loads.
   const [kept, setKept] = useState<PettyCashOverview | null>(null);
   useEffect(() => {
@@ -196,7 +203,7 @@ export function PettyCashScreen({
     permissions: permissions!,
     stamp,
     canAddItem,
-    canAddVehicle,
+    canAddVehicle: canAddVehicle && reach.data?.placesVehicles !== false,
     onCancel: () => setForm(null),
     onSaved: (message: string) => finish("ok", message),
     onStale: (message: string) => finish("error", message),

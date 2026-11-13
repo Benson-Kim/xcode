@@ -22,7 +22,7 @@ import {
 import { vehiclesApi } from "../../lib/endpoints/vehicles";
 import { useFormats } from "../../lib/formats";
 import { useSession } from "../../lib/session-context";
-import type { ExpenseBucket } from "../../lib/types";
+import type { ExpenseBucket, MyScope } from "../../lib/types";
 import { recurringFrequency } from "../recurringPresentation";
 import { shiftDate } from "../revenueFormat";
 import {
@@ -86,13 +86,23 @@ import { VehicleInvestmentTab } from "./VehicleInvestment";
 
 export type CompanyChoice = { id: string; name: string; active?: boolean };
 
+// Adding takes the right and a scope that names companies: the API refuses a vehicle-only scope. Until the
+// server has answered, the right alone decides, as the API still checks the scope.
+export function useVehicleAddRight() {
+  const { can } = useSession();
+  const right = can("vehicles.manage") || can("vehicles.add");
+  const scope = useResource<MyScope>(right ? "setup/access/me" : null);
+  return right && scope.data?.placesVehicles !== false;
+}
+
 // The released vehicles.manage key stands for adding, editing and setting targets together.
 function useVehicleRights() {
   const { can } = useSession();
   const manage = can("vehicles.manage");
+  const add = useVehicleAddRight();
   return {
     view: manage || can("vehicles.view"),
-    add: manage || can("vehicles.add"),
+    add,
     edit: manage || can("vehicles.edit"),
     target: manage || can("vehicles.target"),
   };

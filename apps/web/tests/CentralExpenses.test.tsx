@@ -958,6 +958,31 @@ it("opens the new vehicle form with the registration typed, and cancelling it ke
   expect(api.sent("POST setup/vehicles")).toEqual([]);
 });
 
+it("offers no + Add new in the vehicle list when the person's scope names vehicles only", async () => {
+  const api = serveExpenses();
+  api.on("GET setup/access/me", [
+    200,
+    {
+      allCompanies: false,
+      placesVehicles: false,
+      companies: [],
+      vehicles: [],
+      canChange: "Any date",
+      earliest: null,
+    },
+  ]);
+  renderPage(api, ["expenses.view", "expenses.capture", "vehicles.add"]);
+  const dialog = await openRecord();
+  const vehicle = within(dialog).getByLabelText("Vehicle");
+  fireEvent.focus(vehicle);
+  changeTo(vehicle, "kde 300z");
+  await waitFor(() =>
+    expect(
+      within(dialog).queryByRole("option", { name: "+ Add new" }),
+    ).not.toBeInTheDocument(),
+  );
+});
+
 it("puts a vehicle added from a split row on that row and keeps the others", async () => {
   const api = serveExpenses();
   const added = {
