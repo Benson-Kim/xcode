@@ -1,0 +1,134 @@
+name: deploy
+
+# One instance's deploy, called by ci.yml once every check has passed: develop deploys staging, master the migration
+# instance. Nothing reaches into a host: the API source and the web build are published as the GitHub releases
+# <release>-api and <release>-web, and the droplet (apps/api-python/deploy/install-release.sh, from a timer) and the
+# cPanel account (deploy/cpanel/update.sh, from cron) install them themselves.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: the GitHub environment
+        required: true
+        type: string
+      release:
+        description: the prefix of the release names the instance installs
+        required: true
+        type: string
+      title:
+        description: the instance's name in the release titles
+        required: true
+        type: string
+      update_unit:
+        description: the droplet's systemd unit that installs the API, named when it has not
+        required: true
+        type: string
+      api_url:
+        description: the API's public origin; the environment's API_URL variable when empty
+        type: string
+        default: ""
+      web_url:
+        description: the web's public origin; the environment's WEB_URL variable when empty
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.web_url || vars.WEB_URL }}
+    concurrency:
+      group: deploy-${{ inputs.release }}
+      cancel-in-progress: false
+    env:
+      API_URL: ${{ inputs.api_url || vars.API_URL }}
+      RELEASE: ${{ inputs.release }}-api
+      TITLE: ${{ inputs.title }} API
+      UPDATE_UNIT: ${{ inputs.update_unit }}
+    steps:
+      # The web app and the phones send PINs and tokens to the API: nothing changes until its address answers over
+      # HTTPS with a valid certificate.
+      - name: The API's address answers over HTTPS
+        run: |
+          case "$API_URL" in https://*) ;; *) echo "::error::API_URL must start with https://"; exit 1 ;; esac
+          curl -sS -o /dev/null --max-time 60 "$API_URL/health"
+      - uses: actions/checkout@v4
+      - name: Package the API source of this commit
+        run: |
+          name="xcode-api-${GITHUB_SHA::12}.tar.gz"
+          git archive --format=tar.gz -o "$RUNNER_TEMP/$name" "$GITHUB_SHA:apps/api-python"
+          (cd "$RUNNER_TEMP" && sha256sum "$name" > xcode-api.tar.gz.sha256)
+          echo "ARCHIVE=$name" >> "$GITHUB_ENV"
+      - name: Publish for the droplet to install
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$RELEASE" --yes --cleanup-tag || true
+          gh release create "$RELEASE" "$RUNNER_TEMP/$ARCHIVE" "$RUNNER_TEMP/xcode-api.tar.gz.sha256" \
+            --target "$GITHUB_SHA" --prerelease --title "$TITLE" \
+            --notes "API source of $GITHUB_SHA. The droplet installs it within a few minutes (apps/api-python/deploy/install-release.sh)."
+      # The droplet looks every two minutes and names the commit it runs at /release once that build is ready.
+      - name: The API runs this commit and reaches its database
+        run: |
+          want="${GITHUB_SHA::12}"
+          for _ in $(seq 1 45); do
+            if [ "$(curl -fsS --max-time 10 "$API_URL/release" 2> /dev/null)" = "$want" ]; then
+              curl --retry 10 --retry-delay 5 --retry-all-errors -fsS --max-time 30 "$API_URL/health/ready"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::the droplet has not installed $want after 15 minutes (journalctl -u $UPDATE_UNIT there)"
+          exit 1
+      # /health and /release skip the host check; a route that answers 401 without credentials passes it, so a stale
+      # XCODE_ALLOWED_HOSTS shows here as another status.
+      - name: The API accepts its public host name
+        run: |
+          status=$(curl -sS -o /dev/null -w '%{http_code}' --retry 10 --retry-delay 5 --retry-all-errors --max-time 30 "$API_URL/auth/session")
+          if [ "$status" != "401" ]; then
+            echo "::error::GET /auth/session without credentials answered $status, not 401 (check XCODE_ALLOWED_HOSTS on the droplet)"
+            exit 1
+          fi
+
+  web:
+    needs: api
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.web_url || vars.WEB_URL }}
+    concurrency:
+      group: deploy-${{ inputs.release }}-web
+      cancel-in-progress: false
+    env:
+      API_URL: ${{ inputs.api_url || vars.API_URL }}
+      RELEASE: ${{ inputs.release }}-web
+      TITLE: ${{ inputs.title }} web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w apps/web
+        env:
+          NEXT_OUTPUT: standalone
+      - run: bash deploy/cpanel/package.sh "$GITHUB_SHA" "$API_URL" "$RUNNER_TEMP/web"
+      - name: Publish for the cPanel account to install
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$RELEASE" --yes --cleanup-tag || true
+          gh release create "$RELEASE" "$RUNNER_TEMP/web/xcode-web.tar.gz" "$RUNNER_TEMP/web/xcode-web.tar.gz.sha256" \
+            --target "$GITHUB_SHA" --prerelease --title "$TITLE" \
+            --notes "Web build of $GITHUB_SHA against $API_URL. The cPanel account installs it within five minutes (deploy/cpanel/update.sh)."

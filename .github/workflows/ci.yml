@@ -80,96 +80,36 @@ jobs:
       - if: failure()
         run: docker logs web || true
 
-  # Staging: a push to develop that passes every job above deploys. Nothing reaches into a host: the API, the web build
-  # and the Android app are published as GitHub releases, and the droplet (apps/api-python/deploy/install-release.sh)
-  # and the cPanel account (deploy/cpanel/update.sh) install them themselves.
-  deploy-api:
+  # A push that passes every job above deploys (deploy.yml): develop to staging, master to the migration instance
+  # (https://xcode.mgr.priori.co.ke, the real data the store builds use). The Android app is built for staging only.
+  staging:
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     needs: [js, mobile, api, web-image]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    uses: ./.github/workflows/deploy.yml
     permissions:
       contents: write
-    environment:
-      name: staging
-      url: ${{ vars.WEB_URL }}
-    concurrency:
-      group: deploy-staging
-      cancel-in-progress: false
-    env:
-      API_URL: ${{ vars.API_URL }}
-    steps:
-      # The web app and the phones send PINs and tokens to the API: nothing changes until its address answers over
-      # HTTPS with a valid certificate.
-      - name: The API's address answers over HTTPS
-        run: |
-          case "$API_URL" in https://*) ;; *) echo "::error::API_URL must start with https://"; exit 1 ;; esac
-          curl -sS -o /dev/null --max-time 60 "$API_URL/health"
-      - uses: actions/checkout@v4
-      - name: Package the API source of this commit
-        run: |
-          name="xcode-api-${GITHUB_SHA::12}.tar.gz"
-          git archive --format=tar.gz -o "$RUNNER_TEMP/$name" "$GITHUB_SHA:apps/api-python"
-          (cd "$RUNNER_TEMP" && sha256sum "$name" > xcode-api.tar.gz.sha256)
-          echo "ARCHIVE=$name" >> "$GITHUB_ENV"
-      - name: Publish for the droplet to install
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete staging-api --yes --cleanup-tag || true
-          gh release create staging-api "$RUNNER_TEMP/$ARCHIVE" "$RUNNER_TEMP/xcode-api.tar.gz.sha256" \
-            --target "$GITHUB_SHA" --prerelease --title "Staging API" \
-            --notes "API source of $GITHUB_SHA. The staging droplet installs it within a few minutes (apps/api-python/deploy/install-release.sh)."
-      # The droplet looks every two minutes and names the commit it runs at /release once that build is ready.
-      - name: The API runs this commit and reaches its database
-        run: |
-          want="${GITHUB_SHA::12}"
-          for _ in $(seq 1 45); do
-            if [ "$(curl -fsS --max-time 10 "$API_URL/release" 2> /dev/null)" = "$want" ]; then
-              curl --retry 10 --retry-delay 5 --retry-all-errors -fsS --max-time 30 "$API_URL/health/ready"
-              exit 0
-            fi
-            sleep 20
-          done
-          echo "::error::the staging droplet has not installed $want after 15 minutes (journalctl -u xcode-stg-update there)"
-          exit 1
+    with:
+      environment: staging
+      release: staging
+      title: Staging
+      update_unit: xcode-stg-update
 
-  deploy-web:
-    needs: deploy-api
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  migration:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [js, mobile, api, web-image]
+    uses: ./.github/workflows/deploy.yml
     permissions:
       contents: write
-    environment:
-      name: staging
-      url: ${{ vars.WEB_URL }}
-    concurrency:
-      group: deploy-staging-web
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
-      - run: npm run build -w apps/web
-        env:
-          NEXT_OUTPUT: standalone
-      - run: bash deploy/cpanel/package.sh "$GITHUB_SHA" "$API_URL" "$RUNNER_TEMP/web"
-        env:
-          API_URL: ${{ vars.API_URL }}
-      - name: Publish for the cPanel account to install
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete staging-web --yes --cleanup-tag || true
-          gh release create staging-web "$RUNNER_TEMP/web/xcode-web.tar.gz" "$RUNNER_TEMP/web/xcode-web.tar.gz.sha256" \
-            --target "$GITHUB_SHA" --prerelease --title "Staging web" \
-            --notes "Web build of $GITHUB_SHA. The cPanel account installs it within five minutes (deploy/cpanel/update.sh)."
+    with:
+      environment: migration
+      release: migration
+      title: Migration
+      update_unit: xcode-mgr-update
+      api_url: https://api.xcode.mgr.priori.co.ke
+      web_url: https://xcode.mgr.priori.co.ke
 
   android:
-    needs: deploy-api
+    needs: staging
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
