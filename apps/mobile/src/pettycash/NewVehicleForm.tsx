@@ -171,7 +171,7 @@ export function NewVehicleForm({
       {errors.targets ? <ErrorText>{errors.targets}</ErrorText> : null}
       {problem ? <ErrorText>{problem}</ErrorText> : null}
       <View style={{ flexDirection: "row", gap: 12 }}>
-        <Button tone="outline" onPress={onCancel}>
+        <Button tone="outline" disabled={saving} onPress={onCancel}>
           Cancel
         </Button>
         <Button onPress={() => void save()} disabled={saving}>

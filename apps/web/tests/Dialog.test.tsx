@@ -2,7 +2,51 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { expect, it, vi } from "vitest";
 
-import { Dialog } from "../components/ui";
+import { Dialog, useDialogBusy } from "../components/ui";
+
+const escape = () => {
+  const event = new Event("cancel", { cancelable: true });
+  fireEvent(screen.getByRole("dialog"), event);
+  return event;
+};
+
+function Form({ busy }: { busy: boolean }) {
+  useDialogBusy(busy);
+  return null;
+}
+
+it("stays open to Escape and the close button while busy", () => {
+  const onClose = vi.fn();
+  render(
+    <Dialog open busy title="Edit" onClose={onClose}>
+      body
+    </Dialog>,
+  );
+  expect(escape().defaultPrevented).toBe(true);
+  const close = screen.getByRole("button", { name: "Close" });
+  expect(close).toBeDisabled();
+  fireEvent.click(close);
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+it("stays open while a form inside it holds it busy, and closes again after", () => {
+  const onClose = vi.fn();
+  const { rerender } = render(
+    <Dialog open title="Edit" onClose={onClose}>
+      <Form busy />
+    </Dialog>,
+  );
+  expect(escape().defaultPrevented).toBe(true);
+  expect(screen.getByRole("button", { name: "Close" })).toBeDisabled();
+  rerender(
+    <Dialog open title="Edit" onClose={onClose}>
+      <Form busy={false} />
+    </Dialog>,
+  );
+  expect(escape().defaultPrevented).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
 
 it("calls onClose once for Escape", () => {
   const onClose = vi.fn();

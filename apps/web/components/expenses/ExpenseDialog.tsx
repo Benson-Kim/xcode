@@ -281,7 +281,7 @@ function ExpenseForm({
           </div>
         )}
         <DialogFooter>
-          <Button tone="outline" onClick={onClose}>
+          <Button tone="outline" disabled={saving} onClick={onClose}>
             Cancel
           </Button>
           <Button

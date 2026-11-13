@@ -61,7 +61,7 @@ export function CatalogDialog({
       onClose={onClose}
       footer={
         <>
-          <Button tone="outline" onClick={onClose}>
+          <Button tone="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
           <Button type="submit" form="catalog-form" tone="ok" disabled={busy}>

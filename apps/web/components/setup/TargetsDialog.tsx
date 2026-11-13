@@ -108,7 +108,7 @@ export function TargetsDialog({
       onClose={onClose}
       footer={
         <>
-          <Button tone="outline" onClick={onClose}>
+          <Button tone="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
           <Button type="submit" form="targets-form" tone="ok" disabled={busy}>

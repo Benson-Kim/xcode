@@ -321,7 +321,11 @@ export function VehicleInvestmentTab({
         onClose={() => setAdding(null)}
         footer={
           <>
-            <Button tone="outline" onClick={() => setAdding(null)}>
+            <Button
+              tone="outline"
+              disabled={busy}
+              onClick={() => setAdding(null)}
+            >
               Cancel
             </Button>
             <Button

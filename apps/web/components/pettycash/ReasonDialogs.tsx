@@ -175,7 +175,7 @@ function ReasonForm({
       )}
       {error && <Banner>{error}</Banner>}
       <DialogFooter>
-        <Button tone="outline" onClick={onClose}>
+        <Button tone="outline" disabled={saving} onClick={onClose}>
           Cancel
         </Button>
         <Button type="submit" form={formId} tone={spec.tone} disabled={saving}>
