@@ -45,10 +45,10 @@ Each part also runs alone: `test:lint-rules`, `test:shared`, `test:web`, `test:m
 
 ## Deploying
 
-Staging deploys itself when a push to `develop` passes every job. Nothing reaches into a host: each one installs the build CI publishes as a GitHub release.
+A push that passes every job deploys itself (`.github/workflows/deploy.yml`): `develop` to staging, `master` to the migration instance (https://xcode.mgr.priori.co.ke, the real data the store builds use). Nothing reaches into a host: each one installs the build CI publishes as a GitHub release, `staging-*` or `migration-*`.
 
-- API (`deploy-api`): release `staging-api`, the API source of that commit and its checksum. A timer on the staging droplet runs `apps/api-python/deploy/install-release.sh`, which builds the release, migrates and verifies the database, switches over and restarts, and goes back to the previous build if the new one is not ready. The job waits until `$API_URL/release` names the commit and the API is ready.
-- Web (`deploy-web`): release `staging-web`, installed by the cPanel account's cron (`deploy/cpanel/update.sh`).
+- API (job `api`): release `<instance>-api`, the API source of that commit and its checksum. A timer on the droplet (`xcode-stg-update`, `xcode-mgr-update`) runs `apps/api-python/deploy/install-release.sh`, which builds the release, migrates and verifies the database, switches over and restarts, and goes back to the previous build if the new one is not ready. The job waits until `/release` on the API names the commit and the API is ready.
+- Web (job `web`, after the API): release `<instance>-web`, installed by the cPanel account's cron (`deploy/cpanel/update.sh`).
 - Android (`android`): release `staging-android`, an APK built against the staging API.
 
 The API image and its settings are described in `apps/api-python/deploy/README.md` and `apps/api-python/docs/08-operability.md`. Migrations are a deploy step (`xcode-api db migrate`); starting the API never creates or migrates the schema.
