@@ -448,6 +448,7 @@ class MyScope:
     first date their writes may carry today (``None`` for any date)."""
 
     all_companies: bool
+    places_vehicles: bool
     companies: tuple[CompanyOption, ...]
     vehicles: tuple[VehicleOption, ...]
     can_change: str

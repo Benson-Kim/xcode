@@ -73,6 +73,8 @@ class ScopeOptions(ApiModel):
 
 class MyScope(ApiModel):
     all_companies: bool
+    # The scope lets them add a vehicle: every company, or companies named in it.
+    places_vehicles: bool
     companies: list[CompanyOption]
     vehicles: list[VehicleOption]
     can_change: str

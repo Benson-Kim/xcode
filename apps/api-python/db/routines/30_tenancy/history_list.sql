@@ -95,6 +95,8 @@ BEGIN
             WHEN c.section IN ('people', 'signIn') THEN
               v_sees_people AND (v_all OR c.entity_id = ANY (v_people))
             WHEN v_all THEN true
+            -- Roles belong to no company: whoever may list them (people.view) sees their history.
+            WHEN c.section = 'roles' THEN v_sees_people
             WHEN c.section = 'companies' THEN c.entity_id = ANY (v_companies)
             WHEN c.section IN ('vehicles', 'investment', 'revenue', 'pettycash') THEN c.vehicle_id = ANY (v_vehicles)
             WHEN c.section = 'recurring' THEN NOT EXISTS (

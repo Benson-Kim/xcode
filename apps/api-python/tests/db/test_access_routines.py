@@ -558,6 +558,7 @@ def test_my_scope_of_an_all_companies_member_lists_everything_including_retired_
 ) -> None:
     mine = _read(app_conn, "access_my_scope", owner)
     assert mine["all_companies"] is True
+    assert mine["places_vehicles"] is True
     assert [c["name"] for c in mine["companies"]] == [
         "Alpha Sacco",
         "Closed Sacco",
@@ -581,6 +582,7 @@ def test_my_scope_of_a_vehicle_scoped_member_is_their_vehicle_and_its_company(
     set_scope(owner_conn, clerk, clerk.org, vehicles=[estate.kda])
     mine = _read(app_conn, "access_my_scope", clerk)
     assert mine["all_companies"] is False
+    assert mine["places_vehicles"] is False
     assert mine["companies"] == [{"id": str(estate.alpha), "name": "Alpha Sacco"}]
     assert mine["vehicles"] == [
         {
@@ -597,6 +599,7 @@ def test_my_scope_of_a_company_scoped_member_includes_retired_vehicles_of_the_co
 ) -> None:
     set_scope(owner_conn, fleet, fleet.org, companies=[estate.alpha])
     mine = _read(app_conn, "access_my_scope", fleet)
+    assert mine["places_vehicles"] is True
     assert [c["name"] for c in mine["companies"]] == ["Alpha Sacco"]
     assert [v["registration"] for v in mine["vehicles"]] == [
         "KCC 300C",
@@ -612,6 +615,7 @@ def test_my_scope_of_a_member_without_scope_rows_is_empty(
     mine = _read(app_conn, "access_my_scope", clerk)
     assert mine == {
         "all_companies": False,
+        "places_vehicles": False,
         "companies": [],
         "vehicles": [],
         "can_change": "Any date",

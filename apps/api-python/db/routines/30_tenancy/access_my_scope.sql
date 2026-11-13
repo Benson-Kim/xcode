@@ -1,5 +1,5 @@
 -- api.access_my_scope(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_now timestamptz) RETURNS jsonb
--- Purpose: the actor's own reach for "Your access": the all-companies flag, the companies they can see (by name) and the vehicles they can see, retired ones included (by registration); how far back they may change records in words and the earliest date that allows on today's business date (null for any date).
+-- Purpose: the actor's own reach for "Your access": the all-companies flag, whether their scope lets them add a vehicle (every company or named companies, not vehicles alone), the companies they can see (by name) and the vehicles they can see, retired ones included (by registration); how far back they may change records in words and the earliest date that allows on today's business date (null for any date).
 -- Callers: TenancyRoutines.my_scope; GetMyAccessScope (GET /setup/access/me).
 -- Reads: setup.psv_companies, setup.fleet_vehicles, tenancy.memberships, and what tenancy.actor_scope, setup.visible_companies, setup.visible_vehicles, tenancy.business_date, tenancy.earliest_writable and tenancy.back_limit_words read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC422 time_zone_invalid via tenancy.business_date.
@@ -21,6 +21,9 @@ BEGIN
   PERFORM tenancy.enter_organization(p_actor_id, p_organization_id, p_request_id, NULL);
   RETURN jsonb_build_object(
     'all_companies', (tenancy.actor_scope()).all_companies,
+    -- What api.setup_vehicle_create asks of the scope: every company, or companies named in it.
+    'places_vehicles', (tenancy.actor_scope()).all_companies
+      OR coalesce(cardinality((tenancy.actor_scope()).company_ids), 0) > 0,
     'companies', (
       SELECT coalesce(jsonb_agg(jsonb_build_object('id', c.id, 'name', c.name) ORDER BY c.name, c.id), '[]'::jsonb)
       FROM setup.psv_companies AS c

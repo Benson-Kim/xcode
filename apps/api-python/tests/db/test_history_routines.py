@@ -704,6 +704,16 @@ def test_settings_sections_are_never_shown_to_a_scoped_viewer(
         assert _history(app_conn, viewer, section=section)["items"] == []
 
 
+def test_role_rows_are_shown_to_a_scoped_viewer_who_may_list_roles(
+    app_conn: Conn, owner_conn: Conn, owner: Member, ledger: Ledger
+) -> None:
+    seed_change(owner_conn, owner.org, owner.id, "roles", uuid4(), "role driver")
+    for viewer in (ledger.company_viewer, ledger.vehicle_viewer):
+        assert _reasons(_history(app_conn, viewer, section="roles")) == ["role driver"]
+    set_override(owner_conn, ledger.company_viewer, "people.view", granted=False)
+    assert _history(app_conn, ledger.company_viewer, section="roles")["items"] == []
+
+
 def test_expenses_rows_are_always_shown_to_a_scoped_viewer(app_conn: Conn, ledger: Ledger) -> None:
     for viewer in (ledger.company_viewer, ledger.vehicle_viewer):
         assert _reasons(_history(app_conn, viewer, section="expenses")) == ["expenses"]

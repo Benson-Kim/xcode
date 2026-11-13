@@ -30,9 +30,11 @@ from ..support.tenancy import (
     change_log,
     create_person,
     create_refused,
+    membership,
     provision_member,
     refused,
     settings_version,
+    update_refused,
     write,
 )
 
@@ -437,6 +439,32 @@ def test_a_change_ends_the_sessions_of_holders_only(
         office.id: 0,
         owner.id: 0,
     }
+
+
+def test_a_change_moves_holders_memberships_so_a_person_edit_opened_before_it_conflicts(
+    app_conn: Conn, owner_conn: Conn, owner: Member
+) -> None:
+    role = _role_id(_create(app_conn, owner, "Driver", DRIVER))
+    holder = _give(app_conn, owner, "Driver", _expand(DRIVER), 1)
+    other = _give(app_conn, owner, "Revenue clerk", ["dash.gaps", *_expand(DRIVER)], 2)
+    seen = int(membership(owner_conn, owner.org, holder)["version"])
+    untouched = int(membership(owner_conn, owner.org, other)["version"])
+    _update(app_conn, owner, role, "Driver", [*DRIVER, "revenue.correct"], 1)
+    assert membership(owner_conn, owner.org, holder)["version"] == seen + 1
+    assert membership(owner_conn, owner.org, other)["version"] == untouched
+    update_refused(
+        app_conn,
+        owner,
+        holder,
+        seen,
+        "XC409",
+        "version_conflict",
+        first_name="Baraka",
+        email="person1@example.com",
+        phone="0722000001",
+        role="Driver",
+        permissions=_expand(DRIVER),
+    )
 
 
 @pytest.mark.parametrize("which", ["unknown", "null", "other-organization"])
