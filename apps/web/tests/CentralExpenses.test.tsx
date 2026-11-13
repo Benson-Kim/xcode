@@ -1105,3 +1105,48 @@ it("adds a vehicle for an earlier day that joins on that day, and shows it chose
     ]),
   );
 });
+
+it("stops offering a vehicle added for today once the entry moves to a day before it joins", async () => {
+  const api = serveExpenses();
+  api.on("GET setup/vehicles/company-options", [
+    200,
+    [{ id: "c1", name: "Rongai Express" }],
+  ]);
+  api.on("POST setup/vehicles", [200, { id: "v9" }]);
+  renderPage(api, ["expenses.view", "expenses.capture", "vehicles.add"]);
+  const dialog = await openRecord();
+  const vehicle = within(dialog).getByLabelText("Vehicle");
+  fireEvent.focus(vehicle);
+  changeTo(vehicle, "kde 300z");
+  fireEvent.keyDown(vehicle, { key: "Enter" });
+  const form = within(
+    await screen.findByRole("dialog", { name: "New vehicle" }),
+  );
+  changeTo(form.getByLabelText("Fleet number"), "30");
+  await offered(form.getByLabelText("PSV company"), "Rongai Express");
+  pick(form.getByLabelText("PSV company"), "Rongai Express");
+  changeTo(form.getByLabelText("Target, Monday"), "1800");
+  fireEvent.click(form.getByRole("button", { name: "Same every day" }));
+  fireEvent.click(form.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "New vehicle" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(api.sent("POST setup/vehicles")).toEqual([
+    expect.objectContaining({
+      registration: "KDE 300Z",
+      joinedOn: "2026-10-09",
+    }),
+  ]);
+  changeTo(vehicle, "");
+  expect(optionsOf(vehicle)).toContain("KDE 300Z, Rongai Express");
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Previous day" }));
+
+  changeTo(vehicle, "");
+  await waitFor(() =>
+    expect(optionsOf(vehicle)).not.toContain("KDE 300Z, Rongai Express"),
+  );
+  expect(optionsOf(vehicle)).toContain("KDA 482M, Rongai Express");
+});

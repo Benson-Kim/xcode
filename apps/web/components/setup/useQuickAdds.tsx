@@ -11,6 +11,7 @@ import { useCatalogRights } from "./useCatalogEditor";
 import { useVehicleAddRight, VehicleQuickAdd } from "./VehicleQuickAdd";
 
 type NewVehicle = { typed: string; row: number | null };
+type AddedVehicle = { option: SearchOption; joinedOn: string };
 
 // The options given, then those added here that the reloaded options do not hold yet.
 const withAdded = (options: SearchOption[], added: SearchOption[]) => [
@@ -22,7 +23,8 @@ const withAdded = (options: SearchOption[], added: SearchOption[]) => [
 
 // "+ Add new" for the item and vehicle pickers of an entry form. Each adder is undefined without the right to
 // create; `dialogs` goes after the form's closing tag, since the create forms cannot nest inside it. What is added
-// stays among the options (withItems, withVehicles) until the reload lists it, so the field shows it at once.
+// stays among the options (withItems, withVehicles) until the reload lists it, so the field shows it at once; an added
+// vehicle only on an entry date from the day it joins, as the dated options would offer it.
 export function useQuickAdds({
   onItem,
   onVehicle,
@@ -44,7 +46,7 @@ export function useQuickAdds({
   const [item, setItem] = useState<string | null>(null);
   const [vehicle, setVehicle] = useState<NewVehicle | null>(null);
   const [addedItems, setAddedItems] = useState<SearchOption[]>([]);
-  const [addedVehicles, setAddedVehicles] = useState<SearchOption[]>([]);
+  const [addedVehicles, setAddedVehicles] = useState<AddedVehicle[]>([]);
 
   const dialogs = (
     <>
@@ -75,7 +77,10 @@ export function useQuickAdds({
             setVehicle(null);
             setAddedVehicles((current) => [
               ...current,
-              { value: created.id, label: labelVehicle(created) },
+              {
+                option: { value: created.id, label: labelVehicle(created) },
+                joinedOn: created.joinedOn,
+              },
             ]);
             onVehicle?.(created.id, vehicle.row);
             reload?.();
@@ -93,7 +98,12 @@ export function useQuickAdds({
       : undefined,
     withItems: (options: SearchOption[]) => withAdded(options, addedItems),
     withVehicles: (options: SearchOption[]) =>
-      withAdded(options, addedVehicles),
+      withAdded(
+        options,
+        addedVehicles
+          .filter((added) => !date || added.joinedOn <= date)
+          .map((added) => added.option),
+      ),
     dialogs,
   };
 }

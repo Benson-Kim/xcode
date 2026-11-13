@@ -91,11 +91,28 @@ export async function sendTo<T>(
 
 type Loaded<T> = { key: string; data: T | null; error: string };
 
-// Loads one path. A new path or stamp loads again; an answer to an earlier one is dropped.
+const LIST_PAGE_SIZE = 100;
+
+// Every item of a paged list, for a picker that offers them all: the pages are read in turn until the total is in.
+export async function getAllPages<T>(path: string): Promise<T[]> {
+  const separator = path.includes("?") ? "&" : "?";
+  const items: T[] = [];
+  for (let page = 1; ; page += 1) {
+    const result = await apiGet<{ items: T[]; total: number }>(
+      `${path}${separator}page=${page}&pageSize=${LIST_PAGE_SIZE}`,
+    );
+    items.push(...result.items);
+    if (result.items.length === 0 || items.length >= result.total) return items;
+  }
+}
+
+// Loads one path, with apiGet or another stable loader (getAllPages). A new path or stamp loads again; an answer to
+// an earlier one is dropped.
 export function useLoaded<T>(
   path: string | null,
   stamp: number,
   onSessionEnded: () => void,
+  load: (path: string) => Promise<T> = apiGet,
 ) {
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<Loaded<T>>({
@@ -107,7 +124,7 @@ export function useLoaded<T>(
   useEffect(() => {
     if (path === null) return;
     let active = true;
-    apiGet<T>(path).then(
+    load(path).then(
       (data) => active && setState({ key: loadKey, data, error: "" }),
       (reason: Error) => {
         if (!active) return;
@@ -118,7 +135,7 @@ export function useLoaded<T>(
     return () => {
       active = false;
     };
-  }, [path, loadKey, onSessionEnded]);
+  }, [path, loadKey, onSessionEnded, load]);
   const settled = state.key === loadKey && loadKey !== "";
   return {
     data: settled ? state.data : null,

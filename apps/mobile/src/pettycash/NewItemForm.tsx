@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { View } from "react-native";
 
+import { SessionEndedError } from "../lib/api";
 import { Button, ErrorText, Field, Text } from "../ui";
-import { sendTo, useLoaded } from "./client";
+import { getAllPages, sendTo, useLoaded } from "./client";
 import { Picker, type Option } from "./parts";
 
 type Category = { id: string; name: string; active?: boolean };
 
-const CATEGORIES = "setup/expense-categories?pageNumber=1&pageSize=100";
+const CATEGORIES = "setup/expense-categories";
 
 // The catalog's new item, opened from the item list with what was typed there. Saving hands the new item back to
 // the expense as an option of its item list, cancelling goes back to it as it was.
@@ -24,10 +25,11 @@ export function NewItemForm({
   onCreated: (item: Option) => void;
   onCancel: () => void;
 }) {
-  const categories = useLoaded<{ items: Category[] }>(
+  const categories = useLoaded<Category[]>(
     CATEGORIES,
     stamp,
     onSessionEnded,
+    getAllPages,
   );
   const [itemName, setItemName] = useState(name);
   const [categoryId, setCategoryId] = useState("");
@@ -46,21 +48,27 @@ export function NewItemForm({
     setErrors(found);
     if (found.name || found.category) return;
     setSaving(true);
-    const outcome = await sendTo<{ id: string }>(
-      "POST",
-      `setup/expense-categories/${categoryId}/items`,
-      { name: trimmed },
-    );
-    setSaving(false);
-    if (outcome.ok)
-      onCreated({
-        value: outcome.data.id,
-        label: trimmed,
-        sub:
-          categories.data?.items.find((category) => category.id === categoryId)
-            ?.name ?? "",
-      });
-    else setProblem(outcome.message);
+    try {
+      const outcome = await sendTo<{ id: string }>(
+        "POST",
+        `setup/expense-categories/${categoryId}/items`,
+        { name: trimmed },
+      );
+      if (outcome.ok)
+        onCreated({
+          value: outcome.data.id,
+          label: trimmed,
+          sub:
+            categories.data?.find((category) => category.id === categoryId)
+              ?.name ?? "",
+        });
+      else setProblem(outcome.message);
+    } catch (reason) {
+      if (reason instanceof SessionEndedError) onSessionEnded();
+      else setProblem("The request could not be completed.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -81,7 +89,7 @@ export function NewItemForm({
       {categories.error ? <ErrorText>{categories.error}</ErrorText> : null}
       <Picker
         label="Category"
-        options={(categories.data?.items ?? [])
+        options={(categories.data ?? [])
           .filter((category) => category.active !== false)
           .map((category) => ({ value: category.id, label: category.name }))}
         value={categoryId}
