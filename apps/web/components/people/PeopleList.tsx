@@ -17,6 +17,7 @@ type Props = {
   selfId?: string;
   onEdit: (person: Person) => void;
   onBlock: (person: Person) => void;
+  onErase: (person: Person) => void;
 };
 
 export function StatusChip({ person }: { person: Person }) {
@@ -65,6 +66,7 @@ function PersonRow({
   selfId,
   onEdit,
   onBlock,
+  onErase,
 }: Omit<Props, "items" | "total" | "loading" | "pendingRows" | "failed"> & {
   person: Person;
 }) {
@@ -134,6 +136,16 @@ function PersonRow({
               {blocked ? "Unblock" : "Block"}
             </button>
           )}
+          {canBlock && blocked && person.id !== selfId && (
+            <button
+              type="button"
+              className="act bad"
+              aria-label={`Erase ${name}`}
+              onClick={() => onErase(person)}
+            >
+              Erase
+            </button>
+          )}
         </div>
       </Td>
     </Tr>
@@ -169,6 +181,7 @@ export function PeopleList(props: Props) {
           selfId={props.selfId}
           onEdit={props.onEdit}
           onBlock={props.onBlock}
+          onErase={props.onErase}
         />
       ))}
     </DataTable>

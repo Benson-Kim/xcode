@@ -40,6 +40,12 @@ export const peopleApi = {
       method: "POST",
       ...(action === "sign-out" ? {} : { body: JSON.stringify(body) }),
     }),
+  // Irreversible: erases the blocked person's name, email and mobile number.
+  erase: (id: string, body: { version: number; reason: string }) =>
+    apiRequest(`${personPath(id)}/erasure`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   // "Make [name] reset the PIN": removes their devices and forces a new PIN at the next sign in (v2.33).
   pinReset: (id: string) =>
     apiRequest(`${personPath(id)}/pin-reset`, { method: "POST" }),
