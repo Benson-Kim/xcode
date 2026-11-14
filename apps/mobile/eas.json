@@ -10,6 +10,14 @@
         "EXPO_PUBLIC_WEB_URL": "https://xcode.mgr.priori.co.ke"
       }
     },
+    "staging": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_DISTRIBUTION": "store",
+        "EXPO_PUBLIC_API_URL": "https://xcode-stg-api.priori.co.ke",
+        "EXPO_PUBLIC_WEB_URL": "https://xcode.stg.priori.co.ke"
+      }
+    },
     "production": {
       "autoIncrement": true,
       "env": {
@@ -20,8 +28,11 @@
     }
   },
   "submit": {
-    "production": {
+    "staging": {
       "android": { "track": "internal", "releaseStatus": "draft" }
+    },
+    "production": {
+      "android": { "track": "production", "releaseStatus": "draft" }
     }
   }
 }
