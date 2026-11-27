@@ -245,7 +245,11 @@ TABLES: tuple[Table, ...] = (
             text("TimeZone", "time_zone"),
             text("DatePattern", "date_pattern"),
             bit("Hour12", "hour12"),
-            fixed("first_day_of_week", "int", 0),
+            integer(
+                "FirstDayOfWeek",
+                "first_day_of_week",
+                {"0": 0, "1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "6": 0},
+            ),
             text("WeekNumbering", "week_numbering"),
             text("Currency", "currency"),
             bit("UseGrouping", "use_grouping"),
