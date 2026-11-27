@@ -203,7 +203,7 @@ def test_readonly_reads_code_tables_and_the_catalogue_only(
     readable = {q for q in _all_tables(owner_conn) if _select(readonly_conn, q) is None}
     assert readable == allowed
     row = readonly_conn.execute("SELECT count(*) AS n FROM tenancy.permissions").fetchone()
-    assert row == {"n": 80}
+    assert row == {"n": 81}
 
 
 @pytest.fixture

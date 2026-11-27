@@ -44,6 +44,8 @@ async def test_every_member_reads_the_appearance_in_wire_order(api: AuthApi, cle
         "lockoutThreshold",
         "lockoutMinutes",
         "idleUnlockSeconds",
+        "sundayWeekSince",
+        "targets",
     ]
     assert list(body["branding"]) == [
         "displayName",
@@ -70,6 +72,23 @@ async def test_every_member_reads_the_appearance_in_wire_order(api: AuthApi, cle
     assert (body["formats"]["currency"], body["formats"]["direction"]) == ("KES", "ltr")
     assert (body["themeMode"], body["reducedMotion"], body["fontScale"]) == ("system", False, 1)
     assert (body["lockoutThreshold"], body["lockoutMinutes"]) == (5, 15)
+    # An organization made after the week moved to Sunday never ran Monday first: no notice date.
+    assert (body["formats"]["firstDayOfWeek"], body["sundayWeekSince"]) == (0, None)
+    # Targets is on by default: every screen shows the target and gap figures.
+    assert body["targets"] is True
+
+
+async def test_appearance_serves_the_date_the_week_moved_to_sunday_in_the_organization_zone(
+    api: AuthApi, clerk: Member
+) -> None:
+    # 22:30 UTC on 24 November is already 25 November in Nairobi (UTC+3).
+    api.owner.execute(
+        "UPDATE tenancy.organizations SET sunday_week_at = '2026-11-24 22:30:00+00' "
+        "WHERE id IN (SELECT organization_id FROM tenancy.memberships WHERE user_id = %s)",
+        (clerk.user_id,),
+    )
+    body = ok(await api.client.get("/setup/appearance", headers=clerk.headers))
+    assert body["sundayWeekSince"] == "2026-11-25"
 
 
 async def test_appearance_serves_the_idle_unlock_seconds(api: AuthApi, clerk: Member) -> None:

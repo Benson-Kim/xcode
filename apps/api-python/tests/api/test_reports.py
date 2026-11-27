@@ -606,20 +606,20 @@ async def test_screens_export_what_they_list(world: World) -> None:
     owner, admin = world.owner, world.admin
     week = ok(await get(world, owner, "/revenue?weekStart=2026-10-05"))
     response, count = await statements(get(world, owner, "/revenue/export?weekStart=2026-10-05"))
-    book = Workbook(file_ok(response, XLSX, "Revenue 5 Oct 2026 to 7 Oct 2026.xlsx"))
+    book = Workbook(file_ok(response, XLSX, "Revenue 4 Oct 2026 to 7 Oct 2026.xlsx"))
     assert count <= 2
     assert book.text("A1") == "Revenue"
     width = 2 + 7 + 3
     assert book.row(HEADER_ROW, width) == [
         "Vehicle",
         "Company",
+        "Sun 4",
         "Mon 5",
         "Tue 6",
         "Wed 7",
         "Thu 8",
         "Fri 9",
         "Sat 10",
-        "Sun 11",
         "Week total",
         "Target to date",
         "Gap",
@@ -638,11 +638,12 @@ async def test_screens_export_what_they_list(world: World) -> None:
         book.text(f"A{FIRST_DATA_ROW + len(week['vehicles'])}") == f"{len(week['vehicles'])} rows"
     )
     kda = next(v for v in week["vehicles"] if v["registration"] == "KDA 482M")
-    assert kda["days"][0]["amount"] == 3000
+    # 5 October is the Monday, the second day of the Sunday week.
+    assert kda["days"][1]["amount"] == 3000
     response = await get(
         world, owner, f"/revenue/export?weekStart=2026-10-05&companyId={world.north}"
     )
-    book = Workbook(file_ok(response, XLSX, "Revenue 5 Oct 2026 to 7 Oct 2026.xlsx"))
+    book = Workbook(file_ok(response, XLSX, "Revenue 4 Oct 2026 to 7 Oct 2026.xlsx"))
     assert "North Star" in book.text("A2")
     assert book.value(f"A{FIRST_DATA_ROW + 2}") == "2 rows"
     problem(await get(world, world.teller, "/revenue/export?weekStart=2026-10-05"), 403, FORBIDDEN)
@@ -725,8 +726,8 @@ async def test_screens_export_what_they_list(world: World) -> None:
         sentence("expense_source_invalid"),
     )
     assert reasons(world) == [
-        "Exported Revenue for 5 Oct 2026 to 7 Oct 2026 to Excel",
-        "Exported Revenue for 5 Oct 2026 to 7 Oct 2026 to Excel",
+        "Exported Revenue for 4 Oct 2026 to 7 Oct 2026 to Excel",
+        "Exported Revenue for 4 Oct 2026 to 7 Oct 2026 to Excel",
         "Exported Petty cash, expenses for 1 Oct 2026 to 7 Oct 2026 to Excel",
         "Exported Petty cash, expenses for 1 Oct 2026 to 7 Oct 2026 to Excel",
         "Exported Petty cash, cash received for 1 Oct 2026 to 7 Oct 2026 to PDF",
