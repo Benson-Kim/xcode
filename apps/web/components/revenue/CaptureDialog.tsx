@@ -10,12 +10,14 @@ export function CaptureDialog({
   flow,
   today,
   earliest,
-  threshold,
+  fuelQuestionFrom,
+  showTargets,
 }: {
   flow: ReturnType<typeof useCaptureFlow>;
   today: string;
   earliest: string | null;
-  threshold: number;
+  fuelQuestionFrom: number;
+  showTargets: boolean;
 }) {
   const { capture, vehicle, cell, elsewhere } = flow;
   return (
@@ -33,7 +35,8 @@ export function CaptureDialog({
             cell={cell}
             today={today}
             earliest={earliest}
-            threshold={threshold}
+            fuelQuestionFrom={fuelQuestionFrom}
+            showTargets={showTargets}
             onShiftDay={flow.shiftDay}
             onCancel={flow.close}
             onDone={(wasNew) => flow.advance(capture, wasNew)}

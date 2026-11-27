@@ -8,7 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from ...domain.revenue import CaptureResult, RevenueCapture
+from ...domain.revenue import CaptureResult, RevenueCapture, RevenueFuel
 from ..caller import Caller
 from ..ports import Clock
 from ..repositories import RevenueRepository
@@ -22,6 +22,8 @@ class CaptureRevenueCommand:
     amount: Decimal | None
     reason: str | None
     note: str | None
+    fuel: RevenueFuel | None
+    fuel_given: bool
     version: int | None
     captured_at: datetime | None = None
 
@@ -40,6 +42,8 @@ class CaptureRevenue:
                 command.amount,
                 command.reason,
                 command.note,
+                command.fuel,
+                command.fuel_given,
                 command.version,
                 command.captured_at,
             )

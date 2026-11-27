@@ -57,6 +57,7 @@ class NextTargetDto(ApiModel):
     starts_on: date
     day_targets: list[Money]
     weekly_target: Money
+    low_below: Money
 
 
 class VehicleDto(ApiModel):
@@ -80,6 +81,7 @@ class VehicleDto(ApiModel):
     initial_investment: Money | None
     day_targets: list[Money] | None
     next_target: NextTargetDto | None
+    low_below: Money | None
 
 
 class TargetSetDto(ApiModel):
@@ -87,6 +89,7 @@ class TargetSetDto(ApiModel):
     starts_on: date
     days: list[Money]
     week_total: Money
+    low_below: Money
     in_force: bool
     can_remove: bool
 
@@ -97,6 +100,7 @@ class SaveTargetSet(ApiModel):
 
     starts_on: date | None = None
     days: list[Amount | None] | None = None
+    low_below: Amount | None = None
 
     def day_amounts(self) -> tuple[Decimal | None, ...] | None:
         return None if self.days is None else tuple(self.days)
@@ -123,6 +127,7 @@ class SaveVehicle(ApiModel):
     fleet_number: str | None = None
     day_targets: list[Amount | None] | None = None
     initial_investment: Amount | None = None
+    low_below: Amount | None = None
 
     def details(self) -> VehicleDetails:
         return VehicleDetails(
@@ -132,6 +137,7 @@ class SaveVehicle(ApiModel):
             joined_on=self.joined_on,
             day_targets=None if self.day_targets is None else tuple(self.day_targets),
             initial_investment=self.initial_investment,
+            low_below=self.low_below,
         )
 
 

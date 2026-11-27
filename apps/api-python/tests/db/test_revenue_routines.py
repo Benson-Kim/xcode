@@ -44,7 +44,7 @@ from ..support.tenancy import (
 )
 
 TODAY = date(2026, 10, 9)
-WEEK = date(2026, 10, 5)
+WEEK = date(2026, 10, 4)
 OCT1 = date(2026, 10, 1)
 
 
@@ -76,34 +76,40 @@ def yard(operator_conn: Conn, owner_conn: Conn) -> Yard:
         set_scope(owner_conn, member, org, all_companies=True)
     north = add_company(owner_conn, org, "North Star")
     south = add_company(owner_conn, org, "South Line")
-    set_threshold(owner_conn, org, 100)
 
     def vehicle(company: UUID, registration: str, joined: date, target: int, **kw: Any) -> UUID:
         vehicle_id = add_vehicle(owner_conn, org, company, registration, joined_on=joined, **kw)
         add_target(owner_conn, org, vehicle_id, 1, joined, target)
         return vehicle_id
 
+    kda = vehicle(north, "KDA 482M", OCT1, 7000)
+    kdb = vehicle(north, "KDB 111A", date(2026, 10, 7), 3500)
+    kdc = vehicle(south, "KDC 200B", OCT1, 7000, left_on=date(2026, 10, 8))
+    set_low_figure(owner_conn, org, 100)
     return Yard(
         owner=owner,
         clerk=clerk,
         admin=admin,
         north=north,
         south=south,
-        kda=vehicle(north, "KDA 482M", OCT1, 7000),
-        kdb=vehicle(north, "KDB 111A", date(2026, 10, 7), 3500),
-        kdc=vehicle(south, "KDC 200B", OCT1, 7000, left_on=date(2026, 10, 8)),
+        kda=kda,
+        kdb=kdb,
+        kdc=kdc,
     )
 
 
-def set_threshold(
-    owner: Conn, org: UUID, threshold: Decimal | int, amber: Decimal | int = 10
+def set_low_figure(
+    owner: Conn, org: UUID, low_below: Decimal | int, amber: Decimal | int = 10
 ) -> None:
     owner.execute(
-        "INSERT INTO tenancy.organization_revenue_settings (organization_id, low_day_threshold, "
-        "gap_amber_percent) VALUES (%s, %s, %s) ON CONFLICT (organization_id) DO UPDATE SET "
-        "low_day_threshold = EXCLUDED.low_day_threshold, "
+        "UPDATE setup.vehicle_target_sets SET low_below = %s WHERE organization_id = %s",
+        (low_below, org),
+    )
+    owner.execute(
+        "INSERT INTO tenancy.organization_revenue_settings (organization_id, "
+        "gap_amber_percent) VALUES (%s, %s) ON CONFLICT (organization_id) DO UPDATE SET "
         "gap_amber_percent = EXCLUDED.gap_amber_percent",
-        (org, threshold, amber),
+        (org, amber),
     )
 
 
@@ -127,11 +133,14 @@ def capture(
     note: str | None = None,
     version: int | None = None,
     *,
+    fuel: str | None = None,
+    fuel_given: bool = False,
     captured_at: datetime | None = None,
     now: datetime = T0,
 ) -> dict[str, Any]:
     return run(
-        app, "revenue_capture", who, vehicle, day, amount, reason, note, version, captured_at,
+        app, "revenue_capture", who, vehicle, day, amount, reason, note, fuel, fuel_given,
+        version, captured_at,
         now=now,
     )  # fmt: skip
 
@@ -148,6 +157,8 @@ def capture_refused(
     sqlstate: str,
     code: str,
     *,
+    fuel: str | None = None,
+    fuel_given: bool = False,
     captured_at: datetime | None = None,
     now: datetime = T0,
 ) -> psycopg.Error:
@@ -155,7 +166,7 @@ def capture_refused(
         app,
         "revenue_capture",
         who,
-        [vehicle, day, amount, reason, note, version, captured_at],
+        [vehicle, day, amount, reason, note, fuel, fuel_given, version, captured_at],
         sqlstate,
         code,
         now=now,
@@ -413,6 +424,8 @@ def test_a_stale_version_is_a_conflict_carrying_the_stored_cell(app_conn: Conn, 
             "amount": None,
             "reason": "Other",
             "note": "Engine knock",
+            "fuel": None,
+            "low_below": 100.0,
             "can_edit": True,
             "edited_after_capture": False,
             "version": 1,
@@ -480,6 +493,7 @@ def test_a_first_capture_creates_version_1_and_logs_it(
         "Amount",
         "Reason",
         "Note",
+        "Fuel",
         "CapturedAt",
         "CapturedBy",
         "UpdatedAt",
@@ -639,10 +653,24 @@ def _blocked_on(owner_conn: Conn, waiting: int, holder: int) -> bool:
 def _capture_args(
     who: Member, vehicle: UUID, day: date, amount: int, now: datetime
 ) -> tuple[Any, ...]:
-    return (who.id, who.org, REQUEST, vehicle, day, amount, None, None, None, None, now)
+    return (
+        who.id,
+        who.org,
+        REQUEST,
+        vehicle,
+        day,
+        amount,
+        None,
+        None,
+        None,
+        False,
+        None,
+        None,
+        now,
+    )
 
 
-_CAPTURE = "SELECT * FROM api.revenue_capture(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+_CAPTURE = "SELECT * FROM api.revenue_capture(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
 
 
 def test_two_first_captures_of_a_day_race_to_one_record_and_a_unique_conflict(
@@ -691,10 +719,10 @@ def test_a_save_of_a_day_another_save_holds_is_refused_at_once(
     ):
         with first.transaction():
             args = list(_capture_args(yard.owner, yard.kda, TODAY, 550, at(1)))
-            args[8] = 1
+            args[10] = 1
             updated = first.execute(_CAPTURE, args).fetchone()
             args = list(_capture_args(yard.clerk, yard.kda, TODAY, 600, at(1)))
-            args[8] = 1
+            args[10] = 1
             with pytest.raises(psycopg.Error) as caught:
                 second.execute(_CAPTURE, args).fetchone()
     assert updated is not None and (updated["outcome"], updated["version"]) == ("updated", 2)
@@ -857,16 +885,18 @@ def test_the_week_lists_the_fleet_by_registration_with_cells_and_whole_grid_figu
         "day_totals",
         "first_gap",
         "low_day_threshold",
+        "fuel_question_from",
         "gap_amber_percent",
         "gap",
         "gap_band",
         "below_threshold_days",
+        "not_fueled_days",
         "missing_days",
     }
     assert (grid["week_start"], grid["week_through"], grid["current_week_start"]) == (
-        "2026-10-05",
-        "2026-10-11",
-        "2026-10-05",
+        "2026-10-04",
+        "2026-10-10",
+        "2026-10-04",
     )
     assert grid["business_date"] == "2026-10-09"
     assert grid["companies"] == [
@@ -891,6 +921,7 @@ def test_the_week_lists_the_fleet_by_registration_with_cells_and_whole_grid_figu
         "gap",
         "gap_band",
         "below_threshold_days",
+        "not_fueled_days",
     }
     assert (kda["company_name"], kda["joined_on"], kda["left_on"]) == (
         "North Star",
@@ -898,32 +929,32 @@ def test_the_week_lists_the_fleet_by_registration_with_cells_and_whole_grid_figu
         None,
     )
     assert [(c["status"], c["amount"], c["reason"]) for c in kda["days"]] == [
+        ("missing", None, None),
         ("amount", 1000, None),
         ("reason", None, "Garage"),
         ("missing", None, None),
         ("amount", 900, None),
         ("amount", 1100, None),
         ("future", None, None),
-        ("future", None, None),
     ]
-    assert [c["edited_after_capture"] for c in kda["days"]] == [False, False, False, True] + [
-        False
-    ] * 3
-    assert [c["version"] for c in kda["days"]] == [1, 1, None, 2, 1, None, None]
-    assert [c["can_edit"] for c in kda["days"]] == [True] * 5 + [False] * 2
-    assert (kda["total_amount"], kda["total_expected"], kda["percent"]) == (3000, 5000, 60)
+    assert [c["edited_after_capture"] for c in kda["days"]] == [False] * 4 + [True] + [False] * 2
+    assert [c["version"] for c in kda["days"]] == [None, 1, 1, None, 2, 1, None]
+    assert [c["can_edit"] for c in kda["days"]] == [True] * 6 + [False]
+    assert (kda["total_amount"], kda["total_expected"], kda["percent"]) == (3000, 6000, 50)
     assert [c["status"] for c in kdb["days"]] == [
+        "none",
         "none",
         "none",
         "amount",
         "missing",
         "missing",
         "future",
-        "future",
     ]
     assert (kdb["total_expected"], kdb["percent"]) == (1000, 50)
-    assert [c["status"] for c in kdc["days"]] == ["amount", "missing", "missing"] + ["none"] * 4
-    assert (kdc["left_on"], kdc["total_expected"], kdc["percent"]) == ("2026-10-08", 3000, 23)
+    assert [c["status"] for c in kdc["days"]] == ["missing", "amount", "missing", "missing"] + [
+        "none"
+    ] * 3
+    assert (kdc["left_on"], kdc["total_expected"], kdc["percent"]) == ("2026-10-08", 4000, 18)
     assert [v["earliest_missing"] for v in grid["vehicles"]] == [
         "2026-10-03",
         "2026-10-08",
@@ -931,23 +962,23 @@ def test_the_week_lists_the_fleet_by_registration_with_cells_and_whole_grid_figu
     ]
     assert _figures(grid) == {
         "total_amount": 4200,
-        "total_expected": 9000,
-        "percent": 47,
+        "total_expected": 11000,
+        "percent": 38,
         "total_vehicles": 3,
         "day_totals": [
+            {"day": "2026-10-04", "amount": 0, "expected": 2000},
             {"day": "2026-10-05", "amount": 1700, "expected": 2000},
             {"day": "2026-10-06", "amount": 0, "expected": 2000},
             {"day": "2026-10-07", "amount": 500, "expected": 2500},
             {"day": "2026-10-08", "amount": 900, "expected": 1500},
             {"day": "2026-10-09", "amount": 1100, "expected": 1000},
             {"day": "2026-10-10", "amount": 0, "expected": 0},
-            {"day": "2026-10-11", "amount": 0, "expected": 0},
         ],
         "first_gap": {"vehicle_id": str(yard.kdc), "day": "2026-10-01"},
-        "gap": -4800,
+        "gap": -6800,
         "gap_band": "red",
         "below_threshold_days": 1,
-        "missing_days": 4,
+        "missing_days": 6,
     }
     assert (grid["page_number"], grid["page_size"], grid["truncated"]) == (1, 500, False)
 
@@ -958,8 +989,8 @@ def test_the_cells_open_by_the_viewers_permissions(
     _history(owner_conn, yard)
     clerk = week(app_conn, yard.clerk)["vehicles"][0]["days"]
     admin = week(app_conn, yard.admin)["vehicles"][0]["days"]
-    assert [c["can_edit"] for c in clerk] == [False, False, True, False, False, False, False]
-    assert [c["can_edit"] for c in admin] == [True, True, False, True, True, False, False]
+    assert [c["can_edit"] for c in clerk] == [True, False, False, True, False, False, False]
+    assert [c["can_edit"] for c in admin] == [False, True, True, False, True, True, False]
 
 
 def test_pages_list_a_slice_and_keep_the_whole_grid_figures(
@@ -1023,8 +1054,9 @@ def test_the_week_range_runs_from_ten_years_back_through_the_current_week(
     app_conn: Conn, yard: Yard
 ) -> None:
     lower = WEEK - timedelta(days=3650)
-    earliest = lower + timedelta(days=(7 - lower.weekday()) % 7)
-    for allowed in (TODAY + timedelta(days=2), WEEK, earliest, earliest + timedelta(days=6)):
+    # The first Sunday on or after the lower bound (Python counts Sunday as weekday 6).
+    earliest = lower + timedelta(days=(6 - lower.weekday()) % 7)
+    for allowed in (TODAY + timedelta(days=1), WEEK, earliest, earliest + timedelta(days=6)):
         start = week(app_conn, yard.owner, allowed)["week_start"]
         assert start == (WEEK if allowed >= WEEK else earliest).isoformat()
     for refused_day in (WEEK + timedelta(days=7), earliest - timedelta(days=1)):
@@ -1042,10 +1074,10 @@ def test_one_vehicle_is_listed_for_any_week_and_never_paged(
     app_conn: Conn, owner_conn: Conn, yard: Yard
 ) -> None:
     _history(owner_conn, yard)
-    past = week(app_conn, yard.owner, date(2026, 9, 28), vehicle=yard.kdc, page=0, size=0)
+    past = week(app_conn, yard.owner, date(2026, 9, 27), vehicle=yard.kdc, page=0, size=0)
     [kdc] = past["vehicles"]
     assert kdc["registration"] == "KDC 200B"
-    assert [c["status"] for c in kdc["days"]] == ["none"] * 3 + ["missing"] * 4
+    assert [c["status"] for c in kdc["days"]] == ["none"] * 4 + ["missing"] * 3
     assert (past["page_number"], past["page_size"], past["truncated"]) == (1, 500, False)
     assert past["first_gap"] == {"vehicle_id": str(yard.kdc), "day": "2026-10-01"}
     later = week(app_conn, yard.owner, vehicle=yard.kdc)
@@ -1102,7 +1134,7 @@ def test_a_company_filter_narrows_the_grid_and_its_figures(
     _history(owner_conn, yard)
     south = week(app_conn, yard.owner, company=yard.south)
     assert [v["registration"] for v in south["vehicles"]] == ["KDC 200B"]
-    assert (south["total_amount"], south["total_expected"], south["percent"]) == (700, 3000, 23)
+    assert (south["total_amount"], south["total_expected"], south["percent"]) == (700, 4000, 18)
     assert south["first_gap"] == {"vehicle_id": str(yard.kdc), "day": "2026-10-01"}
 
 
@@ -1141,11 +1173,11 @@ def test_viewing_the_week_needs_revenue_view(app_conn: Conn, owner_conn: Conn, y
 _CARDS = {
     "week": {
         "revenue": 4200,
-        "expected": 9000,
-        "percent": 47,
+        "expected": 11000,
+        "percent": 38,
         "captured_today": 1,
         "vehicles_today": 2,
-        "missing_days": 4,
+        "missing_days": 6,
         "missing_vehicles": 3,
         "edited_records": 1,
     },
@@ -1234,11 +1266,11 @@ def test_the_company_filter_narrows_the_cards(app_conn: Conn, owner_conn: Conn, 
     cards = dashboard(app_conn, yard.owner, "week", yard.south)
     assert {key: cards[key] for key in _CARDS["week"]} == {
         "revenue": 700,
-        "expected": 3000,
-        "percent": 23,
+        "expected": 4000,
+        "percent": 18,
         "captured_today": 0,
         "vehicles_today": 0,
-        "missing_days": 2,
+        "missing_days": 3,
         "missing_vehicles": 1,
         "edited_records": 0,
     }
@@ -1281,9 +1313,7 @@ def test_the_dashboard_is_refused_without_a_card_and_before_the_period_is_read(
 
 def test_a_low_day_needs_a_reason(app_conn: Conn, owner_conn: Conn, yard: Yard) -> None:
     org = yard.owner.org
-    owner_conn.execute(
-        "DELETE FROM tenancy.organization_revenue_settings WHERE organization_id = %s", (org,)
-    )
+    set_low_figure(owner_conn, org, 4000)
     error = capture_refused(
         app_conn, yard.owner, yard.kda, TODAY, "3999.99", None, None, None,
         "XC422", "revenue_low_needs_reason",
@@ -1311,7 +1341,7 @@ def test_a_low_day_needs_a_reason(app_conn: Conn, owner_conn: Conn, yard: Yard) 
     logs = [log["reason"] for log in change_rows(owner_conn, org, "revenue")]
     assert logs[0] == "Recorded revenue for KDA 482M on 9 Oct 2026: Garage"
     assert logs[2] == "Recorded no revenue for KDB 111A on 9 Oct 2026: No Crew"
-    set_threshold(owner_conn, org, 3000)
+    set_low_figure(owner_conn, org, 3000)
     assert capture(app_conn, yard.owner, yard.kdb, TODAY - timedelta(days=1), 3500)["outcome"] == (
         "created"
     )
@@ -1335,7 +1365,7 @@ def _low_week(owner_conn: Conn, yard: Yard) -> None:
 def test_below_threshold_days_count_low_and_no_revenue_days(
     app_conn: Conn, owner_conn: Conn, yard: Yard
 ) -> None:
-    set_threshold(owner_conn, yard.owner.org, 4000)
+    set_low_figure(owner_conn, yard.owner.org, 4000)
     _low_week(owner_conn, yard)
     grid = week(app_conn, yard.owner)
     kda, kdb, kdc = grid["vehicles"]
@@ -1344,11 +1374,17 @@ def test_below_threshold_days_count_low_and_no_revenue_days(
         (0, 4000),
         (0, 0),
     ]
-    assert [c["status"] for c in kda["days"][:4]] == ["amount", "reason", "amount", "amount"]
-    assert (kda["days"][3]["amount"], kda["days"][3]["reason"]) == (3500, "Garage")
-    assert (grid["below_threshold_days"], grid["missing_days"]) == (3, 4)
+    assert [c["status"] for c in kda["days"][:5]] == [
+        "missing",
+        "amount",
+        "reason",
+        "amount",
+        "amount",
+    ]
+    assert (kda["days"][4]["amount"], kda["days"][4]["reason"]) == (3500, "Garage")
+    assert (grid["below_threshold_days"], grid["missing_days"]) == (3, 6)
     assert (grid["low_day_threshold"], grid["gap_amber_percent"]) == (4000, 10)
-    set_threshold(owner_conn, yard.owner.org, 3000)
+    set_low_figure(owner_conn, yard.owner.org, 3000)
     assert week(app_conn, yard.owner)["below_threshold_days"] == 1
 
 
@@ -1368,9 +1404,9 @@ def test_capture_fills_and_correct_changes(app_conn: Conn, owner_conn: Conn, yar
     set_limit(owner_conn, yard.admin, "days", 1)
     clerk = week(app_conn, yard.clerk)["vehicles"][0]["days"]
     admin = week(app_conn, yard.admin)["vehicles"][0]["days"]
-    # 5 to 7 Oct are before the limit; 8 Oct is missing, today is saved.
-    assert [c["can_edit"] for c in clerk] == [False, False, False, True, False, False, False]
-    assert [c["can_edit"] for c in admin] == [False, False, False, False, True, False, False]
+    # 4 to 7 Oct are before the limit; 8 Oct is missing, today is saved.
+    assert [c["can_edit"] for c in clerk] == [False, False, False, False, True, False, False]
+    assert [c["can_edit"] for c in admin] == [False, False, False, False, False, True, False]
 
 
 def test_capture_and_change_respect_the_back_limit(
@@ -1480,14 +1516,14 @@ def test_an_identical_replay_is_answered_whatever_the_threshold(
     org = yard.owner.org
     low = capture(app_conn, yard.clerk, yard.kda, OCT1, 3000)
     garage = capture(app_conn, yard.clerk, yard.kda, date(2026, 10, 2), 50, "Garage")
-    set_threshold(owner_conn, org, 4000)
+    set_low_figure(owner_conn, org, 4000)
     replay = capture(app_conn, yard.clerk, yard.kda, OCT1, 3000, version=7)
     assert replay == {**low, "outcome": "replayed"}
     capture_refused(
         app_conn, yard.owner, yard.kda, OCT1, 2999, None, None, 1,
         "XC422", "revenue_low_needs_reason",
     )  # fmt: skip
-    set_threshold(owner_conn, org, 40)
+    set_low_figure(owner_conn, org, 40)
     replay = capture(app_conn, yard.clerk, yard.kda, date(2026, 10, 2), 50, "Garage")
     assert replay == {**garage, "outcome": "replayed"}
     capture_refused(
@@ -1566,20 +1602,20 @@ def test_the_week_carries_the_gap_and_its_band(
     kda, kdb, kdc = grid["vehicles"]
     # Today counts for KDA (recorded) and not for KDB (not yet); KDC left on 8 Oct.
     assert [(v["gap"], v["gap_band"]) for v in (kda, kdb, kdc)] == [
-        (-2000, "red"),
+        (-3000, "red"),
         (-500, "red"),
-        (-2300, "red"),
+        (-3300, "red"),
     ]
-    assert (grid["gap"], grid["gap_band"]) == (-4800, "red")
-    assert [c["expected"] for c in kdb["days"]] == [0, 0, 500, 500, 500, 500, 500]
-    set_threshold(owner_conn, yard.owner.org, 100, 50)
+    assert (grid["gap"], grid["gap_band"]) == (-6800, "red")
+    assert [c["expected"] for c in kdb["days"]] == [0, 0, 0, 500, 500, 500, 500]
+    set_low_figure(owner_conn, yard.owner.org, 100, 50)
     add_record(owner_conn, yard.owner.org, yard.kdb, date(2026, 10, 8), 600, recorder=yard.owner.id)
     grid = week(app_conn, yard.owner)
     kda, kdb, kdc = grid["vehicles"]
     assert [(v["gap"], v["gap_band"]) for v in (kda, kdb, kdc)] == [
-        (-2000, "amber"),
+        (-3000, "amber"),
         (100, "green"),
-        (-2300, "red"),
+        (-3300, "red"),
     ]
     assert grid["gap_amber_percent"] == 50
 
@@ -1605,24 +1641,24 @@ def test_the_revenue_settings_default_save_and_log_in_the_organization_section(
     read_back = read(app_conn, "organization_settings_get", yard.owner)["revenue"]
     assert read_back == {
         "organization_id": str(org),
-        "low_day_threshold": 4000,
+        "fuel_question_from": 10000,
         "gap_amber_percent": 10,
     }
-    saved = _save_settings(app_conn, yard.owner, {"low_day_threshold": 3500.5}, now=at(1))
+    saved = _save_settings(app_conn, yard.owner, {"fuel_question_from": 3500.5}, now=at(1))
     assert saved["outcome"] == "updated"
     read_back = read(app_conn, "organization_settings_get", yard.owner)["revenue"]
-    assert (read_back["low_day_threshold"], read_back["gap_amber_percent"]) == (3500.5, 10)
+    assert (read_back["fuel_question_from"], read_back["gap_amber_percent"]) == (3500.5, 10)
     [log] = change_rows(owner_conn, org, "organization")
     assert log["reason"] == (
-        "Changed the low-day threshold to KES 3,500.50 and the amber band to 10 per cent"
+        "Changed the fuel question amount to KES 3,500.50 and the amber band to 10 per cent"
     )
     assert (log["vehicle_id"], json.loads(log["before"])) == (None, None)
     assert json.loads(log["after"]) == {
         "organizationId": str(org),
-        "lowDayThreshold": 3500.5,
+        "fuelQuestionFrom": 3500.5,
         "gapAmberPercent": 10,
     }
-    same = _save_settings(app_conn, yard.owner, {"low_day_threshold": 3500.50}, now=at(2))
+    same = _save_settings(app_conn, yard.owner, {"fuel_question_from": 3500.50}, now=at(2))
     assert same["outcome"] == "unchanged"
     moved = _save_settings(app_conn, yard.owner, {"gap_amber_percent": 12.5}, now=at(3))
     assert moved["outcome"] == "updated"
@@ -1635,14 +1671,15 @@ def test_the_revenue_settings_default_save_and_log_in_the_organization_section(
 @pytest.mark.parametrize(
     ("value", "code"),
     [
-        ({"low_day_threshold": -1}, "revenue_settings_invalid"),
-        ({"low_day_threshold": 1000000000000}, "revenue_settings_invalid"),
-        ({"low_day_threshold": 10.005}, "revenue_settings_invalid"),
+        ({"fuel_question_from": 0}, "revenue_settings_invalid"),
+        ({"fuel_question_from": -1}, "revenue_settings_invalid"),
+        ({"fuel_question_from": 1000000000000}, "revenue_settings_invalid"),
+        ({"fuel_question_from": 10.005}, "revenue_settings_invalid"),
         ({"gap_amber_percent": 100.01}, "revenue_settings_invalid"),
         ({"gap_amber_percent": -0.5}, "revenue_settings_invalid"),
-        ({"low_day_threshold": "4000"}, "settings_wrong_type"),
+        ({"fuel_question_from": "4000"}, "settings_wrong_type"),
         ({"gap_amber_percent": True}, "settings_wrong_type"),
-        ({"low_day_threshold": None}, "settings_wrong_type"),
+        ({"fuel_question_from": None}, "settings_wrong_type"),
         ([4000], "settings_not_object"),
     ],
 )
@@ -1658,10 +1695,10 @@ def test_revenue_settings_out_of_range_or_of_the_wrong_kind_are_refused(
         code,
     )
     assert owner_conn.execute(
-        "SELECT low_day_threshold FROM tenancy.organization_revenue_settings "
+        "SELECT fuel_question_from FROM tenancy.organization_revenue_settings "
         "WHERE organization_id = %s",
         (yard.owner.org,),
-    ).fetchone() == {"low_day_threshold": 100}
+    ).fetchone() == {"fuel_question_from": 10000}
 
 
 def test_only_owners_change_the_revenue_settings(app_conn: Conn, yard: Yard) -> None:
@@ -1670,7 +1707,7 @@ def test_only_owners_change_the_revenue_settings(app_conn: Conn, yard: Yard) -> 
             app_conn,
             "organization_settings_set",
             who,
-            ["revenue", Jsonb({"low_day_threshold": 1}), None, None],
+            ["revenue", Jsonb({"fuel_question_from": 1}), None, None],
             "XC403",
             "permission_missing",
         )

@@ -23,6 +23,7 @@ class ListPettyCashEntriesQuery:
     q: str | None
     page: int | None
     page_size: int | None
+    vehicle_id: UUID | None = None
 
 
 class ListPettyCashEntries:
@@ -42,5 +43,6 @@ class ListPettyCashEntries:
                 query.q,
                 query.page,
                 query.page_size,
+                query.vehicle_id,
             )
         )

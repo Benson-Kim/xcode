@@ -1,5 +1,5 @@
 -- api.revenue_week_get(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_week_start date, p_company_id uuid, p_vehicle_id uuid, p_page integer, p_page_size integer, p_q text, p_now timestamptz) RETURNS jsonb
--- Purpose: the revenue week grid (RevenueWeekDto): the organization week holding p_week_start (default the business date); the visible vehicles in the fleet on some day of it, optionally of one company and matching p_q (registration or fleet number), by registration, one page of rows with their seven cells, earliest missing day, totals, gap and low days; the totals, percent, gap to target, low days, missing days, seven day totals and the first gap of the whole filtered grid; the low-day threshold and amber band in force; the company options. With p_vehicle_id, exactly that vehicle in any week, never paged.
+-- Purpose: the revenue week grid (RevenueWeekDto): the organization week holding p_week_start (default the business date); the visible vehicles in the fleet on some day of it, optionally of one company and matching p_q (registration or fleet number), by registration, one page of rows with their seven cells, earliest missing day, totals, gap, low days and not-fueled days; the totals, percent, gap to target, low days, missing days, seven day totals and the first gap of the whole filtered grid; the amber band and the amount from which the fuel question is asked (fuel_question_from); low days count days below each vehicle's own low revenue figure, not_fueled_days the records that say not fueled; low_day_threshold is always 4,000, kept for released clients; the company options. With p_vehicle_id, exactly that vehicle in any week, never paged.
 -- Callers: RevenueRoutines.week; GetRevenueWeek (GET /setup/revenue).
 -- Reads: setup.fleet_vehicles, setup.psv_companies, and what tenancy.business_date, tenancy.effective_permissions, tenancy.earliest_writable, tenancy.settings_document, tenancy.check_page, revenue.week_start, setup.visible_vehicles, setup.visible_companies, setup.vehicle_visible, setup.company_active_on, revenue.vehicle_days, revenue.earliest_missing and revenue.vehicle_week read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 time_zone_invalid via tenancy.business_date, XC422 page_out_of_range via tenancy.check_page, XC422 revenue_search_length, XC422 revenue_week_range, XC404 not_found.
@@ -43,7 +43,7 @@ DECLARE
   v_capture boolean;
   v_correct boolean;
   v_settings jsonb;
-  v_threshold numeric;
+  v_fuel_from numeric;
   v_amber numeric;
   v_today date;
   v_earliest date;
@@ -62,7 +62,7 @@ BEGIN
   v_correct := 'revenue.correct' = ANY (v_permissions);
   v_earliest := tenancy.earliest_writable(p_organization_id, p_actor_id, v_today);
   v_settings := tenancy.settings_document('revenue');
-  v_threshold := (v_settings ->> 'low_day_threshold')::numeric;
+  v_fuel_from := (v_settings ->> 'fuel_question_from')::numeric;
   v_amber := (v_settings ->> 'gap_amber_percent')::numeric;
   IF v_paged THEN
     v_page := coalesce(p_page, 1);
@@ -116,7 +116,8 @@ BEGIN
     );
 
   WITH days AS MATERIALIZED (
-    SELECT d AS fact, d.vehicle_id, d.day, d.active, d.target, d.counted, d.record_id, d.amount
+    SELECT d AS fact, d.vehicle_id, d.day, d.active, d.target, d.counted, d.record_id, d.amount,
+           d.low_below, d.fuel
     FROM revenue.vehicle_days(v_grid, v_start, v_through, v_today) AS d
   ),
   missing AS MATERIALIZED (
@@ -141,7 +142,7 @@ BEGIN
              'earliest_missing', m.earliest_missing,
              'fleet_number', f.fleet_number
            ) || revenue.vehicle_week(
-                  w.facts, v_today, v_capture, v_correct, v_earliest, v_threshold, v_amber
+                  w.facts, v_today, v_capture, v_correct, v_earliest, v_amber
                 ) AS document
     FROM unnest(v_shown) WITH ORDINALITY AS s (id, ord)
     JOIN setup.fleet_vehicles AS f ON f.organization_id = p_organization_id AND f.id = s.id
@@ -154,8 +155,9 @@ BEGIN
            coalesce(sum(d.target) FILTER (WHERE d.counted), 0) AS target,
            count(*) FILTER (
              WHERE d.counted AND d.record_id IS NOT NULL
-               AND coalesce(d.amount < v_threshold, true)
+               AND coalesce(d.amount < d.low_below, true)
            ) AS low_days,
+           count(*) FILTER (WHERE d.counted AND d.fuel IS FALSE) AS not_fueled_days,
            count(*) FILTER (WHERE d.counted AND d.record_id IS NULL) AS missing_days
     FROM days AS d
   ),
@@ -207,11 +209,13 @@ BEGIN
              FROM day_totals AS dt
            ),
            'first_gap', (SELECT jsonb_build_object('vehicle_id', g.id, 'day', g.day) FROM gap AS g),
-           'low_day_threshold', v_threshold,
+           'low_day_threshold', 4000,
+           'fuel_question_from', v_fuel_from,
            'gap_amber_percent', v_amber,
            'gap', round(t.amount - t.target, 2),
            'gap_band', revenue.gap_band(t.amount - t.target, t.target, v_amber),
            'below_threshold_days', t.low_days,
+           'not_fueled_days', t.not_fueled_days,
            'missing_days', t.missing_days
          )
   INTO v_document

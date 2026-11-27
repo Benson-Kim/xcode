@@ -20,6 +20,7 @@ class SaveTargetSetCommand:
     vehicle_id: UUID
     starts_on: date | None
     days: tuple[Decimal | None, ...] | None
+    low_below: Decimal | None
 
 
 class SaveTargetSet:
@@ -34,5 +35,6 @@ class SaveTargetSet:
                 command.vehicle_id,
                 command.starts_on,
                 command.days,
+                command.low_below,
             )
         )

@@ -36,7 +36,7 @@ WEEK = [Decimal(1000)] * 7
 
 def _new(company: UUID, registration: str, fleet: str = "N-1") -> tuple[Any, ...]:
     """``api.setup_vehicle_create`` arguments after the standard three: from 2026-03-01."""
-    return (company, registration, fleet, date(2026, 3, 1), WEEK, None, None)
+    return (company, registration, fleet, date(2026, 3, 1), WEEK, 4000, None, None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,8 +249,8 @@ def test_two_target_sets_saved_for_one_date_at_once_leave_the_later_one(
     starts = date(2026, 3, 10)
     first, late = _race(
         app_url,
-        _call("target_set_save", yard.owner, vehicle, starts, [Decimal(1100)] * 7),
-        _call("target_set_save", yard.owner, vehicle, starts, [Decimal(1200)] * 7),
+        _call("target_set_save", yard.owner, vehicle, starts, [Decimal(1100)] * 7, 4000),
+        _call("target_set_save", yard.owner, vehicle, starts, [Decimal(1200)] * 7, 4000),
     )
     assert (first["outcome"], late["outcome"]) == ("created", "updated")
     assert first["id"] == late["id"]
@@ -267,7 +267,7 @@ def test_a_target_set_saved_while_its_vehicle_leaves_waits_and_is_refused(
     first, late = _race(
         app_url,
         _call("vehicle_retire", yard.owner, vehicle, TODAY, None),
-        _call("target_set_save", yard.owner, vehicle, date(2026, 3, 10), [Decimal(1100)] * 7),
+        _call("target_set_save", yard.owner, vehicle, date(2026, 3, 10), [Decimal(1100)] * 7, 4000),
     )
     assert first["outcome"] == "updated"
     assert late == ("XC422", "vehicle_retired_edit")
@@ -287,7 +287,7 @@ def test_a_target_set_removed_while_it_is_replaced_waits_and_the_replacement_is_
     assert set_id is not None
     first, late = _race(
         app_url,
-        _call("target_set_save", yard.owner, vehicle, date(2026, 3, 10), [Decimal(1100)] * 7),
+        _call("target_set_save", yard.owner, vehicle, date(2026, 3, 10), [Decimal(1100)] * 7, 4000),
         _call("target_set_remove", yard.owner, set_id["id"]),
     )
     assert (first["outcome"], late["outcome"]) == ("updated", "updated")

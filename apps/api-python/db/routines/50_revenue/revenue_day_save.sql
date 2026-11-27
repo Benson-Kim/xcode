@@ -1,8 +1,8 @@
 -- api.revenue_day_save(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_date date, p_rows jsonb, p_now timestamptz) RETURNS jsonb
--- Purpose: save one day for many vehicles, all or nothing: p_rows [{vehicle_id, amount, reason, note, version}] (amounts and versions as text); each row runs the single capture's steps (revenue.capture_row, an identical row a replay), checked as of the request; answers {rows: [{vehicle_id, id, version}]} in the order sent.
+-- Purpose: save one day for many vehicles, all or nothing: p_rows [{vehicle_id, amount, reason, note, fuel, version}] (amounts and versions as text; fuel "yes", "no" or null, a row without the key keeping the saved answer); each row runs the single capture's steps (revenue.capture_row, an identical row a replay), checked as of the request; answers {rows: [{vehicle_id, id, version}]} in the order sent.
 -- Callers: RevenueRoutines.save_day; SaveRevenueDay (PUT /setup/revenue/day/{date}).
 -- Reads: setup.fleet_vehicles, and what tenancy.effective_permissions, tenancy.settings_document, tenancy.business_date, tenancy.earliest_writable, setup.vehicle_visible, revenue.check_entry, revenue.capture_row and setup.decide_fleet_saving_runs read. Writes: what revenue.capture_row and setup.decide_fleet_saving_runs write.
--- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing, XC422 revenue_day_rows_required, XC422 revenue_day_rows_limit, XC422 revenue_day_vehicle_repeated, XC404 not_found, XC422 revenue_reason_invalid via revenue.check_entry, XC422 money_invalid via revenue.check_entry, XC422 revenue_entry_required via revenue.check_entry, XC422 revenue_note_length via revenue.check_entry, XC422 revenue_note_without_other via revenue.check_entry, XC422 time_zone_invalid via revenue.capture_row, XC422 revenue_low_needs_reason via revenue.capture_row, XC422 revenue_amount_with_reason via revenue.capture_row, XC422 revenue_future_date via revenue.capture_row, XC422 revenue_vehicle_away via revenue.capture_row, XC422 revenue_vehicle_inactive via revenue.capture_row, XC403 revenue_capture_permission via revenue.capture_row, XC403 revenue_correct_permission via revenue.capture_row, XC422 record_too_old via revenue.capture_row, XC409 revenue_day_conflict, XC409 revenue_concurrent_save via revenue.capture_row, XC409 unique_conflict via revenue.capture_row.
+-- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing, XC422 revenue_day_rows_required, XC422 revenue_day_rows_limit, XC422 revenue_day_vehicle_repeated, XC404 not_found, XC422 revenue_reason_invalid via revenue.check_entry, XC422 money_invalid via revenue.check_entry, XC422 revenue_entry_required via revenue.check_entry, XC422 revenue_note_length via revenue.check_entry, XC422 revenue_note_without_other via revenue.check_entry, XC422 fuel_invalid, XC422 fuel_invalid via revenue.capture_row, XC422 time_zone_invalid via revenue.capture_row, XC422 revenue_low_needs_reason via revenue.capture_row, XC422 revenue_amount_with_reason via revenue.capture_row, XC422 revenue_future_date via revenue.capture_row, XC422 revenue_vehicle_away via revenue.capture_row, XC422 revenue_vehicle_inactive via revenue.capture_row, XC403 revenue_capture_permission via revenue.capture_row, XC403 revenue_correct_permission via revenue.capture_row, XC422 record_too_old via revenue.capture_row, XC409 revenue_day_conflict, XC409 revenue_concurrent_save via revenue.capture_row, XC409 unique_conflict via revenue.capture_row.
 -- Tests: tests/db/test_revenue_day_routines.py, tests/api/test_revenue_day.py.
 -- Order: the row count, repeated vehicles, every vehicle visible (404, before any row), the
 -- shape of every row in the order sent, then each row's capture in ascending vehicle id (one
@@ -10,8 +10,8 @@
 -- for every vehicle. A row's XC422 refusal is raised again with its code and the
 -- vehicle_registration added to its detail; its version conflict becomes revenue_day_conflict
 -- naming the vehicle; a 403 or 404 passes unchanged. Any refusal aborts the whole call, so
--- nothing of the day is saved. What is the same for every row (the actor's rights, the low-day
--- threshold, the business date, the earliest writable date) is read once per call, and each
+-- nothing of the day is saved. What is the same for every row (the actor's rights, the amount
+-- from which the fuel question is asked, the business date, the earliest writable date) is read once per call, and each
 -- loop is one subtransaction, not one per row (a 500-row save fits the role's 5 s timeout).
 
 CREATE OR REPLACE FUNCTION api.revenue_day_save(
@@ -39,7 +39,9 @@ DECLARE
   v_versions bigint[];
   v_registrations text[];
   v_permissions text[];
-  v_threshold numeric;
+  v_fuel_from numeric;
+  v_fuels text[];
+  v_fuel_given boolean[];
   v_today date;
   v_writable_from date;
   v_count integer;
@@ -72,9 +74,11 @@ BEGIN
                    END ORDER BY e.n),
          array_agg(e.value ->> 'reason' ORDER BY e.n),
          array_agg(e.value ->> 'note' ORDER BY e.n),
+         array_agg(e.value ->> 'fuel' ORDER BY e.n),
+         array_agg(e.value ? 'fuel' ORDER BY e.n),
          array_agg(CASE WHEN (e.value ->> 'version') ~ '^[0-9]{1,18}$' THEN (e.value ->> 'version')::bigint END
                    ORDER BY e.n)
-  INTO v_vehicles, v_keys, v_amounts, v_reasons, v_notes, v_versions
+  INTO v_vehicles, v_keys, v_amounts, v_reasons, v_notes, v_fuels, v_fuel_given, v_versions
   FROM jsonb_array_elements(p_rows) WITH ORDINALITY AS e (value, n);
 
   IF (SELECT count(DISTINCT k) FROM unnest(v_keys) AS k) <> v_count THEN
@@ -97,6 +101,9 @@ BEGIN
     FOR v_i IN 1 .. v_count LOOP
       v_at := v_i;
       PERFORM revenue.check_entry(v_amounts[v_i], v_reasons[v_i], v_notes[v_i]);
+      IF v_fuels[v_i] NOT IN ('yes', 'no') THEN
+        PERFORM tenancy.refuse('fuel_invalid', 'XC422');
+      END IF;
     END LOOP;
   EXCEPTION
     WHEN SQLSTATE 'XC422' THEN
@@ -109,7 +116,7 @@ BEGIN
       );
   END;
 
-  v_threshold := (tenancy.settings_document('revenue') ->> 'low_day_threshold')::numeric;
+  v_fuel_from := (tenancy.settings_document('revenue') ->> 'fuel_question_from')::numeric;
   BEGIN
     FOR v_i IN SELECT s.n FROM unnest(v_vehicles) WITH ORDINALITY AS s (id, n) ORDER BY s.id LOOP
       v_at := v_i;
@@ -120,9 +127,10 @@ BEGIN
         );
       END IF;
       v_result := revenue.capture_row(
-        p_organization_id, p_actor_id, v_permissions, v_threshold, v_today, v_writable_from,
-        v_vehicles[v_i], p_date, v_amounts[v_i], v_reasons[v_i], v_notes[v_i], v_versions[v_i],
-        NULL, p_now, false
+        p_organization_id, p_actor_id, v_permissions, v_fuel_from, v_today, v_writable_from,
+        v_vehicles[v_i], p_date, v_amounts[v_i], v_reasons[v_i], v_notes[v_i],
+        CASE v_fuels[v_i] WHEN 'yes' THEN true WHEN 'no' THEN false END, v_fuel_given[v_i],
+        v_versions[v_i], NULL, p_now, false
       );
       v_results := v_results || jsonb_build_object(
         v_i::text, jsonb_build_object('id', v_result.id, 'version', v_result.version)

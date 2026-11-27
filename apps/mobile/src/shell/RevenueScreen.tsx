@@ -136,6 +136,7 @@ export function RevenueScreen({
           key={keyOf(target.vehicle.id, target.date)}
           target={target}
           canReason={canReason}
+          fuelQuestionFrom={week?.fuelQuestionFrom}
           onSave={(entry) => save(target, entry)}
           onClose={close}
           onOpenGap={(date) => {

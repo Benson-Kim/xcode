@@ -12,10 +12,16 @@ import { GapChip, VehicleRow } from "./VehicleRow";
 type Rows = ReturnType<typeof useGridRows>;
 
 // Stands in for the rows outside the window, so the page keeps the whole grid's height.
-function OffscreenRows({ height }: { height: number }) {
+function OffscreenRows({
+  height,
+  columns,
+}: {
+  height: number;
+  columns: number;
+}) {
   return (
     <tr aria-hidden="true">
-      <td colSpan={10} className="border-0 p-0" style={{ height }} />
+      <td colSpan={columns} className="border-0 p-0" style={{ height }} />
     </tr>
   );
 }
@@ -25,6 +31,7 @@ export function WeekGrid({
   days,
   today,
   canCapture,
+  showGap,
   searching,
   grid,
   gridRef,
@@ -35,6 +42,8 @@ export function WeekGrid({
   days: WeekDay[];
   today: string;
   canCapture: boolean;
+  // False while Targets is switched off (v2.38): no Gap to target column or total.
+  showGap: boolean;
   searching: boolean;
   grid: Rows;
   gridRef: RefObject<HTMLDivElement | null>;
@@ -43,6 +52,8 @@ export function WeekGrid({
 }) {
   const formats = useFormats();
   const { vehicles, windowed, rowIndex, rowCount, rows } = grid;
+  // Vehicle, seven days, Week total and Gap to target.
+  const columns = showGap ? 10 : 9;
   return (
     <div id="revT" ref={gridRef} tabIndex={-1}>
       <div className="tbl">
@@ -57,23 +68,31 @@ export function WeekGrid({
               Revenue by vehicle and day,{" "}
               {formats.formatDateRange(data.weekStart, data.weekThrough)}
             </caption>
-            <GridHead days={days} today={today} windowed={windowed} />
+            <GridHead
+              days={days}
+              today={today}
+              windowed={windowed}
+              showGap={showGap}
+            />
             <tbody ref={bodyRef}>
               {vehicles.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="empty">
+                  <td colSpan={columns} className="empty">
                     {searching ? "No vehicle matches." : "No vehicles."}
                   </td>
                 </tr>
               ) : (
                 <>
-                  {rows.before > 0 && <OffscreenRows height={rows.before} />}
+                  {rows.before > 0 && (
+                    <OffscreenRows height={rows.before} columns={columns} />
+                  )}
                   {vehicles.slice(rows.start, rows.end).map((item, offset) => (
                     <VehicleRow
                       key={item.id}
                       vehicle={item}
                       today={today}
                       canCapture={canCapture}
+                      showGap={showGap}
                       rowIndex={
                         windowed ? rowIndex[rows.start + offset] : undefined
                       }
@@ -81,13 +100,16 @@ export function WeekGrid({
                       onOpenDay={onOpenDay}
                     />
                   ))}
-                  {rows.after > 0 && <OffscreenRows height={rows.after} />}
+                  {rows.after > 0 && (
+                    <OffscreenRows height={rows.after} columns={columns} />
+                  )}
                 </>
               )}
             </tbody>
             {vehicles.length > 0 && (
               <GridTotals
                 data={data}
+                showGap={showGap}
                 rowIndex={windowed ? rowCount : undefined}
               />
             )}
@@ -102,10 +124,12 @@ function GridHead({
   days,
   today,
   windowed,
+  showGap,
 }: {
   days: WeekDay[];
   today: string;
   windowed: boolean;
+  showGap: boolean;
 }) {
   return (
     <thead>
@@ -125,9 +149,11 @@ function GridHead({
         <th scope="col" className="r">
           Week total
         </th>
-        <th scope="col" className="r">
-          Gap to target
-        </th>
+        {showGap && (
+          <th scope="col" className="r">
+            Gap to target
+          </th>
+        )}
       </tr>
     </thead>
   );
@@ -135,9 +161,11 @@ function GridHead({
 
 function GridTotals({
   data,
+  showGap,
   rowIndex,
 }: {
   data: RevenueWeek;
+  showGap: boolean;
   rowIndex: number | undefined;
 }) {
   const formats = useFormats();
@@ -151,9 +179,11 @@ function GridTotals({
           </td>
         ))}
         <td className="r">{formats.formatNumber(data.totalAmount)}</td>
-        <td className="r">
-          <GapChip gap={data.gap} band={data.gapBand} />
-        </td>
+        {showGap && (
+          <td className="r">
+            <GapChip gap={data.gap} band={data.gapBand} />
+          </td>
+        )}
       </tr>
     </tfoot>
   );

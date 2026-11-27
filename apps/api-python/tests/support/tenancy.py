@@ -167,6 +167,14 @@ def set_localization(owner: Conn, org: UUID, **values: Any) -> None:
     )
 
 
+def set_system_setting(owner: Conn, org: UUID, key: str, *, on: bool) -> None:
+    owner.execute(
+        "INSERT INTO tenancy.organization_system_settings (organization_id, key, enabled) "
+        "VALUES (%s, %s, %s) ON CONFLICT (organization_id, key) DO UPDATE SET enabled = %s",
+        (org, key, on, on),
+    )
+
+
 def membership(owner: Conn, org: UUID, user: UUID) -> dict[str, Any]:
     row = owner.execute(
         "SELECT * FROM tenancy.memberships WHERE organization_id = %s AND user_id = %s",

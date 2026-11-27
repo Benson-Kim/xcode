@@ -141,6 +141,15 @@ class PettyCashFigures:
 
 
 @dataclass(frozen=True, slots=True)
+class PettyCashWaiting:
+    """The waiting expenses (not sent back) of one vehicle in the days and floats shown:
+    what approving the days for that vehicle would approve."""
+
+    waiting: Decimal
+    waiting_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class PettyCashFloat:
     """One float over all its entries the caller may see."""
 
@@ -170,6 +179,8 @@ class PettyCashOverview:
     holders: tuple[PettyCashHolder, ...]
     figures: PettyCashFigures
     floats: tuple[PettyCashFloat, ...]
+    vehicles: tuple[PettyCashVehicleOption, ...] = ()
+    vehicle_waiting: PettyCashWaiting | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,6 +340,7 @@ class PettyCashOverviewQuery:
     holder_id: UUID | None
     from_date: date | None
     to_date: date | None
+    vehicle_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,6 +356,7 @@ class PettyCashEntryQuery:
     q: str | None
     page: int | None
     page_size: int | None
+    vehicle_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,6 +420,7 @@ class PettyCashDayApproval:
     day: date | None
     to: date | None
     holder_id: UUID | None
+    vehicle_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

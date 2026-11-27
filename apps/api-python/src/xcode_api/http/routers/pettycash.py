@@ -55,6 +55,7 @@ CallerDep = Annotated[Caller, Depends(current_caller)]
 ContainerDep = Annotated[Container, Depends(container)]
 Day = Annotated[date | None, Query(alias="date")]
 HolderFilter = Annotated[UUID | None, Query(alias="holderId")]
+VehicleFilter = Annotated[UUID | None, Query(alias="vehicleId")]
 FromDay = Annotated[date | None, Query(alias="from")]
 ToDay = Annotated[date | None, Query(alias="to")]
 PageNumber = Annotated[int, Query(alias="page", ge=-(2**31), le=2**31 - 1)]
@@ -116,9 +117,10 @@ async def get_overview(
     holder_id: HolderFilter = None,
     from_date: FromDay = None,
     to_date: ToDay = None,
+    vehicle_id: VehicleFilter = None,
 ) -> Response:
     overview = await c.get_pettycash_overview.execute(
-        GetPettyCashOverviewQuery(caller, day, period, holder_id, from_date, to_date)
+        GetPettyCashOverviewQuery(caller, day, period, holder_id, from_date, to_date, vehicle_id)
     )
     return respond(PettyCashOverviewDto.from_record(overview))
 
@@ -141,6 +143,7 @@ async def list_entries(
     q: str | None = None,
     page: PageNumber = 1,
     page_size: PageSize = 100,
+    vehicle_id: VehicleFilter = None,
 ) -> Response:
     entries = await c.list_pettycash_entries.execute(
         ListPettyCashEntriesQuery(
@@ -153,6 +156,7 @@ async def list_entries(
             q,
             page,
             page_size,
+            vehicle_id,
         )
     )
     return respond(
@@ -273,7 +277,7 @@ async def remove_entry(
 )
 async def approve_day(body: ApprovePettyCashDay, caller: CallerDep, c: ContainerDep) -> Response:
     result = await c.approve_pettycash_day.execute(
-        ApprovePettyCashDayCommand(caller, body.day, body.to, body.holder_id)
+        ApprovePettyCashDayCommand(caller, body.day, body.to, body.holder_id, body.vehicle_id)
     )
     return _approved(result)
 
@@ -344,10 +348,11 @@ async def export_entries(
     status: str | None = None,
     q: str | None = None,
     format: str | None = None,
+    vehicle_id: VehicleFilter = None,
 ) -> Response:
     file = await c.export_pettycash_entries.execute(
         ExportPettyCashEntriesQuery(
-            caller, from_date, to_date, holder_id, view, _words(status), q, format
+            caller, from_date, to_date, holder_id, view, _words(status), q, format, vehicle_id
         )
     )
     return file_response(file)

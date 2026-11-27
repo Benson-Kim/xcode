@@ -449,7 +449,7 @@ async def test_the_catalogue_keeps_its_shape_and_the_names_the_phone_looks_for(
     assert (await api.client.get("/setup/access/catalog")).status_code == 401
 
 
-# The catalogue lists the 59 rights the phone only displays ("Your access"); the keys its tabs,
+# The catalogue lists the 60 rights the phone only displays ("Your access"); the keys its tabs,
 # cards and buttons are gated on reach it through the token and the session, legacy ones too.
 # Deliberately gone: bills.* (no source; office bills were never served) and, for a Fleet
 # manager added after the change, commitments.view (dash.net no longer needs it).
@@ -916,12 +916,16 @@ def _sees_every_company(api: AuthApi, member: Member) -> None:
     set_scope(api.owner, member.user_id, _organization_of(api, member), all_companies=True)
 
 
-def _low_day_threshold(api: AuthApi, member: Member, amount: int) -> None:
+def _low_below(api: AuthApi, member: Member, amount: int) -> None:
+    """The low revenue figure on the org's vehicles, as a target set in force from joining."""
     api.owner.execute(
-        "INSERT INTO tenancy.organization_revenue_settings (organization_id, low_day_threshold) "
-        "VALUES (%s, %s) ON CONFLICT (organization_id) DO UPDATE "
-        "SET low_day_threshold = EXCLUDED.low_day_threshold",
-        (_organization_of(api, member), amount),
+        "INSERT INTO setup.vehicle_target_sets (organization_id, vehicle_id, starts_on, "
+        "monday, tuesday, wednesday, thursday, friday, saturday, sunday, low_below) "
+        "SELECT organization_id, id, joined_on, 1000, 1000, 1000, 1000, 1000, 1000, 1000, %s "
+        "FROM setup.fleet_vehicles WHERE organization_id = %s "
+        "ON CONFLICT (organization_id, vehicle_id, starts_on) "
+        "DO UPDATE SET low_below = EXCLUDED.low_below",
+        (amount, _organization_of(api, member)),
     )
 
 
@@ -960,10 +964,10 @@ async def test_a_v211_phone_retrying_an_entry_saved_under_another_threshold_gets
     vehicle = _phone_vehicle(api, clerk)
     _sees_every_company(api, clerk)
     url = f"/setup/revenue/{vehicle}/2026-10-05"
-    _low_day_threshold(api, clerk, 500)
+    _low_below(api, clerk, 500)
     saved = await api.client.put(url, json=_entry(amount=700), headers=clerk.headers)
     assert saved.status_code == 200, saved.text
-    _low_day_threshold(api, clerk, 4000)
+    _low_below(api, clerk, 4000)
     again = await api.client.put(url, json=_entry(amount=700), headers=clerk.headers)
     assert (again.status_code, json.loads(again.content)) == (200, json.loads(saved.content))
 
@@ -997,7 +1001,8 @@ async def test_a_v211_phone_reads_the_week_with_a_low_day_on_it(
     for cell in row["days"]:
         for name, *kinds in _CELL:
             has(cell, name, *kinds)
-    low = row["days"][0]
+    # 5 October is the Monday, the second day of the Sunday-to-Saturday week.
+    low = row["days"][1]
     # What the phone keeps as the saved value: an amount and a reason together are accepted.
     assert (low["status"], low["amount"], low["reason"]) == ("amount", 2500, "Garage")
 

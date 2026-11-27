@@ -125,7 +125,9 @@ def _rule(owner_conn: Conn, version: UUID, minimum: int, days: int) -> None:
 def _capture(
     app: Conn, who: Member, vehicle: UUID, day: date, amount: int, version: int | None = None
 ) -> dict[str, Any]:
-    return run(app, "revenue_capture", who, vehicle, day, amount, None, None, version, None)
+    return run(
+        app, "revenue_capture", who, vehicle, day, amount, None, None, None, False, version, None
+    )
 
 
 def _runs(app: Conn, who: Member, item: UUID) -> dict[str, Any]:
@@ -343,10 +345,41 @@ def test_a_week_window_waits_for_every_active_day_and_leaves_out_days_away(
     _capture(app_conn, world.owner, world.kdb, _days(4), 4000)
     assert _decided(owner_conn, item) == []
     _capture(app_conn, world.owner, world.kdb, _days(1), 4000)
-    assert _decided(owner_conn, item) == [(_days(1), 1, Decimal("20000.00"))]
-    assert _shares(app_conn, world.owner, item)[str(TODAY)] == [("KDB 111A", "held", 16000)]
+    # Saturday's run weighs its own week, 8 to 14 March, and Sunday's run the same week.
+    assert _decided(owner_conn, item) == [
+        (_days(1), 1, Decimal("20000.00")),
+        (TODAY, 1, Decimal("20000.00")),
+    ]
+    assert _shares(app_conn, world.owner, item)[str(TODAY)] == [("KDB 111A", "saved", 20000)]
     _capture(app_conn, world.owner, world.kdb, TODAY, 4000)
     assert _decided(owner_conn, item)[-1] == (TODAY, 1, Decimal("20000.00"))
+
+
+def test_a_week_rule_weighs_sunday_to_saturday_weeks_from_the_change_date(
+    app_conn: Conn, owner_conn: Conn, world: World
+) -> None:
+    item, version = _daily(owner_conn, world, kind=2, since=4, name="Week")
+    _rule(owner_conn, version, 34000, 7)
+    # The organization moved to Sunday weeks on Thursday 12 March (09:00 in Nairobi).
+    owner_conn.execute(
+        "UPDATE tenancy.organizations SET sunday_week_at = '2026-03-12 06:00:00+00' WHERE id = %s",
+        (world.owner.org,),
+    )
+    for n, amount in [(n, 5000) for n in range(14, 7, -1)] + [(7, 4500), (6, 4500), (5, 4500)]:
+        add_record(
+            owner_conn, world.owner.org, world.kda, _days(n), amount, recorder=world.owner.id
+        )
+    _capture(app_conn, world.owner, world.kda, _days(4), 4500)
+    assert _decided(owner_conn, item) == [
+        # Wednesday 11 March, before the change: the 7 days to the run, 5 to 11 March.
+        (_days(4), 2, Decimal("33000.00")),
+        # Thursday and Friday weigh the week before, 1 to 7 March, without waiting for later days.
+        (_days(3), 1, Decimal("35000.00")),
+        (_days(2), 1, Decimal("35000.00")),
+    ]
+    # Saturday's and Sunday's runs weigh 8 to 14 March, still waiting for 12 to 14 March.
+    assert _shares(app_conn, world.owner, item)[str(TODAY)] == [("KDA 482M", "held", 18000)]
+    assert _shares(app_conn, world.owner, item)[str(_days(1))] == [("KDA 482M", "held", 18000)]
 
 
 def test_two_connections_deciding_one_run_store_one_row(
@@ -354,7 +387,8 @@ def test_two_connections_deciding_one_run_store_one_row(
 ) -> None:
     item, version = _daily(owner_conn, world, kind=2, since=0, name="Week")
     _rule(owner_conn, version, 1000, 7)
-    for n in (6, 5, 4, 3, 2):
+    # Sunday's run weighs the week before, 8 to 14 March; Saturday's capture completes it.
+    for n in (7, 6, 5, 4, 3, 2):
         add_record(owner_conn, world.owner.org, world.kda, _days(n), 5000, recorder=world.owner.id)
     first, late = _race(
         app_url,

@@ -183,6 +183,7 @@ it("adds, edits, retires and restores a vehicle without a typed reason", async (
         fleetNumber: "21",
         dayTargets: [2000, 2000, 2000, 2000, 2000, 2000, 4000],
         initialInvestment: null,
+        lowBelow: 4000,
       },
     ],
     [

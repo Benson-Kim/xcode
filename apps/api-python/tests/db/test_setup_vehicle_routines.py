@@ -47,6 +47,7 @@ from ..support.tenancy import (
     set_organization,
     set_override,
     set_scope,
+    set_system_setting,
     settings_version,
 )
 
@@ -111,6 +112,14 @@ def _targets(owner_conn: Conn, vehicle: UUID) -> list[tuple[date, list[Decimal]]
     return [(r["starts_on"], r["days"]) for r in rows]
 
 
+def _low_figures(owner_conn: Conn, vehicle: UUID) -> list[Decimal]:
+    rows = owner_conn.execute(
+        "SELECT low_below FROM setup.vehicle_target_sets WHERE vehicle_id = %s ORDER BY starts_on",
+        (vehicle,),
+    ).fetchall()
+    return [r["low_below"] for r in rows]
+
+
 def _away(owner_conn: Conn, vehicle: UUID) -> list[tuple[date, date]]:
     rows = owner_conn.execute(
         "SELECT left_on, returned_on FROM setup.vehicle_away_periods WHERE vehicle_id = %s "
@@ -127,9 +136,10 @@ def _save(
     days: Any = WEEK,
     fleet: str | None = "N-1",
     investment: Any = None,
+    low_below: Any = None,
 ) -> list[Any]:
     """The arguments of ``api.setup_vehicle_create`` between the standard three and the reason."""
-    return [company, registration, fleet, joined_on, days, investment]
+    return [company, registration, fleet, joined_on, days, low_below, investment]
 
 
 def _edit(
@@ -163,7 +173,9 @@ def test_the_list_carries_targets_scheduled_items_and_away_periods_for_a_manager
         "UPDATE setup.fleet_vehicles SET initial_investment = 2500000 WHERE id = %s", (kda,)
     )
     add_target(owner_conn, org, kda, 2, date(2026, 3, 1), 9000)
-    add_target_set(owner_conn, org, kda, date(2026, 3, 10), [1300] * 6 + [Decimal("1300.50")])
+    add_target_set(
+        owner_conn, org, kda, date(2026, 3, 10), [1300] * 6 + [Decimal("1300.50")], low_below=3500
+    )
     add_away(owner_conn, org, kda, date(2026, 2, 10), date(2026, 2, 12))
     add_away(owner_conn, org, kda, date(2026, 1, 5), date(2026, 1, 6))
     later = _vehicle(owner_conn, yard, "KDB 111A", joined_on=date(2026, 3, 10), company=yard.south)
@@ -194,10 +206,12 @@ def test_the_list_carries_targets_scheduled_items_and_away_periods_for_a_manager
         "active": True,
         "weekly_target": 9000.00,
         "day_targets": [1285.71] * 6 + [1285.74],
+        "low_below": 4000,
         "next_target": {
             "starts_on": "2026-03-10",
             "day_targets": [1300] * 6 + [1300.50],
             "weekly_target": 9100.50,
+            "low_below": 3500,
         },
         "targets": [
             {"effective_from": "2026-01-01", "weekly_amount": 7000.00, "revision": 1},
@@ -239,7 +253,7 @@ def test_an_investment_viewer_gets_no_targets_and_no_scheduled_item_count(
     (row,) = page["items"]
     assert (row["id"], row["fleet_number"]) == (str(kda), "482M")
     assert (row["weekly_target"], row["targets"], row["recurring_items"]) == (None, [], None)
-    assert (row["day_targets"], row["next_target"]) == (None, None)
+    assert (row["day_targets"], row["next_target"], row["low_below"]) == (None, None, None)
 
 
 def test_the_list_needs_vehicles_view_or_reports_investment_before_the_page_is_checked(
@@ -345,7 +359,7 @@ def test_create_adds_the_vehicle_with_its_first_target_set_from_the_join_date_an
     assert (log["entity_id"], log["vehicle_id"]) == (vehicle, vehicle)
     assert log["reason"] == (
         "Added vehicle KDA 482M, fleet number n-1, to North Star with a weekly target of "
-        "KES 7,000 from 2026-01-01"
+        "KES 7,000, low below KES 4,000 from 2026-01-01"
     )
     assert log["before"] == "null"
     assert log["after"] == (
@@ -353,8 +367,85 @@ def test_create_adds_the_vehicle_with_its_first_target_set_from_the_join_date_an
         f'"CompanyId":"{yard.north}","JoinedOn":"2026-01-01","LeftOn":null,'
         '"InitialInvestment":2500000,"TargetSets":[{"StartsOn":"2026-01-01","Monday":1000,'
         '"Tuesday":1000,"Wednesday":1000,"Thursday":1000,"Friday":1000,"Saturday":1500,'
-        '"Sunday":500}],"Away":[]}'
+        '"Sunday":500,"LowBelow":4000}],"Away":[]}'
     )
+
+
+def test_with_targets_off_a_new_vehicle_takes_seven_zero_targets_and_its_low_figure(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    set_system_setting(owner_conn, yard.owner.org, "targets", on=False)
+    result = run(
+        app_conn,
+        "setup_vehicle_create",
+        yard.owner,
+        *_save(yard.north, "KDA 482M", date(2026, 1, 1), None, low_below=Decimal("2500.50")),
+        None,
+    )
+    vehicle = UUID(str(result["id"]))
+    assert _targets(owner_conn, vehicle) == [(date(2026, 1, 1), [Decimal(0)] * 7)]
+    assert _low_figures(owner_conn, vehicle) == [Decimal("2500.50")]
+    assert reasons(owner_conn, yard.owner.org, "vehicles") == [
+        "Added vehicle KDA 482M, fleet number N-1, to North Star, low below KES 2,500.50 "
+        "from 2026-01-01"
+    ]
+
+
+def test_with_targets_off_the_explicit_zero_day_targets_the_forms_send_are_accepted(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    set_system_setting(owner_conn, yard.owner.org, "targets", on=False)
+    result = run(
+        app_conn,
+        "setup_vehicle_create",
+        yard.owner,
+        *_save(yard.north, "KDA 482M", date(2026, 1, 1), [Decimal(0)] * 7, low_below=Decimal(2500)),
+        None,
+    )
+    vehicle = UUID(str(result["id"]))
+    assert _targets(owner_conn, vehicle) == [(date(2026, 1, 1), [Decimal(0)] * 7)]
+    assert _low_figures(owner_conn, vehicle) == [Decimal(2500)]
+
+
+def test_with_targets_off_day_targets_given_are_still_kept(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    set_system_setting(owner_conn, yard.owner.org, "targets", on=False)
+    result = run(
+        app_conn,
+        "setup_vehicle_create",
+        yard.owner,
+        *_save(yard.north, "KDA 482M", date(2026, 1, 1)),
+        None,
+    )
+    vehicle = UUID(str(result["id"]))
+    assert _targets(owner_conn, vehicle) == [(date(2026, 1, 1), WEEK)]
+    assert _low_figures(owner_conn, vehicle) == [Decimal(4000)]
+
+
+@pytest.mark.parametrize("low_below", [-1, Decimal("1.005")])
+def test_create_refuses_a_low_figure_below_zero_or_past_two_decimals(
+    app_conn: Conn, yard: Yard, low_below: Any
+) -> None:
+    refuses(
+        app_conn,
+        "setup_vehicle_create",
+        yard.owner,
+        [*_save(yard.north, "KDA 482M", TODAY, low_below=low_below), None],
+        "XC422",
+        "money_invalid",
+    )
+
+
+def test_a_low_figure_of_zero_is_kept(app_conn: Conn, owner_conn: Conn, yard: Yard) -> None:
+    result = run(
+        app_conn,
+        "setup_vehicle_create",
+        yard.owner,
+        *_save(yard.north, "KDA 482M", TODAY, low_below=0),
+        None,
+    )
+    assert _low_figures(owner_conn, UUID(str(result["id"]))) == [Decimal(0)]
 
 
 def test_an_initial_investment_is_optional_and_zero_means_none(
@@ -396,7 +487,7 @@ def test_a_fractional_target_and_the_organization_currency_are_named(
     )
     assert reasons(owner_conn, yard.owner.org, "vehicles") == [
         "Added vehicle KDA 482M, fleet number N-1, to North Star with a weekly target of "
-        "USD 7,150.50 from 2026-01-01. Reason: Bought at auction."
+        "USD 7,150.50, low below USD 4,000 from 2026-01-01. Reason: Bought at auction."
     ]
 
 
@@ -1230,17 +1321,13 @@ def test_the_window_starts_at_the_join_date(app_conn: Conn, yard: Yard, report: 
     assert (january["target"], january["postings"][0]["day"]) == (3000, "2026-02-02")
 
 
-@pytest.mark.parametrize(
-    ("first_day", "start"), [(1, "2026-09-21"), (0, "2026-09-20"), (6, "2026-09-26")]
-)
-def test_a_week_runs_from_the_organizations_first_day_through_today(
-    app_conn: Conn, owner_conn: Conn, yard: Yard, first_day: int, start: str
+def test_a_week_runs_from_sunday_through_today(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
 ) -> None:
     kda = _vehicle(owner_conn, yard)
     set_organization(owner_conn, yard.owner.org, business_date=date(2026, 9, 26))
-    set_localization(owner_conn, yard.owner.org, first_day_of_week=first_day)
     week = _report(app_conn, yard.owner, kda, "week", None, None)
-    assert (week["from_date"], week["through"]) == (start, "2026-09-26")
+    assert (week["from_date"], week["through"]) == ("2026-09-20", "2026-09-26")
     month = _report(app_conn, yard.owner, kda, "month", date(2020, 1, 1), None)
     assert (month["from_date"], month["through"]) == ("2026-09-01", "2026-09-26")
 

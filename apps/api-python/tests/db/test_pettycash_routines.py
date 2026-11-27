@@ -27,7 +27,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from ..support.rows import seed_organization
-from ..support.scenario import T0, Conn
+from ..support.scenario import T0, Conn, call
 from ..support.setup_rows import add_category, add_item, change_rows, read, refuses
 from ..support.tenancy import (
     REQUEST,
@@ -36,7 +36,7 @@ from ..support.tenancy import (
     add_vehicle,
     audit_events,
     provision_member,
-    set_localization,
+    refused,
     set_override,
     set_scope,
 )
@@ -1881,13 +1881,92 @@ def test_approving_a_period_approves_every_day_in_it(
     )
 
 
+def with_vehicle(app: Conn, routine: str, who: Member, vehicle: UUID, *args: Any) -> Any:
+    return call(app, routine, who.id, who.org, REQUEST, *args, T0, vehicle)
+
+
+def test_a_vehicle_narrows_the_list_the_waiting_figure_and_approve_day(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    """The figures stay the floats'; status and search do not narrow what approve-day takes."""
+    expense(app_conn, yard, 1000)
+    expense(app_conn, yard, 300, note="Front tyre")
+    decide(app_conn, "send_back", yard.admin, expense(app_conn, yard, 5), "Receipt")
+    on_kab = expense(app_conn, yard, 700, who=yard.owner, holder=yard.clerk.id, vehicle=yard.kab)
+
+    page = with_vehicle(
+        app_conn,
+        "pettycash_entry_list",
+        yard.admin,
+        yard.kab,
+        TODAY,
+        TODAY,
+        None,
+        None,
+        None,
+        None,
+        1,
+        100,
+    )
+    assert [(e["registration"], num(e["total"])) for e in page["items"]] == [("KAB 502B", 700)]
+    assert page["total"] == 1
+
+    whole = overview(app_conn, yard.admin, start=TODAY, end=TODAY)
+    assert whole["vehicle_waiting"] is None
+    assert [(v["registration"], v["active"]) for v in whole["vehicles"]] == [
+        ("KAA 501A", True),
+        ("KAB 502B", True),
+    ]
+    seen = overview(app_conn, yard.clerk, start=TODAY, end=TODAY)["vehicles"]
+    assert [v["registration"] for v in seen] == ["KAA 501A"]
+    narrowed = with_vehicle(
+        app_conn,
+        "pettycash_overview_get",
+        yard.admin,
+        yard.kaa,
+        None,
+        None,
+        None,
+        TODAY,
+        TODAY,
+    )
+    assert narrowed["figures"] == whole["figures"]
+    assert (num(whole["figures"]["waiting"]), whole["figures"]["waiting_count"]) == (2000, 3)
+    waiting = narrowed["vehicle_waiting"]
+    assert (num(waiting["waiting"]), waiting["waiting_count"]) == (1300, 2)
+
+    done = with_vehicle(app_conn, "pettycash_day_approve", yard.admin, yard.kaa, TODAY, None, None)
+    assert (done["approved"], num(done["total"]), done["skipped"]) == (2, 1300, 0)
+    assert stored(owner_conn, on_kab)["status"] == 1
+
+    calls: tuple[tuple[str, list[Any]], ...] = (
+        ("pettycash_entry_list", [TODAY, TODAY, None, None, None, None, 1, 100]),
+        ("pettycash_overview_get", [None, None, None, TODAY, TODAY]),
+        ("pettycash_day_approve", [TODAY, None, None]),
+    )
+    for routine, args in calls:
+        refused(
+            app_conn,
+            routine,
+            [yard.admin.id, yard.org, REQUEST, *args, T0, uuid4()],
+            "XC404",
+            "not_found",
+        )
+    for routine, args in calls[:2]:
+        refused(
+            app_conn,
+            routine,
+            [yard.clerk.id, yard.org, REQUEST, *args, T0, yard.kab],
+            "XC404",
+            "not_found",
+        )
+
+
 # --- overview ---
 
 
-def test_a_week_starts_on_the_organizations_first_day(
-    app_conn: Conn, owner_conn: Conn, yard: Yard
-) -> None:
-    """The week bounds for every first day of the week."""
+def test_a_week_runs_sunday_to_saturday(app_conn: Conn, owner_conn: Conn, yard: Yard) -> None:
+    """The week holding the day, Sunday first, whatever day of it is asked."""
     monday = day(-4)
     cash(app_conn, yard, 10000, on=monday - timedelta(days=2))
     expense(app_conn, yard, 1000, on=monday)
@@ -1897,8 +1976,8 @@ def test_a_week_starts_on_the_organizations_first_day(
     assert (seen["period"], seen["day"], seen["from_date"], seen["to_date"]) == (
         "week",
         "2026-10-09",
-        "2026-10-05",
-        "2026-10-11",
+        "2026-10-04",
+        "2026-10-10",
     )
     assert [
         num(seen["figures"][k])
@@ -1913,25 +1992,18 @@ def test_a_week_starts_on_the_organizations_first_day(
             "waiting_count",
         )
     ] == [10000, 2000, 1500, 0, 1500, 10500, 1500, 2]
-    assert (
-        overview(app_conn, yard.clerk, on=monday + timedelta(days=1), period=" week ")["from_date"]
-        == "2026-10-05"
-    )
-    for first_day in range(7):
-        set_localization(owner_conn, yard.org, first_day_of_week=first_day)
-        seen = overview(app_conn, yard.clerk, period="week")
-        start = date.fromisoformat(seen["from_date"])
-        assert (start.isoweekday() % 7, date.fromisoformat(seen["to_date"]) - start) == (
-            first_day,
-            timedelta(days=6),
-        )
-        assert day(-6) <= start <= TODAY
-    set_localization(owner_conn, yard.org, first_day_of_week=6)
-    seen = overview(app_conn, yard.clerk, period="week")
-    assert (seen["from_date"], seen["to_date"]) == ("2026-10-03", "2026-10-09")
+    for on, week in (
+        (day(-5), ("2026-10-04", "2026-10-10")),
+        (monday + timedelta(days=1), ("2026-10-04", "2026-10-10")),
+        (day(-6), ("2026-09-27", "2026-10-03")),
+    ):
+        seen = overview(app_conn, yard.clerk, on=on, period=" week ")
+        assert (seen["from_date"], seen["to_date"]) == week
+        assert date.fromisoformat(seen["from_date"]).isoweekday() == 7
+    seen = overview(app_conn, yard.clerk, on=day(-6), period="week")
     assert (
         num(seen["figures"]["opening_balance"]) == 0
-        and num(seen["figures"]["cash_received"]) == 12000
+        and num(seen["figures"]["cash_received"]) == 10000
     )
     refuses(
         app_conn,

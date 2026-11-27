@@ -5,21 +5,8 @@ import { gapText, type RevenueWeek } from "@xcode/shared/revenue";
 import { useFormats } from "../../lib/formats";
 import { shiftDate } from "../revenueFormat";
 import { BandFigure, BandStats, HeroBand, Skeleton } from "../ui";
-import { DEFAULT_LOW_DAY_THRESHOLD } from "./capture";
 import { BandSkeleton } from "./RegPlate";
-
-// Counted from the grid when the API does not say: low days plus no revenue days, and missing days.
-function countDays(week: RevenueWeek) {
-  let below = 0;
-  let missing = 0;
-  for (const vehicle of week.vehicles)
-    for (const day of vehicle.days) {
-      if (day.status === "reason" || (day.status === "amount" && day.reason))
-        below++;
-      else if (day.status === "missing") missing++;
-    }
-  return { below, missing };
-}
+import { weekCounts } from "./summaryImage";
 
 export function WeekToolbar({
   start,
@@ -27,6 +14,7 @@ export function WeekToolbar({
   data,
   companyId,
   search,
+  showTargets,
   exportMenu,
   onWeek,
   onCompany,
@@ -37,14 +25,15 @@ export function WeekToolbar({
   data: RevenueWeek | undefined;
   companyId: string;
   search: string;
+  // False while Targets is switched off (v2.38): no Gap to target figure.
+  showTargets: boolean;
   exportMenu?: ReactNode;
   onWeek: (weekStart: string) => void;
   onCompany: (companyId: string) => void;
   onSearch: (value: string) => void;
 }) {
   const formats = useFormats();
-  const counts = data && countDays(data);
-  const threshold = data?.lowDayThreshold ?? DEFAULT_LOW_DAY_THRESHOLD;
+  const counts = data && weekCounts(data);
   // A week still running is judged on its days so far.
   const finished = data ? data.weekThrough < data.businessDate : false;
   const period = (
@@ -120,20 +109,25 @@ export function WeekToolbar({
           {counts && (
             <BandStats
               items={[
-                {
-                  label: finished ? "Gap to target" : "Gap to target so far",
-                  value:
-                    data.gap === null || data.gap === undefined
-                      ? "0"
-                      : gapText(data.gap, formats.formatNumber),
-                },
-                {
-                  label: `Below ${formats.formatNumber(threshold)}`,
-                  value: String(data.belowThresholdDays ?? counts.below),
-                },
+                ...(showTargets
+                  ? [
+                      {
+                        label: finished
+                          ? "Gap to target"
+                          : "Gap to target so far",
+                        value:
+                          data.gap === null || data.gap === undefined
+                            ? "0"
+                            : gapText(data.gap, formats.formatNumber),
+                      },
+                    ]
+                  : []),
+                // Days below each vehicle's own low figure, and no revenue days (v2.34).
+                { label: "Low days", value: String(counts.low) },
+                { label: "Not fueled", value: String(counts.notFueled) },
                 {
                   label: "Missing days",
-                  value: String(data.missingDays ?? counts.missing),
+                  value: String(counts.missing),
                 },
               ]}
             />

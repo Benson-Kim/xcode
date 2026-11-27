@@ -64,6 +64,7 @@ class ApprovePettyCashDay(ApiModel):
     day: date | None = Field(default=None, alias="date")
     holder_id: UUID | None = None
     to: date | None = None
+    vehicle_id: UUID | None = None
 
 
 class TickedPettyCashEntry(ApiModel):
@@ -131,6 +132,11 @@ class PettyCashFiguresDto(ApiModel):
     waiting_count: int
 
 
+class PettyCashWaitingDto(ApiModel):
+    waiting: Money
+    waiting_count: int
+
+
 class PettyCashFloatDto(ApiModel):
     holder_id: UUID
     name: str
@@ -157,6 +163,8 @@ class PettyCashOverviewDto(ApiModel):
     holders: list[PettyCashHolderDto]
     figures: PettyCashFiguresDto
     floats: list[PettyCashFloatDto]
+    vehicles: list[PettyCashVehicleOptionDto] = Field(default_factory=list)
+    vehicle_waiting: PettyCashWaitingDto | None = None
 
 
 class PettyCashGroupDto(ApiModel):

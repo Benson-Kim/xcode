@@ -107,6 +107,7 @@ export const RIGHTS = [
   "people.block",
   "people.sign_in",
   "audit.view",
+  "settings.edit",
 ] as const;
 
 export type LegacyPermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -188,7 +189,10 @@ export const NAV = {
   // The roles a person can be given; changing them needs access.manage.
   roles: { label: "Roles", any: ["people.view"] },
   history: { label: "Change log", any: ["audit.view"] },
-  settings: { label: "Organization settings", any: ["organization.manage"] },
+  settings: {
+    label: "Organization settings",
+    any: ["organization.manage", "settings.edit"],
+  },
 } as const satisfies Record<string, NavRule & { label: string }>;
 
 export type NavId = keyof typeof NAV;
@@ -221,7 +225,14 @@ export const SETUP_NAV = [
 
 export type NavSection =
   | { kind: "items"; items: readonly NavId[] }
-  | { kind: "group"; id: string; label: string; items: readonly NavId[] };
+  | {
+      kind: "group";
+      id: string;
+      label: string;
+      items: readonly NavId[];
+      // Open only while one of its pages is in use: each page opened outside it collapses it again (v2.46).
+      closedOutside?: boolean;
+    };
 
 // The menu top to bottom: loose items, or a collapsible group with its own heading. Savings is its own item
 // between Expenses and Reports (v2.30).
@@ -229,7 +240,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
   { kind: "items", items: PRIMARY_NAV },
   { kind: "group", id: "expenses", label: "Expenses", items: EXPENSES_NAV },
   { kind: "items", items: MIDDLE_NAV },
-  { kind: "group", id: "setup", label: "Setup", items: SETUP_NAV },
+  {
+    kind: "group",
+    id: "setup",
+    label: "Setup",
+    items: SETUP_NAV,
+    closedOutside: true,
+  },
 ];
 
 export const DASHBOARD_CARDS = [

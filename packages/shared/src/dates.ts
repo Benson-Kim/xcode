@@ -168,6 +168,19 @@ export const daysBetween = (from: string, to: string) =>
 export const startOfWeek = (value: string, weekStartsOn: number) =>
   shiftDate(value, -((weekdayIndex(value) - weekStartsOn + 7) % 7));
 
+// The first day of the week after the one holding the date.
+export const startOfNextWeek = (value: string, weekStartsOn: number) =>
+  shiftDate(startOfWeek(value, weekStartsOn), 7);
+
+export type Weekday = (typeof WEEKDAYS)[number];
+
+// The seven weekdays in the order a week starting on that day shows them.
+export const weekdaysFrom = (weekStartsOn: number): Weekday[] =>
+  WEEKDAYS.map((_, offset) => WEEKDAYS[(weekStartsOn + offset) % 7]!);
+
+// Where a weekday (0 = Sunday) sits in a list kept Monday first, as the API keeps the seven day targets.
+export const mondayFirstIndex = (weekday: number) => (weekday + 6) % 7;
+
 export type WeekDay = {
   date: string;
   weekday: number;

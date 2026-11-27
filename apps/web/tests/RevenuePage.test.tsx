@@ -5,6 +5,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { canOpen } from "@xcode/shared/capture";
@@ -15,8 +16,9 @@ import type {
 } from "@xcode/shared/revenue";
 
 import { RevenuePage } from "../components/RevenuePage";
+import { AppearanceProvider } from "../lib/appearance";
 import { useFormats } from "../lib/formats";
-import { renderInApp } from "./renderInApp";
+import { appearanceFixture, renderInApp } from "./renderInApp";
 
 // Render counters: every part of the grid reads the formatter once per render, and each day cell asks once whether it
 // opens capture.
@@ -335,7 +337,7 @@ it("renders the week grid from one request, with the gap to target, the headline
     screen.getByText(label, { selector }).nextSibling;
   expect(stat("Revenue", ".lab")).toHaveTextContent(/^KES 23,100$/);
   expect(stat("Gap to target so far")).toHaveTextContent(/^−10,900$/);
-  expect(stat("Below 4,000")).toHaveTextContent(/^2$/);
+  expect(stat("Low days")).toHaveTextContent(/^2$/);
   expect(stat("Missing days")).toHaveTextContent(/^2$/);
   expect(screen.queryByText("Expected")).not.toBeInTheDocument();
   expect(screen.queryByText("Reached")).not.toBeInTheDocument();
@@ -360,7 +362,7 @@ it("says Gap to target for a finished week, and counts the days itself when the 
     week(
       [
         vehicle("vehicle-1", "KDA 482M", {
-          [DATES[0]]: recorded(2000, 1, { reason: "Arrest" }),
+          [DATES[0]]: recorded(2000, 1, { reason: "Arrest", fuel: "no" }),
           [DATES[1]]: { status: "reason", reason: "Garage", canEdit: false },
         }),
       ],
@@ -370,7 +372,6 @@ it("says Gap to target for a finished week, and counts the days itself when the 
         currentWeekStart: DATES[0],
         gap: 0,
         gapBand: "pos",
-        lowDayThreshold: 5000,
       },
     ),
   );
@@ -379,8 +380,9 @@ it("says Gap to target for a finished week, and counts the days itself when the 
   const stat = (label: string) =>
     screen.getByText(label, { selector: ".side span" }).nextSibling;
   expect(stat("Gap to target")).toHaveTextContent(/^0$/);
-  // The threshold is the fleet's setting, not a constant.
-  expect(stat("Below 5,000")).toHaveTextContent(/^2$/);
+  // A low day and a no revenue day, whatever each vehicle's own figure.
+  expect(stat("Low days")).toHaveTextContent(/^2$/);
+  expect(stat("Not fueled")).toHaveTextContent(/^1$/);
   expect(stat("Missing days")).toHaveTextContent(/^1$/);
 });
 
@@ -738,6 +740,7 @@ it("sends the version the day was opened at, even when the grid reloads undernea
     amount: 8000,
     reason: null,
     note: null,
+    fuel: null,
     version: null,
   });
 });
@@ -765,7 +768,7 @@ it("sends the record's version when correcting a past day", async () => {
   await waitFor(() => expect(puts(fetcher)).toHaveLength(1));
   expect(puts(fetcher)[0]).toEqual({
     path: "/api/setup/revenue/vehicle-1/2026-09-28",
-    body: { amount: 9000, reason: null, note: null, version: 3 },
+    body: { amount: 9000, reason: null, note: null, fuel: null, version: 3 },
   });
 });
 
@@ -827,8 +830,8 @@ it("on a conflict shows the saved value against yours and replaces it with the s
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
   );
   expect(puts(fetcher).map((call) => call.body)).toEqual([
-    { amount: 9000, reason: null, note: null, version: 3 },
-    { amount: 9000, reason: null, note: null, version: 4 },
+    { amount: 9000, reason: null, note: null, fuel: null, version: 3 },
+    { amount: 9000, reason: null, note: null, fuel: null, version: 4 },
   ]);
 });
 
@@ -902,6 +905,7 @@ it("on a conflict without the saved record (an insert race) refetches the day, t
     amount: 9000,
     reason: null,
     note: null,
+    fuel: null,
     version: 1,
   });
 });
@@ -952,6 +956,7 @@ it("needs a reason below the threshold, shows the reasons only while the amount 
     amount: 2500,
     reason: "Garage",
     note: null,
+    fuel: null,
     version: null,
   });
 });
@@ -977,6 +982,7 @@ it("takes a reason alone as a no revenue day, and Other needs no note", async ()
     amount: null,
     reason: "Other",
     note: null,
+    fuel: null,
     version: null,
   });
 });
@@ -1372,4 +1378,241 @@ it("exports the week shown to someone with revenue.export, and offers it to no o
   expect(
     screen.queryByRole("button", { name: "Export" }),
   ).not.toBeInTheDocument();
+});
+
+// The owner has switched Targets off (v2.38).
+const targetsOff = (ui: ReactNode) => (
+  <AppearanceProvider
+    value={{
+      appearance: { ...appearanceFixture(TODAY), targets: false },
+      loading: false,
+      refresh: () => {},
+    }}
+  >
+    {ui}
+  </AppearanceProvider>
+);
+
+const barStat = (label: string) =>
+  screen.getByText(label, { selector: ".side span" }).nextSibling;
+
+it("shows Not fueled in grey under the amount, under the reason when there is one, never Fueled, and the bar counts the tagged days", async () => {
+  serveWeek(() =>
+    week(
+      [
+        vehicle("vehicle-1", "KDA 482M", {
+          [DATES[0]]: recorded(12600, 1, { fuel: "no" }),
+          [DATES[1]]: recorded(2500, 1, { reason: "Garage", fuel: "no" }),
+          [DATES[2]]: recorded(13000, 1, { fuel: "yes" }),
+        }),
+      ],
+      { notFueledDays: 5 },
+    ),
+  );
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+
+  const grid = await screen.findByRole("table", {
+    name: /Revenue by vehicle and day/,
+  });
+  const cells = within(
+    within(grid).getByRole("row", { name: /KDA 482M/ }),
+  ).getAllByRole("cell");
+  expect(cells[0]).toHaveTextContent(/^12,600Not fueled$/);
+  expect(within(cells[0]).getByText("Not fueled")).toHaveClass("rfuel");
+  const low = within(cells[1]);
+  expect(low.getByText("Garage").nextSibling).toBe(low.getByText("Not fueled"));
+  expect(cells[2]).toHaveTextContent(/^13,000$/);
+  expect(screen.queryByText(/^Fueled/)).not.toBeInTheDocument();
+  // The server's figure, for the whole filtered grid rather than the rows on screen.
+  expect(barStat("Not fueled")).toHaveTextContent(/^5$/);
+});
+
+it("hides the gap to target and the day target while Targets is off, and keeps Low days, Not fueled and Missing days", async () => {
+  serveWeek(() =>
+    week(
+      [
+        vehicle(
+          "vehicle-1",
+          "KDA 482M",
+          { [DATES[0]]: recorded(8500) },
+          { totalAmount: 8500, gap: -11500, gapBand: "neg" },
+        ),
+      ],
+      {
+        totalAmount: 8500,
+        gap: -11500,
+        gapBand: "neg",
+        belowThresholdDays: 0,
+        notFueledDays: 0,
+        missingDays: 1,
+      },
+    ),
+  );
+  renderInApp(targetsOff(<RevenuePage />), { permissions: CLERK });
+
+  const grid = await screen.findByRole("table", {
+    name: /Revenue by vehicle and day/,
+  });
+  expect(
+    within(grid).queryByRole("columnheader", { name: "Gap to target" }),
+  ).not.toBeInTheDocument();
+  expect(within(grid).queryByText("−11,500")).not.toBeInTheDocument();
+  // Seven days and the week total; the totals row has its label in front.
+  expect(
+    within(within(grid).getByRole("row", { name: /KDA 482M/ })).getAllByRole(
+      "cell",
+    ),
+  ).toHaveLength(8);
+  expect(
+    within(within(grid).getByRole("row", { name: /^1 vehicle/ })).getAllByRole(
+      "cell",
+    ),
+  ).toHaveLength(9);
+  expect(screen.queryByText(/Gap to target/)).not.toBeInTheDocument();
+  expect(barStat("Low days")).toHaveTextContent(/^0$/);
+  expect(barStat("Not fueled")).toHaveTextContent(/^0$/);
+  expect(barStat("Missing days")).toHaveTextContent(/^1$/);
+
+  fireEvent.click(
+    within(grid).getByRole("button", {
+      name: "KDA 482M, Wed 30 Sep 2026: Missing",
+    }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "KDA 482M" });
+  expect(amountField(dialog)).toBeInTheDocument();
+  expect(within(dialog).queryByText("Day target")).not.toBeInTheDocument();
+  expect(within(dialog).queryByText("KES 1,000")).not.toBeInTheDocument();
+});
+
+it("asks the reasons below the vehicle's own low figure with Not fueled after them, a Tag row from that figure, and Fueled? from the question amount", async () => {
+  const fetcher = serveWeek(() =>
+    week(
+      [vehicle("vehicle-1", "KDA 482M", { [DATES[2]]: { lowBelow: 6000 } })],
+      { fuelQuestionFrom: 12000 },
+    ),
+  );
+  renderInApp(<RevenuePage />, { permissions: CLERK });
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "KDA 482M, Wed 30 Sep 2026: Missing",
+    }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "KDA 482M" });
+  const group = (name: string) => within(dialog).queryByRole("group", { name });
+  const labels = (name: string) =>
+    within(group(name)!)
+      .getAllByRole("button")
+      .map((button) => button.textContent);
+
+  // Nothing typed: the reasons for a no revenue day and no fuel tag.
+  expect(labels("Reason")).toEqual(["Garage", "Arrest", "No Crew", "Other"]);
+
+  // Below the vehicle's 6,000 (the week's old fleet figure is 4,000): the reasons, a divider, then Not fueled.
+  fireEvent.change(amountField(dialog), { target: { value: "5,000" } });
+  expect(labels("Reason")).toEqual([
+    "Garage",
+    "Arrest",
+    "No Crew",
+    "Other",
+    "Not fueled",
+  ]);
+  expect(group("Reason")!.querySelector(".tsep")).not.toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "Choose the reason. Revenue is below KES 6,000.",
+  );
+
+  // From the low figure: a Tag row with only Not fueled, which a second tap clears.
+  fireEvent.change(amountField(dialog), { target: { value: "8,000" } });
+  expect(group("Reason")).toBeNull();
+  expect(labels("Tag")).toEqual(["Not fueled"]);
+  const tag = within(group("Tag")!).getByRole("button", { name: "Not fueled" });
+  fireEvent.click(tag);
+  expect(tag).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(tag);
+  expect(tag).toHaveAttribute("aria-pressed", "false");
+
+  // From the question amount: the amber Fueled? box with Yes and No, and no Tag row.
+  fireEvent.change(amountField(dialog), { target: { value: "12,000" } });
+  expect(group("Tag")).toBeNull();
+  expect(within(dialog).getByText("Fueled?")).toHaveClass("fq");
+  expect(group("Fueled")!.closest(".fuelrow")).toHaveClass("ask");
+  expect(labels("Fueled")).toEqual(["Yes", "No"]);
+  fireEvent.click(
+    within(group("Fueled")!).getByRole("button", { name: "Yes" }),
+  );
+  expect(
+    within(group("Fueled")!).getByRole("button", { name: "Yes" }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  // Typed back below it, the Yes is dropped.
+  fireEvent.change(amountField(dialog), { target: { value: "11,000" } });
+  expect(
+    within(group("Tag")!).getByRole("button", { name: "Not fueled" }),
+  ).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(puts(fetcher)).toHaveLength(1));
+  expect(puts(fetcher)[0].body).toEqual({
+    amount: 11000,
+    reason: null,
+    note: null,
+    fuel: null,
+    version: null,
+  });
+});
+
+it("opens a saved No, keeps it as Not fueled when the amount comes down, drops it when the amount is cleared, and sends the answer", async () => {
+  const fetcher = serveWeek(() =>
+    week([
+      vehicle("vehicle-1", "KDA 482M", {
+        [DATES[0]]: recorded(12600, 3, { fuel: "no", canEdit: true }),
+      }),
+    ]),
+  );
+  renderInApp(<RevenuePage />, { permissions: OFFICE });
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "KDA 482M, Mon 28 Sep 2026: KES 12,600, Not fueled",
+    }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "KDA 482M" });
+  const fueled = within(dialog).getByRole("group", { name: "Fueled" });
+  expect(within(fueled).getByRole("button", { name: "No" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(within(fueled).getByRole("button", { name: "Yes" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+
+  fireEvent.change(amountField(dialog), { target: { value: "9,000" } });
+  const notFueled = () =>
+    within(within(dialog).getByRole("group", { name: "Tag" })).getByRole(
+      "button",
+      { name: "Not fueled" },
+    );
+  expect(notFueled()).toHaveAttribute("aria-pressed", "true");
+
+  // Cleared: no fuel row, and the answer does not come back with the amount.
+  fireEvent.change(amountField(dialog), { target: { value: "" } });
+  expect(
+    within(dialog).queryByRole("button", { name: "Not fueled" }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(dialog).queryByRole("group", { name: "Fueled" }),
+  ).not.toBeInTheDocument();
+  fireEvent.change(amountField(dialog), { target: { value: "9,000" } });
+  expect(notFueled()).toHaveAttribute("aria-pressed", "false");
+
+  fireEvent.click(notFueled());
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(puts(fetcher)).toHaveLength(1));
+  expect(puts(fetcher)[0].body).toEqual({
+    amount: 9000,
+    reason: null,
+    note: null,
+    fuel: "no",
+    version: 3,
+  });
 });

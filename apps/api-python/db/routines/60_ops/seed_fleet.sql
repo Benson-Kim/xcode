@@ -48,7 +48,7 @@ BEGIN
   WHERE f.organization_id = p_organization_id AND f.registration = 'KDB 117P';
   PERFORM api.setup_target_set_save(
     p_owner_id, p_organization_id, p_request_id, v_vehicle_id, v_today,
-    ARRAY[5800, 5800, 5800, 5800, 6300, 7300, 4800]::numeric[], p_now
+    ARRAY[5800, 5800, 5800, 5800, 6300, 7300, 4800]::numeric[], NULL, p_now
   );
 END;
 $$;

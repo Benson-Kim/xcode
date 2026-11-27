@@ -49,20 +49,20 @@ describe("first day of the week", () => {
     [1, 1],
     [3, 3],
     [6, 6],
-    [7, 1],
-    [-1, 1],
-    [1.5, 1],
-    [NaN, 1],
-    [undefined, 1],
+    [7, 0],
+    [-1, 0],
+    [1.5, 0],
+    [NaN, 0],
+    [undefined, 0],
   ])("setting %s starts weeks on day %d", (setting, expected) => {
     expect(createFormatter({ firstDayOfWeek: setting }).firstDayOfWeek()).toBe(
       expected,
     );
   });
 
-  it("starts on Monday without settings", () => {
-    expect(createFormatter(null).firstDayOfWeek()).toBe(1);
-    expect(createFormatter().firstDayOfWeek()).toBe(1);
+  it("starts on Sunday without settings, as every week runs Sunday to Saturday", () => {
+    expect(createFormatter(null).firstDayOfWeek()).toBe(0);
+    expect(createFormatter().firstDayOfWeek()).toBe(0);
   });
 });
 

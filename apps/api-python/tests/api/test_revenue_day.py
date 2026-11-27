@@ -35,7 +35,7 @@ from ..support.tenancy import set_override, set_scope
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 TODAY = "2026-10-07"
-DAY_KEYS = ["date", "businessDate", "vehicles", "truncated"]
+DAY_KEYS = ["date", "businessDate", "vehicles", "truncated", "fuelQuestionFrom"]
 VEHICLE_KEYS = ["id", "companyId", "registration", "day", "lastWeek", "fleetNumber"]
 CELL_KEYS = [
     "date",
@@ -44,6 +44,8 @@ CELL_KEYS = [
     "amount",
     "reason",
     "note",
+    "fuel",
+    "lowBelow",
     "canEdit",
     "editedAfterCapture",
     "version",
@@ -59,10 +61,6 @@ async def api(make_api: ApiFactory) -> AuthApi:
 @pytest.fixture
 async def owner(api: AuthApi) -> Member:
     joined = await join(api, email="ann@example.com", phone="0711000111", role="Owner")
-    api.owner.execute(
-        "INSERT INTO tenancy.organization_revenue_settings (organization_id, low_day_threshold, "
-        "gap_amber_percent) SELECT id, 100, 10 FROM tenancy.organizations"
-    )
     return joined
 
 
@@ -87,6 +85,7 @@ async def _fleet(api: AuthApi, owner: Member) -> tuple[str, str, str, str]:
             "fleetNumber": registration[-4:],
             "joinedOn": "2026-09-01",
             "dayTargets": [1000] * 7,
+            "lowBelow": 100,
         }
         return await _post_id(api, owner, "/setup/vehicles", body)
 

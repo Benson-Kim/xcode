@@ -76,7 +76,7 @@ class SecurityPolicyDto(ApiModel):
 
 class RevenueSettingsDto(ApiModel):
     organization_id: UUID
-    low_day_threshold: Money
+    fuel_question_from: Money
     gap_amber_percent: Money
 
 
@@ -183,6 +183,8 @@ class AppearanceResponse(ApiModel):
     lockout_threshold: int
     lockout_minutes: int
     idle_unlock_seconds: int
+    sunday_week_since: date | None
+    targets: bool
 
 
 class UserPreferenceDto(ApiModel):
@@ -245,3 +247,21 @@ _DOCUMENT_KEYS: dict[str, dict[str, str]] = {
     SettingsSection.SECURITY_POLICY: _aliases(SecurityPolicyDto),
     SettingsSection.REVENUE: _aliases(RevenueSettingsDto),
 }
+
+
+class SystemSettingDto(ApiModel):
+    key: str
+    label: str
+    on: bool
+
+
+class SystemSettingsResponse(ApiModel):
+    """``GET /setup/settings`` and the answer of ``PUT /setup/settings/{key}``."""
+
+    settings: list[SystemSettingDto]
+
+
+class SetSystemSetting(ApiModel):
+    """``PUT /setup/settings/{key}``: ``on`` switches the setting for the whole organization."""
+
+    on: bool | None = None

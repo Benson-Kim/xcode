@@ -1,11 +1,11 @@
 -- revenue.vehicle_days(p_vehicle_ids uuid[], p_from date, p_through date, p_today date) RETURNS SETOF revenue.vehicle_day
--- Purpose: every day from p_from through p_through of each listed vehicle of the current organization, set-based: in the fleet (joined, not yet left, not away), the day target (that weekday's figure in the target set in force; 0 when not in the fleet or no set has started), whether the day counts towards the figures (in the fleet and before p_today or recorded), and the record of the day; ordered by vehicle and day.
+-- Purpose: every day from p_from through p_through of each listed vehicle of the current organization, set-based: in the fleet (joined, not yet left, not away), the day target (that weekday's figure in the target set in force; 0 when not in the fleet or no set has started), whether the day counts towards the figures (in the fleet and before p_today or recorded), the record of the day, and the low revenue figure in force (that of the set in force, before the first set the first set's, 4,000 with no set); ordered by vehicle and day.
 -- Callers: api.revenue_week_get, api.revenue_dashboard_get, api.revenue_capture (the current cell of a conflict).
 -- Reads: setup.fleet_vehicles, setup.vehicle_away_periods, setup.vehicle_target_sets, revenue.records, revenue.no_earnings_reasons. Writes: nothing.
 -- Raises: none.
 -- Tests: tests/db/test_revenue_helpers.py.
--- The set form of setup.vehicle_active_on and setup.day_target, which answer one vehicle and one
--- day each; a test holds the two forms equal. Target sets are joined as ranges (each start until
+-- The set form of setup.vehicle_active_on, setup.day_target and setup.low_below_on, which answer
+-- one vehicle and one day each; a test holds the two forms equal. Target sets are joined as ranges (each start until
 -- the next start), so no lookup runs per day. Records are read for the period only: a function
 -- body is planned without its arguments, and an unbounded join hashed the organization's whole
 -- history even for one vehicle's week.
@@ -34,12 +34,20 @@ AS $$
            t.starts_on,
            ARRAY[t.monday, t.tuesday, t.wednesday, t.thursday, t.friday, t.saturday, t.sunday]
              AS figures,
+           t.low_below,
            lead(t.starts_on) OVER (PARTITION BY t.vehicle_id ORDER BY t.starts_on)
              AS superseded_from
     FROM setup.vehicle_target_sets AS t
     WHERE t.organization_id = tenancy.current_organization()
       AND t.vehicle_id = ANY (p_vehicle_ids)
       AND t.starts_on <= p_through
+  ),
+  firsts AS (
+    SELECT DISTINCT ON (t.vehicle_id) t.vehicle_id, t.low_below
+    FROM setup.vehicle_target_sets AS t
+    WHERE t.organization_id = tenancy.current_organization()
+      AND t.vehicle_id = ANY (p_vehicle_ids)
+    ORDER BY t.vehicle_id, t.starts_on
   ),
   days AS MATERIALIZED (
     SELECT v.id AS vehicle_id,
@@ -58,7 +66,7 @@ AS $$
   ),
   records AS MATERIALIZED (
     SELECT r.vehicle_id, r.business_date, r.id, r.amount, r.reason, r.note,
-           r.corrected_after_date, r.version
+           r.corrected_after_date, r.version, r.fuel
     FROM revenue.records AS r
     WHERE r.organization_id = tenancy.current_organization()
       AND r.vehicle_id = ANY (p_vehicle_ids)
@@ -79,12 +87,15 @@ AS $$
          l.label,
          r.note,
          r.corrected_after_date,
-         r.version
+         r.version,
+         coalesce(t.low_below, f.low_below, 4000),
+         r.fuel
   FROM days AS d
   LEFT JOIN targets AS t
     ON t.vehicle_id = d.vehicle_id
    AND d.day >= t.starts_on
    AND (t.superseded_from IS NULL OR d.day < t.superseded_from)
+  LEFT JOIN firsts AS f ON f.vehicle_id = d.vehicle_id
   LEFT JOIN records AS r ON r.vehicle_id = d.vehicle_id AND r.business_date = d.day
   LEFT JOIN revenue.no_earnings_reasons AS l ON l.code = r.reason
   ORDER BY d.vehicle_id, d.day;

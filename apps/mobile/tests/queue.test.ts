@@ -838,3 +838,66 @@ it("treats stored entries without attempt counts as never tried", async () => {
   await next.queue.sync();
   expect(next.latest().entries).toEqual([]);
 });
+
+it("sends each capture's fuel answer, and replays a capture stored before the fuel question without one, so the saved answer stays", async () => {
+  const api = revenueApi();
+  const first = open();
+  await first.queue.add(capture("2026-09-25", { amount: 12000, fuel: "yes" }));
+  await first.queue.add(capture("2026-09-26", { amount: 5000, fuel: null }));
+  await first.queue.add(capture("2026-09-27", { amount: 5000, fuel: "no" }));
+  // As a phone kept it before v2.37: no fuel key at all.
+  const slot = queueKeys().find((key) =>
+    items().get(key)!.includes('"2026-09-27"'),
+  )!;
+  const stored = JSON.parse(items().get(slot)!);
+  delete stored.fuel;
+  items().set(slot, JSON.stringify(stored));
+  first.queue.close();
+
+  const next = open();
+  await next.queue.ready;
+  expect(next.latest().entries).toHaveLength(3);
+  api.answer(() => [200, { version: 1 }]);
+  await next.queue.sync();
+  expect(next.latest().entries).toEqual([]);
+  const sent = Object.fromEntries(
+    api.reached.map(({ date, body }) => [date, body]),
+  );
+  expect(sent["2026-09-25"]).toMatchObject({ amount: 12000, fuel: "yes" });
+  expect(sent["2026-09-26"]).toMatchObject({ amount: 5000, fuel: null });
+  expect(sent["2026-09-27"]).toMatchObject({ amount: 5000 });
+  expect(sent["2026-09-27"]).not.toHaveProperty("fuel");
+});
+
+it("reads back a low amount with its reason, and clears a fuel answer stored on a day with no amount", async () => {
+  const api = fakeApi();
+  api.on("setup/revenue/v-1/2026-09-28", "offline");
+  api.on("setup/revenue/v-1/2026-09-29", "offline");
+  const first = open();
+  await first.queue.add(
+    capture("2026-09-28", { amount: 1500, reason: "Garage", fuel: "no" }),
+  );
+  await first.queue.add(
+    capture("2026-09-29", { amount: null, reason: "Garage" }),
+  );
+  first.queue.close();
+  const slot = queueKeys().find((key) =>
+    items().get(key)!.includes('"2026-09-29"'),
+  )!;
+  items().set(
+    slot,
+    JSON.stringify({ ...JSON.parse(items().get(slot)!), fuel: "yes" }),
+  );
+
+  const again = open();
+  await again.queue.ready;
+  expect(again.latest().entries).toEqual([
+    expect.objectContaining({
+      date: "2026-09-28",
+      amount: 1500,
+      reason: "Garage",
+      fuel: "no",
+    }),
+  ]);
+  expect(items().has(slot)).toBe(false);
+});

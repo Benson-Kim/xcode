@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 
-import { weekdayName } from "@xcode/shared/dates";
+import { DEFAULT_FUEL_QUESTION_FROM } from "@xcode/shared/revenue";
 
 import { useAppearance } from "../lib/appearance";
 import { useResource } from "../lib/data";
@@ -68,11 +68,13 @@ type Settings = {
     idleUnlockSeconds: number;
     allowPinSignIn: boolean;
   };
+  // v2.37: the amount from which Capture revenue asks whether the vehicle was fueled. Older servers leave it out.
+  revenue?: { fuelQuestionFrom?: number };
 };
 
 type Section = keyof Pick<
   Settings,
-  "organization" | "localization" | "branding" | "securityPolicy"
+  "organization" | "localization" | "branding" | "securityPolicy" | "revenue"
 >;
 
 type PolicyNumber = Exclude<
@@ -132,14 +134,17 @@ const saved: Record<Section, string> = {
   localization: "Locale and time saved.",
   branding: "Brand saved.",
   securityPolicy: "Security policy saved.",
+  revenue: "Revenue settings saved.",
 };
 
-export function OrganizationSettingsView() {
+// system: the system settings table, shown under the page head for someone who may change it.
+export function OrganizationSettingsView({ system }: { system?: ReactNode }) {
   const loaded = useResource<Settings>("setup/organization/settings");
   if (loaded.error)
     return (
       <>
         <PageHeader title="Organization settings" />
+        {system}
         <Banner>{loaded.error}</Banner>
       </>
     );
@@ -150,11 +155,18 @@ export function OrganizationSettingsView() {
           title="Organization settings"
           description="Defaults for everyone in the organization."
         />
+        {system}
         <FormSkeleton cards={5} label="Loading organization settings" />
       </>
     );
   // Reloaded after every save: the calendar date and the effective business date are worked out by the server.
-  return <SettingsForm initial={loaded.data} onSaved={loaded.reload} />;
+  return (
+    <SettingsForm
+      initial={loaded.data}
+      system={system}
+      onSaved={loaded.reload}
+    />
+  );
 }
 
 const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -171,9 +183,11 @@ function readAsDataUrl(file: File) {
 
 function SettingsForm({
   initial,
+  system,
   onSaved,
 }: {
   initial: Settings;
+  system?: ReactNode;
   onSaved: () => void;
 }) {
   const toast = useToast();
@@ -189,8 +203,11 @@ function SettingsForm({
   const update = <T extends Section>(section: T, value: Partial<Settings[T]>) =>
     setSettings({ ...settings, [section]: { ...settings[section], ...value } });
 
+  const fuelQuestionFrom =
+    settings.revenue?.fuelQuestionFrom ?? DEFAULT_FUEL_QUESTION_FROM;
+
   async function save(section: Section) {
-    let value: object = settings[section];
+    let value: object = settings[section] ?? {};
     if (section === "securityPolicy") {
       // Said here, field by field, rather than as the server's one-line refusal. The pause is capped at one hour.
       const policy = settings.securityPolicy;
@@ -236,6 +253,14 @@ function SettingsForm({
     if (section === "securityPolicy") {
       const problem = policyProblem(settings.securityPolicy);
       if (problem) return setErrors({ ...errors, securityPolicy: problem });
+    }
+    if (section === "revenue") {
+      if (!(Number.isInteger(fuelQuestionFrom) && fuelQuestionFrom > 0))
+        return setErrors({
+          ...errors,
+          revenue: "Enter the fuel question amount as whole shillings.",
+        });
+      value = { fuelQuestionFrom };
     }
     setBusy(section);
     try {
@@ -309,6 +334,7 @@ function SettingsForm({
         title="Organization settings"
         description="Defaults for everyone in the organization. Each person sets their own display under Your preferences."
       />
+      {system}
       <SettingsCard
         title="Organization details"
         error={errors.organization}
@@ -588,27 +614,6 @@ function SettingsForm({
               <option value="long">Long</option>
             </SelectInput>
           </Field>
-          <Field id="first-day" label="First day of week">
-            <SelectInput
-              value={localization.firstDayOfWeek}
-              onChange={(event) =>
-                update("localization", {
-                  firstDayOfWeek: Number(event.target.value),
-                })
-              }
-            >
-              <option value="1">{weekdayName(1)}</option>
-              <option value="0">{weekdayName(0)}</option>
-              <option value="6">{weekdayName(6)}</option>
-              {/* The API takes any day; one set elsewhere is shown as it is rather than as Monday. */}
-              {![0, 1, 6].includes(localization.firstDayOfWeek) && (
-                <option value={localization.firstDayOfWeek}>
-                  {weekdayName(localization.firstDayOfWeek) ??
-                    localization.firstDayOfWeek}
-                </option>
-              )}
-            </SelectInput>
-          </Field>
         </FieldGrid>
         <ChoiceGroup label="Time and overrides">
           <Choice
@@ -724,6 +729,39 @@ function SettingsForm({
               onChange={(event) =>
                 update("securityPolicy", {
                   refreshTokenDays: Number(event.target.value),
+                })
+              }
+            />
+          </Field>
+        </FieldGrid>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Revenue"
+        description="From this amount, capturing revenue asks whether the vehicle was fueled."
+        error={errors.revenue}
+        action="Save revenue"
+        busy={busy === "revenue"}
+        onSave={() => void save("revenue")}
+      >
+        <FieldGrid>
+          <Field
+            id="fuel-question-from"
+            label="Fuel question from, KES"
+            hint="Below it, only the Not fueled tag is offered."
+          >
+            <TextInput
+              type="number"
+              min="1"
+              inputMode="numeric"
+              value={fuelQuestionFrom}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  revenue: {
+                    ...settings.revenue,
+                    fuelQuestionFrom: Number(event.target.value),
+                  },
                 })
               }
             />

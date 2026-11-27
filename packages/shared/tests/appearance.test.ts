@@ -4,6 +4,9 @@ import {
   BRAND_TOKEN_NAMES,
   deriveBrandTokens,
   resolveTheme,
+  sundayWeekNotice,
+  sundayWeekNoticeDetail,
+  targetsOn,
   type Appearance,
 } from "@xcode/shared/appearance";
 
@@ -107,4 +110,50 @@ it("accepts a cached appearance without the fields older versions never stored",
     fontScale: 1,
   };
   expect(cached.lockoutThreshold).toBeUndefined();
+});
+
+describe("sundayWeekNotice", () => {
+  const since = "2026-11-25";
+  const on = (businessDate: string | undefined) => ({
+    sundayWeekSince: since,
+    businessDate,
+  });
+
+  it("runs for seven days from the change date, by the business date", () => {
+    expect(sundayWeekNotice(on("2026-11-24"), null)).toBeNull();
+    expect(sundayWeekNotice(on("2026-11-25"), null)).toBe(since);
+    expect(sundayWeekNotice(on("2026-12-01"), null)).toBe(since);
+    expect(sundayWeekNotice(on("2026-12-02"), null)).toBeNull();
+  });
+
+  it("stays away once this device dismissed it for that change date", () => {
+    expect(sundayWeekNotice(on("2026-11-26"), since)).toBeNull();
+    expect(sundayWeekNotice(on("2026-11-26"), "2026-01-04")).toBe(since);
+  });
+
+  it("is never shown without a change date, a business date or an appearance", () => {
+    expect(sundayWeekNotice(null, null)).toBeNull();
+    expect(sundayWeekNotice(on(undefined), null)).toBeNull();
+    expect(
+      sundayWeekNotice({ sundayWeekSince: null, businessDate: since }, null),
+    ).toBeNull();
+    expect(
+      sundayWeekNotice({ businessDate: since } as Appearance, null),
+    ).toBeNull();
+  });
+
+  it("names the date before which weeks ran Monday to Sunday", () => {
+    expect(sundayWeekNoticeDetail("25 Nov 2026")).toBe(
+      "Weekly figures from before 25 Nov 2026 were counted Monday to Sunday.",
+    );
+  });
+});
+
+describe("targetsOn", () => {
+  it("is off only when the server says Targets is off", () => {
+    expect(targetsOn({ targets: false })).toBe(false);
+    expect(targetsOn({ targets: true })).toBe(true);
+    expect(targetsOn({})).toBe(true);
+    expect(targetsOn(null)).toBe(true);
+  });
 });

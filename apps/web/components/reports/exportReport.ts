@@ -14,7 +14,7 @@ export const safeFileName = (name: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-function saveBlob(blob: Blob, name: string) {
+export function saveBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

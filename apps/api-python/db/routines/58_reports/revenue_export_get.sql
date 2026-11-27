@@ -1,7 +1,7 @@
 -- api.revenue_export_get(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_week_start date, p_company_id uuid, p_format text, p_now timestamptz) RETURNS jsonb
--- Purpose: the Revenue screen as a file's document, in one transaction with its audit row: the format first, then the week grid exactly as api.revenue_week_get serves it to the screen (the legacy page of at most 500 vehicles, the company filter), as the Revenue table: vehicle, company, the seven days (the amount, the no-earnings reason, "Missing" or nothing), Week total, Target to date (Target for a finished week) and the signed Gap; headline Revenue; figures Gap to target so far (Gap to target), Below {threshold} and Missing days; the change-log row holds {screen, weekStart, companyId, rows, format}.
+-- Purpose: the Revenue screen as a file's document, in one transaction with its audit row: the format first, then the week grid exactly as api.revenue_week_get serves it to the screen (the legacy page of at most 500 vehicles, the company filter), as the Revenue table: vehicle, company, the seven days (the amount, "12,600, Not fueled" for an amount the vehicle was not fueled on, the no-earnings reason, "Missing" or nothing), Week total, and while Targets is on Target to date (Target for a finished week) and the signed Gap; headline Revenue; figures Gap to target so far (Gap to target) while Targets is on, Low days, Not fueled and Missing days; the change-log row holds {screen, weekStart, companyId, rows, format}.
 -- Callers: ReportsRoutines.export_revenue; ExportRevenueWeek (GET /setup/revenue/export).
--- Reads: what tenancy.require_permission, reports.check_export, api.revenue_week_get and reports.document read. Writes: what reports.log_export writes.
+-- Reads: what tenancy.require_permission, tenancy.setting_enabled, reports.check_export, api.revenue_week_get and reports.document read. Writes: what reports.log_export writes.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC403 permission_missing via tenancy.require_permission, XC422 export_format_invalid via reports.check_export, XC422 time_zone_invalid via api.revenue_week_get, XC422 revenue_week_range via api.revenue_week_get, XC422 export_too_many_rows via reports.check_export.
 -- Tests: tests/db/test_report_routines.py, tests/api/test_reports.py.
 
@@ -27,7 +27,7 @@ DECLARE
   v_start date;
   v_through date;
   v_finished boolean;
-  v_threshold numeric;
+  v_targets boolean;
   v_columns jsonb;
   v_rows jsonb;
   v_count integer;
@@ -46,7 +46,7 @@ BEGIN
   v_start := (v_week ->> 'week_start')::date;
   v_through := (v_week ->> 'week_through')::date;
   v_finished := v_through < v_today;
-  v_threshold := (v_week ->> 'low_day_threshold')::numeric;
+  v_targets := tenancy.setting_enabled('targets');
 
   SELECT jsonb_build_array(
            reports.heading('vehicle', 'Vehicle', 'vehicle', false),
@@ -63,13 +63,17 @@ BEGIN
               ),
               '[]'::jsonb
             )
-         || jsonb_build_array(
-              reports.heading('total', 'Week total', 'money', true),
-              reports.heading(
-                'target', CASE WHEN v_finished THEN 'Target' ELSE 'Target to date' END, 'money', true
-              ),
-              reports.heading('gap', 'Gap', 'net', true)
-            )
+         || jsonb_build_array(reports.heading('total', 'Week total', 'money', true))
+         || CASE
+              WHEN v_targets THEN jsonb_build_array(
+                reports.heading(
+                  'target', CASE WHEN v_finished THEN 'Target' ELSE 'Target to date' END, 'money',
+                  true
+                ),
+                reports.heading('gap', 'Gap', 'net', true)
+              )
+              ELSE '[]'::jsonb
+            END
   INTO v_columns;
 
   WITH vehicles AS (
@@ -83,7 +87,13 @@ BEGIN
              SELECT coalesce(
                       jsonb_agg(
                         CASE d.cell ->> 'status'
-                          WHEN 'amount' THEN d.cell -> 'amount'
+                          WHEN 'amount' THEN
+                            CASE
+                              WHEN d.cell ->> 'fuel' = 'no' THEN to_jsonb(
+                                tenancy.fmt_money((d.cell ->> 'amount')::numeric) || ', Not fueled'
+                              )
+                              ELSE d.cell -> 'amount'
+                            END
                           WHEN 'reason' THEN d.cell -> 'reason'
                           WHEN 'missing' THEN to_jsonb('Missing'::text)
                           ELSE 'null'::jsonb
@@ -98,7 +108,11 @@ BEGIN
            jsonb_agg(
              jsonb_build_array(l.doc ->> 'registration', l.doc ->> 'company_name')
              || l.day_cells
-             || jsonb_build_array(l.doc -> 'total_amount', l.doc -> 'total_expected', l.doc -> 'gap')
+             || jsonb_build_array(l.doc -> 'total_amount')
+             || CASE
+                  WHEN v_targets THEN jsonb_build_array(l.doc -> 'total_expected', l.doc -> 'gap')
+                  ELSE '[]'::jsonb
+                END
              ORDER BY l.ord),
            '[]'::jsonb
          ),
@@ -115,17 +129,19 @@ BEGIN
     least(v_through, v_today),
     v_today,
     reports.figure('Revenue', (v_week ->> 'total_amount')::numeric, 'money'),
-    jsonb_build_array(
-      reports.figure(
-        CASE WHEN v_finished THEN 'Gap to target' ELSE 'Gap to target so far' END,
-        (v_week ->> 'gap')::numeric,
-        'net'
-      ),
-      reports.figure(
-        'Below ' || tenancy.fmt_money(v_threshold),
-        (v_week ->> 'below_threshold_days')::numeric,
-        'count'
-      ),
+    CASE
+      WHEN v_targets THEN jsonb_build_array(
+        reports.figure(
+          CASE WHEN v_finished THEN 'Gap to target' ELSE 'Gap to target so far' END,
+          (v_week ->> 'gap')::numeric,
+          'net'
+        )
+      )
+      ELSE '[]'::jsonb
+    END
+    || jsonb_build_array(
+      reports.figure('Low days', (v_week ->> 'below_threshold_days')::numeric, 'count'),
+      reports.figure('Not fueled', (v_week ->> 'not_fueled_days')::numeric, 'count'),
       reports.figure('Missing days', (v_week ->> 'missing_days')::numeric, 'count')
     ),
     v_columns,

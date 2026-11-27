@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 
-import { WEEKDAYS } from "@xcode/shared/dates";
+import { mondayFirstIndex, weekdaysFrom } from "@xcode/shared/dates";
 import {
+  DEFAULT_LOW_BELOW,
   normaliseRegistration,
   parseRevenueAmount,
 } from "@xcode/shared/revenue";
 
 import { SessionEndedError } from "../lib/api";
 import { useFormats } from "../lib/formats";
+import { useTargets } from "../shell/targets";
 import { Button, ErrorText, Field, Sheet, Text } from "../ui";
 import { sendTo, useLoaded } from "./client";
 import { Picker, SmallButton, type Option } from "./parts";
@@ -23,10 +25,11 @@ type Errors = {
   fleetNumber?: string;
   company?: string;
   targets?: string;
+  lowBelow?: string;
 };
 
-// Monday first, the order the API reads dayTargets in.
-const DAYS = [...WEEKDAYS.slice(1), WEEKDAYS[0]].map((day) => day.label);
+// The day targets are kept Monday first, the order the API reads dayTargets in.
+const DAY_COUNT = 7;
 
 const FLEET_NUMBER_LIMIT = 20;
 
@@ -40,6 +43,10 @@ function dayTargets(texts: string[]): number[] | null {
   }
   return figures;
 }
+
+const NO_TARGETS = Array<number>(DAY_COUNT).fill(0);
+
+const lowFigure = (text: string) => (text === "" ? null : Number(text));
 
 // The fleet's new vehicle, opened from the expense's vehicle list with what was typed there. An expense dated before
 // the business date has the vehicle join on that date, so the expense can use it. Saving hands the vehicle back to
@@ -62,6 +69,7 @@ export function NewVehicleForm({
   onCancel: () => void;
 }) {
   const { formatDateOnly } = useFormats();
+  const targetsShown = useTargets();
   const companies = useLoaded<Company[]>(
     "setup/vehicles/company-options",
     stamp,
@@ -71,7 +79,8 @@ export function NewVehicleForm({
     registration: registration.toUpperCase(),
     fleetNumber: "",
     companyId: "",
-    targets: DAYS.map(() => ""),
+    targets: Array<string>(DAY_COUNT).fill(""),
+    lowBelow: String(DEFAULT_LOW_BELOW),
   });
   const [errors, setErrors] = useState<Errors>({});
   const [problem, setProblem] = useState("");
@@ -86,16 +95,26 @@ export function NewVehicleForm({
     if (saving) return;
     const plate = normaliseRegistration(form.registration);
     const fleetNumber = form.fleetNumber.trim();
-    const targets = dayTargets(form.targets);
+    // With Targets switched off no day targets are asked, and the vehicle is saved with none.
+    const targets = targetsShown ? dayTargets(form.targets) : NO_TARGETS;
+    const lowBelow = lowFigure(form.lowBelow);
     const found: Errors = {
       registration: plate ? undefined : "Enter the registration like KDN 204B.",
       fleetNumber: fleetNumber ? undefined : "Enter the fleet number.",
       company: form.companyId ? undefined : "Choose the PSV company.",
       targets: targets ? undefined : "Enter the target for every day.",
+      lowBelow: lowBelow === null ? "Enter the low revenue figure." : undefined,
     };
     setErrors(found);
     setProblem("");
-    if (!plate || !fleetNumber || !form.companyId || !targets) return;
+    if (
+      !plate ||
+      !fleetNumber ||
+      !form.companyId ||
+      !targets ||
+      lowBelow === null
+    )
+      return;
     setSaving(true);
     try {
       const outcome = await sendTo<{ id: string }>("POST", "setup/vehicles", {
@@ -104,6 +123,7 @@ export function NewVehicleForm({
         joinedOn,
         fleetNumber,
         dayTargets: targets,
+        lowBelow,
       });
       if (outcome.ok)
         onCreated({
@@ -164,11 +184,25 @@ export function NewVehicleForm({
         error={errors.company}
         empty={companies.loading ? "Loading companies." : undefined}
       />
-      <DayTargets
-        values={form.targets}
-        onChange={(targets) => change({ targets }, "targets")}
+      {targetsShown ? (
+        <>
+          <DayTargets
+            values={form.targets}
+            onChange={(targets) => change({ targets }, "targets")}
+          />
+          {errors.targets ? <ErrorText>{errors.targets}</ErrorText> : null}
+        </>
+      ) : null}
+      <Field
+        label="Low revenue below, KES"
+        value={form.lowBelow}
+        keyboardType="number-pad"
+        autoCorrect={false}
+        onChangeText={(text) =>
+          change({ lowBelow: text.replace(/\D/g, "") }, "lowBelow")
+        }
+        error={errors.lowBelow}
       />
-      {errors.targets ? <ErrorText>{errors.targets}</ErrorText> : null}
       {problem ? <ErrorText>{problem}</ErrorText> : null}
       <View style={{ flexDirection: "row", gap: 12 }}>
         <Button tone="outline" disabled={saving} onPress={onCancel}>
@@ -182,7 +216,8 @@ export function NewVehicleForm({
   );
 }
 
-// A target for each day, Monday first. Same every day copies the first one typed to every day.
+// A target for each day, shown from the first day of the week (Sunday, v2.41). Same every day copies the first one
+// typed, from Sunday onwards, to every day.
 function DayTargets({
   values,
   onChange,
@@ -190,7 +225,14 @@ function DayTargets({
   values: string[];
   onChange: (values: string[]) => void;
 }) {
-  const first = values.find((text) => text.trim());
+  const { firstDayOfWeek } = useFormats();
+  const shown = weekdaysFrom(firstDayOfWeek()).map((day) => ({
+    name: day.label,
+    at: mondayFirstIndex(day.value),
+  }));
+  const first = shown
+    .map(({ at }) => values[at] ?? "")
+    .find((text) => text.trim());
   return (
     <>
       <View style={styles.targetsHead}>
@@ -205,7 +247,7 @@ function DayTargets({
         </SmallButton>
       </View>
       <View style={styles.days}>
-        {DAYS.map((day, index) => (
+        {shown.map(({ name: day, at: index }) => (
           <View key={day} style={styles.day}>
             <Field
               label={day}

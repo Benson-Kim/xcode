@@ -211,6 +211,8 @@ export function overviewOf(
     to: period === "week" ? shiftDate(from, 6) : date,
     permissions,
     holders: OPTIONS.holders,
+    vehicles: OPTIONS.vehicles,
+    vehicleWaiting: null,
     figures: period === "week" ? WEEK_FIGURES : DAY_FIGURES,
     floats: [
       {
@@ -313,6 +315,21 @@ export function servePettyCash(options: Options = {}) {
       if (route === "overview") {
         const from = url.searchParams.get("from");
         const to = url.searchParams.get("to");
+        const vehicleId = url.searchParams.get("vehicleId");
+        const waiting = rows.filter(
+          (entry) =>
+            entry.kind === "expense" &&
+            entry.status === "waiting" &&
+            entry.vehicleId === vehicleId &&
+            (!from || entry.date >= from) &&
+            (!to || entry.date <= to),
+        );
+        const vehicleWaiting = vehicleId
+          ? {
+              waiting: waiting.reduce((sum, entry) => sum + entry.total, 0),
+              waitingCount: waiting.length,
+            }
+          : null;
         if (from && to)
           return json(
             overviewOf(
@@ -320,6 +337,7 @@ export function servePettyCash(options: Options = {}) {
               to,
               {
                 ...(options.floats ? { floats: options.floats } : {}),
+                vehicleWaiting,
                 from,
                 to,
                 period: from === to ? "day" : "range",
@@ -334,7 +352,10 @@ export function servePettyCash(options: Options = {}) {
           overviewOf(
             permissions,
             url.searchParams.get("date") ?? BUSINESS_DATE,
-            options.floats ? { floats: options.floats } : {},
+            {
+              ...(options.floats ? { floats: options.floats } : {}),
+              vehicleWaiting,
+            },
             period,
           ),
         );
@@ -345,12 +366,14 @@ export function servePettyCash(options: Options = {}) {
       if (route === "entries") {
         const kinds = url.searchParams.get("kind")?.split(",");
         const status = url.searchParams.get("status");
+        const vehicleId = url.searchParams.get("vehicleId");
         const from = url.searchParams.get("from");
         const to = url.searchParams.get("to");
         const items = rows.filter(
           (entry) =>
             (!kinds || kinds.includes(entry.kind)) &&
             (!status || entry.status === status) &&
+            (!vehicleId || entry.vehicleId === vehicleId) &&
             (!from || entry.date >= from) &&
             (!to || entry.date <= to),
         );

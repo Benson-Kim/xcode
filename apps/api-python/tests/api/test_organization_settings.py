@@ -100,7 +100,7 @@ async def test_the_settings_read_keeps_the_entity_shapes(api: AuthApi, owner: Me
         "revenue",
     ]
     assert list(body["organization"]) == ["id", "slug", "name", "businessDate", "settingsVersion"]
-    assert list(body["revenue"]) == ["organizationId", "lowDayThreshold", "gapAmberPercent"]
+    assert list(body["revenue"]) == ["organizationId", "fuelQuestionFrom", "gapAmberPercent"]
     assert list(body["localization"]) == LOCALIZATION_KEYS
     assert "useGroupping" not in body["localization"]
     assert list(body["branding"]) == [
@@ -135,19 +135,28 @@ async def test_the_settings_read_keeps_the_entity_shapes(api: AuthApi, owner: Me
 
 async def test_a_partial_section_keeps_what_it_omits(api: AuthApi, owner: Member) -> None:
     response, count = await statements(
-        save(api, owner, "localization", {"currency": "USD", "firstDayOfWeek": 0})
+        save(api, owner, "localization", {"currency": "USD", "datePattern": "short"})
     )
     assert ok(response) == {"section": "localization"}
     assert count == 2
     stored = (await settings(api, owner))["localization"]
-    assert (stored["currency"], stored["firstDayOfWeek"], stored["timeZone"]) == (
-        "USD",
-        0,
-        "Africa/Nairobi",
-    )
+    assert (
+        stored["currency"],
+        stored["datePattern"],
+        stored["firstDayOfWeek"],
+        stored["timeZone"],
+    ) == ("USD", "short", 0, "Africa/Nairobi")
     assert await history_reasons(api, owner, "localization") == [
-        "Changed the first day of the week to Sunday and the currency to USD"
+        "Changed the date format to short and the currency to USD"
     ]
+
+
+async def test_the_week_can_only_start_on_sunday(api: AuthApi, owner: Member) -> None:
+    for day in (1, 6):
+        response = await save(api, owner, "localization", {"firstDayOfWeek": day})
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Invalid format settings"
+    assert (await settings(api, owner))["localization"]["firstDayOfWeek"] == 0
 
 
 async def test_grouping_under_its_old_name_is_saved_and_both_names_are_served(

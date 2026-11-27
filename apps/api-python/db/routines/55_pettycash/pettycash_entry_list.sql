@@ -1,5 +1,5 @@
--- api.pettycash_entry_list(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_from date, p_to date, p_holder_id uuid, p_kinds text[], p_statuses text[], p_q text, p_page integer, p_page_size integer, p_now timestamptz) RETURNS jsonb
--- Purpose: one page of the entries the actor may see (PettyCashEntryDto with the actor's flags), of one float when p_holder_id is given, dated p_from..p_to (either end open), of the kinds and status words asked (empty or null = all; cash and credit notes have no status), whose note, payee, holder name, registration or item name holds p_q (literally, ignoring case); by date, kind, id; {total, items}.
+-- api.pettycash_entry_list(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_from date, p_to date, p_holder_id uuid, p_kinds text[], p_statuses text[], p_q text, p_page integer, p_page_size integer, p_now timestamptz, p_vehicle_id uuid DEFAULT NULL) RETURNS jsonb
+-- Purpose: one page of the entries the actor may see (PettyCashEntryDto with the actor's flags), of one float when p_holder_id is given, of one vehicle the actor may see when p_vehicle_id is given, dated p_from..p_to (either end open), of the kinds and status words asked (empty or null = all; cash and credit notes have no status), whose note, payee, holder name, registration or item name holds p_q (literally, ignoring case); by date, kind, id; {total, items}.
 -- Callers: PettyCashRoutines.list_entries; ListPettyCashEntries (GET /setup/pettycash/entries).
 -- Reads: tenancy.memberships, and what tenancy.business_date, tenancy.effective_permissions, tenancy.earliest_writable, setup.visible_vehicles, pettycash.visible_holders, pettycash.entry_matches and pettycash.entry_document read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.require_any_permission, XC422 page_out_of_range via tenancy.check_page, XC422 history_dates_order, XC422 history_text_length, XC422 pettycash_kind_invalid, XC422 pettycash_status_invalid, XC404 not_found, XC422 time_zone_invalid via tenancy.business_date.
@@ -17,7 +17,8 @@ CREATE OR REPLACE FUNCTION api.pettycash_entry_list(
   p_q text,
   p_page integer,
   p_page_size integer,
-  p_now timestamptz
+  p_now timestamptz,
+  p_vehicle_id uuid DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -71,11 +72,14 @@ BEGIN
   FROM tenancy.memberships AS m
   WHERE m.organization_id = p_organization_id AND m.user_id = p_actor_id;
   v_vehicles := ARRAY(SELECT visible.id FROM setup.visible_vehicles() AS visible (id));
+  IF p_vehicle_id IS NOT NULL AND NOT p_vehicle_id = ANY (v_vehicles) THEN
+    PERFORM tenancy.refuse('not_found', 'XC404');
+  END IF;
 
   WITH matches AS MATERIALIZED (
     SELECT m AS e
     FROM pettycash.entry_matches(
-           p_holder_id, p_from, p_to, v_kinds, p_statuses, v_text, v_view_all, v_vehicles
+           p_holder_id, p_from, p_to, v_kinds, p_statuses, v_text, v_view_all, v_vehicles, p_vehicle_id
          ) AS m
   )
   SELECT (SELECT count(*)::integer FROM matches),

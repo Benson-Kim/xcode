@@ -27,10 +27,13 @@ export type Vehicle = {
   fleetNumber?: string | null;
   initialInvestment?: number | null;
   dayTargets?: number[] | null;
+  // v2.34: below this a day's revenue needs a reason; the figure of the set in force today (null with dayTargets).
+  lowBelow?: number | null;
   nextTarget?: {
     startsOn: string;
     dayTargets: number[];
     weeklyTarget: number;
+    lowBelow?: number;
   } | null;
 };
 
@@ -40,6 +43,7 @@ export type TargetSet = {
   startsOn: string;
   days: number[];
   weekTotal: number;
+  lowBelow?: number;
   inForce: boolean;
   canRemove: boolean;
 };

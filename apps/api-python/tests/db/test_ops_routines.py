@@ -212,7 +212,7 @@ def test_first_provision_creates_the_organization_with_defaults_and_the_person(
         "locale": "en-GB",
         "time_zone": "Africa/Nairobi",
         "currency": "KES",
-        "first_day_of_week": 1,
+        "first_day_of_week": 0,
     }
     branding = owner_conn.execute(
         "SELECT display_name, primary_color FROM tenancy.organization_brandings"

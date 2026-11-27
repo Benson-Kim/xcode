@@ -197,7 +197,7 @@ async def save_target_set(
     vehicle_id: VehicleId, body: SaveTargetSet, caller: CallerDep, c: ContainerDep
 ) -> Response:
     result = await c.save_target_set.execute(
-        SaveTargetSetCommand(caller, vehicle_id, body.starts_on, body.day_amounts())
+        SaveTargetSetCommand(caller, vehicle_id, body.starts_on, body.day_amounts(), body.low_below)
     )
     return respond(IdResponse(id=result.id))
 

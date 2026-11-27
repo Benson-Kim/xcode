@@ -51,6 +51,7 @@ VEHICLE_KEYS = [
     "initialInvestment",
     "dayTargets",
     "nextTarget",
+    "lowBelow",
 ]
 TARGET_KEYS = ["effectiveFrom", "weeklyAmount", "revision"]
 AWAY_KEYS = ["leftOn", "returnedOn"]
@@ -290,9 +291,11 @@ async def test_the_list_carries_targets_scheduled_items_and_days_away_for_a_mana
             "startsOn": "2026-10-20",
             "dayTargets": [1400] * 6 + [1600.5],
             "weeklyTarget": 10000.5,
+            "lowBelow": 4000,
         },
+        "lowBelow": 4000,
     }
-    assert list(first["nextTarget"]) == ["startsOn", "dayTargets", "weeklyTarget"]
+    assert list(first["nextTarget"]) == ["startsOn", "dayTargets", "weeklyTarget", "lowBelow"]
     assert [list(target) for target in first["targets"]] == [TARGET_KEYS, TARGET_KEYS]
     assert list(first["away"][0]) == AWAY_KEYS
     assert isinstance(first["weeklyTarget"], int)
@@ -328,6 +331,7 @@ async def test_the_list_shows_the_target_in_force_and_the_next_one(
         "startsOn": "2026-10-12",
         "dayTargets": [1200] * 7,
         "weeklyTarget": 8400,
+        "lowBelow": 4000,
     }
     assert [t["effectiveFrom"] for t in row["targets"]] == ["2026-10-01"]
 
@@ -506,7 +510,7 @@ async def test_a_created_vehicle_has_its_registration_normalised_and_is_logged(
     assert (entry["section"], entry["entityId"]) == ("vehicles", created["id"])
     assert entry["reason"] == (
         "Added vehicle KDA 482M, fleet number 482M, to North Star with a weekly target of "
-        "KES 7,000 from 2026-10-01"
+        "KES 7,000, low below KES 4,000 from 2026-10-01"
     )
     assert entry["actorName"] == "Jane Doe"
     assert entry["before"] == "null"
@@ -514,7 +518,7 @@ async def test_a_created_vehicle_has_its_registration_normalised_and_is_logged(
     assert entry["after"] == (
         f'{{"Id":"{created["id"]}","Registration":"KDA 482M","FleetNumber":"482M",'
         f'"CompanyId":"{north}","JoinedOn":"2026-10-01","LeftOn":null,"InitialInvestment":null,'
-        f'"TargetSets":[{{"StartsOn":"2026-10-01",{week}}}],"Away":[]}}'
+        f'"TargetSets":[{{"StartsOn":"2026-10-01",{week},"LowBelow":4000}}],"Away":[]}}'
     )
 
 
@@ -560,7 +564,7 @@ async def test_a_fractional_target_is_a_json_number_and_a_typed_reason_follows(
     assert row["dayTargets"] == days
     assert await reasons(api, owner) == [
         "Added vehicle KDA 482M, fleet number 482M, to North Star with a weekly target of "
-        "KES 7,150.50 from 2026-10-01. Reason: Bought at auction."
+        "KES 7,150.50, low below KES 4,000 from 2026-10-01. Reason: Bought at auction."
     ]
 
 
@@ -1263,10 +1267,17 @@ async def test_a_week_report_runs_from_the_first_day_of_the_week_through_today(
             f"/setup/vehicles/{fleet.kda}/report?period=week", headers=owner.headers
         )
     )
-    assert (week["from"], week["through"]) == ("2026-03-30", "2026-03-31")
-    assert (week["moneyIn"], week["target"], week["loans"], week["net"]) == (0, 2000, 10000, -10000)
+    # The week runs Sunday to Saturday: Tuesday 31 March is in the week of Sunday 29 March.
+    assert (week["from"], week["through"]) == ("2026-03-29", "2026-03-31")
+    assert (week["moneyIn"], week["target"], week["loans"], week["net"]) == (
+        1500,
+        4000,
+        10000,
+        -8600,
+    )
     assert [(p["date"], p["name"], p["amount"]) for p in week["postings"]] == [
-        ("2026-03-31", "Loan repayment", 10000)
+        ("2026-03-29", "Tyres", 100),
+        ("2026-03-31", "Loan repayment", 10000),
     ]
 
 

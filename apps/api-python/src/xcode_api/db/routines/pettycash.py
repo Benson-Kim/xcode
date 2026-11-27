@@ -73,6 +73,7 @@ class PettyCashRoutines:
             query.from_date,
             query.to_date,
             query.context.now,
+            query.vehicle_id,
             idempotent=True,
         )
         return document(value, PettyCashOverview, "api.pettycash_overview_get")
@@ -90,6 +91,7 @@ class PettyCashRoutines:
             query.page,
             query.page_size,
             query.context.now,
+            query.vehicle_id,
             idempotent=True,
         )
         return document(value, PettyCashEntryPage, "api.pettycash_entry_list")
@@ -159,6 +161,7 @@ class PettyCashRoutines:
             command.to,
             command.holder_id,
             command.context.now,
+            command.vehicle_id,
         )
         return document(value, PettyCashApproved, "api.pettycash_day_approve")
 

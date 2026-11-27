@@ -54,6 +54,7 @@ export function useWeekGrid(canView: boolean) {
     setCompanyId,
     search,
     setSearch,
+    q,
     searching: q !== "",
     today,
     start,

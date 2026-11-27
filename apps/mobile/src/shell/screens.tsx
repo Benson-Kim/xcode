@@ -57,6 +57,7 @@ import {
   Segmented,
   WhoRow,
 } from "./parts";
+import { useTargets } from "./targets";
 
 export type Catalog = { groups: PermissionGroup[] | null; error: string };
 
@@ -84,6 +85,7 @@ function revenueFigures(
   permission: string,
   dashboard: RevenueDashboard,
   period: Period,
+  targets = true,
 ): Figures | null {
   const {
     capturedToday,
@@ -113,6 +115,12 @@ function revenueFigures(
       period !== "month" && capturedToday !== null && vehiclesToday
         ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.`
         : "";
+    // With Targets off (v2.38) the card shows the revenue alone: no target, share or bar.
+    if (!targets)
+      return {
+        value: formats.kes(revenue),
+        ...(soFar && { note: soFar.slice(2) }),
+      };
     if (percent === null || expected === null)
       return {
         value: revenue ? formats.kes(revenue) : undefined,
@@ -172,6 +180,7 @@ export function HomeScreen({
 }) {
   const { colors } = useTheme();
   const formats = useFormats();
+  const targets = useTargets();
   const connected = useConnected();
   const has = permissionChecker(person.permissions);
   // People who capture or spend start on today; everyone else on the month so far.
@@ -278,6 +287,7 @@ export function HomeScreen({
                   card.permission,
                   dashboard,
                   periodOf(card),
+                  targets,
                 )
               : null;
           const sub =

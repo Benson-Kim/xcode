@@ -304,6 +304,7 @@ it("dates a new vehicle from the business date, never the computer clock", async
       fleetNumber: "9",
       dayTargets: [1500, 1500, 1500, 1500, 1500, 1500, 1500],
       initialInvestment: null,
+      lowBelow: 4000,
     },
   ]);
 });

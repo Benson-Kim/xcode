@@ -137,12 +137,12 @@ BEGIN
   IF p_joined_on < v_vehicle.joined_on AND v_first.starts_on > p_joined_on THEN
     INSERT INTO setup.vehicle_target_sets (
       organization_id, vehicle_id, starts_on, monday, tuesday, wednesday, thursday, friday,
-      saturday, sunday, created_at, created_by
+      saturday, sunday, low_below, created_at, created_by
     )
     VALUES (
       p_organization_id, p_vehicle_id, p_joined_on, v_first.monday, v_first.tuesday,
       v_first.wednesday, v_first.thursday, v_first.friday, v_first.saturday, v_first.sunday,
-      p_now, p_actor_id
+      v_first.low_below, p_now, p_actor_id
     );
   END IF;
 

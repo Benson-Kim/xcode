@@ -69,6 +69,7 @@ export function PettyCashPage({
     initialDate ? { from: initialDate, to: initialDate, unit: "day" } : null,
   );
   const [holderId, setHolderId] = useState("");
+  const [vehicleId, setVehicleId] = useState("");
   const [status, setStatus] = useState<StatusFilter>(initialStatus ?? "all");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
@@ -114,8 +115,10 @@ export function PettyCashPage({
       ? range.to
       : businessDate;
 
+  // Cash received carries no vehicle, so the vehicle narrows the expenses only.
+  const vehicleFilter = tab === "expenses" ? vehicleId : "";
   const paging = usePaging(
-    `${range?.from}|${range?.to}|${holderId}|${query}|${tab}|${status}`,
+    `${range?.from}|${range?.to}|${holderId}|${vehicleFilter}|${query}|${tab}|${status}`,
   );
   const list = useResource<PettyCashEntryPage>(
     range
@@ -123,6 +126,7 @@ export function PettyCashPage({
           from: range.from,
           to: range.to,
           holderId: holderId || undefined,
+          vehicleId: vehicleFilter || undefined,
           q: query || undefined,
           page: paging.page,
           pageSize: paging.pageSize,
@@ -137,8 +141,28 @@ export function PettyCashPage({
   const otherTab: Tab = tab === "expenses" ? "cash" : "expenses";
   const other = useCount(range, holderId, query, KINDS[otherTab]);
   const selection = useSelection(
-    `${range?.from}|${range?.to}|${holderId}|${query}|${tab}|${status}|${paging.page}|${paging.pageSize}`,
+    `${range?.from}|${range?.to}|${holderId}|${vehicleFilter}|${query}|${tab}|${status}|${paging.page}|${paging.pageSize}`,
   );
+  // What Approve all takes for one vehicle; the headline figures stay the managers'.
+  const forVehicle = useResource<PettyCashOverview>(
+    range && vehicleFilter
+      ? pettyCashOverviewPath({
+          from: range.from,
+          to: range.to,
+          holderId: holderId || undefined,
+          vehicleId: vehicleFilter,
+        })
+      : null,
+  );
+  const vehicles = known?.vehicles;
+  const vehicle = vehicleFilter
+    ? {
+        id: vehicleFilter,
+        registration:
+          vehicles?.find((option) => option.id === vehicleFilter)
+            ?.registration ?? "",
+      }
+    : undefined;
   const items = list.data?.items ?? [];
   const loading = range === null ? !overview.error : list.loading;
 
@@ -146,6 +170,7 @@ export function PettyCashPage({
     overview.reload();
     list.reload();
     other.reload();
+    forVehicle.reload();
   }
 
   // A refusal keeps the explanation on the page; a save says so in a toast. Either closes the dialogs and reloads.
@@ -246,6 +271,9 @@ export function PettyCashPage({
         holders={permissions?.canViewAll ? known?.holders : undefined}
         holderId={holderId}
         onHolderChange={setHolderId}
+        vehicles={tab === "expenses" ? (vehicles ?? []) : undefined}
+        vehicleId={vehicleId}
+        onVehicleChange={setVehicleId}
         status={tab === "expenses" ? status : undefined}
         onStatusChange={setStatus}
         search={search}
@@ -259,6 +287,7 @@ export function PettyCashPage({
                   tab={tab}
                   range={range}
                   holderId={holderId}
+                  vehicleId={vehicleFilter}
                   status={status}
                   query={query}
                 />
@@ -269,7 +298,12 @@ export function PettyCashPage({
                   canApproveDay={Boolean(permissions?.canApproveDay)}
                   range={range}
                   holderId={holderId}
-                  figures={waiting}
+                  vehicle={vehicle}
+                  figures={
+                    vehicleFilter
+                      ? (forVehicle.data?.vehicleWaiting ?? undefined)
+                      : waiting
+                  }
                   busy={busyId === BULK}
                   onApprove={(path, body, nothing) =>
                     void approveMany(path, body, nothing)

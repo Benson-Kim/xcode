@@ -14,6 +14,7 @@ const keys = {
   pinKey: "xcode.pin-key",
   offlineTries: "xcode.offline-tries",
   captureList: "xcode.capture-list",
+  sundayWeekNotice: "xcode.sunday-week-notice",
 };
 
 export interface StoredSession extends SessionTokens {
@@ -420,6 +421,12 @@ export async function loadCaptureList(
   }
   return list;
 }
+
+// The change date this phone dismissed the "week runs Sunday to Saturday" notice for, kept per device.
+export const loadSundayWeekDismissed = () => vault.get(keys.sundayWeekNotice);
+
+export const saveSundayWeekDismissed = (since: string) =>
+  vault.set(keys.sundayWeekNotice, since);
 
 // Switch user: this phone stops being trusted for anyone
 export async function forgetPerson(): Promise<void> {

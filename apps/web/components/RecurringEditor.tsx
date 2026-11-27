@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 
-import { MONTH_NAMES, ordinal, WEEKDAYS } from "@xcode/shared/dates";
+import { MONTH_NAMES, ordinal, weekdaysFrom } from "@xcode/shared/dates";
 import { vehicleLabel } from "@xcode/shared/revenue";
 
 import { useAppearance } from "../lib/appearance";
@@ -54,7 +54,6 @@ type Props = {
   onSaved: () => Promise<void> | void;
 };
 
-const weekdays = [...WEEKDAYS.slice(1), WEEKDAYS[0]];
 const monthDays = Array.from({ length: 28 }, (_, index) => index + 1);
 
 // Scheduled expense or saving (v2.30): what, how much per vehicle, when it runs, which vehicles, and for a saving
@@ -277,7 +276,7 @@ export function RecurringEditor({
               disabled={disabled}
               onChange={(event) => set("weekday", event.target.value)}
             >
-              {weekdays.map((day) => (
+              {weekdaysFrom(formats.firstDayOfWeek()).map((day) => (
                 <option key={day.value} value={String(day.value)}>
                   {day.label}
                 </option>
@@ -347,7 +346,9 @@ export function RecurringEditor({
                     }
                   >
                     <option value="1">That day</option>
-                    <option value="7">Over the 7 days to the run</option>
+                    <option value="7">
+                      Over the last Sunday to Saturday week
+                    </option>
                     <option value="30">Over the 30 days to the run</option>
                   </select>
                 </div>

@@ -29,7 +29,7 @@ from ..support.tenancy import set_override, set_scope
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
-SET_KEYS = ["id", "startsOn", "days", "weekTotal", "inForce", "canRemove"]
+SET_KEYS = ["id", "startsOn", "days", "weekTotal", "lowBelow", "inForce", "canRemove"]
 WEEK = [1000] * 5 + [1500, 500]
 LATER = [1200] * 6 + [1300.5]
 UNKNOWN = "00000000-0000-4000-8000-000000000000"
@@ -116,6 +116,7 @@ async def test_the_sets_list_newest_first_in_wire_order(
         "startsOn": "2026-10-20",
         "days": LATER,
         "weekTotal": 8500.5,
+        "lowBelow": 4000,
         "inForce": False,
         "canRemove": True,
     }
@@ -137,7 +138,7 @@ async def test_a_set_saved_again_on_its_date_replaces_it_and_both_are_logged(
     assert ok(response) == first
     assert count == 2
     assert [s["days"] for s in await sets(api, owner, kda)] == [WEEK[::-1], WEEK]
-    assert (await reasons(api, owner))[1:] == ["Target set, KDA 482M"] * 2
+    assert (await reasons(api, owner))[1:] == ["Target set, KDA 482M, low below KES 4,000"] * 2
 
 
 async def test_a_set_that_has_not_started_is_removed(api: AuthApi, owner: Member, kda: str) -> None:
@@ -176,7 +177,7 @@ async def test_a_set_from_today_can_be_replaced_today_but_not_removed(
     [
         ({"days": LATER}, "Enter the start date."),
         ({"startsOn": None, "days": LATER}, "Enter the start date."),
-        ({"startsOn": "2026-10-20"}, "Enter the target for every day."),
+        ({"startsOn": "2026-10-20"}, "This is the target already set for 2026-10-20."),
         ({"startsOn": "2026-10-20", "days": LATER[:6]}, "Enter the target for every day."),
         ({"startsOn": "2026-10-20", "days": [*LATER[:6], None]}, "Enter the target for every day."),
         (

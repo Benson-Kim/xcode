@@ -19,6 +19,7 @@ class ApprovePettyCashDayCommand:
     day: date | None
     to: date | None
     holder_id: UUID | None
+    vehicle_id: UUID | None = None
 
 
 class ApprovePettyCashDay:
@@ -33,5 +34,6 @@ class ApprovePettyCashDay:
                 command.day,
                 command.to,
                 command.holder_id,
+                command.vehicle_id,
             )
         )

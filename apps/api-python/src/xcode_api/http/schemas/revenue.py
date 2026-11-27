@@ -14,7 +14,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field
 
-from ...domain.revenue import CellStatus, DashboardPeriod, GapBand
+from ...domain.revenue import CellStatus, DashboardPeriod, GapBand, RevenueFuel
 from .common import Amount, ApiModel, Money
 
 
@@ -27,6 +27,8 @@ class RevenueCellDto(ApiModel):
     amount: Money | None
     reason: str | None
     note: str | None
+    fuel: RevenueFuel | None
+    low_below: Money
     can_edit: bool
     edited_after_capture: bool
     version: int | None
@@ -48,6 +50,7 @@ class RevenueVehicleDto(ApiModel):
     gap: Money
     gap_band: GapBand | None
     below_threshold_days: int
+    not_fueled_days: int
 
 
 class RevenueCompanyOption(ApiModel):
@@ -86,10 +89,12 @@ class RevenueWeekDto(ApiModel):
     day_totals: list[RevenueDayTotalDto]
     first_gap: RevenueGapDto | None
     low_day_threshold: Money
+    fuel_question_from: Money
     gap_amber_percent: Money
     gap: Money
     gap_band: GapBand | None
     below_threshold_days: int
+    not_fueled_days: int
     missing_days: int
 
 
@@ -118,8 +123,12 @@ class SaveRevenue(ApiModel):
     amount: Amount | None = None
     reason: str | None = None
     note: str | None = None
+    fuel: RevenueFuel | None = None
     version: int | None = Field(default=None, ge=-(2**63), le=2**63 - 1)
     captured_at: AwareDatetime | None = None
+
+    def fuel_given(self) -> bool:
+        return "fuel" in self.model_fields_set
 
 
 class RevenueSaved(ApiModel):
@@ -148,6 +157,7 @@ class RevenueDayDto(ApiModel):
     business_date: date
     vehicles: list[RevenueDayVehicleDto]
     truncated: bool
+    fuel_question_from: Money
 
 
 class SaveRevenueDayRow(ApiModel):
@@ -157,7 +167,11 @@ class SaveRevenueDayRow(ApiModel):
     amount: Amount | None = None
     reason: str | None = None
     note: str | None = None
+    fuel: RevenueFuel | None = None
     version: int | None = Field(default=None, ge=-(2**63), le=2**63 - 1)
+
+    def fuel_given(self) -> bool:
+        return "fuel" in self.model_fields_set
 
 
 class SaveRevenueDay(ApiModel):

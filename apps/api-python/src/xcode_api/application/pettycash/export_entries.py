@@ -25,6 +25,7 @@ class ExportPettyCashEntriesQuery:
     statuses: tuple[str, ...] | None
     q: str | None
     format: str | None
+    vehicle_id: UUID | None = None
 
 
 class ExportPettyCashEntries:
@@ -49,6 +50,7 @@ class ExportPettyCashEntries:
                 query.statuses,
                 query.q,
                 query.format,
+                query.vehicle_id,
             )
         )
         return await build_file(self._writers, document)

@@ -373,7 +373,10 @@ MESSAGES: Mapping[str, Message] = MappingProxyType(
         ),
         "revenue_search_length": _invalid("Search for 40 characters or fewer."),
         "revenue_settings_invalid": _invalid(
-            "The low-day threshold must be 0 or more and the amber band 0 to 100 per cent."
+            "The fuel question amount must be above 0 and the amber band 0 to 100 per cent."
+        ),
+        "fuel_invalid": _invalid(
+            "A fuel answer is kept only for revenue at or above the fuel question amount."
         ),
         "dashboard_period_invalid": _invalid("Period must be today, week or month."),
         "revenue_day_date_range": _invalid("Choose a day from the last ten years up to today."),
@@ -397,6 +400,7 @@ MESSAGES: Mapping[str, Message] = MappingProxyType(
         "organization_slug_taken": _plain(409, "This organization slug is already in use."),
         "settings_not_object": _invalid("Send the section's settings as an object."),
         "settings_wrong_type": _invalid("A setting has the wrong type of value."),
+        "setting_state_required": _invalid("Choose whether the setting is on or off."),
         "settings_business_date_future_zone": _invalid(
             "The held business date would be in the future in that time zone. Change the business date first."
         ),

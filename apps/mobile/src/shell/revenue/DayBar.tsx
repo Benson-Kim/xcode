@@ -5,6 +5,7 @@ import type { Formatter } from "@xcode/shared/format";
 import {
   STATUS_META,
   awaitsCapture,
+  fuelTag,
   isRecorded,
   type StatusTone,
 } from "@xcode/shared/revenue";
@@ -12,6 +13,7 @@ import {
 import { useFormats } from "../../lib/formats";
 import type { QueuedCapture, RevenueCell } from "../../revenue/types";
 import { Text, useTheme } from "../../ui";
+import { useTargets } from "../targets";
 import { STATE_TAG, TONE_COLOR, valueText } from "./model";
 import { styles as shared } from "./styles";
 
@@ -108,24 +110,29 @@ export const DayBar = memo(function DayBar({
   const { colors } = useTheme();
   const formats = useFormats();
   const columns = useColumns();
-  const { compared, share, below, shown, tone, difference } = dayBarFigures(
-    formats,
-    cell,
-    queued,
-    today,
-  );
+  // With Targets off (v2.38): no expected figure, bar or difference; the amount stands alone.
+  const targets = useTargets();
+  const figures = dayBarFigures(formats, cell, queued, today);
+  const { compared, share, below, shown, tone } = figures;
+  const difference = targets ? figures.difference : "";
+  const tag =
+    !queued && isRecorded(cell) && cell.amount !== null
+      ? fuelTag(cell.fuel)
+      : null;
   const content = (
     <>
       <Text style={[shared.detailDay, columns.day]}>{name}</Text>
-      <Text
-        style={[
-          shared.detailNumber,
-          columns.number,
-          { color: compared ? colors.navy : colors.grey },
-        ]}
-      >
-        {STATUS_META[cell.status].inFleet ? formats.kes(cell.expected) : ""}
-      </Text>
+      {targets && (
+        <Text
+          style={[
+            shared.detailNumber,
+            columns.number,
+            { color: compared ? colors.navy : colors.grey },
+          ]}
+        >
+          {STATUS_META[cell.status].inFleet ? formats.kes(cell.expected) : ""}
+        </Text>
+      )}
       <View style={shared.detailActual}>
         <Text
           weight={
@@ -141,7 +148,10 @@ export const DayBar = memo(function DayBar({
         >
           {shown}
         </Text>
-        {compared && <ShareBar share={share} below={below} />}
+        {tag ? (
+          <Text style={{ fontSize: 12, color: colors.grey }}>{tag}</Text>
+        ) : null}
+        {targets && compared && <ShareBar share={share} below={below} />}
         {difference ? (
           <Text
             style={{ fontSize: 12, color: below ? colors.red : colors.green }}
@@ -152,7 +162,7 @@ export const DayBar = memo(function DayBar({
       </View>
     </>
   );
-  const label = `${name}: expected ${formats.kes(cell.expected)}, ${shown}${difference ? `, ${difference}` : ""}`;
+  const label = `${name}: ${targets ? `expected ${formats.kes(cell.expected)}, ` : ""}${shown}${tag ? `, ${tag}` : ""}${difference ? `, ${difference}` : ""}`;
   return tappable ? (
     <Pressable
       accessibilityRole="button"

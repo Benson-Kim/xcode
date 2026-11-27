@@ -19,7 +19,7 @@ from xcode_api.domain.tenancy import ORGANIZATION_MANAGE, Permission, RetiredPer
 API_ROOT = Path(__file__).resolve().parents[2]
 CATALOGUE = API_ROOT / "tests" / "support" / "permission_catalogue.json"
 SHARED = API_ROOT.parents[1] / "packages" / "shared" / "src"
-PROTOTYPE = API_ROOT.parents[1] / "docs" / "design" / "XCODE_Web_v2.3.html"
+PROTOTYPE = API_ROOT.parents[1] / "docs" / "design" / "XCODE_Web_v2.46.html"
 
 needs_shared = pytest.mark.skipif(
     not SHARED.is_dir(), reason="packages/shared is not checked out beside apps/api-python"
@@ -61,8 +61,8 @@ def _prototype_modules() -> list[tuple[str, list[tuple[str, str]]]]:
 def test_the_permission_enumeration_equals_the_catalogue_in_order() -> None:
     keys = _catalogue_keys()
     assert [permission.value for permission in Permission] == keys
-    assert len(set(keys)) == len(keys) == 59
-    assert len(_catalogue()["groups"]) == 12
+    assert len(set(keys)) == len(keys) == 60
+    assert len(_catalogue()["groups"]) == 13
 
 
 def test_retired_and_hidden_keys_stay_outside_the_catalogue() -> None:

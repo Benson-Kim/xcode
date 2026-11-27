@@ -1,5 +1,5 @@
--- pettycash.entry_matches(p_holder_id uuid, p_from date, p_to date, p_kinds smallint[], p_statuses text[], p_q text, p_view_all boolean, p_vehicles uuid[]) RETURNS SETOF pettycash.entries
--- Purpose: the entries the Petty cash page lists for the current actor (pettycash.entry_visible with p_view_all and the actor's visible vehicles), of one float when p_holder_id is given, dated p_from..p_to (either end open), of the kind codes and status words asked (empty or null = all), whose note, payee, holder name, registration or item name holds p_q literally, ignoring case (the LIKE wildcards escaped); unordered, so the list and the export order or page them themselves.
+-- pettycash.entry_matches(p_holder_id uuid, p_from date, p_to date, p_kinds smallint[], p_statuses text[], p_q text, p_view_all boolean, p_vehicles uuid[], p_vehicle_id uuid) RETURNS SETOF pettycash.entries
+-- Purpose: the entries the Petty cash page lists for the current actor (pettycash.entry_visible with p_view_all and the actor's visible vehicles), of one float when p_holder_id is given, of one vehicle when p_vehicle_id is given, dated p_from..p_to (either end open), of the kind codes and status words asked (empty or null = all), whose note, payee, holder name, registration or item name holds p_q literally, ignoring case (the LIKE wildcards escaped); unordered, so the list and the export order or page them themselves.
 -- Callers: api.pettycash_entry_list, api.pettycash_export_get.
 -- Reads: pettycash.entries, tenancy.memberships, setup.fleet_vehicles, setup.expense_items, and what pettycash.entry_visible and pettycash.status_word read. Writes: nothing.
 -- Raises: none.
@@ -13,7 +13,8 @@ CREATE OR REPLACE FUNCTION pettycash.entry_matches(
   p_statuses text[],
   p_q text,
   p_view_all boolean,
-  p_vehicles uuid[]
+  p_vehicles uuid[],
+  p_vehicle_id uuid
 )
 RETURNS SETOF pettycash.entries
 LANGUAGE plpgsql
@@ -34,6 +35,7 @@ BEGIN
   WHERE e.organization_id = tenancy.current_organization()
     AND pettycash.entry_visible(e, p_view_all, p_vehicles)
     AND (p_holder_id IS NULL OR e.holder_id = p_holder_id)
+    AND (p_vehicle_id IS NULL OR e.vehicle_id = p_vehicle_id)
     AND (p_from IS NULL OR e.entry_date >= p_from)
     AND (p_to IS NULL OR e.entry_date <= p_to)
     AND (coalesce(cardinality(p_kinds), 0) = 0 OR e.kind = ANY (p_kinds))
@@ -48,6 +50,6 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION pettycash.entry_matches(uuid, date, date, smallint[], text[], text, boolean, uuid[]) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION pettycash.entry_matches(uuid, date, date, smallint[], text[], text, boolean, uuid[])
+REVOKE ALL ON FUNCTION pettycash.entry_matches(uuid, date, date, smallint[], text[], text, boolean, uuid[], uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pettycash.entry_matches(uuid, date, date, smallint[], text[], text, boolean, uuid[], uuid)
   TO xcode_api_executor;

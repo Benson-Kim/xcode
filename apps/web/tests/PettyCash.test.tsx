@@ -77,7 +77,8 @@ it("shows the four day figures from the overview and the day's expenses, with no
 
   const tyres = await screen.findByRole("row", { name: /KDA 482M/ });
   expect(within(tyres).getByText("Tyres")).toBeInTheDocument();
-  expect(within(tyres).getByText("Waiting")).toBeInTheDocument();
+  expect(within(tyres).queryByText("Waiting")).not.toBeInTheDocument();
+  expect(tyres.querySelector(".chip")).toBeNull();
   expect(
     screen.queryByRole("row", { name: /Refund for a double charge/ }),
   ).not.toBeInTheDocument();
@@ -194,10 +195,10 @@ it("shows the comment on a sent-back entry", async () => {
   });
   renderInApp(<PettyCashPage />);
   const row = await screen.findByRole("row", { name: /KDA 482M/ });
-  expect(within(row).getByText("Sent back")).toHaveClass("chip", "back");
   expect(
     within(row).getByText("Sent back, Attach the receipt"),
   ).toBeInTheDocument();
+  expect(row.querySelector(".chip")).toBeNull();
 });
 
 it("approves one entry with its version", async () => {
@@ -294,11 +295,10 @@ it("will not send an entry back without a reason, then marks the row Sent back a
 
   const row = await rowOf(/KDA 482M/);
   await waitFor(() =>
-    expect(within(row).getByText("Sent back")).toHaveClass("chip", "back"),
+    expect(
+      within(row).getByText("Sent back, Attach the receipt"),
+    ).toBeInTheDocument(),
   );
-  expect(
-    within(row).getByText("Sent back, Attach the receipt"),
-  ).toBeInTheDocument();
   expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument();
   expect(
     within(row).queryByRole("button", { name: /^Approve / }),
@@ -431,7 +431,7 @@ it("rejects a waiting expense with a reason, and the row shows Rejected with it,
   expect(writes(fetcher)).toEqual([]);
   fireEvent.click(within(dialog).getByRole("button", { name: "Not agreed" }));
   fireEvent.click(reject);
-  expect(await screen.findByText("Rejected")).toBeInTheDocument();
+  expect(await screen.findByText("Rejected, Not agreed")).toBeInTheDocument();
   expect(writes(fetcher)).toEqual([
     {
       path: "/api/setup/pettycash/entries/e1/reject",
@@ -441,9 +441,8 @@ it("rejects a waiting expense with a reason, and the row shows Rejected with it,
   ]);
   const row = await rowOf(/KDA 482M/);
   await waitFor(() =>
-    expect(within(row).getByText("Rejected")).toHaveClass("chip", "bad"),
+    expect(within(row).getByText("Rejected, Not agreed")).toBeInTheDocument(),
   );
-  expect(within(row).getByText("Not agreed")).toBeInTheDocument();
   expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument();
   expect(
     screen.getByText("Expenses, 2 entries").closest("tr"),
@@ -471,7 +470,9 @@ it("reopens an approved or rejected expense with a reason, and it waits again wi
   });
   renderInApp(<PettyCashPage />);
   const rejected = await rowOf(/KDA 482M/);
-  expect(within(rejected).getByText("No receipt")).toBeInTheDocument();
+  expect(
+    within(rejected).getByText("Rejected, No receipt"),
+  ).toBeInTheDocument();
   expect(
     within(screen.getByRole("row", { name: /KDC 200Y/ })).queryByRole(
       "button",
@@ -515,12 +516,14 @@ it("reopens an approved or rejected expense with a reason, and it waits again wi
   ]);
   const row = await rowOf(/KDA 482M/);
   await waitFor(() =>
-    expect(within(row).getByText("Waiting")).toHaveClass("chip", "wait"),
+    expect(
+      within(row).getByText("Reopened, Approved by mistake"),
+    ).toBeInTheDocument(),
   );
   expect(
-    within(row).getByText("Reopened, Approved by mistake"),
-  ).toBeInTheDocument();
-  expect(within(row).queryByText("No receipt")).not.toBeInTheDocument();
+    within(row).queryByText("Rejected, No receipt"),
+  ).not.toBeInTheDocument();
+  expect(within(row).queryByText("Waiting")).not.toBeInTheDocument();
 });
 
 it("puts send back, reject and delete under More when two or more apply, and shows one alone as a button", async () => {
@@ -1376,7 +1379,7 @@ it("opens on the business date, with the same period picker as Central expenses 
   const period = await trigger("Period, Wed 30 Sep 2026");
   expect(paths(fetcher)[0]).toBe("/api/setup/pettycash/overview");
   const manager = await screen.findByRole("combobox", { name: "Manager" });
-  const status = screen.getByRole("combobox", { name: "Show" });
+  const status = screen.getByRole("combobox", { name: "Status" });
   const search = screen.getByRole("searchbox", { name: "Search" });
   const approve = await screen.findByRole("button", {
     name: "Record spending",
@@ -1401,7 +1404,7 @@ it("shows several days: asks for the figures and entries of the span, labels the
     entries: [
       expense({ id: "e1", date: "2026-09-28" }),
       expense({ id: "e2", date: "2026-09-30", registration: "KDB 100X" }),
-      expense({ id: "e3", date: "2026-09-27", registration: "KDC 200Y" }),
+      expense({ id: "e3", date: "2026-09-26", registration: "KDC 200Y" }),
     ],
   });
   renderInApp(<PettyCashPage />);
@@ -1417,7 +1420,7 @@ it("shows several days: asks for the figures and entries of the span, labels the
   const figures = await screen.findByRole("group", {
     name: "Period figures",
   });
-  expect(await trigger("Period, 28 Sep to 4 Oct 2026")).toBeInTheDocument();
+  expect(await trigger("Period, 27 Sep to 3 Oct 2026")).toBeInTheDocument();
   const figure = (label: string) =>
     within(figures).getByText(label).nextSibling;
   expect(figure("Expenses")).toHaveTextContent(/^14,000$/);
@@ -1425,21 +1428,21 @@ it("shows several days: asks for the figures and entries of the span, labels the
   expect(figure("Cash issued")).toHaveTextContent(/^21,000$/);
   expect(figure("Opening balance")).toHaveTextContent(/^9,000$/);
   expect(paths(fetcher)).toContain(
-    "/api/setup/pettycash/overview?from=2026-09-28&to=2026-10-04",
+    "/api/setup/pettycash/overview?from=2026-09-27&to=2026-10-03",
   );
   await waitFor(() =>
     expect(
       entryReads(fetcher).some(
         (path) =>
-          path.includes("from=2026-09-28") &&
-          path.includes("to=2026-10-04") &&
+          path.includes("from=2026-09-27") &&
+          path.includes("to=2026-10-03") &&
           path.includes("kind=expense") &&
           !path.includes("credit"),
       ),
     ).toBe(true),
   );
   expect(
-    await screen.findByRole("button", { name: "Period, 28 Sep to 4 Oct 2026" }),
+    await screen.findByRole("button", { name: "Period, 27 Sep to 3 Oct 2026" }),
   ).toBeInTheDocument();
   await screen.findByRole("row", { name: /KDA 482M/ });
   expect(
@@ -1564,7 +1567,7 @@ it("opens a new entry on the last day of a past period, and on today when the pe
     await screen.findByRole("button", { name: "Record spending" }),
   );
   expect(
-    within(await screen.findByRole("dialog")).getByText("Sun 27 Sep 2026"),
+    within(await screen.findByRole("dialog")).getByText("Sat 26 Sep 2026"),
   ).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -1577,7 +1580,7 @@ it("opens a new entry on the last day of a past period, and on today when the pe
   ).toBeInTheDocument();
 });
 
-it("draws the four statuses as the design's chips, counts a sent-back expense but not a rejected one, and filters by Rejected", async () => {
+it("shows the status as a line under the item (none while waiting), with no Manager or Status column, counts a sent-back expense but not a rejected one, and filters by Rejected", async () => {
   const fetcher = servePettyCash({
     entries: [
       expense({ id: "e1", total: 1000, unitAmount: 1000 }),
@@ -1607,17 +1610,29 @@ it("draws the four statuses as the design's chips, counts a sent-back expense bu
     ],
   });
   renderInApp(<PettyCashPage />);
-  const chipOf = async (pattern: RegExp, label: string) =>
-    within(await rowOf(pattern)).getByText(label);
-  expect(await chipOf(/KDA 482M/, "Waiting")).toHaveClass("chip", "wait");
-  expect(await chipOf(/KDB 100X/, "Sent back")).toHaveClass("chip", "back");
-  expect(await chipOf(/KDC 200Y/, "Approved")).toHaveClass("chip", "ok");
-  expect(await chipOf(/KDD 300Z/, "Rejected")).toHaveClass("chip", "bad");
+  const itemOf = async (pattern: RegExp) =>
+    within(await rowOf(pattern))
+      .getByText("Tyres")
+      .closest("td");
+  expect(await itemOf(/KDA 482M/)).toHaveTextContent(/^Tyres$/);
+  expect(await itemOf(/KDB 100X/)).toHaveTextContent(
+    /^TyresSent back, No receipt$/,
+  );
+  expect(await itemOf(/KDC 200Y/)).toHaveTextContent(/^TyresApproved$/);
+  expect(await itemOf(/KDD 300Z/)).toHaveTextContent(
+    /^TyresRejected, Not agreed$/,
+  );
+  expect(
+    screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent)
+      .filter((name) => name !== "Select"),
+  ).toEqual(["Vehicle", "Item", "Qty", "Unit cost", "Total amount", "Actions"]);
   expect(
     screen.getByText("Expenses, 4 entries").closest("tr"),
   ).toHaveTextContent("7,000");
 
-  choose(screen.getByRole("combobox", { name: "Show" }), "Rejected");
+  choose(screen.getByRole("combobox", { name: "Status" }), "Rejected");
   await waitFor(() =>
     expect(
       entryReads(fetcher).some((path) => path.includes("status=rejected")),
@@ -1700,7 +1715,7 @@ it("filters expenses by status and by search", async () => {
   });
   renderInApp(<PettyCashPage />);
   await screen.findByRole("row", { name: /KDA 482M/ });
-  choose(screen.getByRole("combobox", { name: "Show" }), "Waiting");
+  choose(screen.getByRole("combobox", { name: "Status" }), "Waiting");
   await waitFor(() =>
     expect(
       entryReads(fetcher).some((path) => path.includes("status=waiting")),
@@ -1724,7 +1739,7 @@ it("opens on the waiting filter when asked to", async () => {
   const fetcher = servePettyCash({ entries: [expense()] });
   renderInApp(<PettyCashPage initialStatus="waiting" />);
   expect(
-    await screen.findByRole("combobox", { name: "Show" }),
+    await screen.findByRole("combobox", { name: "Status" }),
   ).toHaveDisplayValue("Waiting");
   await waitFor(() =>
     expect(entryReads(fetcher)[0]).toContain("status=waiting"),
@@ -2010,7 +2025,7 @@ it("pages the entries on the server, 25 to a page, and goes back to page 1 when 
 
   fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
   await screen.findByText("Showing 101–200 of 230");
-  choose(screen.getByLabelText("Show"), "Waiting");
+  choose(screen.getByLabelText("Status"), "Waiting");
   await waitFor(() =>
     expect(entryReads(fetcher).at(-1)).toContain("page=1&pageSize=100"),
   );
@@ -2119,7 +2134,7 @@ it("clears the ticks when the list changes", async () => {
   fireEvent.click(box);
   expect(box).toBeChecked();
 
-  choose(screen.getByRole("combobox", { name: "Show" }), "Waiting");
+  choose(screen.getByRole("combobox", { name: "Status" }), "Waiting");
   await waitFor(() =>
     expect(
       screen.getByRole("checkbox", { name: "Select KDA 482M, KES 3,500" }),
@@ -2150,7 +2165,7 @@ it("approves every day of a period at once, naming what waits", async () => {
     {
       path: "/api/setup/pettycash/approve-day",
       method: "POST",
-      body: { date: "2026-09-28", to: "2026-10-04" },
+      body: { date: "2026-09-27", to: "2026-10-03" },
     },
   ]);
 });
@@ -2471,4 +2486,120 @@ it("opens the new vehicle form from the spending form with the registration type
   );
   expect(within(dialog).getByLabelText("Unit cost, KES")).toHaveValue("800");
   expect(writes(fetcher)).toEqual([]);
+});
+
+it("narrows the expenses to a vehicle: the list, Approve all and the export follow it, the figures and Cash received do not, and ticks clear", async () => {
+  URL.createObjectURL = vi.fn(() => "blob:petty");
+  URL.revokeObjectURL = vi.fn();
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(() => undefined);
+  const fetcher = servePettyCash({
+    permissions: permissionsOf({ canApproveDay: true, canApproveItem: true }),
+    entries: [
+      expense({ id: "e1", canReview: true }),
+      expense({
+        id: "e2",
+        vehicleId: "v2",
+        registration: "KDB 100X",
+        total: 9350,
+        unitAmount: 9350,
+        canReview: true,
+      }),
+      expense({
+        id: "e3",
+        vehicleId: "v2",
+        registration: "KDB 100X",
+        status: "approved",
+        total: 100,
+        unitAmount: 100,
+      }),
+    ],
+    answer: (path, init) =>
+      init?.method === "POST" && path === "/api/setup/pettycash/approve-day"
+        ? json({ approved: 1, total: 9350, skipped: 0 })
+        : undefined,
+  });
+  const exported: string[] = [];
+  vi.stubGlobal("fetch", (input: RequestInfo, init?: RequestInit) => {
+    if (String(input).includes("/export?")) {
+      exported.push(String(input));
+      return Promise.resolve(new Response("file", { status: 200 }));
+    }
+    return fetcher(input, init);
+  });
+  renderInApp(<PettyCashPage />, { permissions: ["reports.export"] });
+
+  const vehicle = await screen.findByRole("combobox", { name: "Vehicle" });
+  expect(
+    within(vehicle)
+      .getAllByRole("option")
+      .map((option) => option.textContent),
+  ).toEqual(["All vehicles", "KDA 482M", "KDB 100X · 7"]);
+  fireEvent.click(
+    within(await screen.findByRole("row", { name: /KDA 482M/ })).getByRole(
+      "checkbox",
+    ),
+  );
+  expect(
+    screen.getByRole("button", { name: "Approve 1, KES 3,500" }),
+  ).toBeInTheDocument();
+
+  choose(vehicle, "KDB 100X · 7");
+  expect(
+    await screen.findByRole("button", {
+      name: "Approve all KDB 100X, KES 9,350",
+    }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("row", { name: /KDA 482M/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Approve 1,/ })).toBeNull();
+  expect(
+    entryReads(fetcher).some((path) => path.includes("vehicleId=v2")),
+  ).toBe(true);
+  const figures = screen.getByRole("group", { name: "Day figures" });
+  expect(within(figures).getByText("Expenses").nextSibling).toHaveTextContent(
+    /^3,500$/,
+  );
+  expect(
+    paths(fetcher).filter(
+      (path) => path.includes("/overview") && !path.includes("vehicleId"),
+    ),
+  ).toHaveLength(1);
+
+  choose(screen.getByRole("combobox", { name: "Status" }), "Approved");
+  await screen.findByText("Approved");
+  expect(
+    screen.getByRole("button", { name: "Approve all KDB 100X, KES 9,350" }),
+  ).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Excel" }));
+  await waitFor(() => expect(exported).toHaveLength(1));
+  expect(exported[0]).toBe(
+    "/api/setup/pettycash/export?from=2026-09-30&to=2026-09-30&vehicleId=v2&view=expenses&status=approved&format=xlsx",
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "Approve all KDB 100X, KES 9,350" }),
+  );
+  await waitFor(() =>
+    expect(writes(fetcher)).toEqual([
+      {
+        path: "/api/setup/pettycash/approve-day",
+        method: "POST",
+        body: { date: BUSINESS_DATE, vehicleId: "v2" },
+      },
+    ]),
+  );
+
+  fireEvent.click(screen.getByRole("tab", { name: "Cash received" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("combobox", { name: "Vehicle" })).toBeNull(),
+  );
+  expect(screen.queryByRole("combobox", { name: "Status" })).toBeNull();
+  const cashReads = entryReads(fetcher).filter((path) =>
+    path.includes("kind=cash"),
+  );
+  expect(cashReads.some((path) => path.includes("vehicleId"))).toBe(false);
+  click.mockRestore();
 });

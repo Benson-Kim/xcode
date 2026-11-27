@@ -9,13 +9,16 @@ import {
   formatTimestamp,
   isDate,
   mediumDateLabel,
+  mondayFirstIndex,
   shiftDate,
   shortMonthName,
+  startOfNextWeek,
   startOfWeek,
   weekDays,
   WEEKDAYS,
   weekdayName,
   weekdayIndex,
+  weekdaysFrom,
   weekdayShortName,
 } from "@xcode/shared/dates";
 
@@ -165,4 +168,28 @@ it("describes a week as primitives for screens to precompute once", () => {
   expect(weekDays("2026-09-28", 3)).toHaveLength(3);
   expect(weekDays("2026-09-28")).not.toBe(weekDays("2026-09-28"));
   expect(weekDays("nope")).toEqual([]);
+});
+
+it("orders the weekdays from the first day of the week and finds each in a Monday-first list", () => {
+  expect(weekdaysFrom(0).map((day) => day.label.slice(0, 3))).toEqual([
+    "Sun",
+    "Mon",
+    "Tue",
+    "Wed",
+    "Thu",
+    "Fri",
+    "Sat",
+  ]);
+  expect(weekdaysFrom(1).map((day) => day.value)).toEqual([
+    1, 2, 3, 4, 5, 6, 0,
+  ]);
+  expect(weekdaysFrom(0).map((day) => mondayFirstIndex(day.value))).toEqual([
+    6, 0, 1, 2, 3, 4, 5,
+  ]);
+});
+
+it("opens the next week on its first day, even from that day itself", () => {
+  expect(startOfNextWeek("2026-09-21", 0)).toBe("2026-09-27");
+  expect(startOfNextWeek("2026-09-26", 0)).toBe("2026-09-27");
+  expect(startOfNextWeek("2026-09-27", 0)).toBe("2026-10-04");
 });

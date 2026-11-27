@@ -1,5 +1,5 @@
--- api.pettycash_export_get(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_from date, p_to date, p_holder_id uuid, p_view text, p_status text[], p_q text, p_format text, p_now timestamptz) RETURNS jsonb
--- Purpose: the Petty cash screen as a file's document, in one transaction with its audit row: the format first, the view (expenses or cash), the overview's period checks, the list's status words and search length, the float among the ones the actor sees, then every entry the list shows for those filters (pettycash.entry_matches, by date, kind, id) as the table "Petty cash, expenses" (date, manager, vehicle, item, units, unit amount, amount, status, note, recorded by) or "Petty cash, cash received" (date, manager, description, the amount with credit notes negative, note, recorded by); headline Cash balance (the window's closing balance of the chosen floats), figures Cash received, Expenses, Credit notes and Waiting; the change-log row holds {screen, from, to, holderId, view, status, q, rows, format}.
+-- api.pettycash_export_get(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_from date, p_to date, p_holder_id uuid, p_view text, p_status text[], p_q text, p_format text, p_now timestamptz, p_vehicle_id uuid DEFAULT NULL) RETURNS jsonb
+-- Purpose: the Petty cash screen as a file's document, in one transaction with its audit row: the format first, the view (expenses or cash), the overview's period checks, the list's status words and search length, the float among the ones the actor sees, the vehicle (p_vehicle_id) among the ones the actor sees, then every entry the list shows for those filters (pettycash.entry_matches, by date, kind, id) as the table "Petty cash, expenses" (date, manager, vehicle, item, units, unit amount, amount, status, note, recorded by) or "Petty cash, cash received" (date, manager, description, the amount with credit notes negative, note, recorded by); headline Cash balance (the window's closing balance of the chosen floats), figures Cash received, Expenses, Credit notes and Waiting; the change-log row holds {screen, from, to, holderId, vehicleId, view, status, q, rows, format}.
 -- Callers: ReportsRoutines.export_pettycash; ExportPettyCash (GET /setup/pettycash/export).
 -- Reads: what tenancy.require_any_permission, tenancy.business_date, tenancy.effective_permissions, reports.check_export, pettycash.check_period, pettycash.visible_holders, setup.visible_vehicles, pettycash.entry_matches, reports.pettycash_entries, pettycash.tallies and reports.document read. Writes: what reports.log_export writes.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC403 permission_missing via tenancy.require_any_permission, XC422 export_format_invalid via reports.check_export, XC422 pettycash_export_view_invalid, XC422 time_zone_invalid via tenancy.business_date, XC422 pettycash_range_both via pettycash.check_period, XC422 history_dates_order via pettycash.check_period, XC422 pettycash_range_length via pettycash.check_period, XC422 pettycash_range_start via pettycash.check_period, XC422 pettycash_too_old via pettycash.check_period, XC422 pettycash_status_invalid, XC422 history_text_length, XC404 not_found, XC422 export_too_many_rows via reports.check_export.
@@ -16,7 +16,8 @@ CREATE OR REPLACE FUNCTION api.pettycash_export_get(
   p_status text[],
   p_q text,
   p_format text,
-  p_now timestamptz
+  p_now timestamptz,
+  p_vehicle_id uuid DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -76,13 +77,16 @@ BEGIN
     PERFORM tenancy.refuse('not_found', 'XC404');
   END IF;
   v_vehicles := ARRAY(SELECT visible.id FROM setup.visible_vehicles() AS visible (id));
+  IF p_vehicle_id IS NOT NULL AND NOT p_vehicle_id = ANY (v_vehicles) THEN
+    PERFORM tenancy.refuse('not_found', 'XC404');
+  END IF;
   v_kinds := CASE v_view WHEN 'expenses' THEN ARRAY[2::smallint] ELSE ARRAY[1::smallint, 3::smallint] END;
   v_statuses := CASE WHEN v_view = 'expenses' THEN p_status END;
 
   WITH listed AS (
     SELECT m.id, m.entry_date, m.kind, m.status, m.sent_back_note, m.payee, m.total AS signed_total
     FROM pettycash.entry_matches(
-           p_holder_id, p_from, p_to, v_kinds, v_statuses, v_text, v_view_all, v_vehicles
+           p_holder_id, p_from, p_to, v_kinds, v_statuses, v_text, v_view_all, v_vehicles, p_vehicle_id
          ) AS m
   ),
   lines AS (
@@ -179,6 +183,10 @@ BEGIN
   v_filters := coalesce(
     (SELECT h.name FROM pettycash.visible_holders(v_view_all) AS h WHERE h.user_id = p_holder_id),
     'All floats'
+  ) || coalesce(
+    ', ' || (SELECT f.registration FROM setup.fleet_vehicles AS f
+             WHERE f.organization_id = p_organization_id AND f.id = p_vehicle_id),
+    ''
   ) || coalesce(', ' || nullif(array_to_string(v_statuses, ', '), ''), '');
   v_document := reports.document(v_table, v_rows, v_filters, v_format, p_now);
   PERFORM reports.log_export(
@@ -192,6 +200,7 @@ BEGIN
       'from', p_from,
       'to', p_to,
       'holderId', p_holder_id,
+      'vehicleId', p_vehicle_id,
       'view', v_view,
       'status', to_jsonb(v_statuses),
       'q', v_text,

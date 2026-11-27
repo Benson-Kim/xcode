@@ -30,11 +30,13 @@ const vehicle: Vehicle = {
   active: true,
   weeklyTarget: 14000,
   dayTargets: flat(2000),
+  lowBelow: 3500,
   initialInvestment: 1200000,
   nextTarget: {
     startsOn: "2026-10-05",
     dayTargets: flat(2500),
     weeklyTarget: 17500,
+    lowBelow: 3000,
   },
   targets: [],
   recurringItems: 3,
@@ -45,6 +47,7 @@ const sets: TargetSet[] = [
     id: "t-2",
     startsOn: "2026-10-05",
     days: flat(2500),
+    lowBelow: 3000,
     weekTotal: 17500,
     inForce: false,
     canRemove: true,
@@ -53,6 +56,7 @@ const sets: TargetSet[] = [
     id: "t-1",
     startsOn: "2026-01-01",
     days: flat(2000),
+    lowBelow: 3500,
     weekTotal: 14000,
     inForce: true,
     canRemove: false,
@@ -111,6 +115,11 @@ it("shows the fleet number, the next target, the investment and the totals in th
   expect(weekly.querySelector(".note.wrap")).toHaveTextContent(
     "17,500 from 5 Oct 2026",
   );
+  const low = row.getByText(/^3,500/);
+  expect(low).toHaveAttribute("data-label", "Low below");
+  expect(low.querySelector(".note.wrap")).toHaveTextContent(
+    "3,000 from 5 Oct 2026",
+  );
   expect(row.getByText("1,200,000")).toHaveAttribute(
     "data-label",
     "Initial investment",
@@ -124,7 +133,7 @@ it("shows the fleet number, the next target, the investment and the totals in th
   const footer = [
     ...screen.getAllByRole("row").at(-1)!.querySelectorAll("td"),
   ].map((cell) => cell.textContent);
-  expect(footer).toEqual(["1 vehicle", "14,000", "1,200,000", "", ""]);
+  expect(footer).toEqual(["1 vehicle", "14,000", "", "1,200,000", "", ""]);
 });
 
 it("hides the Targets button without a targets right, and treats vehicles.manage as all three", async () => {
@@ -166,9 +175,23 @@ it("refuses a new vehicle without a registration, a fleet number or every day ta
 
   fireEvent.click(await screen.findByRole("button", { name: "New vehicle" }));
   const dialog = within(screen.getByRole("dialog", { name: "New vehicle" }));
-  expect(dialog.getAllByLabelText(/^Target, /)).toHaveLength(7);
+  expect(
+    dialog
+      .getAllByLabelText(/^Target, /)
+      .map((input) => input.getAttribute("aria-label")),
+  ).toEqual(
+    [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ].map((day) => `Target, ${day}`),
+  );
   fireEvent.click(dialog.getByRole("button", { name: "Same every day" }));
-  expect(dialog.getByLabelText("Target, Monday")).toHaveFocus();
+  expect(dialog.getByLabelText("Target, Sunday")).toHaveFocus();
 
   fireEvent.click(dialog.getByRole("button", { name: "Save" }));
   expect(dialog.getByRole("alert")).toHaveTextContent(
@@ -213,18 +236,19 @@ it("refuses a new vehicle without a registration, a fleet number or every day ta
       joinedOn: businessDate,
       fleetNumber: "30",
       dayTargets: flat(1800),
+      lowBelow: 4000,
       initialInvestment: 2500000,
     },
   ]);
 });
 
-it("opens the targets pop up on the next Monday with the set in force and the history, newest first", async () => {
+it("opens the targets pop up on the next Sunday with the set in force and the history, newest first", async () => {
   const { dialog, element } = await open(["vehicles.target", "vehicles.view"]);
 
   expect(element).toHaveClass("tg");
   expect(dialog.getByText("KDA 482M · 14")).toBeVisible();
   expect(dialog.getByText("New target starts")).toBeVisible();
-  expect(dialog.getByText("Mon 28 Sep 2026")).toBeVisible();
+  expect(dialog.getByText("Sun 27 Sep 2026")).toBeVisible();
   expect(dialog.getByRole("button", { name: "Previous day" })).toBeEnabled();
   for (const day of [
     "Monday",
@@ -240,6 +264,12 @@ it("opens the targets pop up on the next Monday with the set in force and the hi
     "14,000",
   );
 
+  expect(
+    dialog
+      .getAllByRole("columnheader")
+      .map((cell) => cell.textContent)
+      .slice(0, 9),
+  ).toEqual(["From", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Week"]);
   const rows = dialog.getAllByRole("row").slice(1);
   expect(rows).toHaveLength(2);
   expect(rows[0]).toHaveTextContent("5 Oct 2026");
@@ -254,7 +284,7 @@ it("steps the start date but never to a day before today", async () => {
   const { dialog } = await open(["vehicles.target"]);
 
   const previous = dialog.getByRole("button", { name: "Previous day" });
-  for (let step = 0; step < 7; step++) fireEvent.click(previous);
+  for (let step = 0; step < 6; step++) fireEvent.click(previous);
   expect(dialog.getByText("Mon 21 Sep 2026")).toBeVisible();
   expect(previous).toBeDisabled();
   fireEvent.click(dialog.getByRole("button", { name: "Next day" }));
@@ -275,12 +305,13 @@ it("saves a new target from the chosen date, reloads the list and closes", async
     "POST",
     "setup/vehicles/v-1/targets",
     {
-      startsOn: "2026-09-28",
+      startsOn: "2026-09-27",
       days: [2000, 2500, 2000, 2000, 2000, 2000, 2000],
+      lowBelow: 3500,
     },
   ]);
   expect(
-    await screen.findByText("Target saved, from 28 Sep 2026"),
+    await screen.findByText("Target saved, from 27 Sep 2026"),
   ).toBeVisible();
   await waitFor(() =>
     expect(
@@ -295,17 +326,63 @@ it("saves a new target from the chosen date, reloads the list and closes", async
 it("fills every day from the first figure typed with Same every day", async () => {
   const { api, dialog } = await open(["vehicles.target"]);
 
+  fireEvent.change(dialog.getByLabelText("Target, Sunday"), {
+    target: { value: "3000" },
+  });
+  fireEvent.click(dialog.getByRole("button", { name: "Same every day" }));
+  expect(dialog.getByLabelText("Target, Saturday")).toHaveValue("3000");
+  fireEvent.click(dialog.getByRole("button", { name: "Save target" }));
+  await waitFor(() => expect(writes(api)).toHaveLength(1));
+  expect(writes(api)[0][2]).toEqual({
+    startsOn: "2026-09-27",
+    days: flat(3000),
+    lowBelow: 3500,
+  });
+});
+
+it("copies Sunday's figure, the first shown, with Same every day, and keeps the days Monday first", async () => {
+  const { api, dialog } = await open(["vehicles.target"]);
+
+  fireEvent.change(dialog.getByLabelText("Target, Sunday"), {
+    target: { value: "1500" },
+  });
   fireEvent.change(dialog.getByLabelText("Target, Monday"), {
     target: { value: "3000" },
   });
   fireEvent.click(dialog.getByRole("button", { name: "Same every day" }));
-  expect(dialog.getByLabelText("Target, Sunday")).toHaveValue("3000");
+  expect(dialog.getByLabelText("Target, Saturday")).toHaveValue("1500");
+  fireEvent.change(dialog.getByLabelText("Target, Sunday"), {
+    target: { value: "900" },
+  });
   fireEvent.click(dialog.getByRole("button", { name: "Save target" }));
   await waitFor(() => expect(writes(api)).toHaveLength(1));
   expect(writes(api)[0][2]).toEqual({
-    startsOn: "2026-09-28",
-    days: flat(3000),
+    startsOn: "2026-09-27",
+    days: [1500, 1500, 1500, 1500, 1500, 1500, 900],
+    lowBelow: 3500,
   });
+});
+
+it("shows each set's figures in the history from Sunday", async () => {
+  const api = serve();
+  api.on("GET setup/vehicles/v-1/targets", [
+    200,
+    [{ ...sets[1], days: [1, 2, 3, 4, 5, 6, 7], weekTotal: 28 }],
+  ]);
+  renderInApp(
+    <VehiclesPage />,
+    { permissions: ["vehicles.target"] },
+    { businessDate },
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Targets KDA 482M" }),
+  );
+  const dialog = within(await screen.findByRole("dialog", { name: "Targets" }));
+  const row = (await dialog.findByText("Now")).closest("tr")!;
+  expect(
+    [...row.querySelectorAll("td")].slice(1, 8).map((cell) => cell.textContent),
+  ).toEqual(["7", "1", "2", "3", "4", "5", "6"]);
+  expect(dialog.getByLabelText("Target, Sunday")).toHaveValue("7");
 });
 
 it("refuses an empty day and the target already set for the date, before sending", async () => {
@@ -313,7 +390,7 @@ it("refuses an empty day and the target already set for the date, before sending
 
   fireEvent.click(dialog.getByRole("button", { name: "Save target" }));
   expect(dialog.getByRole("alert")).toHaveTextContent(
-    "This is the target already set for 28 Sep 2026.",
+    "This is the target already set for 27 Sep 2026.",
   );
   fireEvent.change(dialog.getByLabelText("Target, Friday"), {
     target: { value: "" },

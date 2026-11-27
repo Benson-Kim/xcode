@@ -99,7 +99,7 @@ def test_permission_enum_is_the_catalogue_in_order(owner_conn: Conn) -> None:
         "SELECT key FROM tenancy.permissions WHERE catalogue ORDER BY group_order, item_order"
     ).fetchall()
     assert [r["key"] for r in rows] == [p.value for p in Permission]
-    assert len(Permission) == 59
+    assert len(Permission) == 60
 
 
 def test_the_keys_outside_the_catalogue_are_the_retired_and_the_hidden_ones(
@@ -193,4 +193,4 @@ def test_role_defaults_equal_the_inventory(owner_conn: Conn) -> None:
         actual.setdefault(r["role_name"], set()).add(r["permission"])
     assert actual == expected
     assert set(actual) == {role.value for role in RoleName}
-    assert len(expected["Owner"]) == 60
+    assert len(expected["Owner"]) == 61

@@ -432,7 +432,9 @@ async def test_a_later_join_date_decides_the_held_runs_whose_window_it_completes
     api: AuthApi, owner: Member, fleet: Fleet
 ) -> None:
     saving = _daily(api, fleet, kind=2, since=2, shares={fleet.kda: 500})
-    _rule(api, saving, 5000, 7)
+    # Monday to Wednesday's runs all weigh the week before, Sunday 27 September to Saturday
+    # 3 October.
+    _rule(api, saving, 3000, 7)
     for day in range(1, 7):
         add_record(
             api.owner,
@@ -451,8 +453,10 @@ async def test_a_later_join_date_decides_the_held_runs_whose_window_it_completes
         "joinedOn": "2026-10-01",
     }
     ok(await _call(api, owner, "put", f"/setup/vehicles/{fleet.kda}", json=body))
-    assert _decided(api, saving) == [("2026-10-05", 1), ("2026-10-06", 1)]
-    assert await _states(api, owner, saving) == held | {
+    # Joining on 1 October leaves 1 to 3 October in that week, recorded at 3,000.
+    assert _decided(api, saving) == [("2026-10-05", 1), ("2026-10-06", 1), ("2026-10-07", 1)]
+    assert await _states(api, owner, saving) == {
+        "2026-10-07": ["saved"],
         "2026-10-06": ["saved"],
         "2026-10-05": ["saved"],
     }

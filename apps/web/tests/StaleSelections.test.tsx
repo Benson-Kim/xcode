@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { OrganizationSettingsView } from "../components/OrganizationSettingsView";
@@ -247,8 +253,8 @@ it("says what a person's scope holds beyond the companies and vehicles listed", 
   ).toBeInTheDocument();
 });
 
-it("shows a first day of the week the server holds even when it is not one of the usual three", async () => {
-  // The API accepts any day (0 to 6); the picker offers Monday, Sunday and Saturday.
+it("offers no first day of the week and saves the locale with the week starting on Sunday", async () => {
+  // Every week runs Sunday to Saturday: the server holds 0 and refuses any other first day.
   serve({
     "/api/setup/organization/settings": {
       organization: { name: "Demo Fleet", slug: "demo-fleet" },
@@ -258,7 +264,7 @@ it("shows a first day of the week the server holds even when it is not one of th
         currency: "KES",
         datePattern: "medium",
         hour12: false,
-        firstDayOfWeek: 2,
+        firstDayOfWeek: 0,
         weekNumbering: "iso8601",
         useGrouping: true,
         numberDecimals: 2,
@@ -286,12 +292,21 @@ it("shows a first day of the week the server holds even when it is not one of th
   });
   render(<OrganizationSettingsView />);
 
-  const firstDay = await screen.findByLabelText("First day of week");
-  expect(firstDay).toHaveValue("2");
-  expect(
-    within(firstDay).getByRole("option", { name: "Tuesday" }),
-  ).toBeInTheDocument();
-  expect(
-    within(firstDay).getByRole("option", { name: "Monday" }),
-  ).toBeInTheDocument();
+  await screen.findByLabelText("Locale");
+  expect(screen.queryByLabelText("First day of week")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Save locale" }));
+  const localizationSave = () =>
+    vi
+      .mocked(fetch)
+      .mock.calls.find(
+        ([path, init]) =>
+          String(path) === "/api/setup/organization/settings/localization" &&
+          init?.method === "PUT",
+      );
+  await waitFor(() => expect(localizationSave()).toBeDefined());
+  const [, init] = localizationSave()!;
+  expect(JSON.parse(String(init!.body)).value).toMatchObject({
+    firstDayOfWeek: 0,
+  });
 });

@@ -1,5 +1,5 @@
 -- api.setup_target_set_list(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_vehicle_id uuid, p_now timestamptz) RETURNS jsonb
--- Purpose: the target sets of a visible vehicle, newest start first, each with its seven day figures, week total, whether it is the set in force on the business date, and whether the actor may remove it (it has not started and the actor holds vehicles.target).
+-- Purpose: the target sets of a visible vehicle, newest start first, each with its seven day figures, week total, low revenue figure, whether it is the set in force on the business date, and whether the actor may remove it (it has not started and the actor holds vehicles.target).
 -- Callers: SetupRoutines.list_target_sets; ListVehicleTargets (GET /setup/vehicles/{id}/targets).
 -- Reads: setup.fleet_vehicles, setup.vehicle_target_sets, and what tenancy.business_date, tenancy.has_permission, setup.vehicle_visible and setup.target_set_on read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 time_zone_invalid via tenancy.business_date, XC404 not_found.
@@ -43,6 +43,7 @@ BEGIN
                    s.monday, s.tuesday, s.wednesday, s.thursday, s.friday, s.saturday, s.sunday
                  ),
                  'week_total', setup.week_total(s),
+                 'low_below', s.low_below,
                  'in_force', s.id IS NOT DISTINCT FROM v_in_force,
                  'can_remove', v_can_remove AND s.starts_on > v_today
                ) ORDER BY s.starts_on DESC),

@@ -403,7 +403,7 @@ def test_resolver_expands_each_roles_defaults(
     catalogue = _catalogue(owner_conn)
     assert resolved == [key for key in catalogue if key in resolved], "catalogue order"
     assert resolved == list(role_permissions(role))
-    assert len(resolved) == {"Owner": 77, "Office admin": 53, "Fleet manager": 18}.get(role, 5)
+    assert len(resolved) == {"Owner": 78, "Office admin": 53, "Fleet manager": 18}.get(role, 5)
 
 
 def test_legacy_keys_are_derived_never_granted(

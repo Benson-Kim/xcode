@@ -92,7 +92,7 @@ def _calls(home: OrganizationRows, stranger: OrganizationRows) -> list[tuple[str
         ("setup_company_restore", [home.company, None], "not_found"),
         (
             "setup_vehicle_create",
-            [home.company, "KDC 300C", "S-9", START, WEEK, None, None],
+            [home.company, "KDC 300C", "S-9", START, WEEK, 4000, None, None],
             "not_found",
         ),
         (
@@ -106,7 +106,7 @@ def _calls(home: OrganizationRows, stranger: OrganizationRows) -> list[tuple[str
             "not_found",
         ),
         ("setup_target_set_list", [home.vehicle], "not_found"),
-        ("setup_target_set_save", [home.vehicle, START, WEEK], "not_found"),
+        ("setup_target_set_save", [home.vehicle, START, WEEK, 4000], "not_found"),
         # The set started long ago: the 404 comes before the started-set refusal.
         ("setup_target_set_remove", [home.target_set], "not_found"),
         ("setup_vehicle_retire", [home.vehicle, START, None], "not_found"),
@@ -227,7 +227,7 @@ def test_a_filter_naming_another_organizations_company_gives_an_empty_page(
         ("setup_investment_get", [None]),
         ("setup_vehicle_options", []),
         ("setup_target_set_list", [None]),
-        ("setup_target_set_save", [None, START, WEEK]),
+        ("setup_target_set_save", [None, START, WEEK, 4000]),
         ("setup_target_set_remove", [None]),
         ("setup_expense_main_category_list", [1, 25]),
         ("setup_expense_main_category_create", ["Fuel"]),
@@ -327,7 +327,7 @@ def test_target_sets_of_a_vehicle_outside_the_scope_are_not_found(
     who = _scoped(operator_conn, owner_conn, "vehicles.view", "vehicles.target", companies=[north])
     for routine, args in (
         ("setup_target_set_list", [kdc]),
-        ("setup_target_set_save", [kdc, date(2026, 3, 10), WEEK]),
+        ("setup_target_set_save", [kdc, date(2026, 3, 10), WEEK, 4000]),
         ("setup_target_set_remove", [later]),
     ):
         refused(app_conn, routine, [who.id, who.org, REQUEST, *args, T0], "XC404", "not_found")
@@ -340,6 +340,7 @@ def test_target_sets_of_a_vehicle_outside_the_scope_are_not_found(
         kda,
         date(2026, 3, 10),
         WEEK,
+        4000,
         T0,
     )
     assert saved["outcome"] == "created"

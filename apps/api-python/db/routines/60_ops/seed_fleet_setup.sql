@@ -37,7 +37,7 @@ BEGIN
   LOOP
     PERFORM api.setup_vehicle_create(
       p_owner_id, p_organization_id, p_request_id, p_company_ids[v_plan.company_index],
-      v_plan.registration, v_plan.fleet_number, p_day, v_plan.day_targets,
+      v_plan.registration, v_plan.fleet_number, p_day, v_plan.day_targets, NULL,
       v_plan.initial_investment, NULL, p_at
     );
   END LOOP;
@@ -127,7 +127,7 @@ BEGIN
       PERFORM api.setup_target_set_save(
         p_owner_id, p_organization_id, p_request_id, v_vehicle_id, p_day,
         ARRAY(SELECT t.figure + 500 FROM unnest(v_plan.day_targets) WITH ORDINALITY AS t (figure, n) ORDER BY t.n),
-        p_at
+        NULL, p_at
       );
     END LOOP;
   END IF;

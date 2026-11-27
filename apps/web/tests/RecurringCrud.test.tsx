@@ -170,12 +170,35 @@ it("creates a saving with a revenue rule and an opening balance on every vehicle
     target: { value: "2000" },
   });
   choose(screen.getByLabelText("Runs"), "Every week");
+  // The week runs Sunday to Saturday, so the days are offered in that order.
+  expect(
+    within(screen.getByLabelText("Day"))
+      .getAllByRole("option")
+      .map((option) => option.textContent),
+  ).toEqual([
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ]);
   choose(screen.getByLabelText("Day"), "Saturday");
   choose(screen.getByLabelText("Save"), "Only when revenue reaches a target");
   fireEvent.change(screen.getByLabelText("Revenue per vehicle, KES"), {
     target: { value: "60000" },
   });
   expect(screen.getByLabelText("Measured")).toHaveValue("7");
+  expect(
+    within(screen.getByLabelText("Measured"))
+      .getAllByRole("option")
+      .map((option) => option.textContent),
+  ).toEqual([
+    "That day",
+    "Over the last Sunday to Saturday week",
+    "Over the 30 days to the run",
+  ]);
   fireEvent.click(screen.getByLabelText("Opening balance"));
   fireEvent.change(screen.getByLabelText("Opening balance date"), {
     target: { value: "2026-08-31" },

@@ -43,17 +43,18 @@ def add_target_set(
     days: Sequence[Amount],
     *,
     created_by: UUID | None = None,
+    low_below: Amount = 4000,
 ) -> UUID:
     return _one(
         owner,
         "INSERT INTO setup.vehicle_target_sets (organization_id, vehicle_id, starts_on, monday, "
-        "tuesday, wednesday, thursday, friday, saturday, sunday, created_by) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "tuesday, wednesday, thursday, friday, saturday, sunday, created_by, low_below) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (organization_id, vehicle_id, starts_on) DO UPDATE SET "
         "monday = excluded.monday, tuesday = excluded.tuesday, wednesday = excluded.wednesday, "
         "thursday = excluded.thursday, friday = excluded.friday, saturday = excluded.saturday, "
-        "sunday = excluded.sunday RETURNING id",
-        (org, vehicle, starts_on, *days, created_by),
+        "sunday = excluded.sunday, low_below = excluded.low_below RETURNING id",
+        (org, vehicle, starts_on, *days, created_by, low_below),
     )
 
 

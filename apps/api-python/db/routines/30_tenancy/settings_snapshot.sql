@@ -86,7 +86,7 @@ BEGIN
     WHEN 'revenue' THEN
       SELECT json_build_object(
                'organizationId', r.organization_id,
-               'lowDayThreshold', trim_scale(r.low_day_threshold),
+               'fuelQuestionFrom', trim_scale(r.fuel_question_from),
                'gapAmberPercent', trim_scale(r.gap_amber_percent)
              )
       INTO v_snapshot

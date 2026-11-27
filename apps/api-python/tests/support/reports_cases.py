@@ -101,7 +101,16 @@ async def read_the_net_and_the_gaps(world: ReportsWorld) -> None:
     kdb = await world.setup.vehicle(north, "KDB 111A", date(2026, 10, 5), 3500)
     for day, amount in ((1, 4500), (2, 5200), (3, 0)):
         capture = RevenueCapture(
-            world.later(owner), kda, date(2026, 10, day), Decimal(amount), None, None, None, None
+            world.later(owner),
+            kda,
+            date(2026, 10, day),
+            Decimal(amount),
+            None,
+            None,
+            None,
+            False,
+            None,
+            None,
         )
         await world.record(world.revenue.capture(capture))
 

@@ -576,6 +576,24 @@
   "planned": false
  },
  {
+  "id": "O08",
+  "section": "2.9",
+  "method": "get",
+  "path": "/setup/settings",
+  "operationId": "GetSystemSettings",
+  "tag": "Organization",
+  "planned": false
+ },
+ {
+  "id": "O09",
+  "section": "2.9",
+  "method": "put",
+  "path": "/setup/settings/{key}",
+  "operationId": "SetSystemSetting",
+  "tag": "Organization",
+  "planned": false
+ },
+ {
   "id": "P01",
   "section": "2.11",
   "method": "get",
@@ -896,6 +914,15 @@
   "method": "get",
   "path": "/setup/revenue/export",
   "operationId": "ExportRevenueWeek",
+  "tag": "Revenue",
+  "planned": false
+ },
+ {
+  "id": "X04",
+  "section": "2.13.3",
+  "method": "post",
+  "path": "/setup/revenue/export/image",
+  "operationId": "LogRevenueSummaryImage",
   "tag": "Revenue",
   "planned": false
  },

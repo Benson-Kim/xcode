@@ -14,6 +14,7 @@ import type {
 } from "../../revenue/types";
 import { Banner, Button, Icon, Text, useTheme } from "../../ui";
 import { IconButton, ScreenTitle, Segmented } from "../parts";
+import { useTargets } from "../targets";
 import {
   MODES,
   OFFLINE_EMPTY,
@@ -197,6 +198,8 @@ function WeekNav({
   const { colors } = useTheme();
   const formats = useFormats();
   const { kes } = formats;
+  // With Targets off (v2.38) the week shows its revenue alone, with no expected figure or share.
+  const targets = useTargets();
   return (
     <>
       <View style={styles.dateNav}>
@@ -223,7 +226,7 @@ function WeekNav({
           <Text weight="bold" style={{ fontSize: 14, color: colors.navy }}>
             {kes(week.totalAmount)}
           </Text>
-          {week.totalExpected > 0
+          {targets && week.totalExpected > 0
             ? ` of ${kes(week.totalExpected)} expected to date${week.percent === null ? "" : `, ${percentText(week.percent)}`}`
             : " so far"}
         </Text>

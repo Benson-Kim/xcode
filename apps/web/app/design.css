@@ -2787,6 +2787,40 @@ td.nw .note {
   line-height: 1.25;
   margin-top: 1px;
 }
+/* v2.37: Not fueled under the amount; the Fueled? question from the fuel question amount */
+.rfuel {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--slate);
+  line-height: 1.25;
+  margin-top: 1px;
+}
+.fuelrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fuelrow.ask {
+  background: var(--gold-wash);
+  border: 1px solid var(--gold-pure);
+  border-radius: 12px;
+  padding: 9px 10px 9px 14px;
+}
+.fuelrow .fq {
+  font-weight: 700;
+  color: var(--gold);
+}
+.fuelrow .pills {
+  background: var(--shell);
+}
+.tsep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 4px;
+  background: var(--line);
+}
 td.rcell {
   padding: 3px 6px;
 }

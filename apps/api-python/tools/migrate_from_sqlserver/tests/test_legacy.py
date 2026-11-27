@@ -742,7 +742,7 @@ def test_the_rights_of_each_person(applied: Applied) -> None:
             "SELECT count(*) FROM tenancy.permission_overrides WHERE user_id IN (%s, %s, %s)",
             (ADA, HYPATIA, GRACE),
         ).fetchone()[0]  # type: ignore[index]
-    assert len(catalogue) == 59
+    assert len(catalogue) == 60
     assert held[ADA] == held[HYPATIA] == held[GRACE] == catalogue
     assert overrides == 0
     assert held[MARY] == held[ALAN] == FLEET_MANAGER_29

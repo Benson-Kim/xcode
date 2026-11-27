@@ -1,8 +1,8 @@
 -- api.organization_appearance_get(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_now timestamptz) RETURNS jsonb
--- Purpose: what every member's screens need: the organization name, settings version and business date, the branding colours, names and logo (a data URL or NULL), the actor's effective formats, theme, motion and font scale, and the wrong-PIN policy (clamped) the phone enforces offline.
+-- Purpose: what every member's screens need: the organization name, settings version and business date, the branding colours, names and logo (a data URL or NULL), the actor's effective formats, theme, motion and font scale, the wrong-PIN policy (clamped) the phone enforces offline, and sunday_week_since: the calendar date the organization's week moved to Sunday to Saturday (migration 0024), for the clients' go-live notice, or NULL for an organization made after it; and targets: whether the system setting Targets is on, so every screen shows or hides target and gap figures.
 -- Callers: TenancyRoutines.appearance; GetAppearance (GET /setup/appearance).
--- Reads: tenancy.organizations, tenancy.organization_logos, and what tenancy.business_date and tenancy.effective_settings read. Writes: nothing.
--- Raises: XC403 not_member via tenancy.enter_organization, XC422 time_zone_invalid via tenancy.business_date, XC422 locale_invalid via tenancy.effective_settings, XC422 format_settings_invalid via tenancy.effective_settings, XC422 brand_names_required via tenancy.effective_settings, XC422 brand_colour_format via tenancy.effective_settings, XC422 brand_contrast via tenancy.effective_settings, XC422 brand_url_https via tenancy.effective_settings, XC422 brand_domain_invalid via tenancy.effective_settings, XC422 brand_support_email_invalid via tenancy.effective_settings.
+-- Reads: tenancy.organizations, tenancy.organization_logos, and what tenancy.business_date, tenancy.calendar_date, tenancy.effective_settings and tenancy.setting_enabled read. Writes: nothing.
+-- Raises: XC403 not_member via tenancy.enter_organization, XC422 time_zone_invalid via tenancy.business_date, XC422 time_zone_invalid via tenancy.calendar_date, XC422 locale_invalid via tenancy.effective_settings, XC422 format_settings_invalid via tenancy.effective_settings, XC422 brand_names_required via tenancy.effective_settings, XC422 brand_colour_format via tenancy.effective_settings, XC422 brand_contrast via tenancy.effective_settings, XC422 brand_url_https via tenancy.effective_settings, XC422 brand_domain_invalid via tenancy.effective_settings, XC422 brand_support_email_invalid via tenancy.effective_settings.
 -- Tests: tests/db/test_organization_routines.py, tests/api/test_appearance.py.
 
 CREATE OR REPLACE FUNCTION api.organization_appearance_get(
@@ -46,7 +46,12 @@ BEGIN
     'font_scale', v_effective -> 'font_scale',
     'lockout_threshold', identity.pin_tries(),
     'lockout_minutes', v_effective -> 'security_policy' -> 'lockout_minutes',
-    'idle_unlock_seconds', v_effective -> 'security_policy' -> 'idle_unlock_seconds'
+    'idle_unlock_seconds', v_effective -> 'security_policy' -> 'idle_unlock_seconds',
+    'sunday_week_since', CASE
+      WHEN v_organization.sunday_week_at IS NOT NULL
+        THEN tenancy.calendar_date(p_organization_id, v_organization.sunday_week_at)
+    END,
+    'targets', tenancy.setting_enabled('targets')
   );
 END;
 $$;

@@ -14,6 +14,7 @@ import { useFormats } from "../../lib/formats";
 import type { RevenueVehicle, RevenueWeek } from "../../revenue/types";
 import { loadWeek } from "../../revenue/week";
 import { ErrorText, Text, useTheme } from "../../ui";
+import { useTargets } from "../targets";
 import { DayBar, useColumns } from "./DayBar";
 import { keyOf, targetFor, type Waiting } from "./model";
 import { styles } from "./styles";
@@ -51,6 +52,7 @@ function useVehicleWeek(
 }
 
 function DetailHead({ columns }: { columns: Columns }) {
+  const targets = useTargets();
   const { colors } = useTheme();
   return (
     <View
@@ -66,12 +68,14 @@ function DetailHead({ columns }: { columns: Columns }) {
       >
         Day
       </Text>
-      <Text
-        weight="semibold"
-        style={[styles.detailNumber, columns.number, { color: colors.grey }]}
-      >
-        Expected
-      </Text>
+      {targets && (
+        <Text
+          weight="semibold"
+          style={[styles.detailNumber, columns.number, { color: colors.grey }]}
+        >
+          Expected
+        </Text>
+      )}
       <Text
         weight="semibold"
         style={[
@@ -79,7 +83,7 @@ function DetailHead({ columns }: { columns: Columns }) {
           { fontSize: 14, color: colors.grey, textAlign: "right" },
         ]}
       >
-        Actual and difference
+        {targets ? "Actual and difference" : "Actual"}
       </Text>
     </View>
   );
@@ -94,6 +98,22 @@ function DetailFoot({
 }) {
   const { colors } = useTheme();
   const formats = useFormats();
+  const targets = useTargets();
+  if (!targets)
+    return (
+      <View
+        accessible
+        accessibilityLabel={`To date: actual ${formats.kes(vehicle.totalAmount)}`}
+        style={styles.detailRow}
+      >
+        <Text weight="bold" style={[styles.detailDay, columns.day]}>
+          To date
+        </Text>
+        <View style={styles.detailActual}>
+          <Text weight="bold">{formats.kes(vehicle.totalAmount)}</Text>
+        </View>
+      </View>
+    );
   return (
     <View
       accessible

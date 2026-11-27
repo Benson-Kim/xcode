@@ -27,6 +27,7 @@ export const VehicleRow = memo(function VehicleRow({
   vehicle,
   today,
   canCapture,
+  showGap,
   rowIndex,
   measure,
   onOpenDay,
@@ -34,6 +35,8 @@ export const VehicleRow = memo(function VehicleRow({
   vehicle: RevenueVehicle;
   today: string;
   canCapture: boolean;
+  // False while Targets is switched off (v2.38): no Gap to target column.
+  showGap: boolean;
   rowIndex?: number;
   measure: (element: HTMLElement | null) => void;
   onOpenDay: OpenDay;
@@ -56,9 +59,11 @@ export const VehicleRow = memo(function VehicleRow({
         />
       ))}
       <td className="r tot">{formats.formatNumber(vehicle.totalAmount)}</td>
-      <td className="r">
-        <GapChip gap={vehicle.gap} band={vehicle.gapBand} />
-      </td>
+      {showGap && (
+        <td className="r">
+          <GapChip gap={vehicle.gap} band={vehicle.gapBand} />
+        </td>
+      )}
     </tr>
   );
 });

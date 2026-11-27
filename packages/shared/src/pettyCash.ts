@@ -124,6 +124,12 @@ export interface PettyCashFloat {
   lastCashOn: string | null;
 }
 
+// The waiting expenses (not sent back) of one vehicle in the days and floats shown: what approving them would take.
+export interface PettyCashWaiting {
+  waiting: number;
+  waitingCount: number;
+}
+
 // A week starts on the organization's first day of the week; from and to are the days the figures cover.
 export interface PettyCashOverview {
   businessDate: string;
@@ -135,6 +141,10 @@ export interface PettyCashOverview {
   holders: PettyCashHolder[];
   figures: PettyCashFigures;
   floats: PettyCashFloat[];
+  // The vehicles this person sees, for the vehicle filter; optional for older servers.
+  vehicles?: PettyCashVehicleOption[];
+  // Null unless a vehicleId was asked; the figures and floats never follow the vehicle.
+  vehicleWaiting?: PettyCashWaiting | null;
 }
 
 // from and to go together (at most 367 days, from not after the business date). With them the server ignores date and
@@ -146,6 +156,7 @@ export interface PettyCashOverviewQuery {
   from?: string;
   to?: string;
   holderId?: string;
+  vehicleId?: string;
 }
 
 export interface PettyCashEntry {
@@ -202,6 +213,7 @@ export interface PettyCashEntryQuery {
   // Several kinds are sent as "expense,credit".
   kind?: PettyCashKind | readonly PettyCashKind[];
   status?: PettyCashStatus;
+  vehicleId?: string;
   q?: string;
   page?: number;
   pageSize?: number;
@@ -285,6 +297,7 @@ export interface ApprovePettyCashDay {
   date: string;
   holderId?: string | null;
   to?: string | null;
+  vehicleId?: string | null;
 }
 
 // POST /approve: the entries ticked in the list, each at the version shown. All are approved or none: one changed

@@ -674,6 +674,7 @@ def build_fleet(
                 list(split_week(42000 + 7000 * n)),
                 None,
                 None,
+                None,
                 now,
             )
             vehicle_ids.append(created["id"])
@@ -695,6 +696,8 @@ def build_fleet(
                 5000 + 100 * number + 10 * offset,
                 None,
                 None,
+                None,
+                False,
                 None,
                 None,
                 now,

@@ -312,6 +312,7 @@ class NextTarget:
     starts_on: date
     day_targets: tuple[Decimal, ...]
     weekly_target: Decimal
+    low_below: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,6 +337,7 @@ class VehicleSummary:
     initial_investment: Decimal | None
     day_targets: tuple[Decimal, ...] | None
     next_target: NextTarget | None
+    low_below: Decimal | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,6 +349,7 @@ class TargetSetSummary:
     starts_on: date
     days: tuple[Decimal, ...]
     week_total: Decimal
+    low_below: Decimal
     in_force: bool
     can_remove: bool
 
@@ -659,6 +662,7 @@ class VehicleDetails:
     joined_on: date | None
     day_targets: tuple[Decimal | None, ...] | None
     initial_investment: Decimal | None
+    low_below: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -848,6 +852,7 @@ class TargetSetSave:
     vehicle_id: UUID
     starts_on: date | None
     days: tuple[Decimal | None, ...] | None
+    low_below: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)

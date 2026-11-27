@@ -64,7 +64,9 @@ from .application.organization.delete_organization_logo import DeleteOrganizatio
 from .application.organization.get_appearance import GetAppearance
 from .application.organization.get_organization_settings import GetOrganizationSettings
 from .application.organization.get_preferences import GetPreferences
+from .application.organization.get_system_settings import GetSystemSettings
 from .application.organization.list_history import ListHistory
+from .application.organization.set_system_setting import SetSystemSetting
 from .application.organization.update_organization_logo import UpdateOrganizationLogo
 from .application.organization.update_organization_settings import UpdateOrganizationSettings
 from .application.organization.update_preferences import UpdatePreferences
@@ -110,6 +112,7 @@ from .application.revenue.export_week import ExportRevenueWeek
 from .application.revenue.get_dashboard import GetRevenueDashboard
 from .application.revenue.get_day import GetRevenueDay
 from .application.revenue.get_week import GetRevenueWeek
+from .application.revenue.log_summary_image import LogRevenueSummaryImage
 from .application.revenue.save_day import SaveRevenueDay
 from .application.setup.archive_company import ArchiveCompany
 from .application.setup.cancel_recurring_stop import CancelRecurringStop
@@ -242,6 +245,8 @@ class Container:
     update_organization_logo: UpdateOrganizationLogo
     delete_organization_logo: DeleteOrganizationLogo
     get_appearance: GetAppearance
+    get_system_settings: GetSystemSettings
+    set_system_setting: SetSystemSetting
     get_preferences: GetPreferences
     update_preferences: UpdatePreferences
     setup: SetupRepository
@@ -318,6 +323,7 @@ class Container:
     get_report: GetReport
     export_report: ExportReport
     export_revenue_week: ExportRevenueWeek
+    log_revenue_summary_image: LogRevenueSummaryImage
     export_expense_ledger: ExportExpenseLedger
     export_pettycash_entries: ExportPettyCashEntries
 
@@ -525,6 +531,8 @@ def build_container(
         update_organization_logo=UpdateOrganizationLogo(tenancy, clock),
         delete_organization_logo=DeleteOrganizationLogo(tenancy, clock),
         get_appearance=GetAppearance(tenancy, clock),
+        get_system_settings=GetSystemSettings(tenancy, clock),
+        set_system_setting=SetSystemSetting(tenancy, clock),
         get_preferences=GetPreferences(tenancy, clock),
         update_preferences=UpdatePreferences(tenancy, clock),
         setup=setup,
@@ -601,6 +609,7 @@ def build_container(
         get_report=GetReport(reports, clock),
         export_report=ExportReport(reports, export_writers, clock),
         export_revenue_week=ExportRevenueWeek(reports, export_writers, clock),
+        log_revenue_summary_image=LogRevenueSummaryImage(reports, clock),
         export_expense_ledger=ExportExpenseLedger(reports, export_writers, clock),
         export_pettycash_entries=ExportPettyCashEntries(reports, export_writers, clock),
     )
