@@ -43,6 +43,7 @@ DECLARE
   v_requested text[] := tenancy.expand_permissions(p_permissions);
   v_granted text[];
   v_denied text[];
+  v_gained text[];
 BEGIN
   IF p_user_id IS NOT NULL THEN
     v_target := tenancy.person_scope(p_user_id);
@@ -171,6 +172,17 @@ BEGIN
         PERFORM tenancy.refuse('people_access_manage_needed', 'XC403');
       END IF;
       IF NOT v_granted <@ v_held THEN
+        PERFORM tenancy.refuse('people_permission_not_held', 'XC403');
+      END IF;
+      -- Lifting the denial of a role default re-grants it although the role name is unchanged, which
+      -- the grant check above misses: that key is a default, not a single grant. So no save leaves
+      -- the person holding a permission new to them that the editor does not also hold.
+      v_gained := ARRAY(
+        SELECT k.key FROM unnest(v_requested) AS k (key)
+        WHERE NOT k.key = ANY (tenancy.effective_permissions(v_organization_id, p_user_id))
+        ORDER BY k.key
+      );
+      IF NOT v_gained <@ v_held THEN
         PERFORM tenancy.refuse('people_permission_not_held', 'XC403');
       END IF;
     END IF;

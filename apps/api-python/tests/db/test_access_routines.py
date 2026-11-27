@@ -1234,6 +1234,52 @@ def test_step_14_only_permissions_the_editor_holds_may_be_granted(
     )
 
 
+def test_step_14_a_denied_role_default_is_not_restored_by_an_editor_who_lacks_it(
+    app_conn: Conn, owner_conn: Conn, owner: Member, clerk: Member
+) -> None:
+    role_id = owner_conn.execute(
+        "INSERT INTO tenancy.roles (organization_id, name) VALUES (%s, 'Depot crew') RETURNING id",
+        (owner.org,),
+    ).fetchone()["id"]
+    for key in ("revenue.view", "revenue.capture", "pettycash.view_all"):
+        owner_conn.execute(
+            "INSERT INTO tenancy.role_grants (organization_id, role_id, permission) "
+            "VALUES (%s, %s, %s)",
+            (owner.org, role_id, key),
+        )
+    # The person is on the role but its pettycash.view_all default is denied, so they lack it.
+    jane = create_person(
+        app_conn, owner, role="Depot crew", permissions=["revenue.view", "revenue.capture"]
+    )
+    # The editor manages people but does not hold pettycash.view_all.
+    set_override(owner_conn, clerk, "people.edit")
+    set_scope(owner_conn, clerk, clerk.org, all_companies=True)
+    # Keeping the role, asking for every default would lift the denial and restore a right the
+    # editor does not hold.
+    update_refused(
+        app_conn,
+        clerk,
+        jane["id"],
+        jane["version"],
+        "XC403",
+        "people_permission_not_held",
+        role="Depot crew",
+        permissions=["revenue.view", "revenue.capture", "pettycash.view_all"],
+    )
+    # An Owner, who holds everything, may still restore it.
+    assert (
+        update_person(
+            app_conn,
+            owner,
+            jane["id"],
+            jane["version"],
+            role="Depot crew",
+            permissions=["revenue.view", "revenue.capture", "pettycash.view_all"],
+        )["outcome"]
+        == "updated"
+    )
+
+
 def test_step_14_comes_after_the_unknown_permission_rule(app_conn: Conn, office: Member) -> None:
     create_refused(
         app_conn, office, "XC422", "people_permission_unknown", permissions=["no.such_key"]
