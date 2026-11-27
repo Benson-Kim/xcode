@@ -391,6 +391,22 @@ def test_with_targets_off_a_new_vehicle_takes_seven_zero_targets_and_its_low_fig
     ]
 
 
+def test_with_targets_off_the_explicit_zero_day_targets_the_forms_send_are_accepted(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    set_system_setting(owner_conn, yard.owner.org, "targets", on=False)
+    result = run(
+        app_conn,
+        "setup_vehicle_create",
+        yard.owner,
+        *_save(yard.north, "KDA 482M", date(2026, 1, 1), [Decimal(0)] * 7, low_below=Decimal(2500)),
+        None,
+    )
+    vehicle = UUID(str(result["id"]))
+    assert _targets(owner_conn, vehicle) == [(date(2026, 1, 1), [Decimal(0)] * 7)]
+    assert _low_figures(owner_conn, vehicle) == [Decimal(2500)]
+
+
 def test_with_targets_off_day_targets_given_are_still_kept(
     app_conn: Conn, owner_conn: Conn, yard: Yard
 ) -> None:

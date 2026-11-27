@@ -44,7 +44,9 @@ BEGIN
   v_reason := tenancy.check_typed_reason(p_reason);
   v_registration := setup.registration_normalize(p_registration);
   v_fleet_number := setup.fleet_number(p_fleet_number);
-  IF p_day_targets IS NULL AND NOT tenancy.setting_enabled('targets') THEN
+  -- With Targets off the forms send seven zeros (or nothing); either stands for no target.
+  IF NOT tenancy.setting_enabled('targets')
+     AND (p_day_targets IS NULL OR p_day_targets = array_fill(0::numeric, ARRAY[7])) THEN
     v_days := array_fill(0::numeric, ARRAY[7]);
   ELSE
     v_days := setup.check_day_targets(p_day_targets);

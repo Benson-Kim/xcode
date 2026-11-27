@@ -67,9 +67,11 @@ export function TargetsDialog({
   const [typedLow, setTypedLow] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const opening = setInForce(sets.data, opensOn);
-  const values = typed ?? targetsToText(opening?.days);
-  const low = typedLow ?? (sets.data ? String(lowOf(opening)) : "");
+  // Defaults follow the chosen start date, so moving it past another set shows that date's
+  // figures; a field the user has typed into keeps their value.
+  const inForce = setInForce(sets.data, startsOn);
+  const values = typed ?? targetsToText(inForce?.days);
+  const low = typedLow ?? (sets.data ? String(lowOf(inForce)) : "");
   const noun = targets ? "target" : "low revenue figure";
 
   async function save() {

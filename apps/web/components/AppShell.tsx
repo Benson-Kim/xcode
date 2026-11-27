@@ -890,12 +890,12 @@ function dashboardCards(
             : "";
         if (!targets)
           return {
-            value: revenue ? formats.kes(revenue) : undefined,
+            value: formats.kes(revenue),
             note: soFar ? soFar.slice(2) : undefined,
           };
         if (percent === null)
           return {
-            value: revenue ? formats.kes(revenue) : undefined,
+            value: formats.kes(revenue),
             note: `No weekly target applies in this period${soFar || "."}`,
           };
         return {
