@@ -429,6 +429,8 @@ limit and the low-day threshold included (`docs/05-routines.md` section 10.2).
 | O05 | `GET /setup/appearance` | member | `AppearanceResponse` (includes `lockoutThreshold`, `lockoutMinutes`) | `GetAppearance` | `api.organization_appearance_get` | 2 |
 | O06 | `GET /setup/preferences` | member | `PreferencesResponse` | `GetUserPreferences` | `api.preferences_get` | 2 |
 | O07 | `PUT /setup/preferences` | member | the saved `UserPreference` | `UpdateUserPreferences` | `api.preferences_set` | 2 |
+| O08 | `GET /setup/settings` | `settings.edit` | `SystemSettingsResponse`, the on/off settings in wire order | `GetSystemSettings` | `api.setup_settings_get` | 2 |
+| O09 | `PUT /setup/settings/{key}` | `settings.edit`; unknown `key` 404; missing state 400 | `SystemSettingsResponse` | `SetSystemSetting` | `api.setup_settings_set` | 2 |
 
 Section saves merge the posted object onto the stored section (omitted fields keep their
 values, `organizationId` ignored, the legacy key `useGroupping` accepted for `useGrouping`
@@ -459,8 +461,8 @@ the listed permissions; the per-entry rules and check orders are `docs/05-routin
 
 | ID | Route | Permission (any of) | Success | operationId | Routine | Budget |
 |---|---|---|---|---|---|---|
-| P01 | `GET /setup/pettycash/overview?date&period&holderId&from&to` | `pettycash.view` | `PettyCashOverviewDto` | `GetPettyCashOverview` | `api.pettycash_overview_get` | 2 |
-| P02 | `GET /setup/pettycash/entries?from&to&holderId&kind&status&q&page&pageSize` | `pettycash.view` | `Page<PettyCashEntryDto>` (`pageSize` default 100) | `ListPettyCashEntries` | `api.pettycash_entry_list` | 2 |
+| P01 | `GET /setup/pettycash/overview?date&period&holderId&from&to&vehicleId` | `pettycash.view` | `PettyCashOverviewDto` | `GetPettyCashOverview` | `api.pettycash_overview_get` | 2 |
+| P02 | `GET /setup/pettycash/entries?from&to&holderId&kind&status&q&page&pageSize&vehicleId` | `pettycash.view` | `Page<PettyCashEntryDto>` (`pageSize` default 100) | `ListPettyCashEntries` | `api.pettycash_entry_list` | 2 |
 | P03 | `GET /setup/pettycash/options?date` | `pettycash.spend`, `pettycash.spend_other`, `pettycash.edit_own`, `pettycash.edit`, `pettycash.issue`, `pettycash.credit` | `PettyCashOptionsDto` | `GetPettyCashOptions` | `api.pettycash_options_get` | 2 |
 | P04 | `GET /setup/pettycash/dashboard` | `dash.pettycash` | `PettyCashDashboardDto` (cards null as DEC-25 says) | `GetPettyCashDashboard` | `api.pettycash_dashboard_get` | 2 |
 | P05 | `POST /setup/pettycash/entries` | `pettycash.spend`, `pettycash.spend_other`, `pettycash.issue`, `pettycash.credit` | 200 `PettyCashSaved` (never 201; replay by the client-supplied `id`) | `CreatePettyCashEntry` | `api.pettycash_entry_create` | 2 |
@@ -484,11 +486,11 @@ last (DEC-29); the rest are `inventory-petty-cash.md` section 4.4:
 | `SendBackPettyCashEntry` (P08) | `version`, `comment` |
 | `RemovePettyCashEntry` (P09) | `version`, `reason` (optional for a waiting expense, DEC-28) |
 | `DecidePettyCashEntry` (P12, P13) + | `version`, `reason` |
-| `ApprovePettyCashDay` (P10) | `date`, `holderId`, `to` |
+| `ApprovePettyCashDay` (P10) | `date`, `holderId`, `to`, `vehicleId` |
 | `ApprovePettyCashEntries` (P11) | `entries`: `[{id, version}]` |
 | `PettyCashSaved` | `id`, `version`, `status`, `balance` |
 | `PettyCashDayApproved` | `approved`, `total`, `skipped` |
-| `PettyCashOverviewDto` | `businessDate`, `date`, `period` (`day`, `week`, `range`), `from`, `to`, `permissions`, `holders`, `figures`, `floats` |
+| `PettyCashOverviewDto` | `businessDate`, `date`, `period` (`day`, `week`, `range`), `from`, `to`, `permissions`, `holders`, `figures`, `floats`, `vehicleWaiting` (`waiting`, `waitingCount` of the `vehicleId` asked, else null) |
 | `PettyCashPermissionsDto` | `holderId`, `canSpend`, `canViewAll`, `canIssue`, `canIssueNegative`, `canApproveItem`, `canApproveDay`, `approvalLimit`, + `canView`, `canSpendOther`, `canEditOwn`, `canEdit`, `canDeleteOwn`, `canDelete`, `canDeleteApproved`, `canSendBack`, `canReject`, `canReopen`, `canCredit`, `canDeleteCash`, `earliestDate` (the back-dating limit, null for none) |
 | `PettyCashHolderDto` | `id`, `name`, `active` |
 | `PettyCashFiguresDto` | `openingBalance`, `cashReceived`, `expenses`, `creditNotes`, `moneyOut`, `closingBalance`, `waiting`, `waitingCount` (rejected expenses count in none of them) |
@@ -587,7 +589,7 @@ property order of today with the new properties at the end.
 |---|---|---|
 | A01 to A13 | anonymous / bearer as today | envelope unchanged; behaviour per `docs/07-auth.md` 12.13; A01 and A02 also under `auth_pin`; A09's budget becomes 2 (the lookup that returns the hash the new PIN is compared with) |
 | O01 to O04 | `organization.manage` (Owner only, `docs/15` 3.3) | O01 adds the section `revenue` `{lowDayThreshold, gapAmberPercent}`; O02 accepts `section` `revenue` |
-| O05 | member | adds `idleUnlockSeconds`; `lockoutThreshold` is 5 |
+| O05 | member | adds `idleUnlockSeconds`; `lockoutThreshold` is 5; adds `sundayWeekSince` (Web v2.41): the `yyyy-MM-dd` calendar date the organization's week moved to Sunday to Saturday, or null; the clients show the go-live notice for seven days from it. `formats.firstDayOfWeek` is always 0 |
 | S01 | member | 59 items in 12 groups; each item adds `section` (null outside petty cash) |
 | S02 | `people.view` | |
 | S03 | any of `people.add`, `people.edit` | vehicle options add `fleetNumber` |
@@ -713,7 +715,12 @@ document. Bodies keep .NET's property order; what Python adds is appended at the
 | D01 | `GET /setup/revenue/day?date&companyId` | `revenue.view` | `RevenueDay` | `GetRevenueDay` | `api.revenue_day_get` |
 | D02 | `PUT /setup/revenue/day/{date}` | any of `revenue.capture`, `revenue.correct`; each row as R03 | 200 `{rows: [{vehicleId, id, version}]}` | `SaveRevenueDay` | `api.revenue_day_save` |
 | X02 | `GET /setup/revenue/export?weekStart&companyId&format` | `revenue.export` and `revenue.view` | file | `ExportRevenueWeek` | `api.revenue_export_get` |
+| X04 | `POST /setup/revenue/export/image` (router `http/routers/revenue_image.py`) | `revenue.export` and `revenue.view` | 204 | `LogRevenueSummaryImage` | `api.revenue_image_log` |
 
+- X04 body `{weekStart, companyId, q}`: the week, company filter and search of the Summary image (Web v2.40 to v2.45)
+  the web drew on the device. The answer is the change-log row only, "Exported Revenue for {week} to Summary image";
+  `weekStart` is required (the framework's 400 without it), a week outside R01's range is `revenue_week_range`, a
+  search over 40 characters `revenue_search_length`, a company the caller cannot see 404.
 - `RevenueDay`: `date, businessDate, vehicles [{id, companyId, registration, day, lastWeek, fleetNumber}], truncated`;
   `day` is R01's cell (D4's fields), `lastWeek` `{amount, reason}` or null.
 - D02 body `{rows: [{vehicleId, amount, reason, note, version}]}`; each row runs R03's steps of `docs/05` 10.5 (the
@@ -728,7 +735,7 @@ document. Bodies keep .NET's property order; what Python adds is appended at the
 
 | ID | Route | Permission | Success | operationId | Routine |
 |---|---|---|---|---|---|
-| X03 | `GET /setup/pettycash/export?from&to&holderId&view&status&q&format` (tag `Petty cash`) | `pettycash.export` and the petty-cash read gate | file | `ExportPettyCash` | `api.pettycash_export_get` |
+| X03 | `GET /setup/pettycash/export?from&to&holderId&view&status&q&format&vehicleId` (tag `Petty cash`) | `pettycash.export` and the petty-cash read gate | file | `ExportPettyCash` | `api.pettycash_export_get` |
 | S53 | `GET /setup/recurring/summary` (tag `Setup`) | any of `scheduled.view`, `savings.view` | `RecurringSummary` | `GetSetupRecurringSummary` | `api.setup_recurring_summary` |
 | S54 | `GET /setup/recurring/{id}/runs` | any of `scheduled.view`, `savings.view` (the item's kind) | `RecurringRuns` | `GetSetupRecurringRuns` | `api.setup_recurring_runs` |
 | S55 | `POST /setup/recurring/{id}/pause` | `scheduled.pause` or `savings.pause` by kind | `{id}` | `PauseSetupRecurring` | `api.setup_recurring_pause` |
@@ -1000,7 +1007,8 @@ Revenue (`inv 2.10`):
 | `revenue_concurrent_save` | 409 | title `This day was changed by another save.`, detail `Reload the current record and try again.` |
 | `revenue_week_range` | 400 | `Choose a week from the last ten years through the current week.` |
 | `revenue_search_length` | 400 | `Search for 40 characters or fewer.` |
-| `revenue_settings_invalid` | 400 | `The low-day threshold must be 0 or more and the amber band 0 to 100 per cent.` |
+| `revenue_settings_invalid` | 400 | `The fuel question amount must be above 0 and the amber band 0 to 100 per cent.` |
+| `fuel_invalid` | 400 | `A fuel answer is kept only for revenue at or above the fuel question amount.` |
 | `dashboard_period_invalid` | 400 | `Period must be today, week or month.` |
 | `revenue_day_date_range` | 400 | `Choose a day from the last ten years up to today.` |
 | `revenue_day_rows_required` | 400 | `Enter the revenue or a no-earnings reason for at least one vehicle.` |
@@ -1016,6 +1024,7 @@ Organization, logo, preferences (`inv 2.11`):
 | `organization_slug_taken` | 409 plain `{detail}` | `This organization slug is already in use.` |
 | `settings_not_object` | 400 | `Send the section's settings as an object.` |
 | `settings_wrong_type` | 400 | `A setting has the wrong type of value.` |
+| `setting_state_required` | 400 | `Choose whether the setting is on or off.` |
 | `settings_business_date_future_zone` | 400 | `The held business date would be in the future in that time zone. Change the business date first.` |
 | `business_date_invalid` | 400 | `Business date must be a valid calendar date or null.` |
 | `business_date_future` | 400 | `The business date cannot be in the future.` |

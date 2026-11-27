@@ -118,6 +118,12 @@
       "items": [
         {"key": "audit.view", "prototype": "set.log", "label": "View the change log", "needs": [], "section": null}
       ]
+    },
+    {
+      "name": "Settings",
+      "items": [
+        {"key": "settings.edit", "prototype": "set.edit", "label": "Change settings", "needs": [], "section": null}
+      ]
     }
   ],
   "retired": [

@@ -1,3 +1,4 @@
+import { daysBetween, isDate } from "./dates";
 import type { Formats } from "./format";
 import type { TokenName } from "./tokens";
 
@@ -31,7 +32,48 @@ export type Appearance = {
   lockoutMinutes?: number;
   // The client asks for the PIN again after this long without activity (v2.33: 15 minutes).
   idleUnlockSeconds?: number;
+  // v2.41: the organization's calendar date its week moved to Sunday to Saturday; null when it never ran Monday
+  // first. Older servers leave it out.
+  sundayWeekSince?: string | null;
+  // v2.38: false while the owner has Targets switched off; every target and gap figure is then hidden. Older
+  // servers leave it out (on).
+  targets?: boolean;
 };
+
+export const targetsOn = (
+  appearance: Pick<Appearance, "targets"> | null | undefined,
+): boolean => appearance?.targets !== false;
+
+// v2.38 Settings page (GET setup/settings, PUT setup/settings/{key} with { on }), settings.edit only.
+export type SystemSettingKey = "targets";
+
+export type SystemSetting = {
+  key: SystemSettingKey;
+  label: string;
+  on: boolean;
+};
+
+export type SystemSettings = { settings: SystemSetting[] };
+
+export const SUNDAY_WEEK_NOTICE_DAYS = 7;
+
+// The change date while its go-live notice runs (seven days from it, by the business date), unless this device
+// has dismissed the notice for that date; otherwise null.
+export function sundayWeekNotice(
+  appearance: Pick<Appearance, "sundayWeekSince" | "businessDate"> | null,
+  dismissed: string | null,
+): string | null {
+  const since = appearance?.sundayWeekSince;
+  const today = appearance?.businessDate;
+  if (!isDate(since) || !isDate(today) || dismissed === since) return null;
+  const day = daysBetween(since, today);
+  return day >= 0 && day < SUNDAY_WEEK_NOTICE_DAYS ? since : null;
+}
+
+export const SUNDAY_WEEK_NOTICE_TITLE = "The week now runs Sunday to Saturday.";
+
+export const sundayWeekNoticeDetail = (sinceLabel: string) =>
+  `Weekly figures from before ${sinceLabel} were counted Monday to Sunday.`;
 
 // "system" and anything unrecognised follow the device.
 export function resolveTheme(

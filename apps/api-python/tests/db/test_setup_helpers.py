@@ -28,6 +28,7 @@ from ..support.setup_rows import (
     add_investment,
     add_item,
     add_main_category,
+    add_record,
     add_schedule,
     add_target,
     add_target_set,
@@ -652,9 +653,9 @@ def test_the_vehicle_snapshot_is_the_dotnet_json(
             f'"CompanyId":"{fleet.north}","JoinedOn":"2026-01-01","LeftOn":"2026-03-20",'
             '"InitialInvestment":1500000.5,"TargetSets":['
             '{"StartsOn":"2026-01-01","Monday":1000,"Tuesday":1000,"Wednesday":1000,'
-            '"Thursday":1000,"Friday":1000,"Saturday":1000,"Sunday":1000},'
+            '"Thursday":1000,"Friday":1000,"Saturday":1000,"Sunday":1000,"LowBelow":4000},'
             '{"StartsOn":"2026-03-16","Monday":2100,"Tuesday":2000,"Wednesday":2000,'
-            '"Thursday":2000,"Friday":2000.5,"Saturday":2400,"Sunday":1500}],'
+            '"Thursday":2000,"Friday":2000.5,"Saturday":2400,"Sunday":1500,"LowBelow":4000}],'
             '"Away":[{"LeftOn":"2026-01-05","ReturnedOn":"2026-01-07"},'
             '{"LeftOn":"2026-02-10","ReturnedOn":"2026-02-13"}]}'
         )
@@ -899,6 +900,38 @@ def test_day_targets_that_are_not_seven_positive_amounts_are_refused(
     assert caught.value.diag.message_primary == code
 
 
+@pytest.mark.parametrize(
+    "amount", [0, Decimal("0.01"), Decimal("4000.50"), Decimal("999999999999.99")]
+)
+def test_zero_or_a_positive_amount_is_a_low_revenue_figure(executor: Conn, amount: Any) -> None:
+    assert _scalar(executor, "SELECT setup.check_low_below(%s)", (amount,)) == Decimal(amount)
+
+
+@pytest.mark.parametrize("amount", [None, -1, Decimal("1.005"), Decimal("1000000000000")])
+def test_a_low_revenue_figure_below_zero_or_past_two_decimals_is_refused(
+    executor: Conn, amount: Any
+) -> None:
+    with pytest.raises(psycopg.Error) as caught:
+        executor.execute("SELECT setup.check_low_below(%s)", (amount,))
+    assert caught.value.sqlstate == "XC422"
+    assert caught.value.diag.message_primary == "money_invalid"
+
+
+def test_the_low_figure_is_that_of_the_set_in_force_or_the_first_set_or_4000(
+    executor: Conn, owner_conn: Conn, fleet: Fleet
+) -> None:
+    org = fleet.owner.org
+    add_target_set(owner_conn, org, fleet.kda, date(2026, 1, 5), [1000] * 7, low_below=2500)
+    add_target_set(owner_conn, org, fleet.kda, date(2026, 2, 2), [1000] * 7, low_below=0)
+    low = "SELECT setup.low_below_on(%s, %s)"
+    with _as(executor, fleet.owner):
+        assert _scalar(executor, low, (fleet.kda, date(2026, 1, 1))) == Decimal(2500)
+        assert _scalar(executor, low, (fleet.kda, date(2026, 1, 5))) == Decimal(2500)
+        assert _scalar(executor, low, (fleet.kda, date(2026, 2, 1))) == Decimal(2500)
+        assert _scalar(executor, low, (fleet.kda, date(2026, 2, 2))) == Decimal(0)
+        assert _scalar(executor, low, (fleet.kdb, date(2026, 2, 2))) == Decimal(4000)
+
+
 # --- fleet numbers --------------------------------------------------------------------
 
 
@@ -979,3 +1012,65 @@ def test_an_item_is_hidden_from_a_member_without_the_view_right_of_its_current_k
     set_override(owner_conn, clerk, "savings.view", True)
     set_override(owner_conn, clerk, "scheduled.view", False)
     assert visible() == {cost: False, saving: True, switched: True}
+
+
+# --- the saving rule's revenue window ----------------------------------------------------
+
+
+def _window(conn: Conn, vehicle: UUID, run_on: date, days: int) -> tuple[Decimal, bool]:
+    row = conn.execute(
+        "SELECT revenue, complete FROM setup.saving_window_revenue(%s, %s, %s)",
+        (vehicle, run_on, days),
+    ).fetchone()
+    assert row is not None
+    return row["revenue"], row["complete"]
+
+
+def _march(day: int) -> date:
+    return date(2026, 3, day)
+
+
+def _record_march(owner_conn: Conn, fleet: Fleet, vehicle: UUID, days: range) -> None:
+    # Each day's amount is its day of the month in hundreds, so every window has its own sum.
+    for day in days:
+        add_record(
+            owner_conn, fleet.owner.org, vehicle, _march(day), day * 100, recorder=fleet.owner.id
+        )
+
+
+def test_a_week_rule_weighs_the_latest_sunday_to_saturday_week_up_to_the_run(
+    executor: Conn, owner_conn: Conn, fleet: Fleet
+) -> None:
+    # An organization made after the change to Sunday weeks has no change date: every run
+    # weighs a calendar week.
+    _record_march(owner_conn, fleet, fleet.kda, range(1, 15))
+    _record_march(owner_conn, fleet, fleet.kdb, range(8, 15))
+    with _as(executor, fleet.owner):
+        # Saturday 14 March weighs its own week, 8 to 14 March.
+        assert _window(executor, fleet.kda, _march(14), 7) == (Decimal(7700), True)
+        # Wednesday 11 March weighs the week before, 1 to 7 March, not waiting for later days.
+        assert _window(executor, fleet.kda, _march(11), 7) == (Decimal(2800), True)
+        assert _window(executor, fleet.kdb, _march(11), 7) == (Decimal(0), False)
+        # Sunday 15 March and Wednesday 18 March weigh 8 to 14 March.
+        assert _window(executor, fleet.kda, _march(15), 7) == (Decimal(7700), True)
+        assert _window(executor, fleet.kdb, _march(18), 7) == (Decimal(7700), True)
+        # The day and 30-day rules still end on the run.
+        assert _window(executor, fleet.kda, _march(11), 1) == (Decimal(1100), True)
+        assert _window(executor, fleet.kda, _march(11), 30) == (Decimal(6600), False)
+
+
+def test_a_week_rule_keeps_the_seven_days_to_the_run_before_the_organization_moved_to_sunday(
+    executor: Conn, owner_conn: Conn, fleet: Fleet
+) -> None:
+    _record_march(owner_conn, fleet, fleet.kda, range(1, 15))
+    # 21:30 UTC on 11 March is 00:30 on Thursday 12 March in Nairobi: the change is from 12 March.
+    owner_conn.execute(
+        "UPDATE tenancy.organizations SET sunday_week_at = '2026-03-11 21:30:00+00' WHERE id = %s",
+        (fleet.owner.org,),
+    )
+    with _as(executor, fleet.owner):
+        # Wednesday 11 March is before the change: the 7 days ending on it, 5 to 11 March.
+        assert _window(executor, fleet.kda, _march(11), 7) == (Decimal(5600), True)
+        # From Thursday 12 March the week before, 1 to 7 March; Saturday 14 March its own week.
+        assert _window(executor, fleet.kda, _march(12), 7) == (Decimal(2800), True)
+        assert _window(executor, fleet.kda, _march(14), 7) == (Decimal(7700), True)

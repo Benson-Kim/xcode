@@ -16,7 +16,8 @@ jest.mock("@xcode/shared/capture", () => {
 type Person = (typeof people)[keyof typeof people];
 type Api = ReturnType<typeof fakeApi>;
 
-// A week: days after the business date are future, the rest missing unless given.
+// A week: days after the business date are future, the rest missing unless given. The low figure sits under the
+// amounts these tests capture, so none of them asks a low revenue reason.
 function week(
   businessDate: string,
   weekStart: string,
@@ -48,6 +49,7 @@ function week(
         date,
         status: date > businessDate ? "future" : "missing",
         expected: 1000,
+        lowBelow: 500,
         amount: null,
         reason: null,
         note: null,
@@ -155,7 +157,7 @@ it("keeps a capture on the phone before sending it, then moves on to the next ve
   expect(await screen.findByRole("header", { name: "KCY 117T" })).toBeTruthy();
   await waitFor(() =>
     expect(api.sent(PUT)).toEqual([
-      { amount: 1500, reason: null, note: null, version: null },
+      { amount: 1500, reason: null, note: null, fuel: null, version: null },
     ]),
   );
   // Written to the Keychain before any network call; gone from it once the API accepted it.
@@ -214,6 +216,7 @@ it("keeps waiting captures through an app restart and sends them after the next 
     amount: 1000,
     reason: null,
     note: null,
+    fuel: null,
     version: null,
   });
   await waitFor(() => expect(storedText()).not.toContain('"amount":1000'));
@@ -244,6 +247,7 @@ const saved: RevenueCell = {
   date: TODAY,
   status: "amount",
   expected: 1000,
+  lowBelow: 500,
   amount: 900,
   reason: null,
   note: null,
@@ -352,6 +356,7 @@ it("replaces the saved value with mine over the version the API reported, even w
     amount: 1000,
     reason: null,
     note: null,
+    fuel: null,
     version: 2,
   });
   await waitFor(() => expect(tabLabel()).toBe("Revenue"));
@@ -526,7 +531,7 @@ it("offers what the person may do: reasons with the no-earnings permission, Othe
   await fireEvent.press(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(owner.sent(PUT)).toEqual([
-      { amount: 1100, reason: null, note: null, version: 4 },
+      { amount: 1100, reason: null, note: null, fuel: null, version: 4 },
     ]),
   );
 });
@@ -657,7 +662,8 @@ it("takes today from the organization's business date, never the phone's clock, 
     ).toBeTruthy();
     expect(screen.getByText("Your vehicles, 29 Feb 2024")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "This week" }));
-    expect(screen.getByText("This week, 26 Feb to 3 Mar 2024")).toBeTruthy();
+    // Without a first day in the formats, the phone counts the week from Sunday (v2.41).
+    expect(screen.getByText("This week, 25 Feb to 2 Mar 2024")).toBeTruthy();
 
     await openRevenue();
     expect(await screen.findByText("Thu 29 Feb 2024")).toBeTruthy();
@@ -891,7 +897,7 @@ it("shows every revenue date in the organization's date pattern", async () => {
   ).toBeTruthy();
   expect(screen.getByText("Your vehicles, 29/02/2024")).toBeTruthy();
   await fireEvent.press(screen.getByRole("button", { name: "This week" }));
-  expect(screen.getByText("This week, 26/02/2024 to 03/03/2024")).toBeTruthy();
+  expect(screen.getByText("This week, 25/02/2024 to 02/03/2024")).toBeTruthy();
 
   await openRevenue();
   expect(await screen.findByText("Thu 29/02/2024")).toBeTruthy();

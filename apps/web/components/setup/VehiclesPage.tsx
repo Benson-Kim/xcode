@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 
+import { targetsOn } from "@xcode/shared/appearance";
 import { MONTH_NAMES } from "@xcode/shared/dates";
 import { plural, type Formatter } from "@xcode/shared/format";
 import {
+  DEFAULT_LOW_BELOW,
   normaliseRegistration,
   REVENUE_REPORT_PERIODS,
   revenuePeriodLabel,
@@ -69,6 +71,9 @@ import {
   DayTargetGrid,
   EMPTY_TARGETS,
   hasEveryTarget,
+  LOW_FIGURE_MISSING,
+  lowFigure,
+  LowRevenueField,
   targetFigures,
 } from "./DayTargets";
 import { useDeleteRecord } from "./DeleteRecordDialog";
@@ -132,6 +137,8 @@ export function VehiclesPage({
   );
   // The organization's business date, never the computer clock; undefined until the appearance has loaded.
   const today = appearance?.businessDate;
+  // With Targets switched off (v2.38) no target figure shows; the low revenue figure stays.
+  const targets = targetsOn(appearance);
   const [filter, setFilter] = useState("all");
   // Vehicles come a server page at a time, filtered to the chosen company by the server.
   const vehicles = usePagedList<Vehicle>(
@@ -194,7 +201,10 @@ export function VehiclesPage({
           { label: "Registration" },
           { label: "Fleet number" },
           { label: "PSV company" },
-          ...(rights.view ? [{ label: "Weekly target", numeric: true }] : []),
+          ...(rights.view && targets
+            ? [{ label: "Weekly target", numeric: true }]
+            : []),
+          ...(rights.view ? [{ label: "Low below", numeric: true }] : []),
           { label: "Initial investment", numeric: true },
           ...(rights.view ? [{ label: scheduledLabel, numeric: true }] : []),
           { label: "Actions", numeric: true },
@@ -205,7 +215,7 @@ export function VehiclesPage({
         footer={
           <tr>
             <td colSpan={3}>{plural(vehicles.total, "vehicle", "vehicles")}</td>
-            {rights.view && (
+            {rights.view && targets && (
               <td className="r">
                 {formatNumber(
                   rows.reduce(
@@ -215,6 +225,7 @@ export function VehiclesPage({
                 )}
               </td>
             )}
+            {rights.view && <td />}
             <td className="r">
               {formatNumber(
                 rows.reduce(
@@ -250,7 +261,7 @@ export function VehiclesPage({
               </Td>
               <Td label="Fleet number">{vehicle.fleetNumber ?? ""}</Td>
               <Td label="PSV company">{vehicle.companyName}</Td>
-              {rights.view && (
+              {rights.view && targets && (
                 // Leaving the fleet ends the target: no "KES 0 a day" for a vehicle that no longer runs.
                 <Td
                   label="Weekly target"
@@ -264,6 +275,16 @@ export function VehiclesPage({
                       {formatDateOnly(vehicle.nextTarget.startsOn)}
                     </span>
                   )}
+                </Td>
+              )}
+              {rights.view && (
+                <Td label="Low below" numeric>
+                  <LowBelowCell
+                    vehicle={vehicle}
+                    left={status.left}
+                    format={formatNumber}
+                    formatDate={formatDateOnly}
+                  />
                 </Td>
               )}
               <Td label="Initial investment" numeric>
@@ -281,6 +302,7 @@ export function VehiclesPage({
                   vehicle={vehicle}
                   rights={rights}
                   ready={Boolean(today)}
+                  targets={targets}
                   onTargets={() => setTargeting(vehicle.id)}
                   onOpen={() => setEditing({ id: vehicle.id })}
                   onDelete={() =>
@@ -336,11 +358,41 @@ export function VehiclesPage({
   );
 }
 
-// A row's actions: targets, open or edit, and delete for a vehicle added by mistake (the server refuses one in use).
+// The low revenue figure in force today, and the next set's figure under it when that set changes it.
+function LowBelowCell({
+  vehicle,
+  left,
+  format,
+  formatDate,
+}: {
+  vehicle: Vehicle;
+  left: boolean;
+  format: (value: number) => string;
+  formatDate: (value: string) => string;
+}) {
+  if (left) return <>—</>;
+  const now = vehicle.lowBelow ?? DEFAULT_LOW_BELOW;
+  const next = vehicle.nextTarget;
+  const nextLow = next?.lowBelow;
+  return (
+    <>
+      {format(now)}
+      {next && nextLow !== undefined && nextLow !== now && (
+        <span className="note wrap">
+          {format(nextLow)} from {formatDate(next.startsOn)}
+        </span>
+      )}
+    </>
+  );
+}
+
+// A row's actions: targets (Low revenue while targets are off), open or edit, and delete for a vehicle added by
+// mistake (the server refuses one in use).
 function VehicleActions({
   vehicle,
   rights,
   ready,
+  targets,
   onTargets,
   onOpen,
   onDelete,
@@ -348,6 +400,7 @@ function VehicleActions({
   vehicle: Vehicle;
   rights: ReturnType<typeof useVehicleRights>;
   ready: boolean;
+  targets: boolean;
   onTargets: () => void;
   onOpen: () => void;
   onDelete: () => void;
@@ -356,11 +409,11 @@ function VehicleActions({
     <div className="tacts">
       {rights.target && (
         <RowAction
-          aria-label={`Targets ${vehicle.registration}`}
+          aria-label={`${targets ? "Targets" : "Low revenue"} ${vehicle.registration}`}
           disabled={!ready}
           onClick={onTargets}
         >
-          Targets
+          {targets ? "Targets" : "Low revenue"}
         </RowAction>
       )}
       <RowAction
@@ -514,6 +567,8 @@ export function VehicleEditor({
   const { can } = useSession();
   const rights = useVehicleRights();
   const { formatDateOnly, formatDateRange } = useFormats();
+  // With Targets off a new vehicle asks no day targets and starts with none (zeros); its low figure is still asked.
+  const targets = targetsOn(useAppearance().appearance);
   const isNew = !vehicle;
   const [form, setForm] = useState<{
     registration: string;
@@ -521,6 +576,7 @@ export function VehicleEditor({
     companyId: string;
     initialInvestment: string;
     dayTargets: string[];
+    lowBelow: string;
   }>({
     registration: vehicle?.registration ?? initialRegistration,
     fleetNumber: vehicle?.fleetNumber ?? "",
@@ -529,6 +585,7 @@ export function VehicleEditor({
       ? String(vehicle.initialInvestment)
       : "",
     dayTargets: EMPTY_TARGETS,
+    lowBelow: String(DEFAULT_LOW_BELOW),
   });
   const [saveError, setSaveError] = useState("");
   const [lifecycleInput, setLifecycleDate] = useState<string | null>(
@@ -625,7 +682,10 @@ export function VehicleEditor({
       : vehicle.registration;
     const fleetNumber = form.fleetNumber.trim();
     const investment = Number(form.initialInvestment) || 0;
-    const dayTargets = targetFigures(form.dayTargets);
+    const dayTargets = targets
+      ? targetFigures(form.dayTargets)
+      : targetFigures(EMPTY_TARGETS);
+    const lowBelow = lowFigure(form.lowBelow);
     const joinedOn = vehicle?.joinedOn ?? joinsOn ?? today;
     const problem = !registration
       ? "Enter the registration like KDN 204B."
@@ -633,13 +693,15 @@ export function VehicleEditor({
         ? "Enter the fleet number."
         : !form.companyId
           ? "Choose the PSV company."
-          : isNew && !hasEveryTarget(form.dayTargets)
+          : isNew && targets && !hasEveryTarget(form.dayTargets)
             ? "Enter the target for every day."
-            : !joinedOn
-              ? "The business date has not loaded yet. Try again in a moment."
-              : retired
-                ? "Restore this vehicle before editing its details."
-                : "";
+            : isNew && lowBelow === null
+              ? LOW_FIGURE_MISSING
+              : !joinedOn
+                ? "The business date has not loaded yet. Try again in a moment."
+                : retired
+                  ? "Restore this vehicle before editing its details."
+                  : "";
     setSaveError(problem);
     if (problem || !registration || !joinedOn) return;
     if (
@@ -664,6 +726,7 @@ export function VehicleEditor({
             ...body,
             registration,
             dayTargets,
+            lowBelow: lowBelow ?? DEFAULT_LOW_BELOW,
           })
         : await vehiclesApi.update(vehicle.id, body);
       toast(
@@ -681,6 +744,7 @@ export function VehicleEditor({
           ? {
               dayTargets,
               weeklyTarget: dayTargets.reduce((sum, figure) => sum + figure, 0),
+              lowBelow,
             }
           : { weeklyTarget: vehicle.weeklyTarget }),
         joinedOn,
@@ -778,10 +842,17 @@ export function VehicleEditor({
               {companyField}
               {investmentField}
             </FieldPair>
-            <DayTargetGrid
-              idPrefix="vehicle-day"
-              values={form.dayTargets}
-              onChange={(dayTargets) => setForm({ ...form, dayTargets })}
+            {targets && (
+              <DayTargetGrid
+                idPrefix="vehicle-day"
+                values={form.dayTargets}
+                onChange={(dayTargets) => setForm({ ...form, dayTargets })}
+              />
+            )}
+            <LowRevenueField
+              id="vehicle-low"
+              value={form.lowBelow}
+              onChange={(lowBelow) => setForm({ ...form, lowBelow })}
             />
           </>
         ) : (

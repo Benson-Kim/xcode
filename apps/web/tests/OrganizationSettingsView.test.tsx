@@ -37,6 +37,8 @@ it("loads organization settings without personal preferences", async () => {
   ).toBeInTheDocument();
   expect(screen.getByLabelText("Time zone")).toHaveValue("Africa/Nairobi");
   expect(screen.queryByLabelText("Font scale")).not.toBeInTheDocument();
+  // The week runs Sunday to Saturday for everyone (v2.41): there is no first day to choose.
+  expect(screen.queryByLabelText("First day of week")).not.toBeInTheDocument();
   expect(fetch).toHaveBeenCalledWith(
     "/api/setup/organization/settings",
     expect.anything(),

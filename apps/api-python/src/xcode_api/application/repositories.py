@@ -90,6 +90,7 @@ from ..domain.reports import (
     ReportsAccess,
     ReportTable,
     RevenueExportQuery,
+    RevenueImageLog,
 )
 from ..domain.revenue import (
     CaptureResult,
@@ -176,6 +177,8 @@ from ..domain.tenancy import (
     RoleSave,
     ScopeOptions,
     SettingsSave,
+    SystemSettings,
+    SystemSettingSave,
     TenantContext,
     UserPreferences,
 )
@@ -501,6 +504,15 @@ class TenancyRepository(Protocol):
 
     async def appearance(self, context: TenantContext) -> Appearance:
         """``api.organization_appearance_get``, for any member."""
+        ...
+
+    async def system_settings(self, context: TenantContext) -> SystemSettings:
+        """``api.setup_settings_get`` (``settings.edit``): the on/off system settings."""
+        ...
+
+    async def set_system_setting(self, command: SystemSettingSave) -> SystemSettings:
+        """``api.setup_settings_set`` (``settings.edit``): switch one setting and return them
+        all; ``NotFound`` for an unknown key, ``setting_state_required`` when ``on`` is null."""
         ...
 
     async def preferences(self, context: TenantContext) -> Preferences:
@@ -847,6 +859,11 @@ class ReportsRepository(Protocol):
     async def export_revenue(self, query: RevenueExportQuery) -> ReportDocument:
         """``api.revenue_export_get`` (``revenue.export`` and ``revenue.view``): the week grid as
         the screen lists it."""
+        ...
+
+    async def log_revenue_image(self, log: RevenueImageLog) -> None:
+        """``api.revenue_image_log`` (``revenue.export`` and ``revenue.view``): the change-log
+        row of a Summary image the device drew; nothing is read for it."""
         ...
 
     async def export_expenses(self, query: ExpenseExportQuery) -> ReportDocument:

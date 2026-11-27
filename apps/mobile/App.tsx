@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
+import { targetsOn } from "@xcode/shared/appearance";
 import { createFormatter } from "@xcode/shared/format";
 
 import {
@@ -36,6 +37,8 @@ import { loadPerson, loadSession, type StoredPerson } from "./src/lib/storage";
 import { useServerWake } from "./src/lib/useServerWake";
 import { fetchPerson } from "./src/session";
 import { AppShell } from "./src/shell/AppShell";
+import { SundayWeekNotice } from "./src/shell/SundayWeekNotice";
+import { TargetsContext } from "./src/shell/targets";
 import { UpdateNotice } from "./src/shell/UpdateBanner";
 import { UpdateRequired, useUpdateRequired } from "./src/shell/UpdateRequired";
 import { ErrorBoundary, ThemeProvider } from "./src/ui";
@@ -204,63 +207,68 @@ export default function App() {
       <ErrorBoundary>
         <FormatsContext.Provider value={formatter}>
           <ThemeProvider value={theme}>
-            <StatusBar
-              barStyle={theme.dark ? "light-content" : "dark-content"}
-              backgroundColor={theme.colors.cream}
-            />
-            <SafeAreaView
-              style={[styles.safe, { backgroundColor: theme.colors.cream }]}
-              edges={
-                state.phase === "signed-in"
-                  ? ["top", "left", "right"]
-                  : undefined
-              }
-            >
-              {ready && <UpdateNotice />}
-              {!ready ? (
-                <View style={styles.starting}>
-                  <ActivityIndicator
-                    color={theme.colors.blue}
-                    accessibilityLabel="Starting XCODE"
+            <TargetsContext.Provider value={targetsOn(appearance)}>
+              <StatusBar
+                barStyle={theme.dark ? "light-content" : "dark-content"}
+                backgroundColor={theme.colors.cream}
+              />
+              <SafeAreaView
+                style={[styles.safe, { backgroundColor: theme.colors.cream }]}
+                edges={
+                  state.phase === "signed-in"
+                    ? ["top", "left", "right"]
+                    : undefined
+                }
+              >
+                {ready && <UpdateNotice />}
+                {ready && !updateRequired && state.phase === "signed-in" && (
+                  <SundayWeekNotice appearance={appearance} />
+                )}
+                {!ready ? (
+                  <View style={styles.starting}>
+                    <ActivityIndicator
+                      color={theme.colors.blue}
+                      accessibilityLabel="Starting XCODE"
+                    />
+                  </View>
+                ) : updateRequired ? (
+                  <UpdateRequired
+                    minimumVersion={updateRequired.minimumVersion}
                   />
-                </View>
-              ) : updateRequired ? (
-                <UpdateRequired
-                  minimumVersion={updateRequired.minimumVersion}
-                />
-              ) : state.phase === "signed-in" ? (
-                <AppShell
-                  person={state.person}
-                  offline={state.offline}
-                  // Saved with the appearance, so it is the last business date the phone saw when it is offline.
-                  businessDate={appearance?.businessDate}
-                  onLock={() =>
-                    setState({ phase: "signed-out", trusted: state.person })
-                  }
-                  onSessionEnded={() =>
-                    setState({ phase: "signed-out", trusted: state.person })
-                  }
-                  onSwitchUser={async () => {
-                    await forgetThisPhone();
-                    forgotten();
-                    setState({ phase: "signed-out", trusted: null });
-                  }}
-                />
-              ) : (
-                state.phase === "signed-out" && (
-                  <AuthFlow
-                    trusted={state.trusted}
-                    brand={brand ?? undefined}
-                    onSignedIn={(person, offline) =>
-                      setState({ phase: "signed-in", person, offline })
+                ) : state.phase === "signed-in" ? (
+                  <AppShell
+                    person={state.person}
+                    offline={state.offline}
+                    // Saved with the appearance, so it is the last business date the phone saw when it is offline.
+                    businessDate={appearance?.businessDate}
+                    onLock={() =>
+                      setState({ phase: "signed-out", trusted: state.person })
                     }
-                    onForgotten={forgotten}
-                    invite={invite}
-                    onInviteTaken={takeInvite}
+                    onSessionEnded={() =>
+                      setState({ phase: "signed-out", trusted: state.person })
+                    }
+                    onSwitchUser={async () => {
+                      await forgetThisPhone();
+                      forgotten();
+                      setState({ phase: "signed-out", trusted: null });
+                    }}
                   />
-                )
-              )}
-            </SafeAreaView>
+                ) : (
+                  state.phase === "signed-out" && (
+                    <AuthFlow
+                      trusted={state.trusted}
+                      brand={brand ?? undefined}
+                      onSignedIn={(person, offline) =>
+                        setState({ phase: "signed-in", person, offline })
+                      }
+                      onForgotten={forgotten}
+                      invite={invite}
+                      onInviteTaken={takeInvite}
+                    />
+                  )
+                )}
+              </SafeAreaView>
+            </TargetsContext.Provider>
           </ThemeProvider>
         </FormatsContext.Provider>
       </ErrorBoundary>

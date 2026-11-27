@@ -167,6 +167,11 @@ def _seed(conn: Conn, slug: str) -> OrganizationRows:
         p,
     )
     conn.execute(
+        "INSERT INTO tenancy.organization_system_settings (organization_id, key, enabled) "
+        "VALUES (%(org)s, 'targets', false)",
+        p,
+    )
+    conn.execute(
         "INSERT INTO tenancy.user_preferences (organization_id, user_id, theme_mode) "
         "VALUES (%(org)s, %(user)s, 'dark')",
         p,

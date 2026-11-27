@@ -52,7 +52,7 @@ export function useCaptureTarget({
   const save = useCallback(
     async (
       open: Target,
-      entry: Pick<NewCapture, "amount" | "reason" | "note">,
+      entry: Pick<NewCapture, "amount" | "reason" | "note" | "fuel">,
     ) => {
       const version = open.waiting
         ? open.waiting.version

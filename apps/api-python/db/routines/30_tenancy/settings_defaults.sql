@@ -17,7 +17,7 @@ AS $$
              'time_zone', 'Africa/Nairobi',
              'date_pattern', 'medium',
              'hour12', false,
-             'first_day_of_week', 1,
+             'first_day_of_week', 0,
              'week_numbering', 'iso8601',
              'currency', 'KES',
              'use_grouping', true,
@@ -55,7 +55,7 @@ AS $$
              'allow_pin_sign_in', true
            )
            WHEN 'revenue' THEN jsonb_build_object(
-             'low_day_threshold', 4000,
+             'fuel_question_from', 10000,
              'gap_amber_percent', 10
            )
          END;

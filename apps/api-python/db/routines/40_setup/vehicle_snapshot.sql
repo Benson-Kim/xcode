@@ -1,5 +1,5 @@
 -- setup.vehicle_snapshot(p_id uuid) RETURNS json
--- Purpose: the change-log snapshot of a vehicle, compact JSON with the keys Id, Registration, FleetNumber, CompanyId, JoinedOn, LeftOn, InitialInvestment, TargetSets [{StartsOn, Monday, ..., Sunday}] by start date and Away [{LeftOn, ReturnedOn}] by leave date; the JSON null for an unknown vehicle.
+-- Purpose: the change-log snapshot of a vehicle, compact JSON with the keys Id, Registration, FleetNumber, CompanyId, JoinedOn, LeftOn, InitialInvestment, TargetSets [{StartsOn, Monday, ..., Sunday, LowBelow}] by start date and Away [{LeftOn, ReturnedOn}] by leave date; the JSON null for an unknown vehicle.
 -- Callers: the vehicle write routines.
 -- Reads: setup.fleet_vehicles, setup.vehicle_target_sets, setup.vehicle_away_periods. Writes: nothing.
 -- Raises: none.
@@ -32,7 +32,8 @@ AS $$
                               'Thursday', trim_scale(t.thursday),
                               'Friday', trim_scale(t.friday),
                               'Saturday', trim_scale(t.saturday),
-                              'Sunday', trim_scale(t.sunday)
+                              'Sunday', trim_scale(t.sunday),
+                              'LowBelow', trim_scale(t.low_below)
                             ) ORDER BY t.starts_on),
                           '[]'::json)
                  FROM setup.vehicle_target_sets AS t

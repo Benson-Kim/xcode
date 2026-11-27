@@ -88,7 +88,7 @@ DOCUMENT_KEY = {
 
 LOCALIZATION_TEXT = (
     '{"organizationId":"ORG","locale":"en-GB","timeZone":"Africa/Nairobi",'
-    '"datePattern":"medium","hour12":false,"firstDayOfWeek":1,"weekNumbering":"iso8601",'
+    '"datePattern":"medium","hour12":false,"firstDayOfWeek":0,"weekNumbering":"iso8601",'
     '"currency":"KES","useGrouping":true,"numberDecimals":2,"allowLocaleOverride":true,'
     '"allowTimeZoneOverride":false,"allowHour12Override":true,"allowThemeOverride":true}'
 )
@@ -717,6 +717,9 @@ def test_the_time_zone_must_be_one_postgresql_knows(
         {"date_pattern": "tiny"},
         {"first_day_of_week": 7},
         {"first_day_of_week": -1},
+        # The week runs Sunday to Saturday everywhere (Web v2.41): Sunday is the only first day.
+        {"first_day_of_week": 1},
+        {"first_day_of_week": 6},
         {"week_numbering": "us"},
         {"currency": "usd"},
         {"currency": "US"},
@@ -732,7 +735,7 @@ def test_the_format_settings_must_be_valid(
 
 
 def test_the_format_settings_accept_their_bounds(app_conn: Conn, owner: Member) -> None:
-    for value in ({"first_day_of_week": 6}, {"number_decimals": 0}, {"date_pattern": "short"}):
+    for value in ({"number_decimals": 0}, {"date_pattern": "short"}):
         assert _save(app_conn, owner, "localization", value)["outcome"] == "updated"
 
 
@@ -1102,10 +1105,10 @@ def test_a_typed_reason_follows_the_business_date_reason(
 def test_the_reason_names_each_changed_setting_with_its_value(
     app_conn: Conn, owner_conn: Conn, owner: Member
 ) -> None:
-    _save(app_conn, owner, "localization", {"first_day_of_week": 0, "currency": "USD"})
+    _save(app_conn, owner, "localization", {"date_pattern": "short", "currency": "USD"})
     assert (
         _last(owner_conn, owner.org)["reason"]
-        == "Changed the first day of the week to Sunday and the currency to USD"
+        == "Changed the date format to short and the currency to USD"
     )
 
 
@@ -1248,7 +1251,7 @@ def test_an_empty_object_changes_nothing(app_conn: Conn, owner_conn: Conn, owner
 def test_a_localization_save_logs_literal_camel_case_snapshots(
     app_conn: Conn, owner_conn: Conn, owner: Member
 ) -> None:
-    row = _save(app_conn, owner, "localization", {"first_day_of_week": 0, "currency": "USD"})
+    row = _save(app_conn, owner, "localization", {"date_pattern": "short", "currency": "USD"})
     entry = _last(owner_conn, owner.org)
     assert (entry["section"], entry["entity_id"], entry["version"]) == (
         "localization",
@@ -1261,7 +1264,7 @@ def test_a_localization_save_logs_literal_camel_case_snapshots(
     assert entry["after"] == _text(
         LOCALIZATION_TEXT,
         owner.org,
-        ('"firstDayOfWeek":1', '"firstDayOfWeek":0'),
+        ('"datePattern":"medium"', '"datePattern":"short"'),
         ('"currency":"KES"', '"currency":"USD"'),
     )
 
@@ -1535,7 +1538,7 @@ def test_appearance_of_a_fresh_organization(app_conn: Conn, clerk: Member) -> No
             "time_zone": "Africa/Nairobi",
             "date_pattern": "medium",
             "hour12": False,
-            "first_day_of_week": 1,
+            "first_day_of_week": 0,
             "week_numbering": "iso8601",
             "currency": "KES",
             "use_grouping": True,
@@ -1548,6 +1551,8 @@ def test_appearance_of_a_fresh_organization(app_conn: Conn, clerk: Member) -> No
         "lockout_threshold": 5,
         "lockout_minutes": 15,
         "idle_unlock_seconds": 900,
+        "sunday_week_since": None,
+        "targets": True,
     }
 
 

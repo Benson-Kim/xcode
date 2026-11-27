@@ -12,6 +12,7 @@ export type CreateVehicleRequest = {
   fleetNumber: string;
   dayTargets: number[];
   initialInvestment: number | null;
+  lowBelow?: number;
 };
 
 export type UpdateVehicleRequest = {
@@ -21,7 +22,11 @@ export type UpdateVehicleRequest = {
   initialInvestment: number | null;
 };
 
-export type SaveTargetRequest = { startsOn: string; days: number[] };
+export type SaveTargetRequest = {
+  startsOn: string;
+  days: number[];
+  lowBelow?: number;
+};
 
 export const vehiclesApi = {
   create: (body: CreateVehicleRequest) =>

@@ -24,6 +24,7 @@ from xcode_api.domain.revenue import (
     RevenueDayQuery,
     RevenueDayRow,
     RevenueDaySave,
+    RevenueFuel,
     RevenueWeekQuery,
 )
 from xcode_api.domain.setup import VehicleRetirement, VehicleReturn
@@ -126,7 +127,7 @@ async def capture_a_week(world: RevenueWorld) -> None:
             SettingsSave(
                 world.later(owner),
                 "revenue",
-                {"low_day_threshold": 400, "gap_amber_percent": 25},
+                {"fuel_question_from": 400, "gap_amber_percent": 25},
                 None,
                 None,
             )
@@ -142,12 +143,23 @@ async def capture_a_week(world: RevenueWorld) -> None:
         note: str | None = None,
         version: int | None = None,
         *,
+        fuel: RevenueFuel | None = None,
+        fuel_given: bool = False,
         days_later: int = 0,
         captured_at: datetime | None = None,
     ) -> None:
         money = None if amount is None else Decimal(amount)
         command = RevenueCapture(
-            world.later(who, days_later), vehicle, day, money, reason, note, version, captured_at
+            world.later(who, days_later),
+            vehicle,
+            day,
+            money,
+            reason,
+            note,
+            fuel,
+            fuel_given,
+            version,
+            captured_at,
         )
         await world.record(world.revenue.capture(command))
 
@@ -187,7 +199,7 @@ async def capture_a_week(world: RevenueWorld) -> None:
         (1000, kdb, october[2], 800, None),
         (200, kda, october[5], 300, "Arrest"),
     ):
-        settings = {"low_day_threshold": threshold}
+        settings = {"fuel_question_from": threshold}
         await tenancy.record(
             tenancy.repository.save_settings(
                 SettingsSave(world.later(owner), "revenue", settings, None, None)
@@ -229,14 +241,23 @@ async def save_a_day(world: RevenueWorld) -> None:
     await world.record(
         world.revenue.capture(
             RevenueCapture(
-                world.later(owner), kda, date(2026, 10, 2), Decimal(5000), None, None, None, None
+                world.later(owner),
+                kda,
+                date(2026, 10, 2),
+                Decimal(5000),
+                None,
+                None,
+                None,
+                False,
+                None,
+                None,
             )
         )
     )
 
     def row(vehicle: UUID, amount: int | None, version: int | None = None) -> RevenueDayRow:
         return RevenueDayRow(
-            vehicle, None if amount is None else Decimal(amount), None, None, version
+            vehicle, None if amount is None else Decimal(amount), None, None, None, False, version
         )
 
     async def save(day: date, *rows: RevenueDayRow) -> Any:

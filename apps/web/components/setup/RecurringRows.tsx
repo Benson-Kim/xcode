@@ -10,7 +10,8 @@ import {
 import { RowAction, RowActionGroup, StatusBadge, Td, Tr } from "../ui";
 import { type RecurringItem, RegPlate } from "./shared";
 
-// The revenue rule of a saving in words: "Every run", or "Revenue KES 12,000 or more over the 7 days to the run".
+// The revenue rule of a saving in words: "Every run", or "Revenue KES 12,000 or more over the last Sunday to Saturday
+// week". A week rule weighs the latest Sunday-to-Saturday week ending on or before the run.
 export function ruleText(
   item: Pick<RecurringItem, "condition">,
   kes: (amount: number) => string,
@@ -18,7 +19,11 @@ export function ruleText(
   const rule = item.condition;
   if (!rule) return "Every run";
   const window =
-    rule.days === 1 ? "that day" : `over the ${rule.days} days to the run`;
+    rule.days === 1
+      ? "that day"
+      : rule.days === 7
+        ? "over the last Sunday to Saturday week"
+        : `over the ${rule.days} days to the run`;
   return `Revenue ${kes(rule.min)} or more ${window}`;
 }
 

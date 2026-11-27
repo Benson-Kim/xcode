@@ -50,6 +50,7 @@ AS $$
            WHEN 'allowPinSignIn' THEN 'PIN sign-in'
            WHEN 'logoAlt' THEN 'the logo text'
            WHEN 'lowDayThreshold' THEN 'the low-day threshold'
+           WHEN 'fuelQuestionFrom' THEN 'the fuel question amount'
            WHEN 'gapAmberPercent' THEN 'the amber band'
            ELSE 'the ' || lower(regexp_replace(camel.key, '([a-z])([A-Z])', '\1 \2', 'g'))
          END

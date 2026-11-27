@@ -1,8 +1,8 @@
--- revenue.capture_row(p_organization_id uuid, p_actor_id uuid, p_permissions text[], p_threshold numeric, p_today date, p_writable_from date, p_vehicle_id uuid, p_day date, p_amount numeric, p_reason text, p_note text, p_expected_version bigint, p_captured_at timestamptz, p_now timestamptz, p_decide boolean) RETURNS api.write_result
--- Purpose: the steps of revenue.capture_entry for one vehicle and day, with what is the same for every row of a call given by the caller: the actor's rights, the low-day threshold, the business date and the earliest writable date as of the capture time (-infinity: no limit; each NULL: worked out here, at the step that needs it). p_decide false leaves the saving runs to the caller (one decision for many vehicles).
+-- revenue.capture_row(p_organization_id uuid, p_actor_id uuid, p_permissions text[], p_fuel_from numeric, p_today date, p_writable_from date, p_vehicle_id uuid, p_day date, p_amount numeric, p_reason text, p_note text, p_fuel boolean, p_fuel_given boolean, p_expected_version bigint, p_captured_at timestamptz, p_now timestamptz, p_decide boolean) RETURNS api.write_result
+-- Purpose: the steps of revenue.capture_entry for one vehicle and day, with what is the same for every row of a call given by the caller: the actor's rights, the amount from which the fuel question is asked, the business date and the earliest writable date as of the capture time (-infinity: no limit; each NULL: worked out here, at the step that needs it). p_decide false leaves the saving runs to the caller (one decision for many vehicles). The fuel answer: p_fuel_given false keeps the saved one (none on a first capture), dropped when there is no amount and a Fueled answer dropped below p_fuel_from; given, p_fuel is the answer (NULL clears it), refused on a day with no amount and Fueled below p_fuel_from. A reason goes with an amount only below the vehicle's low revenue figure in force on p_day (setup.low_below_on).
 -- Callers: revenue.capture_entry, api.revenue_day_save.
--- Reads: setup.fleet_vehicles, revenue.records, and what tenancy.effective_permissions, tenancy.settings_document, revenue.check_entry, setup.vehicle_visible, tenancy.business_date, setup.vehicle_active_on, setup.vehicle_away_on, tenancy.check_writable, tenancy.earliest_writable, revenue.vehicle_days, revenue.cell and revenue.record_snapshot read. Writes: revenue.records, setup.saving_runs through setup.decide_saving_runs, and what tenancy.record_change writes.
--- Raises: XC422 revenue_reason_invalid via revenue.check_entry, XC422 money_invalid via revenue.check_entry, XC422 revenue_entry_required via revenue.check_entry, XC422 revenue_note_length via revenue.check_entry, XC422 revenue_note_without_other via revenue.check_entry, XC404 not_found, XC422 time_zone_invalid via tenancy.business_date, XC409 revenue_concurrent_save, XC422 revenue_low_needs_reason, XC422 revenue_amount_with_reason, XC422 revenue_future_date, XC422 revenue_vehicle_away, XC422 revenue_vehicle_inactive, XC403 revenue_capture_permission, XC403 revenue_correct_permission, XC422 record_too_old, XC422 record_too_old via tenancy.check_writable, XC409 revenue_version_conflict, XC409 unique_conflict.
+-- Reads: setup.fleet_vehicles, revenue.records, and what tenancy.effective_permissions, tenancy.settings_document, revenue.check_entry, setup.low_below_on, setup.vehicle_visible, tenancy.business_date, setup.vehicle_active_on, setup.vehicle_away_on, tenancy.check_writable, tenancy.earliest_writable, revenue.vehicle_days, revenue.cell and revenue.record_snapshot read. Writes: revenue.records, setup.saving_runs through setup.decide_saving_runs, and what tenancy.record_change writes.
+-- Raises: XC422 revenue_reason_invalid via revenue.check_entry, XC422 money_invalid via revenue.check_entry, XC422 revenue_entry_required via revenue.check_entry, XC422 revenue_note_length via revenue.check_entry, XC422 revenue_note_without_other via revenue.check_entry, XC422 fuel_invalid, XC404 not_found, XC422 time_zone_invalid via tenancy.business_date, XC409 revenue_concurrent_save, XC422 revenue_low_needs_reason, XC422 revenue_amount_with_reason, XC422 revenue_future_date, XC422 revenue_vehicle_away, XC422 revenue_vehicle_inactive, XC403 revenue_capture_permission, XC403 revenue_correct_permission, XC422 record_too_old, XC422 record_too_old via tenancy.check_writable, XC409 revenue_version_conflict, XC409 unique_conflict.
 -- Tests: tests/db/test_revenue_routines.py, tests/db/test_revenue_day_routines.py, tests/api/test_revenue.py.
 -- The steps and their order are revenue.capture_entry's. A given earliest writable date stands
 -- for tenancy.check_writable as of the capture time: the same refusal, with the same detail.
@@ -15,7 +15,7 @@ CREATE OR REPLACE FUNCTION revenue.capture_row(
   p_organization_id uuid,
   p_actor_id uuid,
   p_permissions text[],
-  p_threshold numeric,
+  p_fuel_from numeric,
   p_today date,
   p_writable_from date,
   p_vehicle_id uuid,
@@ -23,6 +23,8 @@ CREATE OR REPLACE FUNCTION revenue.capture_row(
   p_amount numeric,
   p_reason text,
   p_note text,
+  p_fuel boolean,
+  p_fuel_given boolean,
   p_expected_version bigint,
   p_captured_at timestamptz,
   p_now timestamptz,
@@ -37,6 +39,8 @@ DECLARE
   c_offline_window CONSTANT interval := interval '72 hours';
   v_permissions text[] := coalesce(p_permissions, tenancy.effective_permissions(p_organization_id, p_actor_id));
   v_threshold numeric;
+  v_fuel_from numeric;
+  v_fuel boolean;
   v_amount numeric;
   v_reason smallint;
   v_note text;
@@ -51,11 +55,16 @@ DECLARE
   v_version bigint;
   v_which text;
 BEGIN
-  v_threshold := coalesce(
-    p_threshold, (tenancy.settings_document('revenue') ->> 'low_day_threshold')::numeric
+  v_fuel_from := coalesce(
+    p_fuel_from, (tenancy.settings_document('revenue') ->> 'fuel_question_from')::numeric
   );
   SELECT e.amount, e.reason, e.note INTO v_amount, v_reason, v_note
   FROM revenue.check_entry(p_amount, p_reason, p_note) AS e;
+  IF coalesce(p_fuel_given, false)
+     AND p_fuel IS NOT NULL
+     AND (v_amount IS NULL OR (p_fuel AND v_amount < v_fuel_from)) THEN
+    PERFORM tenancy.refuse('fuel_invalid', 'XC422');
+  END IF;
 
   SELECT f.registration INTO v_registration
   FROM setup.fleet_vehicles AS f
@@ -83,13 +92,20 @@ BEGIN
     PERFORM tenancy.refuse('revenue_concurrent_save', 'XC409');
   END IF;
 
+  v_fuel := CASE WHEN coalesce(p_fuel_given, false) THEN p_fuel ELSE v_record.fuel END;
+  IF v_amount IS NULL OR (v_fuel AND v_amount < v_fuel_from) THEN
+    v_fuel := NULL;
+  END IF;
+
   IF v_exists
      AND v_record.amount IS NOT DISTINCT FROM v_amount
      AND v_record.reason IS NOT DISTINCT FROM v_reason
-     AND v_record.note IS NOT DISTINCT FROM v_note THEN
+     AND v_record.note IS NOT DISTINCT FROM v_note
+     AND v_record.fuel IS NOT DISTINCT FROM v_fuel THEN
     RETURN ROW(v_record.id, v_record.version, 'replayed')::api.write_result;
   END IF;
 
+  v_threshold := setup.low_below_on(p_vehicle_id, p_day);
   IF v_amount < v_threshold AND v_reason IS NULL THEN
     PERFORM tenancy.refuse(
       'revenue_low_needs_reason', 'XC422',
@@ -158,6 +174,7 @@ BEGIN
     SET amount = v_amount,
         reason = v_reason,
         note = v_note,
+        fuel = v_fuel,
         updated_at = p_now,
         updated_by = p_actor_id,
         corrected_after_date = corrected_after_date OR p_day < v_today,
@@ -167,11 +184,11 @@ BEGIN
   ELSE
     v_before := 'null'::json;
     INSERT INTO revenue.records (
-      organization_id, vehicle_id, business_date, amount, reason, note,
+      organization_id, vehicle_id, business_date, amount, reason, note, fuel,
       captured_at, captured_by, updated_at, updated_by
     )
     VALUES (
-      p_organization_id, p_vehicle_id, p_day, v_amount, v_reason, v_note,
+      p_organization_id, p_vehicle_id, p_day, v_amount, v_reason, v_note, v_fuel,
       p_now, p_actor_id, p_now, p_actor_id
     )
     ON CONFLICT ON CONSTRAINT uq_records_vehicle_day DO NOTHING
@@ -212,8 +229,8 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION revenue.capture_row(
-  uuid, uuid, text[], numeric, date, date, uuid, date, numeric, text, text, bigint, timestamptz, timestamptz, boolean
+  uuid, uuid, text[], numeric, date, date, uuid, date, numeric, text, text, boolean, boolean, bigint, timestamptz, timestamptz, boolean
 ) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION revenue.capture_row(
-  uuid, uuid, text[], numeric, date, date, uuid, date, numeric, text, text, bigint, timestamptz, timestamptz, boolean
+  uuid, uuid, text[], numeric, date, date, uuid, date, numeric, text, text, boolean, boolean, bigint, timestamptz, timestamptz, boolean
 ) TO xcode_api_executor;

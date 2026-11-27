@@ -141,6 +141,7 @@ it("tells a vehicle that has not joined yet from one that has left the fleet", a
     "Fleet number",
     "PSV company",
     "Weekly target",
+    "Low below",
     "Initial investment",
     "Scheduled, September 2026",
     "Actions",

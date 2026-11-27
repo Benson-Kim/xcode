@@ -2,7 +2,12 @@ import { memo, type ReactElement, type ReactNode } from "react";
 import { FlatList, Pressable, StyleSheet, View } from "react-native";
 
 import { percentText, type Formatter } from "@xcode/shared/format";
-import { STATUS_META, awaitsCapture, isRecorded } from "@xcode/shared/revenue";
+import {
+  STATUS_META,
+  awaitsCapture,
+  fuelTag,
+  isRecorded,
+} from "@xcode/shared/revenue";
 
 import { useFormats } from "../../lib/formats";
 import type {
@@ -13,6 +18,7 @@ import type {
 } from "../../revenue/types";
 import { Text, useTheme } from "../../ui";
 import { Card, Chip, LineSkeleton } from "../parts";
+import { useTargets } from "../targets";
 import {
   STATE_TAG,
   TONE_COLOR,
@@ -59,18 +65,27 @@ function rowValue(
       ),
     };
   if (isRecorded(cell)) {
-    const status =
-      cell.amount !== null
-        ? formats.kes(cell.amount)
-        : (cell.reason ?? STATUS_META.reason.label);
+    if (cell.amount === null) {
+      const status = cell.reason ?? STATUS_META.reason.label;
+      return { status, right: <Chip>{status}</Chip> };
+    }
+    // Under the amount: a low day's reason (v2.34), then Not fueled (v2.37). A Yes answer never shows.
+    const amount = formats.kes(cell.amount);
+    const notes = [cell.reason, fuelTag(cell.fuel)].filter(
+      (note): note is string => Boolean(note),
+    );
     return {
-      status,
-      right:
-        cell.amount !== null ? (
-          <Text weight="bold">{status}</Text>
-        ) : (
-          <Chip>{status}</Chip>
-        ),
+      status: [amount, ...notes].join(", "),
+      right: (
+        <>
+          <Text weight="bold">{amount}</Text>
+          {notes.map((note) => (
+            <Text key={note} style={{ fontSize: 13, color: colors.grey }}>
+              {note}
+            </Text>
+          ))}
+        </>
+      ),
     };
   }
   if (awaitsCapture(cell)) {
@@ -174,8 +189,10 @@ export const WeekRow = memo(function WeekRow({
 }) {
   const { colors } = useTheme();
   const { kes } = useFormats();
+  // With Targets off (v2.38) the row shows the revenue alone.
+  const targets = useTargets();
   const share =
-    vehicle.percent === null
+    !targets || vehicle.percent === null
       ? ""
       : `${percentText(vehicle.percent)} of ${kes(vehicle.totalExpected)}`;
   return (

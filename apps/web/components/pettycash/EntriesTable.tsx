@@ -13,7 +13,6 @@ import { Days } from "./dayGroups";
 import { entryLabel, unitsFormat } from "./labels";
 import { RowActions, type EntryActions } from "./RowActions";
 import { isRejected, isSentBack, isWaiting, statusOf } from "./status";
-import { StatusTag } from "./StatusTag";
 
 const SELECT: Column = { label: "Select", hidden: true, width: 38 };
 
@@ -23,8 +22,6 @@ const columns: Column[] = [
   { label: "Qty", numeric: true },
   { label: "Unit cost", numeric: true },
   { label: "Total amount", numeric: true },
-  { label: "Manager" },
-  { label: "Status" },
   { label: "Actions", numeric: true },
 ];
 
@@ -43,13 +40,29 @@ const counted = (entries: PettyCashEntry[]) =>
     .filter((entry) => !isRejected(entry))
     .reduce((sum, entry) => sum + entry.total, 0);
 
-// The notes under an item: why it was rejected, what it was sent back for, why it was reopened.
+const withReason = (label: string, reason?: string | null) =>
+  reason ? `${label}, ${reason}` : label;
+
+// The status as a line under the item; a waiting entry has none, its Approve button says it.
+export function statusLine(entry: PettyCashEntry): string | null {
+  switch (statusOf(entry)) {
+    case "approved":
+      return "Approved";
+    case "rejected":
+      return withReason("Rejected", entry.rejectReason);
+    case "sentBack":
+      return withReason("Sent back", entry.sentBackNote);
+    default:
+      return null;
+  }
+}
+
+// The notes under an item: its own note, its status, why it was reopened.
 function notesOf(entry: PettyCashEntry) {
   const notes: string[] = [];
   if (entry.note) notes.push(entry.note);
-  if (isRejected(entry) && entry.rejectReason) notes.push(entry.rejectReason);
-  if (isSentBack(entry) && entry.sentBackNote)
-    notes.push(`Sent back, ${entry.sentBackNote}`);
+  const status = statusLine(entry);
+  if (status) notes.push(status);
   if ((isWaiting(entry) || isSentBack(entry)) && entry.reopenReason)
     notes.push(`Reopened, ${entry.reopenReason}`);
   return notes;
@@ -99,14 +112,14 @@ export function EntriesTable({
           <td className="r">
             {entries.length === total && formats.formatNumber(counted(entries))}
           </td>
-          <td colSpan={3} />
+          <td />
         </tr>
       }
     >
       <Days
         entries={entries}
         grouped={days}
-        span={8 + lead}
+        span={6 + lead}
         note={(day) =>
           `${plural(day.entries.length, "entry", "entries")}, ${formats.kes(day.total)}`
         }
@@ -147,12 +160,6 @@ export function EntriesTable({
             >
               {formats.formatNumber(entry.total)}
               {entry.total < 0 && <CellNote>Money back</CellNote>}
-            </Td>
-            <Td label="Manager" className="nw">
-              {entry.holderName}
-            </Td>
-            <Td label="Status">
-              <StatusTag status={statusOf(entry)} />
             </Td>
             <Td numeric>
               <RowActions entry={entry} actions={actions} />

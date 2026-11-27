@@ -2,19 +2,24 @@
 
 import { useRef } from "react";
 
+import { targetsOn } from "@xcode/shared/appearance";
 import { startOfWeek } from "@xcode/shared/dates";
 import { revenueExportPath } from "@xcode/shared/reports";
+import { DEFAULT_FUEL_QUESTION_FROM } from "@xcode/shared/revenue";
 
+import { useAppearance } from "../lib/appearance";
 import { useResource } from "../lib/data";
 import { useFormats } from "../lib/formats";
 import { useSession } from "../lib/session-context";
 import type { MyScope } from "../lib/types";
 import { ExportMenu } from "./reports/ExportMenu";
 import { useReportExport } from "./reports/exportReport";
-import { captureStart, DEFAULT_LOW_DAY_THRESHOLD } from "./revenue/capture";
+import { captureStart } from "./revenue/capture";
 import { CaptureDialog } from "./revenue/CaptureDialog";
+import { SummaryImageDialog } from "./revenue/SummaryImageDialog";
 import { useCaptureFlow } from "./revenue/useCaptureFlow";
 import { useGridRows } from "./revenue/useGridRows";
+import { useSummaryImage } from "./revenue/useSummaryImage";
 import { useWeekGrid } from "./revenue/useWeekGrid";
 import { WeekGrid } from "./revenue/WeekGrid";
 import { WeekToolbar } from "./revenue/WeekToolbar";
@@ -26,11 +31,13 @@ import {
   TableRowsSkeleton,
 } from "./ui";
 
-// The week grid (v2.30): one row a vehicle, one column a day, then Week total and Gap to target. A tap on a cell
-// opens a pop up for that vehicle and day; "Capture revenue" opens the oldest missing day, or today.
+// The week grid (v2.30): one row a vehicle, one column a day, then Week total and Gap to target (while Targets is on,
+// v2.38). A tap on a cell opens a pop up for that vehicle and day; "Capture revenue" opens the oldest missing day, or
+// today.
 export function RevenuePage() {
   const { can } = useSession();
   const formats = useFormats();
+  const showTargets = targetsOn(useAppearance().appearance);
   const canView = can("revenue.view");
   const canCapture = can("revenue.capture");
   const gridRef = useRef<HTMLDivElement>(null);
@@ -42,7 +49,7 @@ export function RevenuePage() {
   // The earliest day this person may still change (the back-dating limit, v2.32), for the pop up's date control.
   const scope = useResource<MyScope>(canView ? "setup/access/me" : null);
   const earliest = scope.data?.earliest ?? null;
-  const threshold = data?.lowDayThreshold ?? DEFAULT_LOW_DAY_THRESHOLD;
+  const fuelQuestionFrom = data?.fuelQuestionFrom ?? DEFAULT_FUEL_QUESTION_FROM;
   const flow = useCaptureFlow({
     data,
     canCapture,
@@ -53,6 +60,7 @@ export function RevenuePage() {
     rows: rows.rows,
   });
   const exporter = useReportExport();
+  const image = useSummaryImage(data, grid.companyId, grid.q);
 
   if (!canView) {
     return (
@@ -96,6 +104,7 @@ export function RevenuePage() {
         data={data}
         companyId={grid.companyId}
         search={grid.search}
+        showTargets={showTargets}
         exportMenu={
           (can("revenue.export") || can("reports.export")) && (
             <ExportMenu
@@ -112,6 +121,16 @@ export function RevenuePage() {
                   { from: data.weekStart, to: data.weekThrough },
                   format,
                 )
+              }
+              extra={
+                can("revenue.export")
+                  ? [
+                      {
+                        label: "Summary image",
+                        onSelect: () => void image.open(),
+                      },
+                    ]
+                  : []
               }
             />
           )
@@ -142,6 +161,7 @@ export function RevenuePage() {
           days={grid.days}
           today={today}
           canCapture={canCapture}
+          showGap={showTargets}
           searching={grid.searching}
           grid={rows}
           gridRef={gridRef}
@@ -154,8 +174,10 @@ export function RevenuePage() {
         flow={flow}
         today={today}
         earliest={earliest}
-        threshold={threshold}
+        fuelQuestionFrom={fuelQuestionFrom}
+        showTargets={showTargets}
       />
+      <SummaryImageDialog image={image} />
     </>
   );
 }

@@ -2,8 +2,10 @@ import { useId, useRef } from "react";
 
 import { shiftDate } from "@xcode/shared/dates";
 import {
+  NOT_FUELED,
   REVENUE_REASONS,
   type RevenueCell,
+  type RevenueFuel,
   type RevenueVehicle,
 } from "@xcode/shared/revenue";
 
@@ -13,14 +15,15 @@ import { Banner, Button, CurrencyInput, useDialogBusy } from "../ui";
 import { ConflictChoice } from "./ConflictChoice";
 import { useCaptureEntry } from "./useCaptureEntry";
 
-// Revenue for one vehicle on one day (v2.30): the date first, as previous, date, next; the day's own target; the
-// amount; and the reason, shown only while the amount is below the threshold. Cancel and Save.
+// Revenue for one vehicle on one day (v2.30): the date first, as previous, date, next; the day's own target while
+// Targets is on (v2.38); the amount; then the reason and fuel tags (v2.37). Cancel and Save.
 export function CaptureForm({
   vehicle,
   cell,
   today,
   earliest,
-  threshold,
+  fuelQuestionFrom,
+  showTargets,
   onShiftDay,
   onCancel,
   onDone,
@@ -31,7 +34,8 @@ export function CaptureForm({
   today: string;
   // The earliest day this person may still change, or null for no limit.
   earliest: string | null;
-  threshold: number;
+  fuelQuestionFrom: number;
+  showTargets: boolean;
   onShiftDay: (days: number) => void;
   onCancel: () => void;
   onDone: (wasNew: boolean) => Promise<void>;
@@ -43,7 +47,7 @@ export function CaptureForm({
   const entry = useCaptureEntry({
     vehicle,
     cell,
-    threshold,
+    fuelQuestionFrom,
     amountRef,
     onDone,
     reload,
@@ -85,12 +89,14 @@ export function CaptureForm({
           </button>
         </div>
       </div>
-      <div className="mctx">
-        <div className="what">
-          <span>Day target</span>
+      {showTargets && (
+        <div className="mctx">
+          <div className="what">
+            <span>Day target</span>
+          </div>
+          <b className="num">{formats.kes(cell.expected)}</b>
         </div>
-        <b className="num">{formats.kes(cell.expected)}</b>
-      </div>
+      )}
       {conflict ? (
         <ConflictChoice
           message={conflict.message}
@@ -111,23 +117,7 @@ export function CaptureForm({
               onChange={(event) => entry.typeAmount(event.target.value)}
             />
           </div>
-          {entry.belowThreshold && (
-            <div className="f">
-              <span className="flab">Reason</span>
-              <div className="pills" role="group" aria-label="Reason">
-                {REVENUE_REASONS.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    aria-pressed={entry.reason === item}
-                    onClick={() => entry.choose(item)}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          <EntryTags entry={entry} />
           {error && <Banner>{error}</Banner>}
           <DialogFooter>
             <Button tone="outline" disabled={saving} onClick={onCancel}>
@@ -140,5 +130,58 @@ export function CaptureForm({
         </>
       )}
     </form>
+  );
+}
+
+// Under the amount (v2.37). Below the vehicle's low figure: the four reasons, one required, then a thin divider and
+// Not fueled. From the low figure: a Tag row with only Not fueled. From the fuel question amount: the amber Fueled?
+// box with Yes and No. A fuel answer is optional and a second tap clears it.
+function EntryTags({ entry }: { entry: ReturnType<typeof useCaptureEntry> }) {
+  const { asksReason, choice, fuel } = entry;
+  const answer = (value: RevenueFuel, label: string) => (
+    <button
+      type="button"
+      aria-pressed={fuel === value}
+      onClick={() => entry.chooseFuel(value)}
+    >
+      {label}
+    </button>
+  );
+  const notFueled = choice === "reasons" || choice === "tag";
+  const label = asksReason ? "Reason" : "Tag";
+  return (
+    <>
+      {(asksReason || notFueled) && (
+        <div className="f">
+          <span className="flab">{label}</span>
+          <div className="pills" role="group" aria-label={label}>
+            {asksReason &&
+              REVENUE_REASONS.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  aria-pressed={entry.reason === item}
+                  onClick={() => entry.choose(item)}
+                >
+                  {item}
+                </button>
+              ))}
+            {asksReason && notFueled && (
+              <span className="tsep" aria-hidden="true" />
+            )}
+            {notFueled && answer("no", NOT_FUELED)}
+          </div>
+        </div>
+      )}
+      {choice === "ask" && (
+        <div className="fuelrow ask">
+          <span className="fq">Fueled?</span>
+          <div className="pills" role="group" aria-label="Fueled">
+            {answer("yes", "Yes")}
+            {answer("no", "No")}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

@@ -78,7 +78,7 @@ BEGIN
     WHEN 'revenue' THEN
       SELECT jsonb_build_object(
                'organization_id', r.organization_id,
-               'low_day_threshold', r.low_day_threshold,
+               'fuel_question_from', r.fuel_question_from,
                'gap_amber_percent', r.gap_amber_percent
              )
       INTO v_document

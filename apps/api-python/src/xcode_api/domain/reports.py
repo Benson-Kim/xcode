@@ -186,6 +186,16 @@ class RevenueExportQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class RevenueImageLog:
+    """The Revenue Summary image the device drew: the week, company filter and search it shows."""
+
+    context: TenantContext
+    week_start: date
+    company_id: UUID | None
+    q: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class ExpenseExportQuery:
     context: TenantContext
     from_date: date | None
@@ -207,3 +217,4 @@ class PettyCashExportQuery:
     statuses: tuple[str, ...] | None
     q: str | None
     format: str | None
+    vehicle_id: UUID | None = None

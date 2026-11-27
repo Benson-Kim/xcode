@@ -216,6 +216,7 @@ class SetupRoutines:
             d.fleet_number,
             d.joined_on,
             _amounts(d.day_targets),
+            d.low_below,
             d.initial_investment,
             command.reason,
             command.context.now,
@@ -281,6 +282,7 @@ class SetupRoutines:
             command.vehicle_id,
             command.starts_on,
             _amounts(command.days),
+            command.low_below,
             command.context.now,
         )
 

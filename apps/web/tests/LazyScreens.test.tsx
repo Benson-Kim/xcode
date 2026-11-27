@@ -82,7 +82,8 @@ it("keeps a page that could not load inside the app, with the menu working, and 
   vi.spyOn(console, "error").mockImplementation(() => {});
   const menu = signIn();
 
-  fireEvent.click(await menu.findByRole("button", { name: "Change log" }));
+  fireEvent.click(await menu.findByRole("button", { name: "Setup" }));
+  fireEvent.click(menu.getByRole("button", { name: "Change log" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(loadProblem);
   expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   expect(
@@ -124,7 +125,8 @@ it("says something went wrong, without blaming the connection, when a page fails
   crash.on = true;
   const menu = signIn();
 
-  fireEvent.click(await menu.findByRole("button", { name: "PSV companies" }));
+  fireEvent.click(await menu.findByRole("button", { name: "Setup" }));
+  fireEvent.click(menu.getByRole("button", { name: "PSV companies" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Something went wrong on this page.",
   );

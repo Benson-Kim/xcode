@@ -28,7 +28,8 @@ import { choose, offered, optionsOf, pick } from "./searchSelect";
 beforeAll(() => import("../components/pettycash/PettyCashPage"));
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const WEEK = "from=2026-10-05&to=2026-10-11";
+// The week of Friday 9 October, Sunday to Saturday.
+const WEEK = "from=2026-10-04&to=2026-10-10";
 
 function renderPage(
   api = serveExpenses(),
@@ -115,7 +116,7 @@ it("shows the period's four figures and its rows, with the totals of everything 
   expect(ledgerReads(api)[0]).toBe(
     `setup/expenses/ledger?${WEEK}&page=1&pageSize=25`,
   );
-  expect(screen.getByText("5 to 11 Oct 2026")).toBeInTheDocument();
+  expect(screen.getByText("4 to 10 Oct 2026")).toBeInTheDocument();
 });
 
 it("asks again for the source, the search and the period that are chosen", async () => {
@@ -145,12 +146,12 @@ it("asks again for the source, the search and the period that are chosen", async
   changeTo(screen.getByLabelText("Search"), "");
   fireEvent.click(screen.getByRole("button", { name: "Previous week" }));
   await waitFor(() =>
-    expect(ledgerReads(api).at(-1)).toContain("from=2026-09-28&to=2026-10-04"),
+    expect(ledgerReads(api).at(-1)).toContain("from=2026-09-27&to=2026-10-03"),
   );
   expect(
     await screen.findByText("No expenses in this period."),
   ).toBeInTheDocument();
-  expect(screen.getByText("28 Sep to 4 Oct 2026")).toBeInTheDocument();
+  expect(screen.getByText("27 Sep to 3 Oct 2026")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: /^Period, / }));
   fireEvent.click(screen.getByRole("menuitemradio", { name: "Last month" }));
@@ -817,7 +818,7 @@ it("exports the ledger as listed, with its source and search, to someone with re
   ).toEqual([
     `setup/expenses/export?${WEEK}&source=pettycash&q=diesel&format=pdf`,
   ]);
-  expect(saved[0]).toBe("Central expenses 5-11 Oct 2026.pdf");
+  expect(saved[0]).toBe("Central expenses 4-10 Oct 2026.pdf");
   click.mockRestore();
 });
 

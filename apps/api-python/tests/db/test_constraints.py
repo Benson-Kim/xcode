@@ -322,6 +322,14 @@ CHECK_CASES = [
     Case("ck_vehicle_target_sets_days", _set(_TARGET_SET, "sunday = 0")),
     Case("ck_vehicle_target_sets_days", _set(_TARGET_SET, "wednesday = -1")),
     Case(
+        "ck_vehicle_target_sets_days",
+        _set(
+            _TARGET_SET,
+            "monday = 0, tuesday = 0, wednesday = 0, thursday = 0, friday = 0, saturday = 0",
+        ),
+    ),
+    Case("ck_vehicle_target_sets_low_below", _set(_TARGET_SET, "low_below = -0.01")),
+    Case(
         "ck_vehicle_away_periods_returned_on",
         "UPDATE setup.vehicle_away_periods SET returned_on = left_on WHERE id = %(away)s",
     ),
@@ -359,9 +367,10 @@ CHECK_CASES = [
     Case("ck_records_entry", _set(_RECORD, "amount = NULL")),
     Case("ck_records_entry", _set(_RECORD, "note = 'Late'")),
     Case("ck_records_entry", _set(_RECORD, "reason = 1, note = 'Late'")),
+    Case("ck_records_fuel", _set(_RECORD, "amount = NULL, reason = 4, fuel = true")),
     Case(
-        "ck_revenue_settings_low_day_threshold",
-        "UPDATE tenancy.organization_revenue_settings SET low_day_threshold = -0.01 "
+        "ck_revenue_settings_fuel_question_from",
+        "UPDATE tenancy.organization_revenue_settings SET fuel_question_from = 0 "
         "WHERE organization_id = %(org)s",
     ),
     Case(
@@ -589,6 +598,11 @@ UNIQUE_CASES = [
         "uq_organizations_slug",
         "UPDATE tenancy.organizations SET slug = (SELECT slug FROM tenancy.organizations "
         "WHERE id = %(org)s) WHERE id = %(b_org)s",
+    ),
+    Case(
+        "uq_system_settings_sort_order",
+        "INSERT INTO tenancy.system_settings (key, label, sort_order, default_enabled) "
+        "VALUES ('budget', 'Budget', 1, true)",
     ),
     Case(
         "uq_memberships_active_user",
@@ -939,6 +953,11 @@ REFERENCE_CASES = [
         "fk_permission_overrides_permission",
         "INSERT INTO tenancy.permission_overrides (organization_id, user_id, permission, granted) "
         "VALUES (%(org)s, %(user)s, 'no.such_key', true)",
+    ),
+    Case(
+        "fk_organization_system_settings_key",
+        "INSERT INTO tenancy.organization_system_settings (organization_id, key, enabled) "
+        "VALUES (%(org)s, 'no.such_setting', true)",
     ),
     Case(
         "fk_expense_categories_bucket",

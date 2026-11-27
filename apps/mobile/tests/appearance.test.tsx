@@ -160,12 +160,12 @@ it("still unlocks with an appearance cached by an older version of the app", asy
   ).toBe(false);
 });
 
-it("names this week from the organization's first day of the week, Monday until it is known", () => {
+it("names this week from the organization's first day of the week, Sunday until it is known", () => {
   const formatterFor = (formats: Partial<Formats> | null) =>
     createFormatter(formats);
-  // Wednesday 30 Sep 2026.
+  // Wednesday 30 Sep 2026. The week runs Sunday to Saturday (v2.41).
   expect(periodLabel(formatterFor(null), "week", "2026-09-30")).toBe(
-    "This week, 28 Sep to 4 Oct 2026",
+    "This week, 27 Sep to 3 Oct 2026",
   );
   expect(
     periodLabel(formatterFor({ firstDayOfWeek: 0 }), "week", "2026-09-30"),
@@ -173,10 +173,10 @@ it("names this week from the organization's first day of the week, Monday until 
   expect(
     periodLabel(formatterFor({ firstDayOfWeek: 6 }), "week", "2026-10-03"),
   ).toBe("This week, 3 to 9 Oct 2026");
-  // Out of range: the API's default, Monday.
+  // Out of range: the API's default, Sunday.
   expect(
     periodLabel(formatterFor({ firstDayOfWeek: 9 }), "week", "2026-09-30"),
-  ).toBe("This week, 28 Sep to 4 Oct 2026");
+  ).toBe("This week, 27 Sep to 3 Oct 2026");
 });
 
 it("writes the period labels in the organization's date pattern", () => {

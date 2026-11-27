@@ -260,12 +260,12 @@ describe("My float", () => {
 describe("My float by week", () => {
   const WEEK_OWN = `setup/pettycash/overview?date=${DAY}&period=week&holderId=u-brian`;
   const WEEK_ENTRIES =
-    "setup/pettycash/entries?from=2026-09-28&to=2026-10-04&holderId=u-brian";
+    "setup/pettycash/entries?from=2026-09-27&to=2026-10-03&holderId=u-brian";
   const weekOverview = (over: Record<string, unknown> = {}) =>
     pettyOverview({
       period: "week",
-      from: "2026-09-28",
-      to: "2026-10-04",
+      from: "2026-09-27",
+      to: "2026-10-03",
       figures: {
         openingBalance: 3000,
         cashReceived: 2000,
@@ -317,7 +317,7 @@ describe("My float by week", () => {
       screen.getByLabelText("Closing cash balance, end of week, KES 3,500"),
     ).toBeTruthy();
     expect(screen.queryByLabelText(/Today/)).toBeNull();
-    expect(screen.getByText("28 Sep to 4 Oct 2026")).toBeTruthy();
+    expect(screen.getByText("27 Sep to 3 Oct 2026")).toBeTruthy();
     expect(api.sent(WEEK_OWN)).toHaveLength(1);
     expect(api.sent(WEEK_ENTRIES)).toHaveLength(1);
 
@@ -335,25 +335,25 @@ describe("My float by week", () => {
           200,
           weekOverview({
             date: "2026-09-22",
-            from: "2026-09-21",
-            to: "2026-09-27",
+            from: "2026-09-20",
+            to: "2026-09-26",
           }),
         ],
       );
       setup.on(
-        "setup/pettycash/entries?from=2026-09-21&to=2026-09-27&holderId=u-brian",
+        "setup/pettycash/entries?from=2026-09-20&to=2026-09-26&holderId=u-brian",
         [200, pettyPage([])],
       );
     });
     await screen.findByLabelText("Opening cash balance, KES 5,000");
     await fireEvent.press(screen.getByRole("button", { name: "Week" }));
-    await screen.findByText("28 Sep to 4 Oct 2026");
+    await screen.findByText("27 Sep to 3 Oct 2026");
     expect(screen.getByRole("button", { name: "Next week" })).toBeDisabled();
 
     await fireEvent.press(
       screen.getByRole("button", { name: "Previous week" }),
     );
-    await screen.findByText("21 to 27 Sep 2026");
+    await screen.findByText("20 to 26 Sep 2026");
     await screen.findByText("Nothing recorded in this week.");
     expect(
       api.sent(
@@ -362,7 +362,7 @@ describe("My float by week", () => {
     ).toHaveLength(1);
     expect(
       api.sent(
-        "setup/pettycash/entries?from=2026-09-21&to=2026-09-27&holderId=u-brian",
+        "setup/pettycash/entries?from=2026-09-20&to=2026-09-26&holderId=u-brian",
       ),
     ).toHaveLength(1);
     expect(
@@ -370,7 +370,7 @@ describe("My float by week", () => {
     ).not.toBeDisabled();
 
     await fireEvent.press(screen.getByRole("button", { name: "Next week" }));
-    await screen.findByText("28 Sep to 4 Oct 2026");
+    await screen.findByText("27 Sep to 3 Oct 2026");
     expect(screen.getByRole("button", { name: "Next week" })).toBeDisabled();
   });
 
@@ -432,7 +432,7 @@ describe("My float by week", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Week" }));
     await screen.findByText("30 Sep 2026");
     expect(screen.getAllByText("29 Sep 2026")).toHaveLength(1);
-    expect(screen.getByText("28 Sep to 4 Oct 2026")).toBeTruthy();
+    expect(screen.getByText("27 Sep to 3 Oct 2026")).toBeTruthy();
   });
 
   it("does not offer Approve day in week view and keeps the period when the date moves", async () => {
@@ -457,13 +457,13 @@ describe("My float by week", () => {
             200,
             weekOverview({
               date: "2026-09-22",
-              from: "2026-09-21",
-              to: "2026-09-27",
+              from: "2026-09-20",
+              to: "2026-09-26",
             }),
           ],
         );
         setup.on(
-          "setup/pettycash/entries?from=2026-09-21&to=2026-09-27&holderId=u-brian",
+          "setup/pettycash/entries?from=2026-09-20&to=2026-09-26&holderId=u-brian",
           [200, pettyPage([])],
         );
         setup.on(WAITING, [200, pettyPage([pettyEntry({ canReview: true })])]);
@@ -1710,6 +1710,7 @@ describe("Adding a missing vehicle from the expense form", () => {
           joinedOn: DAY,
           fleetNumber: "31",
           dayTargets: [3000, 3000, 3000, 3000, 3000, 3000, 3000],
+          lowBelow: 4000,
         },
       ]),
     );
@@ -1756,6 +1757,52 @@ describe("Adding a missing vehicle from the expense form", () => {
     );
   });
 
+  it("lists the day targets from Sunday, copies Sunday's figure with Same every day and sends them Monday first", async () => {
+    const api = await signIn(VEHICLE_ADDER, vehicleSetup);
+    await openForm();
+    await startAdding("KDE 300Z");
+    expect(
+      screen
+        .getAllByLabelText(/^Target for /)
+        .map((field) => field.props.accessibilityLabel),
+    ).toEqual(
+      [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+      ].map((day) => `Target for ${day}`),
+    );
+    await fireEvent.changeText(screen.getByLabelText("Fleet number"), "31");
+    await pick("PSV company", "North Star");
+    await fireEvent.changeText(
+      screen.getByLabelText("Target for Monday"),
+      "3000",
+    );
+    await fireEvent.changeText(
+      screen.getByLabelText("Target for Sunday"),
+      "1500",
+    );
+    await fireEvent.press(
+      screen.getByRole("button", { name: "Same every day" }),
+    );
+    await fireEvent.changeText(
+      screen.getByLabelText("Target for Sunday"),
+      "900",
+    );
+    await fireEvent.press(screen.getByRole("button", { name: "Save vehicle" }));
+    await waitFor(() =>
+      expect(bodies(api, "setup/vehicles", "POST")).toEqual([
+        expect.objectContaining({
+          dayTargets: [1500, 1500, 1500, 1500, 1500, 1500, 900],
+        }),
+      ]),
+    );
+  });
+
   it("says what is missing, sends nothing, and cancels back to the expense", async () => {
     const api = await signIn(VEHICLE_ADDER, vehicleSetup);
     await openForm();
@@ -1779,6 +1826,77 @@ describe("Adding a missing vehicle from the expense form", () => {
       screen.getByRole("button", { name: "Vehicle, not chosen" }),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save expense" })).toBeTruthy();
+  });
+
+  it("with Targets off, asks no day targets and sends seven zeros with the low revenue figure, 4,000 to start", async () => {
+    const targetsOff = {
+      organizationName: "Demo Fleet",
+      settingsVersion: 4,
+      businessDate: DAY,
+      branding: {
+        displayName: "Demo Fleet",
+        logoAlt: "Demo Fleet",
+        primary: "#0B7A75",
+        secondary: "#3B1F5C",
+        accent: "#1E6B3A",
+        logo: null,
+      },
+      formats: {
+        locale: "en-GB",
+        timeZone: "Africa/Nairobi",
+        datePattern: "medium",
+        hour12: false,
+        currency: "KES",
+        useGrouping: true,
+        numberDecimals: 2,
+        firstDayOfWeek: 0,
+      },
+      themeMode: "system",
+      reducedMotion: true,
+      fontScale: 1,
+      targets: false,
+    };
+    const api = await signIn(VEHICLE_ADDER, (routes) => {
+      vehicleSetup(routes);
+      routes.on("setup/appearance", [200, targetsOff]);
+      routes.on("setup/vehicles", [200, { id: "v-new" }]);
+    });
+    await waitFor(() =>
+      expect(
+        require("expo-secure-store").__items.get("xcode.appearance"),
+      ).toContain('"targets":false'),
+    );
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    await openForm();
+    await startAdding("KDE 300Z");
+
+    const low = () => screen.getByLabelText("Low revenue below, KES");
+    expect(screen.queryByLabelText(/^Target for /)).toBeNull();
+    expect(low().props.value).toBe("4000");
+    await fireEvent.changeText(screen.getByLabelText("Fleet number"), "31");
+    await pick("PSV company", "North Star");
+    await fireEvent.changeText(low(), "");
+    await fireEvent.press(screen.getByRole("button", { name: "Save vehicle" }));
+    expect(
+      await screen.findByText("Enter the low revenue figure."),
+    ).toBeTruthy();
+    expect(bodies(api, "setup/vehicles", "POST")).toHaveLength(0);
+
+    await fireEvent.changeText(low(), "2,500");
+    expect(low().props.value).toBe("2500");
+    await fireEvent.press(screen.getByRole("button", { name: "Save vehicle" }));
+    await waitFor(() =>
+      expect(bodies(api, "setup/vehicles", "POST")).toEqual([
+        {
+          registration: "KDE 300Z",
+          companyId: "company-1",
+          joinedOn: DAY,
+          fleetNumber: "31",
+          dayTargets: [0, 0, 0, 0, 0, 0, 0],
+          lowBelow: 2500,
+        },
+      ]),
+    );
   });
 
   it("keeps Cancel off while the new vehicle saves, then chooses it", async () => {

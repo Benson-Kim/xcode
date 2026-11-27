@@ -60,7 +60,7 @@ it("keeps formatter instances independent of each other and of the default", () 
     currency: "GBP",
     timeZone: "UTC",
     hour12: true,
-    firstDayOfWeek: 0,
+    firstDayOfWeek: 1,
   });
   expect(nairobi.kes(1500.5)).toBe("KES 1,500.50");
   expect(london.kes(1500.5)).toBe("GBP 1,500.50");
@@ -70,8 +70,8 @@ it("keeps formatter instances independent of each other and of the default", () 
   expect(london.formatDateTime("2026-09-20T13:05:00Z")).toBe(
     "20 Sep 2026 1:05 pm",
   );
-  expect(nairobi.firstDayOfWeek()).toBe(1);
-  expect(london.firstDayOfWeek()).toBe(0);
+  expect(nairobi.firstDayOfWeek()).toBe(0);
+  expect(london.firstDayOfWeek()).toBe(1);
   expect(london.money(-10)).toBe("GBP 10 loss");
   expect(createFormatter().kes(10)).toBe("KES 10");
 });

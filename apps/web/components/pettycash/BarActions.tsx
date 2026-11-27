@@ -1,6 +1,10 @@
 "use client";
 
-import type { PettyCashEntry, PettyCashFigures } from "@xcode/shared/pettyCash";
+import type {
+  PettyCashEntry,
+  PettyCashFigures,
+  PettyCashWaiting,
+} from "@xcode/shared/pettyCash";
 import { pettyCashExportPath } from "@xcode/shared/reports";
 
 import { useFormats } from "../../lib/formats";
@@ -11,12 +15,14 @@ import { Button } from "../ui";
 type Range = { from: string; to: string };
 
 // The approve button at the end of the bar (the design's pcApproveBtn): the ticked entries when there are any,
-// otherwise everything waiting in what is shown, "day" for all managers, "these" for one, "all" over several days.
+// otherwise everything waiting in what is shown, "day" for all managers, "these" for one, "all" over several days,
+// "all KDU 142D" for one vehicle. The status filter and the search never narrow it.
 export function ApproveButton({
   ticked,
   canApproveDay,
   range,
   holderId,
+  vehicle,
   figures,
   busy,
   onApprove,
@@ -25,12 +31,16 @@ export function ApproveButton({
   canApproveDay: boolean;
   range: Range;
   holderId: string;
-  figures: PettyCashFigures | undefined;
+  vehicle?: { id: string; registration: string };
+  figures: PettyCashFigures | PettyCashWaiting | undefined;
   busy: boolean;
   onApprove: (path: string, body: unknown, nothing: string) => void;
 }) {
   const formats = useFormats();
-  const holder = holderId ? { holderId } : {};
+  const narrowed = {
+    ...(holderId ? { holderId } : {}),
+    ...(vehicle ? { vehicleId: vehicle.id } : {}),
+  };
   if (ticked.length)
     return (
       <Button
@@ -63,25 +73,26 @@ export function ApproveButton({
         onApprove(
           "setup/pettycash/approve-day",
           oneDay
-            ? { date: range.from, ...holder }
-            : { date: range.from, to: range.to, ...holder },
+            ? { date: range.from, ...narrowed }
+            : { date: range.from, to: range.to, ...narrowed },
           oneDay
             ? "Nothing to approve on this day."
             : "Nothing to approve in this period.",
         )
       }
     >
-      {`Approve ${oneDay ? (holderId ? "these" : "day") : "all"}${none ? "" : `, ${formats.kes(figures.waiting)}`}`}
+      {`Approve ${vehicle ? `all ${vehicle.registration}`.trimEnd() : oneDay ? (holderId ? "these" : "day") : "all"}${none ? "" : `, ${formats.kes(figures.waiting)}`}`}
     </Button>
   );
 }
 
-// Export of the tab shown, for the same period, manager, status and search.
+// Export of the tab shown, for the same period, manager, vehicle, status and search.
 export function PettyCashExport({
   exporter,
   tab,
   range,
   holderId,
+  vehicleId,
   status,
   query,
 }: {
@@ -89,6 +100,7 @@ export function PettyCashExport({
   tab: "expenses" | "cash";
   range: Range;
   holderId: string;
+  vehicleId: string;
   status: string;
   query: string;
 }) {
@@ -101,6 +113,7 @@ export function PettyCashExport({
             from: range.from,
             to: range.to,
             holderId: holderId || undefined,
+            vehicleId: (tab === "expenses" && vehicleId) || undefined,
             view: tab,
             status: tab === "expenses" && status !== "all" ? status : undefined,
             q: query || undefined,

@@ -267,6 +267,11 @@ async def keep_a_float(world: PettyCashWorld) -> None:
     await world.record(pc.remove(decision(clerk, 6, 2)))
     await world.record(pc.remove(decision(stranger, 6, 2)))
     await world.record(pc.remove(decision(reviewer, 1, 1, "Given twice")))
+    await create(clerk, 8, expense(TODAY, 30, vehicle=kdb))
+    await create(clerk, 9, expense(TODAY, 20))
+    for vehicle in (UNKNOWN, kdb):
+        day = PettyCashDayApproval(world.later(reviewer), TODAY, None, None, vehicle)
+        await world.record(pc.approve_day(day))
 
     for who in (owner, clerk, reviewer):
         query = PettyCashOverviewQuery(world.later(who), None, None, None, None, None)
@@ -280,6 +285,15 @@ async def keep_a_float(world: PettyCashWorld) -> None:
     await world.record(
         pc.overview(PettyCashOverviewQuery(world.later(owner), None, "year", None, None, None))
     )
+    for vehicle in (kda, UNKNOWN):
+        query = PettyCashOverviewQuery(
+            world.later(reviewer), TODAY, "week", None, None, None, vehicle
+        )
+        await world.record(pc.overview(query))
+    by_vehicle = PettyCashEntryQuery(
+        world.later(owner), None, None, None, None, None, None, 1, 100, kdb
+    )
+    await world.record(pc.entries(by_vehicle))
     for who, kinds, statuses, text in (
         (owner, None, None, None),
         (reviewer, ("expense", "cash"), ("approved",), None),

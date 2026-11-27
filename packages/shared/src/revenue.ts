@@ -111,6 +111,11 @@ export interface RevenueCell {
   canEdit: boolean;
   editedAfterCapture: boolean;
   version?: number | null;
+  // v2.37: "no" is the Not fueled tag, "yes" the Fueled answer (never shown); null when not said. Older servers
+  // leave it out.
+  fuel?: RevenueFuel | null;
+  // v2.34: the vehicle's low revenue figure in force that day; below it a day's revenue needs a reason.
+  lowBelow?: number;
 }
 
 export interface RevenueVehicle {
@@ -131,6 +136,7 @@ export interface RevenueVehicle {
   gap?: number | null;
   gapBand?: GapBand | null;
   belowThresholdDays?: number;
+  notFueledDays?: number;
 }
 
 // The gap as the design writes it: a signed figure with no words, "+3,050", "−16,100", "0".
@@ -199,6 +205,9 @@ export interface RevenueWeek {
   gapBand?: GapBand | null;
   belowThresholdDays?: number;
   missingDays?: number;
+  // v2.36: the amount from which the Fueled? question is asked, and the days tagged Not fueled.
+  fuelQuestionFrom?: number;
+  notFueledDays?: number;
 }
 
 export const REVENUE_WEEK_PAGE_SIZE = 100;
@@ -283,6 +292,8 @@ export interface SaveRevenue {
   reason: RevenueReason | null;
   note: string | null;
   version?: number | null;
+  // Left out: the saved answer stays. null clears it.
+  fuel?: RevenueFuel | null;
 }
 
 // Capture revenue for one day (GET setup/revenue/day?date&companyId): every vehicle active that day, in registration
@@ -300,6 +311,7 @@ export interface RevenueDay {
   businessDate: string;
   vehicles: RevenueDayVehicle[];
   truncated: boolean;
+  fuelQuestionFrom?: number;
 }
 
 // PUT setup/revenue/day/{date}: saved together or not at all. A refused row's error names the vehicle; a 409 also
@@ -335,3 +347,41 @@ const REVENUE_PERIOD_LABELS = new Map<string, string>(
 export function revenuePeriodLabel(period: RevenuePeriod): string {
   return REVENUE_PERIOD_LABELS.get(period) ?? period;
 }
+
+export type RevenueFuel = "yes" | "no";
+
+// Defaults for a server that sends neither figure: the migration's low figure and the fleet's fuel question amount.
+export const DEFAULT_LOW_BELOW = 4000;
+export const DEFAULT_FUEL_QUESTION_FROM = 10000;
+
+// What the revenue pop up and Capture revenue offer under the amount (v2.37): nothing without an amount; below the
+// low figure the four reasons (one required) then the optional Not fueled tag; from the low figure a Tag row with
+// only Not fueled; from the fuel question amount the Fueled? question with Yes and No.
+export type FuelChoice = "none" | "reasons" | "tag" | "ask";
+
+export function fuelChoice(
+  amount: number | null,
+  lowBelow: number = DEFAULT_LOW_BELOW,
+  fuelQuestionFrom: number = DEFAULT_FUEL_QUESTION_FROM,
+): FuelChoice {
+  if (amount === null || !(amount > 0)) return "none";
+  if (amount >= fuelQuestionFrom) return "ask";
+  return amount < lowBelow ? "reasons" : "tag";
+}
+
+// The answer that survives an amount change: none without an amount, and Yes only where the question is asked.
+export function keptFuel(
+  fuel: RevenueFuel | null | undefined,
+  amount: number | null,
+  fuelQuestionFrom: number = DEFAULT_FUEL_QUESTION_FROM,
+): RevenueFuel | null {
+  const choice = fuelChoice(amount, 0, fuelQuestionFrom);
+  if (!fuel || choice === "none") return null;
+  return fuel === "yes" && choice !== "ask" ? null : fuel;
+}
+
+export const NOT_FUELED = "Not fueled";
+
+// Only No is ever shown on screen.
+export const fuelTag = (fuel: RevenueFuel | null | undefined): string | null =>
+  fuel === "no" ? NOT_FUELED : null;

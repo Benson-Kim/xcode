@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { targetsOn } from "@xcode/shared/appearance";
 import type { TrustedDevice } from "@xcode/shared/auth";
 import { weekdayIndex, weekdayName } from "@xcode/shared/dates";
 import {
@@ -70,6 +71,7 @@ import {
 } from "./pettycash/dashboardCards";
 import { ChangePinDialog, TrustedDevicesDialog } from "./ProfileDialogs";
 import { shiftDate } from "./revenueFormat";
+import { SundayWeekNotice } from "./SundayWeekNotice";
 import type { HeroSlots } from "./ui";
 import {
   Banner,
@@ -134,10 +136,8 @@ const PeopleAccessView = lazyScreen(() =>
 const RolesPage = lazyScreen(() =>
   import("./people/RolesPage").then((module) => module.RolesPage),
 );
-const OrganizationSettingsView = lazyScreen(() =>
-  import("./OrganizationSettingsView").then(
-    (module) => module.OrganizationSettingsView,
-  ),
+const SettingsScreen = lazyScreen(() =>
+  import("./SystemSettings").then((module) => module.SettingsScreen),
 );
 const CentralExpensesPage = lazyScreen(() =>
   import("./expenses/CentralExpensesPage").then(
@@ -422,6 +422,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
             <div className={cn("app", mini && "mini", menuOpen && "drawer")}>
               <MainMenu
                 view={view}
+                visit={visit}
                 can={can}
                 onNavigate={navigate}
                 onMini={() => setMini((current) => !current)}
@@ -442,6 +443,7 @@ export function AppShell({ onSignOut }: { onSignOut: () => void }) {
                 profile={profile}
                 profileMenu={profileMenu}
               >
+                <SundayWeekNotice appearance={appearance.data ?? null} />
                 {/* Keyed on the visit, so a screen still loading shows placeholders, never the page it replaced, and a
                   page that failed to load is left behind on the next one. */}
                 <PageBoundary key={visit}>
@@ -551,24 +553,45 @@ function Frame({
   );
 }
 
+// A group kept closed outside its own pages (Setup) opens on one of them and closes on any other; the rest keep
+// whatever was last tapped.
+function groupsClosedOn(view: ShellView, closed: ReadonlySet<string>) {
+  const next = new Set(closed);
+  for (const section of NAV_SECTIONS) {
+    if (section.kind !== "group" || !section.closedOutside) continue;
+    if ((section.items as readonly string[]).includes(view))
+      next.delete(section.id);
+    else next.add(section.id);
+  }
+  return next;
+}
+
 // The side menu: each section in order, a group collapsible like Setup, and only the entries this person may open.
 // On a desk screen it collapses to icons; on a phone it is a drawer.
 function MainMenu({
   view,
+  visit,
   can,
   brand,
   onNavigate,
   onMini,
 }: {
   view: ShellView;
+  visit: number;
   can: PermissionCheck;
   brand: ReactNode;
   onNavigate: (view: ShellView) => void;
   onMini: () => void;
 }) {
-  const [closedGroups, setClosedGroups] = useState<ReadonlySet<string>>(
-    new Set(),
+  const [closedGroups, setClosedGroups] = useState<ReadonlySet<string>>(() =>
+    groupsClosedOn(view, new Set()),
   );
+  // Each page opened sets Setup afresh; a tap on a group heading still opens or closes it in between.
+  const [shownVisit, setShownVisit] = useState(visit);
+  if (shownVisit !== visit) {
+    setShownVisit(visit);
+    setClosedGroups((current) => groupsClosedOn(view, current));
+  }
   const allowed = (item: NavItem) => canSee(item, can);
   const navButton = (item: NavItem, sub: boolean) => (
     <button
@@ -691,7 +714,7 @@ function Page({
   if (view === "people") return <PeopleAccessView />;
   if (view === "roles") return <RolesPage />;
   if (view === "history") return <HistoryPage />;
-  if (view === "settings") return <OrganizationSettingsView />;
+  if (view === "settings") return <SettingsScreen />;
   return <PreferencesView />;
 }
 
@@ -721,7 +744,7 @@ type PettyFigures = { data?: PettyCashDashboard; error: string };
 // What the figures decide: the value and its note, and whether the card's action still applies.
 type Shown = Pick<DashboardCard, "value" | "bad" | "bar" | "note" | "action">;
 
-// "Today, 30 Sep 2026", "This week, 28 Sep to 4 Oct 2026", "This month, 1 to 30 Sep 2026", from the business date.
+// "Today, 30 Sep 2026", "This week, 27 Sep to 3 Oct 2026", "This month, 1 to 30 Sep 2026", from the business date.
 function periodLabel(
   formats: Formatter,
   period: Period,
@@ -798,6 +821,7 @@ function dashboardCards(
   month: Figures,
   petty: PettyFigures,
   canOpenPetty: boolean,
+  targets: boolean,
 ) {
   const label = periodLabel(formats, period, selected.data);
   const floatCard = pettyCashCard(
@@ -864,6 +888,11 @@ function dashboardCards(
           period !== "month" && capturedToday !== null && vehiclesToday
             ? `. ${capturedToday} of ${vehiclesToday} vehicles have a record so far.`
             : "";
+        if (!targets)
+          return {
+            value: revenue ? formats.kes(revenue) : undefined,
+            note: soFar ? soFar.slice(2) : undefined,
+          };
         if (percent === null)
           return {
             value: revenue ? formats.kes(revenue) : undefined,
@@ -985,6 +1014,9 @@ function Dashboard({
       ? "setup/pettycash/dashboard"
       : null,
   );
+  const { appearance } = useAppearance();
+  // With Targets switched off the dashboard shows revenue alone: no target, share or bar.
+  const targets = targetsOn(appearance);
   const cards = dashboardCards(
     formats,
     can,
@@ -993,8 +1025,8 @@ function Dashboard({
     byMonth,
     pettyCash,
     canOpenPettyCash(session?.permissions ?? []),
+    targets,
   );
-  const { appearance } = useAppearance();
   const today = appearance?.businessDate;
   return (
     <>
@@ -1009,6 +1041,7 @@ function Dashboard({
       <DashboardBand
         period={period}
         onPeriod={setChosen}
+        targets={targets}
         figures={
           can("dash.revenue") ? (period === "month" ? byMonth : byPeriod) : {}
         }
@@ -1055,10 +1088,12 @@ function MessageCard({ title, sub }: { title: string; sub: string }) {
 function DashboardBand({
   period,
   onPeriod,
+  targets,
   figures,
 }: {
   period: Period;
   onPeriod: (period: Period) => void;
+  targets: boolean;
   figures: { data?: RevenueDashboard };
 }) {
   const formats = useFormats();
@@ -1082,7 +1117,7 @@ function DashboardBand({
           />
           <BandStats
             items={[
-              ...(data.expected !== null
+              ...(targets && data.expected !== null
                 ? [
                     {
                       label: "Target",
@@ -1090,7 +1125,7 @@ function DashboardBand({
                     },
                   ]
                 : []),
-              ...(data.percent !== null
+              ...(targets && data.percent !== null
                 ? [
                     {
                       label: "Target reached",

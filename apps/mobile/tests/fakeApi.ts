@@ -88,6 +88,7 @@ export const catalog = [
   },
 ];
 
+// The low figure sits under the amounts the tests capture, so none of them asks a low revenue reason.
 export const revenueWeek = {
   weekStart: "2026-09-28",
   weekThrough: "2026-10-04",
@@ -108,6 +109,7 @@ export const revenueWeek = {
           date: "2026-09-28",
           status: "missing",
           expected: 1000,
+          lowBelow: 500,
           amount: null,
           reason: null,
           note: null,
@@ -118,6 +120,7 @@ export const revenueWeek = {
           date: "2026-09-29",
           status: "missing",
           expected: 1000,
+          lowBelow: 500,
           amount: null,
           reason: null,
           note: null,
@@ -128,6 +131,7 @@ export const revenueWeek = {
           date: "2026-09-30",
           status: "future",
           expected: 1000,
+          lowBelow: 500,
           amount: null,
           reason: null,
           note: null,
@@ -138,6 +142,7 @@ export const revenueWeek = {
           date: "2026-10-01",
           status: "future",
           expected: 1000,
+          lowBelow: 500,
           amount: null,
           reason: null,
           note: null,
@@ -148,6 +153,7 @@ export const revenueWeek = {
           date: "2026-10-02",
           status: "future",
           expected: 1000,
+          lowBelow: 500,
           amount: null,
           reason: null,
           note: null,
@@ -158,6 +164,7 @@ export const revenueWeek = {
           date: "2026-10-03",
           status: "future",
           expected: 1000,
+          lowBelow: 500,
           amount: null,
           reason: null,
           note: null,
@@ -168,6 +175,7 @@ export const revenueWeek = {
           date: "2026-10-04",
           status: "future",
           expected: 1000,
+          lowBelow: 500,
           amount: null,
           reason: null,
           note: null,

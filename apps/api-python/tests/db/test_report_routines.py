@@ -24,7 +24,7 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from ..support.scenario import T0, Conn
+from ..support.scenario import T0, Conn, call
 from ..support.setup_rows import (
     Version,
     add_category,
@@ -39,6 +39,7 @@ from ..support.setup_rows import (
     refuses,
 )
 from ..support.tenancy import (
+    REQUEST,
     Member,
     add_company,
     add_vehicle,
@@ -46,6 +47,7 @@ from ..support.tenancy import (
     provision_member,
     set_override,
     set_scope,
+    set_system_setting,
 )
 
 TODAY = date(2026, 10, 9)
@@ -341,6 +343,20 @@ def test_the_catalogue_lists_what_the_actor_may_open(app_conn: Conn, fleet: Flee
     assert clerk["petty_cash"] == []
     assert clerk["holders"] == []
     assert clerk["can_export"] is False
+
+
+def test_with_targets_off_the_catalogue_drops_revenue_against_target(
+    app_conn: Conn, owner_conn: Conn, fleet: Fleet
+) -> None:
+    set_system_setting(owner_conn, fleet.org, "targets", on=False)
+    owner = read(app_conn, "report_catalog_get", fleet.owner)
+    assert owner["fleet"] == ["net", "moneyOut", "gaps", "savings", "investment"]
+    assert read(app_conn, "report_catalog_get", fleet.clerk)["fleet"] == [
+        "net",
+        "moneyOut",
+        "gaps",
+        "savings",
+    ]
 
 
 def test_a_holder_with_the_reports_right_sees_their_own_float_only(
@@ -1136,6 +1152,26 @@ def test_a_scoped_viewers_export_holds_no_hidden_vehicle(
     assert south["filters"] == "All companies"
 
 
+def test_the_revenue_export_names_a_day_not_fueled_and_drops_target_and_gap_while_off(
+    app_conn: Conn, owner_conn: Conn, fleet: Fleet
+) -> None:
+    owner_conn.execute(
+        "UPDATE revenue.records SET fuel = false WHERE vehicle_id = %s AND business_date = %s",
+        (fleet.kdc, oct(5)),
+    )
+    on = read(app_conn, "revenue_export_get", fleet.owner, oct(5), None, None, now=at(20))
+    assert row_of(on, "KDC 200B")[3] == "2,000, Not fueled"
+    assert figure(on, "Not fueled") == Decimal(1)
+    assert keys(on)[-2:] == ["target", "gap"]
+
+    set_system_setting(owner_conn, fleet.org, "targets", on=False)
+    off = read(app_conn, "revenue_export_get", fleet.owner, oct(5), None, None, now=at(21))
+    assert keys(off)[-2:] == ["2026-10-10", "total"]
+    assert [len(r) for r in off["rows"]] == [len(keys(off))] * 3
+    assert row_of(off, "KDC 200B")[:4] == row_of(on, "KDC 200B")[:4]
+    assert [f["label"] for f in off["figures"]] == ["Low days", "Not fueled", "Missing days"]
+
+
 def test_the_screen_exports_list_what_their_screens_list(
     app_conn: Conn, owner_conn: Conn, fleet: Fleet
 ) -> None:
@@ -1144,22 +1180,23 @@ def test_the_screen_exports_list_what_their_screens_list(
     )
     revenue = read(app_conn, "revenue_export_get", fleet.owner, oct(5), None, None, now=at(20))
     assert (revenue["group"], revenue["report"], revenue["title"]) == ("revenue", "week", "Revenue")
-    assert (revenue["from_date"], revenue["to_date"]) == ("2026-10-05", "2026-10-09")
+    # Monday 5 October is in the week of Sunday 4 October.
+    assert (revenue["from_date"], revenue["to_date"]) == ("2026-10-04", "2026-10-09")
     assert keys(revenue) == [
         "vehicle",
         "company",
+        "2026-10-04",
         "2026-10-05",
         "2026-10-06",
         "2026-10-07",
         "2026-10-08",
         "2026-10-09",
         "2026-10-10",
-        "2026-10-11",
         "total",
         "target",
         "gap",
     ]
-    assert [c["label"] for c in revenue["columns"]][2:4] == ["Mon 5", "Tue 6"]
+    assert [c["label"] for c in revenue["columns"]][2:4] == ["Sun 4", "Mon 5"]
     assert [c["label"] for c in revenue["columns"]][-2] == "Target to date"
     expected = []
     for vehicle in week["vehicles"]:
@@ -1180,23 +1217,28 @@ def test_the_screen_exports_list_what_their_screens_list(
     assert revenue["rows"] == expected
     assert len(revenue["rows"]) == 3
     kdc = row_of(revenue, "KDC 200B")
-    assert nums(kdc[2:6]) == [Decimal(2000), Decimal(2000), Decimal(2000), "Missing"]
-    assert num(kdc[9]) == Decimal(6000)
+    assert nums(kdc[2:7]) == [Decimal(2000)] * 4 + ["Missing"]
+    assert num(kdc[9]) == Decimal(8000)
     assert num(revenue["headline"]["value"]) == num(week["total_amount"])
-    first_label, second_label = (f["label"] for f in revenue["figures"][:2])
-    assert first_label == "Gap to target so far"
-    assert second_label.startswith("Below ")
+    assert [f["label"] for f in revenue["figures"]] == [
+        "Gap to target so far",
+        "Low days",
+        "Not fueled",
+        "Missing days",
+    ]
+    assert figure(revenue, "Low days") == num(week["below_threshold_days"])
+    assert figure(revenue, "Not fueled") == num(week["not_fueled_days"])
     assert figure(revenue, "Missing days") == num(week["missing_days"])
-    assert revenue["file_name"] == "Revenue 5 Oct 2026 to 9 Oct 2026.xlsx"
+    assert revenue["file_name"] == "Revenue 4 Oct 2026 to 9 Oct 2026.xlsx"
     [logged] = change_rows(owner_conn, fleet.org, "reports")
     assert json.loads(logged["after"]) == {
         "screen": "revenue",
-        "weekStart": "2026-10-05",
+        "weekStart": "2026-10-04",
         "companyId": None,
         "rows": 3,
         "format": "xlsx",
     }
-    assert logged["reason"] == "Exported Revenue for 5 Oct 2026 to 9 Oct 2026 to Excel"
+    assert logged["reason"] == "Exported Revenue for 4 Oct 2026 to 9 Oct 2026 to Excel"
     north = read(
         app_conn, "revenue_export_get", fleet.owner, oct(5), fleet.north, "pdf", now=at(21)
     )
@@ -1356,6 +1398,7 @@ def test_the_screen_exports_list_what_their_screens_list(
         "from": "2026-10-01",
         "to": "2026-10-09",
         "holderId": None,
+        "vehicleId": None,
         "view": "expenses",
         "status": None,
         "q": None,
@@ -1366,6 +1409,29 @@ def test_the_screen_exports_list_what_their_screens_list(
     assert rows[3]["reason"] == (
         'Exported Petty cash, expenses for 1 Oct 2026 to 9 Oct 2026, searched for "diesel" to PDF'
     )
+    for vehicle, count, filters in (
+        (fleet.kda, 2, "All floats, KDA 482M"),
+        (fleet.kdb, 0, "All floats, KDB 111A"),
+    ):
+        narrowed = call(
+            app_conn,
+            "pettycash_export_get",
+            fleet.owner.id,
+            fleet.owner.org,
+            REQUEST,
+            FIRST,
+            TODAY,
+            None,
+            "expenses",
+            None,
+            None,
+            "xlsx",
+            at(30),
+            vehicle,
+        )
+        assert (len(narrowed["rows"]), narrowed["filters"]) == (count, filters)
+    logged = json.loads(change_rows(owner_conn, fleet.org, "reports")[-1]["after"])
+    assert (logged["vehicleId"], logged["rows"]) == (str(fleet.kdb), 0)
 
     ledger = read(app_conn, "expenses_ledger_get", fleet.admin, FIRST, TODAY, None, None, 1, 100)
     expenses = read(

@@ -65,12 +65,10 @@ const requested = (fetchMock: ReturnType<typeof serve>) =>
 it("shows Vehicles in the menu for invest.view", async () => {
   serve(["invest.view"]);
   render(<AppShell onSignOut={() => {}} />);
-  fireEvent.click(
-    await within(screen.getByRole("navigation", { name: "Main" })).findByRole(
-      "button",
-      { name: "Vehicles" },
-    ),
-  );
+  const menu = within(screen.getByRole("navigation", { name: "Main" }));
+  // Setup is collapsed outside its own pages (v2.46).
+  fireEvent.click(await menu.findByRole("button", { name: "Setup" }));
+  fireEvent.click(menu.getByRole("button", { name: "Vehicles" }));
   expect(
     await screen.findByRole(
       "button",

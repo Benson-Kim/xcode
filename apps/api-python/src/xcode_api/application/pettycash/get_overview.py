@@ -21,6 +21,7 @@ class GetPettyCashOverviewQuery:
     holder_id: UUID | None
     from_date: date | None
     to_date: date | None
+    vehicle_id: UUID | None = None
 
 
 class GetPettyCashOverview:
@@ -37,5 +38,6 @@ class GetPettyCashOverview:
                 query.holder_id,
                 query.from_date,
                 query.to_date,
+                query.vehicle_id,
             )
         )

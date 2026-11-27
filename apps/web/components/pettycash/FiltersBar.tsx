@@ -2,7 +2,10 @@
 
 import type { ReactNode } from "react";
 
-import type { PettyCashHolder } from "@xcode/shared/pettyCash";
+import type {
+  PettyCashHolder,
+  PettyCashVehicleOption,
+} from "@xcode/shared/pettyCash";
 
 import { SelectInput, TextInput } from "../ui";
 import {
@@ -21,12 +24,20 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   })),
 ];
 
-// The views first, then the manager, the status and the search, with the actions at the end.
+export const vehicleLabel = (vehicle: PettyCashVehicleOption) =>
+  vehicle.fleetNumber
+    ? `${vehicle.registration} · ${vehicle.fleetNumber}`
+    : vehicle.registration;
+
+// The views first, then the manager, the vehicle, the status and the search, with the actions at the end.
 export function FiltersBar({
   views,
   holders,
   holderId,
   onHolderChange,
+  vehicles,
+  vehicleId,
+  onVehicleChange,
   status,
   onStatusChange,
   search,
@@ -38,6 +49,10 @@ export function FiltersBar({
   holders?: PettyCashHolder[];
   holderId: string;
   onHolderChange: (holderId: string) => void;
+  // Left out where entries carry no vehicle, as on cash received.
+  vehicles?: PettyCashVehicleOption[];
+  vehicleId?: string;
+  onVehicleChange?: (vehicleId: string) => void;
   // Left out where the list has no status, as on cash received.
   status?: StatusFilter;
   onStatusChange?: (status: StatusFilter) => void;
@@ -62,9 +77,23 @@ export function FiltersBar({
           ))}
         </SelectInput>
       )}
+      {vehicles && onVehicleChange && (
+        <SelectInput
+          aria-label="Vehicle"
+          value={vehicleId ?? ""}
+          onChange={(event) => onVehicleChange(event.target.value)}
+        >
+          <option value="">All vehicles</option>
+          {vehicles.map((vehicle) => (
+            <option key={vehicle.id} value={vehicle.id}>
+              {vehicleLabel(vehicle)}
+            </option>
+          ))}
+        </SelectInput>
+      )}
       {status && onStatusChange && (
         <SelectInput
-          aria-label="Show"
+          aria-label="Status"
           value={status}
           onChange={(event) =>
             onStatusChange(event.target.value as StatusFilter)

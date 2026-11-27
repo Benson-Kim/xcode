@@ -121,6 +121,7 @@ from xcode_api.domain.pettycash import (
     PettyCashSaved,
     PettyCashUpdate,
     PettyCashVehicleOption,
+    PettyCashWaiting,
     SaveOutcome,
 )
 from xcode_api.domain.policies import CODE_TRIES, PIN_TRIES, TRUSTED_DEVICE_IDLE_DAYS
@@ -137,6 +138,7 @@ from xcode_api.domain.reports import (
     ReportsAccess,
     ReportTable,
     RevenueExportQuery,
+    RevenueImageLog,
 )
 from xcode_api.domain.revenue import (
     CaptureOutcome,
@@ -157,6 +159,7 @@ from xcode_api.domain.revenue import (
     RevenueDaySaved,
     RevenueDayTotal,
     RevenueDayVehicle,
+    RevenueFuel,
     RevenueGap,
     RevenueVehicleWeek,
     RevenueWeek,
@@ -281,6 +284,9 @@ from xcode_api.domain.tenancy import (
     SecurityPolicy,
     SettingsSave,
     SignInNoticeKind,
+    SystemSetting,
+    SystemSettings,
+    SystemSettingSave,
     TenantContext,
     ThemeMode,
     UserPreferences,
@@ -1982,7 +1988,7 @@ _LOCALIZATION_DEFAULTS: dict[str, Any] = {
     "time_zone": "Africa/Nairobi",
     "date_pattern": "medium",
     "hour12": False,
-    "first_day_of_week": 1,
+    "first_day_of_week": 0,
     "week_numbering": "iso8601",
     "currency": "KES",
     "use_grouping": True,
@@ -2020,7 +2026,7 @@ _POLICY_SECTION_DEFAULTS: dict[str, Any] = {
     "allow_pin_sign_in": True,
 }
 _REVENUE_SECTION_DEFAULTS: dict[str, Any] = {
-    "low_day_threshold": Decimal(4000),
+    "fuel_question_from": Decimal(10000),
     "gap_amber_percent": Decimal(10),
 }
 _SECTION_DEFAULTS = {
@@ -2029,6 +2035,9 @@ _SECTION_DEFAULTS = {
     "securityPolicy": _POLICY_SECTION_DEFAULTS,
     "revenue": _REVENUE_SECTION_DEFAULTS,
 }
+_SYSTEM_SETTINGS: tuple[dict[str, Any], ...] = (
+    {"key": "targets", "label": "Targets", "default": True},
+)
 _SETTING_WORDS = {
     "name": "the organization name",
     "hour12": "the 12-hour clock",
@@ -2052,7 +2061,7 @@ _SETTING_WORDS = {
     "lockoutMinutes": "the pause in minutes",
     "allowPinSignIn": "PIN sign-in",
     "logoAlt": "the logo text",
-    "lowDayThreshold": "the low-day threshold",
+    "fuelQuestionFrom": "the fuel question amount",
     "gapAmberPercent": "the amber band",
 }
 _WEEKDAYS = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
@@ -2115,9 +2124,9 @@ def _revenue_settings(values: dict[str, Any]) -> dict[str, Any]:
     if any(isinstance(v, bool) or not isinstance(v, numbers) for v in values.values()):
         raise RuleViolation(code="settings_wrong_type")
     read = {key: Decimal(str(value)) for key, value in values.items()}
-    threshold, amber = read["low_day_threshold"], read["gap_amber_percent"]
+    fuel_from, amber = read["fuel_question_from"], read["gap_amber_percent"]
     if (
-        not Decimal(0) <= threshold <= Decimal("999999999999.99")
+        not Decimal(0) < fuel_from <= Decimal("999999999999.99")
         or not Decimal(0) <= amber <= Decimal(100)
         or any(v != round(v, 2) for v in read.values())
     ):
@@ -2340,6 +2349,7 @@ class FakeTenancyRepository:
         self.preference_rows: dict[UUID, UserPreferences] = {}
         self.log: list[HistoryEntry] = []
         self.invitations: dict[UUID, InvitationHashes] = {}
+        self.system_setting_choices: dict[str, bool] = {}
 
     # --- arranging state --------------------------------------------------------------------
 
@@ -3110,6 +3120,49 @@ class FakeTenancyRepository:
             lockout_threshold=PIN_TRIES,
             lockout_minutes=effective.security_policy.lockout_minutes,
             idle_unlock_seconds=effective.security_policy.idle_unlock_seconds,
+            sunday_week_since=None,
+            targets=self._setting_enabled("targets"),
+        )
+
+    def _setting_enabled(self, key: str) -> bool:
+        setting = next((s for s in _SYSTEM_SETTINGS if s["key"] == key), None)
+        if setting is None:
+            raise KeyError(key)
+        return self.system_setting_choices.get(key, setting["default"])
+
+    async def system_settings(self, context: TenantContext) -> SystemSettings:
+        self._enter(context, "settings.edit")
+        return self._system_settings()
+
+    async def set_system_setting(self, command: SystemSettingSave) -> SystemSettings:
+        context = command.context
+        self._enter(context, "settings.edit")
+        setting = next((s for s in _SYSTEM_SETTINGS if s["key"] == command.key), None)
+        if setting is None:
+            raise NotFound(code="not_found")
+        if command.on is None:
+            raise RuleViolation(code="setting_state_required")
+        was = self._setting_enabled(command.key)
+        if was == command.on:
+            return self._system_settings()
+        self.system_setting_choices[command.key] = command.on
+        before, after = ("On" if was else "Off"), ("On" if command.on else "Off")
+        self._record(
+            context,
+            "organization",
+            self.organization_id,
+            _compact({setting["label"]: before}),
+            _compact({setting["label"]: after}),
+            f"Setting, {setting['label']}, {before} to {after}",
+        )
+        return self._system_settings()
+
+    def _system_settings(self) -> SystemSettings:
+        return SystemSettings(
+            settings=tuple(
+                SystemSetting(key=s["key"], label=s["label"], on=self._setting_enabled(s["key"]))
+                for s in _SYSTEM_SETTINGS
+            )
         )
 
     async def preferences(self, context: TenantContext) -> Preferences:
@@ -3346,10 +3399,11 @@ class FakeTenancyRepository:
         return f"Changed {_join(parts)}" if parts else f"Changed the {section} settings"
 
     def _as_money(self, snapshot: dict[str, Any]) -> dict[str, Any]:
-        """A revenue snapshot as its reason shows it: the threshold as ``{CUR} {amount}``."""
-        threshold = _formatted(Decimal(str(snapshot["lowDayThreshold"])))
+        """A revenue snapshot as its reason shows it: the fuel question amount as
+        ``{CUR} {amount}``."""
+        amount = _formatted(Decimal(str(snapshot["fuelQuestionFrom"])))
         currency = self.sections["localization"]["currency"]
-        return {**snapshot, "lowDayThreshold": f"{currency} {threshold}"}
+        return {**snapshot, "fuelQuestionFrom": f"{currency} {amount}"}
 
     def _logo_snapshot(self, now: datetime) -> str:
         if self.logo is None:
@@ -3555,6 +3609,7 @@ class FakeTargetSet:
     id: UUID
     starts_on: date
     days: tuple[Decimal, ...]
+    low_below: Decimal = Decimal(4000)
 
 
 @dataclass(slots=True)
@@ -3841,7 +3896,11 @@ class FakeSetupRepository:
         typed = _typed_reason(command.reason)
         registration = _registration(d.registration)
         fleet = _fleet_number(d.fleet_number)
-        days = _day_targets(d.day_targets)
+        if d.day_targets is None and not self.tenancy._setting_enabled("targets"):
+            days = (Decimal(0),) * 7
+        else:
+            days = _day_targets(d.day_targets)
+        low_below = d.low_below if d.low_below is not None else Decimal(4000)
         investment = _investment_amount(d.initial_investment)
         today = self._today(context)
         joined_on = _joined(d.joined_on, today)
@@ -3856,13 +3915,18 @@ class FakeSetupRepository:
             joined_on=joined_on,
             fleet_number=fleet,
             initial_investment=investment,
-            sets=[FakeTargetSet(id=uuid4(), starts_on=joined_on, days=days)],
+            sets=[FakeTargetSet(id=uuid4(), starts_on=joined_on, days=days, low_below=low_below)],
         )
         self.vehicles[vehicle.id] = vehicle
+        target_part = (
+            f" with a weekly target of {self._currency()} {_formatted(sum(days, Decimal(0)))}"
+            if days[0] != 0
+            else ""
+        )
         automatic = (
-            f"Added vehicle {registration}, fleet number {fleet}, to {company.name} with a "
-            f"weekly target of {self._currency()} {_formatted(sum(days, Decimal(0)))} from "
-            f"{joined_on.isoformat()}"
+            f"Added vehicle {registration}, fleet number {fleet}, to {company.name}"
+            f"{target_part}, low below {self._currency()} {_formatted(low_below)}"
+            f" from {joined_on.isoformat()}"
         )
         version = self._log(
             context,
@@ -4039,6 +4103,7 @@ class FakeSetupRepository:
                 starts_on=s.starts_on,
                 days=s.days,
                 week_total=sum(s.days, Decimal(0)),
+                low_below=s.low_below,
                 in_force=in_force is not None and s.id == in_force.id,
                 can_remove=can_remove and s.starts_on > today,
             )
@@ -4050,7 +4115,7 @@ class FakeSetupRepository:
         self._enter(context, "vehicles.target")
         if command.starts_on is None:
             raise RuleViolation(code="target_start_required")
-        days = _day_targets(command.days)
+        given_days = None if command.days is None else _day_targets(command.days)
         today = self._today(context)
         vehicle = self._vehicle(command.vehicle_id)
         if vehicle.left_on is not None:
@@ -4059,16 +4124,32 @@ class FakeSetupRepository:
         if starts_on < today:
             raise RuleViolation(code="target_start_past")
         current = _set_on(vehicle, starts_on)
-        if current is not None and current.days == days:
+        if given_days is not None:
+            days = given_days
+        elif current is not None:
+            days = current.days
+        elif not self.tenancy._setting_enabled("targets"):
+            days = (Decimal(0),) * 7
+        else:
+            raise RuleViolation(code="target_days_required")
+        low_below = (
+            command.low_below
+            if command.low_below is not None
+            else _low_below_on(vehicle, starts_on)
+        )
+        if current is not None and current.days == days and current.low_below == low_below:
             raise RuleViolation(code="target_set_unchanged", detail={"date": starts_on.isoformat()})
         before = self._vehicle_snapshot(vehicle)
         existing = next((s for s in vehicle.sets if s.starts_on == starts_on), None)
         if existing is None:
-            existing = FakeTargetSet(id=uuid4(), starts_on=starts_on, days=days)
+            existing = FakeTargetSet(
+                id=uuid4(), starts_on=starts_on, days=days, low_below=low_below
+            )
             vehicle.sets.append(existing)
             outcome = WriteOutcome.CREATED
         else:
             existing.days = days
+            existing.low_below = low_below
             outcome = WriteOutcome.UPDATED
         version = self._log(
             context,
@@ -4076,7 +4157,8 @@ class FakeSetupRepository:
             vehicle.id,
             before,
             self._vehicle_snapshot(vehicle),
-            f"Target set, {vehicle.registration}",
+            f"Target set, {vehicle.registration}, low below {self._currency()} "
+            f"{_formatted(low_below)}",
         )
         return WriteResult(id=existing.id, version=version, outcome=outcome)
 
@@ -5125,12 +5207,16 @@ class FakeSetupRepository:
             day_targets=(
                 in_force.days if manages and (in_force := _set_on(v, today)) is not None else None
             ),
+            low_below=(
+                held.low_below if manages and (held := _set_on(v, today)) is not None else None
+            ),
             next_target=next(
                 (
                     NextTarget(
                         starts_on=s.starts_on,
                         day_targets=s.days,
                         weekly_target=sum(s.days, Decimal(0)),
+                        low_below=s.low_below,
                     )
                     for s in sorted(v.sets, key=lambda s: s.starts_on)
                     if s.starts_on > today
@@ -5242,6 +5328,7 @@ class FakeSetupRepository:
                 "TargetSets": [
                     {"StartsOn": s.starts_on.isoformat()}
                     | {day: _number(amount) for day, amount in zip(_SET_DAYS, s.days, strict=True)}
+                    | {"LowBelow": _number(s.low_below)}
                     for s in sorted(vehicle.sets, key=lambda s: s.starts_on)
                 ],
                 "Away": [
@@ -5393,6 +5480,15 @@ def _set_on(vehicle: FakeVehicle, day: date) -> FakeTargetSet | None:
     """The target set in force on ``day``: the latest start on or before it."""
     started = [s for s in vehicle.sets if s.starts_on <= day]
     return max(started, key=lambda s: s.starts_on) if started else None
+
+
+def _low_below_on(vehicle: FakeVehicle, day: date) -> Decimal:
+    held = _set_on(vehicle, day)
+    if held is not None:
+        return held.low_below
+    if vehicle.sets:
+        return min(vehicle.sets, key=lambda s: s.starts_on).low_below
+    return Decimal(4000)
 
 
 def _target_held(vehicle: FakeVehicle, day: date) -> Decimal:
@@ -5659,6 +5755,7 @@ class FakeRevenueRecord:
     updated_by: UUID
     corrected_after_date: bool = False
     version: int = 1
+    fuel: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -5671,6 +5768,7 @@ class _FakeDay:
     target: Decimal
     counted: bool
     record: FakeRevenueRecord | None
+    low_below: Decimal
 
 
 class FakeRevenueRepository:
@@ -5698,14 +5796,18 @@ class FakeRevenueRepository:
         vehicle = self.setup._vehicle(command.vehicle_id)
         today = self.setup._today(context)
         day = command.day
+        fuel_from = self._fuel_from()
+        _require_fuel_valid(command, amount, fuel_from)
         record = self.records.get((vehicle.id, day))
-        if record is not None and (record.amount, record.reason, record.note) == (
+        fuel = _resolve_fuel(command, record, amount, fuel_from)
+        if record is not None and (record.amount, record.reason, record.note, record.fuel) == (
             amount,
             reason,
             note,
+            fuel,
         ):
             return CaptureResult(record.id, record.version, CaptureOutcome.REPLAYED)
-        _revenue_low_day(amount, reason, self._threshold(), self.setup._currency())
+        _revenue_low_day(amount, reason, _low_below_on(vehicle, day), self.setup._currency())
         if day == date.min or day > today:
             raise RuleViolation(code="revenue_future_date")
         if not _revenue_active(vehicle, day):
@@ -5741,6 +5843,7 @@ class FakeRevenueRepository:
                 captured_by=context.actor_id,
                 updated_at=context.now,
                 updated_by=context.actor_id,
+                fuel=fuel,
             )
             self.records[(vehicle.id, day)] = record
             before = "null"
@@ -5756,6 +5859,7 @@ class FakeRevenueRepository:
             record.amount = amount
             record.reason = reason
             record.note = note
+            record.fuel = fuel
             record.updated_at = context.now
             record.updated_by = context.actor_id
             record.corrected_after_date = record.corrected_after_date or day < today
@@ -5810,6 +5914,7 @@ class FakeRevenueRepository:
                 for v in fleet[:500]
             ),
             truncated=len(fleet) > 500,
+            fuel_question_from=self._fuel_from(),
         )
 
     async def save_day(self, command: RevenueDaySave) -> RevenueDayResult:
@@ -5830,7 +5935,16 @@ class FakeRevenueRepository:
             raise NotFound(code="not_found")
         captures = [
             RevenueCapture(
-                context, r.vehicle_id, command.day, r.amount, r.reason, r.note, r.version, None
+                context,
+                r.vehicle_id,
+                command.day,
+                r.amount,
+                r.reason,
+                r.note,
+                r.fuel,
+                r.fuel_given,
+                r.version,
+                None,
             )
             for r in rows
             if r.vehicle_id is not None
@@ -5889,7 +6003,7 @@ class FakeRevenueRepository:
         correct = "revenue.correct" in permissions
         today = self.setup._today(context)
         earliest = self._earliest(member, today)
-        threshold = self._threshold()
+        fuel_from = self._fuel_from()
         amber = self._amber()
         paged = query.vehicle_id is None and (query.page is not None or query.page_size is not None)
         page, size = 1, 500
@@ -5959,7 +6073,8 @@ class FakeRevenueRepository:
                     percent=_percent(amount, target),
                     gap=_half_even(amount - target),
                     gap_band=_gap_band(amount - target, target, amber),
-                    below_threshold_days=_low_days(days[v.id], threshold),
+                    below_threshold_days=_low_days(days[v.id]),
+                    not_fueled_days=_not_fueled(days[v.id]),
                 )
             )
         every_day = [d for v in grid for d in days[v.id]]
@@ -6005,11 +6120,13 @@ class FakeRevenueRepository:
             truncated=not paged and query.vehicle_id is None and len(grid) > 500,
             day_totals=tuple(day_totals),
             first_gap=None if first is None else RevenueGap(vehicle_id=first[2], day=first[0]),
-            low_day_threshold=threshold,
+            low_day_threshold=Decimal(4000),
+            fuel_question_from=fuel_from,
             gap_amber_percent=amber,
             gap=_half_even(amount - target),
             gap_band=_gap_band(amount - target, target, amber),
-            below_threshold_days=_low_days(every_day, threshold),
+            below_threshold_days=_low_days(every_day),
+            not_fueled_days=_not_fueled(every_day),
             missing_days=sum(1 for d in every_day if d.counted and d.record is None),
         )
 
@@ -6067,8 +6184,8 @@ class FakeRevenueRepository:
         first_day = self.setup.tenancy.sections["localization"]["first_day_of_week"]
         return day - timedelta(days=((day.isoweekday() % 7) - first_day + 7) % 7)
 
-    def _threshold(self) -> Decimal:
-        return Decimal(self.setup.tenancy.sections["revenue"]["low_day_threshold"])
+    def _fuel_from(self) -> Decimal:
+        return Decimal(self.setup.tenancy.sections["revenue"]["fuel_question_from"])
 
     def _amber(self) -> Decimal:
         return Decimal(self.setup.tenancy.sections["revenue"]["gap_amber_percent"])
@@ -6110,6 +6227,7 @@ class FakeRevenueRepository:
                     target=_day_target(vehicle, day) if active else Decimal(0),
                     counted=active and (day < today or record is not None),
                     record=record,
+                    low_below=_low_below_on(vehicle, day),
                 )
             )
         return days
@@ -6179,15 +6297,60 @@ def _gap_band(gap: Decimal, target: Decimal, amber: Decimal) -> GapBand | None:
     return GapBand.AMBER if -gap * 100 <= target * amber else GapBand.RED
 
 
-def _low_days(days: Iterable[_FakeDay], threshold: Decimal) -> int:
-    """Days that count whose record holds a reason alone or an amount below the threshold."""
+def _low_days(days: Iterable[_FakeDay]) -> int:
+    """Days that count whose record holds a reason alone or an amount below the vehicle's low
+    revenue figure in force that day."""
     return sum(
         1
         for d in days
         if d.counted
         and d.record is not None
-        and (d.record.amount is None or d.record.amount < threshold)
+        and (d.record.amount is None or d.record.amount < d.low_below)
     )
+
+
+def _not_fueled(days: Iterable[_FakeDay]) -> int:
+    """Days that count whose record says not fueled."""
+    return sum(1 for d in days if d.counted and d.record is not None and d.record.fuel is False)
+
+
+def _require_fuel_valid(
+    command: RevenueCapture, amount: Decimal | None, fuel_from: Decimal
+) -> None:
+    """``revenue.capture_row``: a given answer refused with no amount, or Fueled below the
+    fuel question amount."""
+    if (
+        command.fuel_given
+        and command.fuel is not None
+        and (amount is None or (command.fuel is RevenueFuel.YES and amount < fuel_from))
+    ):
+        raise RuleViolation(code="fuel_invalid")
+
+
+def _fuel_bool(fuel: RevenueFuel | None) -> bool | None:
+    if fuel is RevenueFuel.YES:
+        return True
+    if fuel is RevenueFuel.NO:
+        return False
+    return None
+
+
+def _resolve_fuel(
+    command: RevenueCapture,
+    record: FakeRevenueRecord | None,
+    amount: Decimal | None,
+    fuel_from: Decimal,
+) -> bool | None:
+    """``revenue.capture_row`` fuel resolution: the given answer, else the saved one; cleared
+    with no amount, or a Fueled answer below the fuel question amount."""
+    base = (
+        _fuel_bool(command.fuel)
+        if command.fuel_given
+        else (record.fuel if record is not None else None)
+    )
+    if amount is None or (base and amount < fuel_from):
+        return None
+    return base
 
 
 def _revenue_reason(text: str | None) -> NoEarningsReason | None:
@@ -6243,10 +6406,20 @@ def _revenue_cell(
         amount=None if record is None else record.amount,
         reason=None if record is None or record.reason is None else record.reason.label,
         note=None if record is None else record.note,
+        fuel=_fuel_label(None if record is None else record.fuel),
+        low_below=_half_even(day.low_below),
         can_edit=can_edit,
         edited_after_capture=record is not None and record.corrected_after_date,
         version=None if record is None else record.version,
     )
+
+
+def _fuel_label(fuel: bool | None) -> RevenueFuel | None:
+    if fuel is True:
+        return RevenueFuel.YES
+    if fuel is False:
+        return RevenueFuel.NO
+    return None
 
 
 def _amount_of(day: _FakeDay) -> Decimal:
@@ -6285,6 +6458,15 @@ def _instant_text(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
 
 
+def _fuel_snapshot(fuel: bool | None) -> str | None:
+    """``revenue.record_snapshot``: the .NET fuel label."""
+    if fuel is True:
+        return "Fueled"
+    if fuel is False:
+        return "Not fueled"
+    return None
+
+
 def _record_snapshot(record: FakeRevenueRecord) -> str:
     """``revenue.record_snapshot``."""
     return _compact(
@@ -6295,6 +6477,7 @@ def _record_snapshot(record: FakeRevenueRecord) -> str:
             "Amount": None if record.amount is None else _number(record.amount),
             "Reason": None if record.reason is None else record.reason.snapshot_name,
             "Note": record.note,
+            "Fuel": _fuel_snapshot(record.fuel),
             "CapturedAt": _instant_text(record.captured_at),
             "CapturedBy": str(record.captured_by),
             "UpdatedAt": _instant_text(record.updated_at),
@@ -6315,6 +6498,8 @@ def _cell_document(cell: RevenueCell) -> dict[str, Any]:
         "amount": cell.amount,
         "reason": cell.reason,
         "note": cell.note,
+        "fuel": None if cell.fuel is None else cell.fuel.value,
+        "low_below": cell.low_below,
         "can_edit": cell.can_edit,
         "edited_after_capture": cell.edited_after_capture,
         "version": cell.version,
@@ -6468,6 +6653,7 @@ class FakePettyCashRepository:
         chosen = [h for h in holders if query.holder_id is None or h.id == query.holder_id]
         if query.holder_id is not None and not chosen:
             raise NotFound(code="not_found")
+        self._check_vehicle(actor, query.vehicle_id)
         ids = {h.id for h in chosen}
         seen = [e for e in self._visible(actor) if e.holder_id in ids]
 
@@ -6480,6 +6666,12 @@ class FakePettyCashRepository:
         spent = _pc_sum(e.total for e in within if e.kind == 2 and e.status != 4)
         credit = _pc_sum(e.total for e in within if e.kind == 3)
         waiting = [e for e in within if _pc_ready(e)]
+        vehicle_waiting = None
+        if query.vehicle_id is not None:
+            ready = [e for e in waiting if e.vehicle_id == query.vehicle_id]
+            vehicle_waiting = PettyCashWaiting(
+                waiting=_pc_sum(e.total for e in ready), waiting_count=len(ready)
+            )
         figures = PettyCashFigures(
             opening_balance=opening,
             cash_received=cash,
@@ -6524,6 +6716,11 @@ class FakePettyCashRepository:
             holders=tuple(holders),
             figures=figures,
             floats=floats,
+            vehicles=tuple(
+                self._vehicle_option(v, _revenue_active(v, today))
+                for v in self._seen_vehicles(actor)
+            ),
+            vehicle_waiting=vehicle_waiting,
         )
 
     async def entries(self, query: PettyCashEntryQuery) -> PettyCashEntryPage:
@@ -6549,6 +6746,7 @@ class FakePettyCashRepository:
         if any(word not in _PC_STATUS_WORDS for word in statuses):
             raise RuleViolation(code="pettycash_status_invalid")
         self._check_holder(actor, query.holder_id)
+        self._check_vehicle(actor, query.vehicle_id)
 
         def matches(e: FakePettyCashEntry) -> bool:
             if text is None:
@@ -6569,6 +6767,7 @@ class FakePettyCashRepository:
                 e
                 for e in self._visible(actor)
                 if (query.holder_id is None or e.holder_id == query.holder_id)
+                and (query.vehicle_id is None or e.vehicle_id == query.vehicle_id)
                 and (query.from_date is None or e.entry_date >= query.from_date)
                 and (query.to_date is None or e.entry_date <= query.to_date)
                 and (not kinds or e.kind in kinds)
@@ -6592,16 +6791,9 @@ class FakePettyCashRepository:
         items: tuple[PettyCashItemOption, ...] = ()
         if actor.holds("spend", "spend_other", "edit_own", "edit"):
             vehicles = tuple(
-                PettyCashVehicleOption(
-                    id=v.id,
-                    company_id=v.company_id,
-                    company_name=self.setup.companies[v.company_id].name,
-                    registration=v.registration,
-                    active=True,
-                    fleet_number=v.fleet_number,
-                )
-                for v in sorted(self.setup.vehicles.values(), key=lambda v: (v.registration, v.id))
-                if v.id in actor.vehicles and _revenue_active(v, day)
+                self._vehicle_option(v, True)
+                for v in self._seen_vehicles(actor)
+                if _revenue_active(v, day)
             )
             listed = []
             for item in self.setup.items.values():
@@ -6994,6 +7186,7 @@ class FakePettyCashRepository:
             _pc_check_period(command.day, command.to, actor.today)
             last = command.to
         self._check_holder(actor, command.holder_id)
+        self._check_vehicle(actor, command.vehicle_id)
         waiting = sorted(
             (
                 e
@@ -7001,6 +7194,7 @@ class FakePettyCashRepository:
                 if _pc_ready(e)
                 and first <= e.entry_date <= last
                 and (command.holder_id is None or e.holder_id == command.holder_id)
+                and (command.vehicle_id is None or e.vehicle_id == command.vehicle_id)
             ),
             key=lambda e: e.id,
         )
@@ -7130,6 +7324,26 @@ class FakePettyCashRepository:
     def _check_holder(self, actor: _PcActor, holder_id: UUID | None) -> None:
         if holder_id is not None and all(h.id != holder_id for h in self._visible_holders(actor)):
             raise NotFound(code="not_found")
+
+    def _check_vehicle(self, actor: _PcActor, vehicle_id: UUID | None) -> None:
+        if vehicle_id is not None and vehicle_id not in actor.vehicles:
+            raise NotFound(code="not_found")
+
+    def _seen_vehicles(self, actor: _PcActor) -> list[FakeVehicle]:
+        return sorted(
+            (v for v in self.setup.vehicles.values() if v.id in actor.vehicles),
+            key=lambda v: (v.registration, v.id),
+        )
+
+    def _vehicle_option(self, vehicle: FakeVehicle, active: bool) -> PettyCashVehicleOption:
+        return PettyCashVehicleOption(
+            id=vehicle.id,
+            company_id=vehicle.company_id,
+            company_name=self.setup.companies[vehicle.company_id].name,
+            registration=vehicle.registration,
+            active=active,
+            fleet_number=vehicle.fleet_number,
+        )
 
     def _visible(self, actor: _PcActor) -> list[FakePettyCashEntry]:
         return [e for e in self.stored.values() if _pc_visible(e, actor)]
@@ -8466,6 +8680,16 @@ def _rp_period_words(first: date | None, last: date | None) -> str | None:
     return f"{_day_words(first)} to {_day_words(last)}"
 
 
+def _rp_reason(title: str, period: str | None, q: str | None, word: str) -> str:
+    """``reports.log_export``'s change-log reason."""
+    reason = f"Exported {title}"
+    if period is not None:
+        reason += f" for {period}"
+    if q is not None:
+        reason += f', searched for "{q}"'
+    return reason + " to " + {"pdf": "PDF", "png": "Summary image"}.get(word, "Excel")
+
+
 def _rp_jsonb_order(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Keys as jsonb stores them: by length, then by bytes."""
     return dict(sorted(snapshot.items(), key=lambda kv: (len(kv[0]), kv[0].encode())))
@@ -8590,6 +8814,31 @@ class FakeReportsRepository:
             word=word,
             snapshot=snapshot,
         )
+
+    async def log_revenue_image(self, log: RevenueImageLog) -> None:
+        member = self.setup._enter(log.context, "revenue.export")
+        if "revenue.view" not in member.permissions:
+            raise Forbidden(code="permission_missing")
+        q = (log.q or "").strip() or None
+        if q is not None and len(q) > 40:
+            raise RuleViolation(code="revenue_search_length")
+        current = self.revenue._week_start(self.setup._today(log.context))
+        start = self.revenue._week_start(log.week_start)
+        if start > current or start < current - timedelta(days=3650):
+            raise RuleViolation(code="revenue_week_range")
+        if log.company_id is not None and log.company_id not in self.setup.companies:
+            raise NotFound(code="not_found")
+        snapshot = {
+            "screen": "revenue",
+            "weekStart": start.isoformat(),
+            "companyId": None if log.company_id is None else str(log.company_id),
+            "q": q,
+            "format": "png",
+        }
+        period = _rp_period_words(start, start + timedelta(days=6))
+        reason = _rp_reason("Revenue", period, q, "png")
+        after = _compact(_rp_jsonb_order(snapshot))
+        self.setup._log(log.context, "reports", uuid4(), "null", after, reason)
 
     async def export_expenses(self, query: ExpenseExportQuery) -> ReportDocument:
         member = self.setup._enter(query.context, "expenses.export")
@@ -8843,12 +9092,7 @@ class FakeReportsRepository:
     ) -> ReportDocument:
         period = _rp_period_words(table.from_date, table.to_date)
         sections = self.setup.tenancy.sections
-        reason = f"Exported {table.title}"
-        if period is not None:
-            reason += f" for {period}"
-        if q is not None:
-            reason += f', searched for "{q}"'
-        reason += " to " + ("PDF" if word == "pdf" else "Excel")
+        reason = _rp_reason(table.title, period, q, word)
         after = _compact(_rp_jsonb_order(snapshot))
         self.setup._log(context, "reports", uuid4(), "null", after, reason)
         return ReportDocument(

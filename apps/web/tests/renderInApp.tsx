@@ -9,11 +9,11 @@ import { appearanceFixture } from "./fixtures";
 export { appearanceFixture };
 
 // Renders a page inside the providers the app shell gives it: the signed-in session, the appearance (with its
-// business date, when given) and toasts.
+// business date and the Targets switch, when given) and toasts.
 export function renderInApp(
   ui: ReactNode,
   session: Partial<Session> = {},
-  options: { businessDate?: string } = {},
+  options: { businessDate?: string; targets?: boolean } = {},
 ) {
   const value: Session = {
     userId: "me",
@@ -23,9 +23,13 @@ export function renderInApp(
     permissions: [],
     ...session,
   };
-  const appearance = options.businessDate
-    ? appearanceFixture(options.businessDate)
-    : null;
+  const appearance =
+    options.businessDate || options.targets !== undefined
+      ? {
+          ...appearanceFixture(options.businessDate),
+          ...(options.targets !== undefined && { targets: options.targets }),
+        }
+      : null;
   return render(
     <SessionProvider
       value={{

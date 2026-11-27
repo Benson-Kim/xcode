@@ -76,6 +76,7 @@ function serve(
   permissions: string[],
   answer: (period: string) => Response | Promise<Response> = (period) =>
     json(dashboard(period)),
+  shown: Appearance = appearance,
 ) {
   const fetcher = vi.fn(async (input: RequestInfo | URL) => {
     const path = String(input);
@@ -87,7 +88,7 @@ function serve(
         role: "Owner",
         permissions,
       });
-    if (path === "/api/setup/appearance") return json(appearance);
+    if (path === "/api/setup/appearance") return json(shown);
     if (path === "/api/setup/pettycash/dashboard")
       return json({
         float: {
@@ -373,4 +374,51 @@ it("caps the revenue percent at 999% and reads 999%+ beyond it, on the dashboard
     await within(revenue).findByText(/^999%\+ of target KES 8,000\.14/),
   ).toBeInTheDocument();
   expect(within(revenue).queryByText(/1249977794/)).not.toBeInTheDocument();
+});
+
+const bandLabels = () =>
+  screen
+    .queryAllByText(/./, { selector: ".side span" })
+    .map((label) => label.textContent);
+
+it("shows the target and the share reached in the band and the revenue card while Targets is on", async () => {
+  serve(EVERYTHING);
+  render(<AppShell onSignOut={() => {}} />);
+
+  const revenue = await screen.findByRole("article", { name: "Revenue" });
+  expect(await within(revenue).findByText("KES 12,500")).toBeInTheDocument();
+  expect(revenue).toHaveTextContent("83% of target KES 15,000");
+  expect(revenue.querySelector(".prog")).not.toBeNull();
+  await waitFor(() =>
+    expect(bandLabels()).toEqual([
+      "Target",
+      "Target reached",
+      "Captured today",
+    ]),
+  );
+});
+
+it("shows revenue alone while the owner has switched Targets off: no target, share or bar", async () => {
+  serve(EVERYTHING, (period) => json(dashboard(period)), {
+    ...appearance,
+    targets: false,
+  });
+  render(<AppShell onSignOut={() => {}} />);
+
+  const revenue = await screen.findByRole("article", { name: "Revenue" });
+  expect(await within(revenue).findByText("KES 12,500")).toBeInTheDocument();
+  expect(
+    within(revenue).getByText("2 of 5 vehicles have a record so far."),
+  ).toBeInTheDocument();
+  expect(revenue).not.toHaveTextContent(/target/i);
+  expect(revenue.querySelector(".prog")).toBeNull();
+  await waitFor(() => expect(bandLabels()).toEqual(["Captured today"]));
+  expect(screen.queryByText("Target reached")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "This month" }));
+  expect(
+    await within(card("Revenue")).findByText("This month, 1 to 30 Sep 2026"),
+  ).toBeInTheDocument();
+  expect(card("Revenue")).not.toHaveTextContent(/target/i);
+  expect(card("Revenue").querySelector(".prog")).toBeNull();
 });

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 
 import {
+  fuelChoice,
   isRecorded,
+  keptFuel,
   type RevenueCell,
+  type RevenueFuel,
   type RevenueReason,
   type RevenueVehicle,
 } from "@xcode/shared/revenue";
@@ -10,14 +13,15 @@ import {
 import { ApiError } from "../../lib/data";
 import { revenueApi } from "../../lib/endpoints/revenue";
 import { useFormats } from "../../lib/formats";
-import { isReason, readEntry } from "./capture";
+import { isReason, lowFigure, readEntry, typedAmount } from "./capture";
 
 type Conflict = { message: string; current: RevenueCell };
 
 type Entry = {
   vehicle: RevenueVehicle;
   cell: RevenueCell;
-  threshold: number;
+  // The amount from which the Fueled? question is asked (an organization setting, v2.37).
+  fuelQuestionFrom: number;
   amountRef: RefObject<HTMLInputElement | null>;
   // Called once the day is settled (saved, or the saved record kept): moves capture on. wasNew says whether the
   // day had no record when it opened, so a new capture moves to the next vehicle and a correction closes.
@@ -30,7 +34,7 @@ type Entry = {
 export function useCaptureEntry({
   vehicle,
   cell,
-  threshold,
+  fuelQuestionFrom,
   amountRef,
   onDone,
   reload,
@@ -46,6 +50,7 @@ export function useCaptureEntry({
   const [reason, setReason] = useState<RevenueReason | "">(
     isReason(opened.reason) ? opened.reason : "",
   );
+  const [fuel, setFuel] = useState<RevenueFuel | null>(opened.fuel ?? null);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [saving, setSaving] = useState(false);
@@ -53,11 +58,13 @@ export function useCaptureEntry({
   const busy = useRef(false);
   useEntryFocus(amountRef);
 
-  const entry = () => readEntry({ amount, reason, threshold, formats });
-  // The reason buttons show only while the amount is below the threshold.
+  const lowBelow = lowFigure(cell);
+  const entry = () =>
+    readEntry({ amount, reason, fuel, lowBelow, fuelQuestionFrom, formats });
+  // The reason buttons show only while the amount is below the vehicle's low figure for the day.
   const parsed = Number(amount.replace(/[,\s]/g, ""));
-  const belowThreshold =
-    !amount || !Number.isFinite(parsed) || parsed < threshold;
+  const asksReason = !amount || !Number.isFinite(parsed) || parsed < lowBelow;
+  const choice = fuelChoice(typedAmount(amount), lowBelow, fuelQuestionFrom);
 
   async function settle(work: () => Promise<void>) {
     if (busy.current) return;
@@ -112,7 +119,9 @@ export function useCaptureEntry({
     opened,
     amount,
     reason,
-    belowThreshold,
+    fuel,
+    asksReason,
+    choice,
     error,
     conflict,
     saving,
@@ -121,8 +130,17 @@ export function useCaptureEntry({
     replace: (version: number | null) => save(version),
     keepSaved: () => void settle(() => onDone(wasNew)),
     choose,
+    // A second tap on the chosen answer clears it.
+    chooseFuel: (answer: RevenueFuel) => {
+      setFuel((current) => (current === answer ? null : answer));
+      setError("");
+    },
+    // Typing below the question amount drops a Yes and keeps a No; clearing the amount drops either.
     typeAmount: (value: string) => {
       setAmount(value);
+      setFuel((current) =>
+        keptFuel(current, typedAmount(value), fuelQuestionFrom),
+      );
       setError("");
     },
   };

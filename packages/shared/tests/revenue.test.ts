@@ -2,8 +2,11 @@ import { expect, expectTypeOf, it, vi } from "vitest";
 
 import {
   awaitsCapture,
+  fuelChoice,
+  fuelTag,
   gapText,
   isRecorded,
+  keptFuel,
   loadWholeWeek,
   mergeWeekPages,
   normaliseRegistration,
@@ -249,4 +252,30 @@ it("puts a registration in the stored form, or refuses it", () => {
   expect(normaliseRegistration("ADN 204B")).toBeNull();
   expect(normaliseRegistration("KDN 2045B")).toBeNull();
   expect(normaliseRegistration("")).toBeNull();
+});
+
+it("offers the fuel row the amount calls for, against the vehicle's low figure and the question amount", () => {
+  expect(fuelChoice(null, 4000, 10000)).toBe("none");
+  expect(fuelChoice(0, 4000, 10000)).toBe("none");
+  expect(fuelChoice(3999.99, 4000, 10000)).toBe("reasons");
+  expect(fuelChoice(4000, 4000, 10000)).toBe("tag");
+  expect(fuelChoice(9999, 4000, 10000)).toBe("tag");
+  expect(fuelChoice(10000, 4000, 10000)).toBe("ask");
+  expect(fuelChoice(1, 0, 10000)).toBe("tag");
+  expect(fuelChoice(5000)).toBe("tag");
+  expect(fuelChoice(12600)).toBe("ask");
+});
+
+it("drops a Yes below the question amount and every answer without an amount, and shows only No", () => {
+  expect(keptFuel("yes", 12600, 10000)).toBe("yes");
+  expect(keptFuel("yes", 9999, 10000)).toBeNull();
+  expect(keptFuel("no", 9999, 10000)).toBe("no");
+  expect(keptFuel("no", 2500, 10000)).toBe("no");
+  expect(keptFuel("no", null, 10000)).toBeNull();
+  expect(keptFuel("no", 0, 10000)).toBeNull();
+  expect(keptFuel(null, 12600, 10000)).toBeNull();
+  expect(keptFuel(undefined, 12600, 10000)).toBeNull();
+  expect(fuelTag("no")).toBe("Not fueled");
+  expect(fuelTag("yes")).toBeNull();
+  expect(fuelTag(null)).toBeNull();
 });

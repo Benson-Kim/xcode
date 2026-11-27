@@ -26,7 +26,8 @@ const defaults: Formats = {
   currency: "KES",
   useGrouping: true,
   numberDecimals: 2,
-  firstDayOfWeek: 1,
+  // The week runs Sunday to Saturday (v2.41); the server serves 0 for every organization.
+  firstDayOfWeek: 0,
 };
 
 // Spelling used before the rename; read for one release, never written.
@@ -51,7 +52,9 @@ export function createFormatter(next?: FormatsInput | null) {
 
   function firstDayOfWeek() {
     const first = formats.firstDayOfWeek;
-    return Number.isInteger(first) && first >= 0 && first <= 6 ? first : 1;
+    return Number.isInteger(first) && first >= 0 && first <= 6
+      ? first
+      : defaults.firstDayOfWeek;
   }
 
   function formatNumber(amount: number) {

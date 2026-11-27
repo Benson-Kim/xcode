@@ -52,12 +52,19 @@ function signIn(permissions: string[]) {
   render(<AppShell onSignOut={() => {}} />);
 }
 
+// Setup is collapsed outside its own pages (v2.46): a tap on its heading shows its entries.
+async function openSetup() {
+  const menu = within(screen.getByRole("navigation", { name: "Main" }));
+  fireEvent.click(await menu.findByRole("button", { name: "Setup" }));
+  return menu;
+}
+
 it.each([["expenses.setup"], ["expenses.view"], ["commitments.view"]])(
   "lists Expense items under Setup for %s",
   async (permission) => {
     signIn([permission]);
-    const menu = within(screen.getByRole("navigation", { name: "Main" }));
-    fireEvent.click(await menu.findByRole("button", { name: "Expense items" }));
+    const menu = await openSetup();
+    fireEvent.click(menu.getByRole("button", { name: "Expense items" }));
     expect(
       await screen.findByRole("heading", {
         name: "Expense items",
@@ -72,10 +79,8 @@ it.each([["expenses.setup"], ["expenses.view"], ["commitments.view"]])(
 
 it("hides Expense items and scheduled items without any of their permissions", async () => {
   signIn(["vehicles.manage"]);
-  const menu = within(screen.getByRole("navigation", { name: "Main" }));
-  expect(
-    await menu.findByRole("button", { name: "Vehicles" }),
-  ).toBeInTheDocument();
+  const menu = await openSetup();
+  expect(menu.getByRole("button", { name: "Vehicles" })).toBeInTheDocument();
   expect(
     menu.queryByRole("button", { name: "Expense items" }),
   ).not.toBeInTheDocument();
@@ -128,14 +133,14 @@ const menuLabels = () =>
 
 it("shows the whole menu, in order, to someone holding every permission", async () => {
   signIn([...PERMISSION_KEYS, ...RIGHTS]);
-  const menu = within(screen.getByRole("navigation", { name: "Main" }));
+  const menu = await openSetup();
   await menu.findByRole("button", { name: "Organization settings" });
   expect(menuLabels()).toEqual(MENU);
 });
 
 it("groups Expenses and Setup under their own headings, around Reports", async () => {
   signIn([...PERMISSION_KEYS, ...RIGHTS]);
-  const menu = within(screen.getByRole("navigation", { name: "Main" }));
+  const menu = await openSetup();
   await menu.findByRole("button", { name: "Organization settings" });
   const all = entries().map((button) => button.textContent);
   expect(all).toEqual([
@@ -183,8 +188,10 @@ it("folds each group on its own, and opens it again", async () => {
   const expenses = await menu.findByRole("button", { name: "Expenses" });
   const setup = menu.getByRole("button", { name: "Setup" });
   expect(expenses).toHaveAttribute("aria-expanded", "true");
-  expect(setup).toHaveAttribute("aria-expanded", "true");
+  expect(setup).toHaveAttribute("aria-expanded", "false");
 
+  fireEvent.click(setup);
+  expect(setup).toHaveAttribute("aria-expanded", "true");
   fireEvent.click(expenses);
   expect(expenses).toHaveAttribute("aria-expanded", "false");
   expect(setup).toHaveAttribute("aria-expanded", "true");
@@ -218,9 +225,9 @@ it.each([
 
 it("keeps Expense items in Setup, out of the Expenses group, for expenses.setup alone", async () => {
   signIn(["expenses.setup"]);
-  const menu = within(screen.getByRole("navigation", { name: "Main" }));
+  const menu = await openSetup();
   expect(
-    await menu.findByRole("button", { name: "Expense items" }),
+    menu.getByRole("button", { name: "Expense items" }),
   ).toBeInTheDocument();
   expect(
     // The group's entries follow its heading button.
@@ -245,8 +252,8 @@ it.each([
 
 it("hides the Expenses group from someone with no expense rights, and Reports without reports.view", async () => {
   signIn(["vehicles.manage", "revenue.view"]);
-  const menu = within(screen.getByRole("navigation", { name: "Main" }));
-  await menu.findByRole("button", { name: "Vehicles" });
+  const menu = await openSetup();
+  menu.getByRole("button", { name: "Vehicles" });
   expect(
     menu.queryByRole("button", { name: "Expenses" }),
   ).not.toBeInTheDocument();
@@ -277,8 +284,51 @@ it.each([
   ["Organization settings", "organization.manage"],
 ])("shows %s for %s alone", async (label, permission) => {
   signIn([permission]);
-  const menu = within(screen.getByRole("navigation", { name: "Main" }));
+  const menu =
+    label === "Petty cash"
+      ? within(screen.getByRole("navigation", { name: "Main" }))
+      : await openSetup();
   expect(await menu.findByRole("button", { name: label })).toBeInTheDocument();
+});
+
+it("keeps Setup collapsed outside its own pages and open on them, and a tap still folds it", async () => {
+  signIn([...PERMISSION_KEYS, ...RIGHTS]);
+  const menu = within(screen.getByRole("navigation", { name: "Main" }));
+  const setup = await menu.findByRole("button", { name: "Setup" });
+  const expenses = menu.getByRole("button", { name: "Expenses" });
+  expect(setup).toHaveAttribute("aria-expanded", "false");
+  expect(
+    menu.queryByRole("button", { name: "Vehicles" }),
+  ).not.toBeInTheDocument();
+  expect(expenses).toHaveAttribute("aria-expanded", "true");
+
+  fireEvent.click(setup);
+  fireEvent.click(menu.getByRole("button", { name: "Vehicles" }));
+  expect(
+    await screen.findByRole("heading", { name: "Vehicles", level: 1 }),
+  ).toBeInTheDocument();
+  expect(setup).toHaveAttribute("aria-expanded", "true");
+
+  // A tap folds it on a setup page too; opening another setup page shows it open again.
+  fireEvent.click(setup);
+  expect(setup).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(setup);
+  fireEvent.click(menu.getByRole("button", { name: "Change log" }));
+  expect(
+    await screen.findByRole("heading", { name: "Change log", level: 1 }),
+  ).toBeInTheDocument();
+  expect(setup).toHaveAttribute("aria-expanded", "true");
+
+  // Any page outside Setup collapses it again; the Expenses group stays as it was.
+  fireEvent.click(menu.getByRole("button", { name: "Revenue" }));
+  await waitFor(() => expect(setup).toHaveAttribute("aria-expanded", "false"));
+  expect(expenses).toHaveAttribute("aria-expanded", "true");
+
+  // Opened by hand outside Setup, it stays open until the next page is opened.
+  fireEvent.click(setup);
+  expect(setup).toHaveAttribute("aria-expanded", "true");
+  fireEvent.click(menu.getByRole("button", { name: "Dashboard" }));
+  await waitFor(() => expect(setup).toHaveAttribute("aria-expanded", "false"));
 });
 
 it("titles the dashboard cards, in order, as the shared list does", async () => {

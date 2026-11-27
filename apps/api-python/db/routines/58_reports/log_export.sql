@@ -1,6 +1,6 @@
 -- reports.log_export(p_table jsonb, p_row_count integer, p_filters text, p_q text, p_format text, p_snapshot jsonb, p_now timestamptz) RETURNS void
--- Purpose: the audit row of an export, in the export's own transaction: one change-log entry in section reports under a new entity id with no vehicle, before null, after the snapshot (the export's filters and row count, compact), reason "Exported {title}[ for {period}][, searched for "{q}"] to {Excel|PDF}", and the audit event reports.exported with the snapshot and the filters text.
--- Callers: api.report_export_get, api.revenue_export_get, api.expenses_export_get, api.pettycash_export_get.
+-- Purpose: the audit row of an export, in the export's own transaction: one change-log entry in section reports under a new entity id with no vehicle, before null, after the snapshot (the export's filters and row count, compact), reason "Exported {title}[ for {period}][, searched for "{q}"] to {Excel|PDF|Summary image}" (format png is the Revenue Summary image the device draws), and the audit event reports.exported with the snapshot and the filters text.
+-- Callers: api.report_export_get, api.revenue_export_get, api.expenses_export_get, api.pettycash_export_get, api.revenue_image_log.
 -- Reads: nothing. Writes: what tenancy.record_change writes.
 -- Raises: XC403 not_member via tenancy.record_change.
 -- Tests: tests/db/test_report_routines.py.
@@ -40,7 +40,7 @@ BEGIN
     'Exported ' || (p_table ->> 'title')
       || coalesce(' for ' || v_period, '')
       || coalesce(', searched for "' || p_q || '"', '')
-      || ' to ' || CASE p_format WHEN 'pdf' THEN 'PDF' ELSE 'Excel' END,
+      || ' to ' || CASE p_format WHEN 'pdf' THEN 'PDF' WHEN 'png' THEN 'Summary image' ELSE 'Excel' END,
     'reports.exported',
     v_id::text,
     NULL,

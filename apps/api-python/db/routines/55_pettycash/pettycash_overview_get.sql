@@ -1,5 +1,5 @@
--- api.pettycash_overview_get(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_date date, p_period text, p_holder_id uuid, p_from date, p_to date, p_now timestamptz) RETURNS jsonb
--- Purpose: the petty-cash screen (PettyCashOverviewDto): the business date; the window (p_from..p_to, else the day or the organization week holding p_date, default the business date); the actor's petty-cash rights and earliest writable date; the floats the actor may see; the window's figures and the to-date row of each chosen float (p_holder_id, else every visible float), both over the entries the actor may see.
+-- api.pettycash_overview_get(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_date date, p_period text, p_holder_id uuid, p_from date, p_to date, p_now timestamptz, p_vehicle_id uuid DEFAULT NULL) RETURNS jsonb
+-- Purpose: the petty-cash screen (PettyCashOverviewDto): the business date; the window (p_from..p_to, else the day or the organization week holding p_date, default the business date); the actor's petty-cash rights and earliest writable date; the floats the actor may see; the window's figures and the to-date row of each chosen float (p_holder_id, else every visible float), both over the entries the actor may see; the vehicles the actor sees, for the vehicle filter (PettyCashVehicleOptionDto, by registration, active when in the fleet on the business date); with p_vehicle_id (a vehicle the actor may see), vehicle_waiting holds the waiting expenses not sent back of that vehicle in the window and the chosen floats (what approve-day with that vehicle approves), else it is null.
 -- Callers: PettyCashRoutines.overview; GetPettyCashOverview (GET /setup/pettycash/overview).
 -- Reads: tenancy.memberships, and what tenancy.business_date, tenancy.effective_permissions, tenancy.earliest_writable, setup.visible_vehicles, revenue.week_start, pettycash.visible_holders and pettycash.tallies read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.require_any_permission, XC422 time_zone_invalid via tenancy.business_date, XC422 pettycash_range_both via pettycash.check_period, XC422 history_dates_order via pettycash.check_period, XC422 pettycash_range_length via pettycash.check_period, XC422 pettycash_range_start via pettycash.check_period, XC422 pettycash_too_old via pettycash.check_period, XC422 pettycash_future_date via pettycash.check_date, XC422 pettycash_period_invalid, XC404 not_found.
@@ -14,7 +14,8 @@ CREATE OR REPLACE FUNCTION api.pettycash_overview_get(
   p_holder_id uuid,
   p_from date,
   p_to date,
-  p_now timestamptz
+  p_now timestamptz,
+  p_vehicle_id uuid DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -36,6 +37,8 @@ DECLARE
   v_chosen uuid[];
   v_figures jsonb;
   v_floats jsonb;
+  v_vehicle_waiting jsonb;
+  v_vehicle_list jsonb;
 BEGIN
   PERFORM tenancy.enter_organization(p_actor_id, p_organization_id, p_request_id, NULL);
   PERFORM tenancy.require_any_permission(ARRAY['pettycash.view']);
@@ -78,6 +81,36 @@ BEGIN
   FROM tenancy.memberships AS m
   WHERE m.organization_id = p_organization_id AND m.user_id = p_actor_id;
   v_vehicles := ARRAY(SELECT visible.id FROM setup.visible_vehicles() AS visible (id));
+  SELECT coalesce(jsonb_agg(
+           jsonb_build_object(
+             'id', f.id,
+             'company_id', f.company_id,
+             'company_name', c.name,
+             'registration', f.registration,
+             'active', setup.vehicle_active_on(f.id, v_today),
+             'fleet_number', f.fleet_number
+           ) ORDER BY f.registration, f.id), '[]'::jsonb)
+  INTO v_vehicle_list
+  FROM setup.fleet_vehicles AS f
+  JOIN setup.psv_companies AS c ON c.organization_id = f.organization_id AND c.id = f.company_id
+  WHERE f.organization_id = p_organization_id
+    AND f.id = ANY (v_vehicles);
+  IF p_vehicle_id IS NOT NULL THEN
+    IF NOT p_vehicle_id = ANY (v_vehicles) THEN
+      PERFORM tenancy.refuse('not_found', 'XC404');
+    END IF;
+    SELECT jsonb_build_object('waiting', coalesce(sum(e.total), 0), 'waiting_count', count(*))
+    INTO v_vehicle_waiting
+    FROM pettycash.entries AS e
+    WHERE e.organization_id = p_organization_id
+      AND e.kind = 2
+      AND e.status = 1
+      AND e.sent_back_note IS NULL
+      AND e.vehicle_id = p_vehicle_id
+      AND e.holder_id = ANY (v_chosen)
+      AND e.entry_date BETWEEN v_from AND v_to
+      AND pettycash.entry_visible(e, v_view_all, v_vehicles);
+  END IF;
 
   WITH t AS MATERIALIZED (
     SELECT * FROM pettycash.tallies(v_chosen, v_from, v_to, v_view_all, v_vehicles)
@@ -173,6 +206,8 @@ BEGIN
       'earliest_date', tenancy.earliest_writable(p_organization_id, p_actor_id, v_today)
     ),
     'holders', v_holders,
+    'vehicles', v_vehicle_list,
+    'vehicle_waiting', v_vehicle_waiting,
     'figures', v_figures,
     'floats', v_floats
   );

@@ -55,6 +55,8 @@ OVERVIEW_KEYS = [
     "holders",
     "figures",
     "floats",
+    "vehicles",
+    "vehicleWaiting",
 ]
 PERMISSION_KEYS = [
     "holderId",
@@ -440,6 +442,38 @@ async def test_ticked_entries_and_a_day_are_approved_with_counts(yard: Yard) -> 
     problem(await post(yard, yard.clerk, "/approve-day", day), 403, FORBIDDEN)
 
 
+async def test_a_vehicle_narrows_the_entries_its_waiting_figure_approve_day_and_export(
+    yard: Yard,
+) -> None:
+    ok(await post(yard, yard.clerk, "/entries", expense(yard, 100)))
+    ok(await post(yard, yard.clerk, "/entries", expense(yard, 250)))
+    listed = ok(await get(yard, yard.reviewer, f"/entries?vehicleId={yard.vehicle}"))
+    assert (listed["total"], {e["vehicleId"] for e in listed["items"]}) == (2, {yard.vehicle})
+    seen = ok(await get(yard, yard.reviewer, f"/overview?vehicleId={yard.vehicle}"))
+    assert seen["vehicleWaiting"] == {"waiting": 350, "waitingCount": 2}
+    assert ok(await get(yard, yard.reviewer, "/overview"))["vehicleWaiting"] is None
+    unknown = uuid4()
+    for path in (f"/entries?vehicleId={unknown}", f"/overview?vehicleId={unknown}"):
+        problem(await get(yard, yard.reviewer, path), 404, NOT_FOUND)
+    problem(
+        await get(
+            yard,
+            yard.owner,
+            f"/export?view=expenses&format=xlsx&from={TODAY}&to={TODAY}&vehicleId={unknown}",
+        ),
+        404,
+        NOT_FOUND,
+    )
+    stranger = {"date": TODAY, "vehicleId": str(unknown)}
+    problem(await post(yard, yard.reviewer, "/approve-day", stranger), 404, NOT_FOUND)
+    day = {"date": TODAY, "vehicleId": yard.vehicle}
+    assert ok(await post(yard, yard.reviewer, "/approve-day", day)) == {
+        "approved": 2,
+        "total": 350,
+        "skipped": 0,
+    }
+
+
 async def test_a_null_entries_list_asks_for_the_entries_as_an_empty_one_does(yard: Yard) -> None:
     for body in ({"entries": None}, {}):
         problem(
@@ -547,8 +581,8 @@ async def test_the_overview_answers_in_wire_order_for_a_day_a_week_and_a_period(
     assert (seen["date"], seen["period"], seen["from"], seen["to"]) == (
         TODAY,
         "week",
-        "2026-10-05",
-        "2026-10-11",
+        "2026-10-04",
+        "2026-10-10",
     )
     assert list(seen["permissions"]) == PERMISSION_KEYS
     assert seen["permissions"]["holderId"] == str(yard.clerk.user_id)

@@ -105,6 +105,7 @@ def _new_vehicle(app_conn: Conn, yard: Yard, registration: str = "KDA 482M") -> 
         "N-7",
         date(2026, 3, 1),
         WEEK,
+        4000,
         None,
         None,
     )

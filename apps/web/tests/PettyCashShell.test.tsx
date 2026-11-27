@@ -187,7 +187,7 @@ it("opens Petty cash on the waiting entries from the approval card", async () =>
   );
 
   expect(
-    await screen.findByRole("combobox", { name: "Show" }),
+    await screen.findByRole("combobox", { name: "Status" }),
   ).toHaveDisplayValue("Waiting");
   await waitFor(() =>
     expect(

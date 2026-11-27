@@ -5,6 +5,7 @@ import {
   REVENUE_NOTE_LIMIT,
   REVENUE_REASONS,
   isRecorded,
+  type RevenueReason,
 } from "@xcode/shared/revenue";
 
 import { SessionEndedError, apiGet, apiPutResult } from "../lib/api";
@@ -85,6 +86,7 @@ const text = (value: unknown, limit: number): value is string =>
 const orNull = (value: unknown, valid: (value: unknown) => boolean) =>
   value === null || valid(value);
 const whole = (value: unknown) => Number.isInteger(value);
+const fuelAnswer = (value: unknown) => value === "yes" || value === "no";
 
 const validSaved = (value: unknown) => {
   const saved = value as SavedValue;
@@ -97,6 +99,7 @@ const validSaved = (value: unknown) => {
     orNull(saved.reason, (reason) => text(reason, 20)) &&
     orNull(saved.note, (note) => text(note, REVENUE_NOTE_LIMIT)) &&
     orNull(saved.version, whole) &&
+    (saved.fuel === undefined || orNull(saved.fuel, fuelAnswer)) &&
     (saved.canEdit === undefined || typeof saved.canEdit === "boolean")
   );
 };
@@ -106,12 +109,19 @@ const validCapture = (entry: StoredCapture) =>
   entry.vehicleId.length > 0 &&
   text(entry.registration, 40) &&
   isDate(entry.date) &&
+  // A reason records no revenue, or goes with an amount below the vehicle's low figure (v2.34).
   (entry.amount === null
     ? REVENUE_REASONS.includes(entry.reason!)
     : typeof entry.amount === "number" &&
       Number.isFinite(entry.amount) &&
       entry.amount > 0 &&
-      entry.reason === null) &&
+      orNull(entry.reason, (reason) =>
+        REVENUE_REASONS.includes(reason as RevenueReason),
+      )) &&
+  // A fuel answer only with an amount; a capture kept before v2.37 has none and keeps the saved answer.
+  (entry.fuel === undefined ||
+    entry.fuel === null ||
+    (entry.amount !== null && fuelAnswer(entry.fuel))) &&
   orNull(entry.note, (note) => text(note, REVENUE_NOTE_LIMIT)) &&
   orNull(entry.version, whole) &&
   STATES.includes(entry.state) &&
@@ -127,6 +137,7 @@ const savedValue = (cell: RevenueCell): SavedValue => ({
   amount: cell.amount,
   reason: cell.reason,
   note: cell.note,
+  fuel: cell.fuel ?? null,
   version: cell.version ?? null,
   canEdit: cell.canEdit,
 });
@@ -177,6 +188,7 @@ export type NewCapture = Pick<
   | "amount"
   | "reason"
   | "note"
+  | "fuel"
   | "version"
 >;
 export type QueueSnapshot = {
@@ -321,6 +333,8 @@ export function openQueue(
       reason: entry.reason,
       note: entry.note,
       version: entry.version,
+      // Absent keeps the saved answer, null clears it.
+      ...(entry.fuel !== undefined && { fuel: entry.fuel }),
     };
     let result: { status: number; body: RevenueProblem };
     try {

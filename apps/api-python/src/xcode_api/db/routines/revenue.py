@@ -20,12 +20,21 @@ from ...domain.revenue import (
     RevenueDayQuery,
     RevenueDayResult,
     RevenueDaySave,
+    RevenueFuel,
     RevenueWeek,
     RevenueWeekQuery,
 )
 from ...domain.tenancy import TenantContext
 from ..session import call
 from ..types import document, write_result
+
+
+def _fuel_bool(fuel: RevenueFuel | None) -> bool | None:
+    if fuel is RevenueFuel.YES:
+        return True
+    if fuel is RevenueFuel.NO:
+        return False
+    return None
 
 
 def _tenant(context: TenantContext) -> tuple[Any, ...]:
@@ -72,6 +81,8 @@ class RevenueRoutines:
             command.amount,
             command.reason,
             command.note,
+            _fuel_bool(command.fuel),
+            command.fuel_given,
             command.expected_version,
             command.captured_at,
             command.context.now,
@@ -107,6 +118,7 @@ class RevenueRoutines:
                     "note": r.note,
                     "version": None if r.version is None else str(r.version),
                 }
+                | ({"fuel": None if r.fuel is None else r.fuel.value} if r.fuel_given else {})
                 for r in command.rows
             ]
         )

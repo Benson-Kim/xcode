@@ -3,7 +3,8 @@ the day read (cell, last week, company, range, the 500 cap), the save's own chec
 through the single capture's steps, all or none, the 400 naming the vehicle, the conflict naming
 it, two saves in opposite orders, and a saving run the day completes.
 
-The business date is 9 Oct 2026, the date of ``T0`` in Nairobi; the low-day threshold is 100."""
+The business date is 9 Oct 2026, the date of ``T0`` in Nairobi; every vehicle's low revenue
+figure is 100."""
 
 from __future__ import annotations
 
@@ -65,18 +66,16 @@ def yard(operator_conn: Conn, owner_conn: Conn) -> Yard:
     clerk = provision_member(operator_conn, 2, "Revenue clerk", "Cleo", "Clerk")
     org = owner.org
     set_scope(owner_conn, clerk, org, all_companies=True)
-    owner_conn.execute(
-        "INSERT INTO tenancy.organization_revenue_settings (organization_id, low_day_threshold, "
-        "gap_amber_percent) VALUES (%s, 100, 10) ON CONFLICT (organization_id) DO UPDATE SET "
-        "low_day_threshold = 100",
-        (org,),
-    )
     north = add_company(owner_conn, org, "North Star")
     south = add_company(owner_conn, org, "South Line")
 
     def vehicle(company: UUID, registration: str) -> UUID:
         vehicle_id = add_vehicle(owner_conn, org, company, registration, joined_on=OCT1)
         add_target(owner_conn, org, vehicle_id, 1, OCT1, 7000)
+        owner_conn.execute(
+            "UPDATE setup.vehicle_target_sets SET low_below = 100 WHERE vehicle_id = %s",
+            (vehicle_id,),
+        )
         return vehicle_id
 
     return Yard(

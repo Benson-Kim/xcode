@@ -115,7 +115,7 @@ it("starts a revenue clerk on today with capture first", async () => {
   await fireEvent.press(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(api.sent("setup/revenue/vehicle-1/2026-09-29")).toEqual([
-      { amount: 1000, reason: null, note: null, version: null },
+      { amount: 1000, reason: null, note: null, fuel: null, version: null },
     ]),
   );
 

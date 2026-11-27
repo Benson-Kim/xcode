@@ -76,6 +76,7 @@ GROUPS = [
     "Expense items",
     "People and access",
     "Change log",
+    "Settings",
 ]
 OFFICE_KEYS = [
     "dash.net",
@@ -320,14 +321,14 @@ def scoped(operator_conn: Conn, owner_conn: Conn, owner: Member, yard: Yard) -> 
 # --- the catalogue and the roles ---
 
 
-def test_the_catalogue_lists_twelve_modules_in_order(app_conn: Conn, clerk: Member) -> None:
+def test_the_catalogue_lists_thirteen_modules_in_order(app_conn: Conn, clerk: Member) -> None:
     groups = _read(app_conn, "access_catalog_list", clerk)
     assert [g["name"] for g in groups] == GROUPS
 
 
-def test_the_catalogue_holds_fifty_nine_rights(app_conn: Conn, clerk: Member) -> None:
+def test_the_catalogue_holds_sixty_rights(app_conn: Conn, clerk: Member) -> None:
     groups = _read(app_conn, "access_catalog_list", clerk)
-    assert sum(len(g["items"]) for g in groups) == 59
+    assert sum(len(g["items"]) for g in groups) == 60
 
 
 def test_a_right_needs_the_view_right_of_its_module_or_the_right_it_builds_on(
@@ -414,7 +415,7 @@ def test_the_owner_role_offers_every_right_but_not_the_hidden_key(
 ) -> None:
     roles = {r["name"]: r for r in _read(app_conn, "access_role_list", office)}
     assert roles["Owner"]["permissions"] == _ORDER
-    assert len(roles["Owner"]["permissions"]) == 59
+    assert len(roles["Owner"]["permissions"]) == 60
 
 
 @pytest.mark.parametrize("name", ["Owner", "Office admin", "Fleet manager", "Revenue clerk"])
@@ -2836,7 +2837,7 @@ def test_the_people_list_shows_modules_can_change_and_status(
     assert item["last_signed_in_at"] is None
     me = _read(app_conn, "people_get", office, owner.id)
     assert me["everything"] is True
-    assert sum(m["held"] for m in me["modules"]) == 59
+    assert sum(m["held"] for m in me["modules"]) == 60
 
 
 # --- the back-dating limit on the person ---

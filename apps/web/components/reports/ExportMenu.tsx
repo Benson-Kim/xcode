@@ -27,14 +27,19 @@ export const EXPORT_FORMATS: {
   { format: "pdf", label: "PDF" },
 ];
 
+export type ExportMenuItem = { label: string; onSelect: () => void };
+
 // The Export button (.btn with the download icon): it opens a pop over (.pop .plist) to choose the file, Excel or PDF,
-// lined up with the button's right edge as in the design.
+// lined up with the button's right edge as in the design. A page may add its own choices after them (Revenue's
+// Summary image).
 export function ExportMenu({
   disabled,
   onExport,
+  extra = [],
 }: {
   disabled: boolean;
   onExport: (format: ReportExportFormat) => void;
+  extra?: ExportMenuItem[];
 }) {
   const [layer, setLayer] = useState<HTMLElement | null>(null);
   const open = layer !== null;
@@ -100,6 +105,19 @@ export function ExportMenu({
                   }}
                 >
                   {option.label}
+                </button>
+              ))}
+              {extra.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    close(true);
+                    item.onSelect();
+                  }}
+                >
+                  {item.label}
                 </button>
               ))}
             </div>

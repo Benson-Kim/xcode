@@ -1,5 +1,5 @@
 -- revenue.record_snapshot(p_id uuid) RETURNS json
--- Purpose: the change-log snapshot of a revenue record with the .NET keys in order (Id, VehicleId, BusinessDate, Amount, Reason, Note, CapturedAt, CapturedBy, UpdatedAt, UpdatedBy, CorrectedAfterDate, Version); Reason is the .NET enum name (NoCrew), the amount has no trailing zeros; the string null for an unknown id.
+-- Purpose: the change-log snapshot of a revenue record with the .NET keys in order (Id, VehicleId, BusinessDate, Amount, Reason, Note, Fuel, CapturedAt, CapturedBy, UpdatedAt, UpdatedBy, CorrectedAfterDate, Version); Reason is the .NET enum name (NoCrew), the amount has no trailing zeros; Fuel is Fueled, Not fueled or left out; the string null for an unknown id.
 -- Callers: api.revenue_capture.
 -- Reads: revenue.records, revenue.no_earnings_reasons. Writes: nothing.
 -- Raises: none.
@@ -20,6 +20,7 @@ AS $$
                'Amount', trim_scale(r.amount),
                'Reason', replace(l.label, ' ', ''),
                'Note', r.note,
+               'Fuel', CASE r.fuel WHEN true THEN 'Fueled' WHEN false THEN 'Not fueled' END,
                'CapturedAt', tenancy.fmt_instant(r.captured_at),
                'CapturedBy', r.captured_by,
                'UpdatedAt', tenancy.fmt_instant(r.updated_at),

@@ -2,6 +2,7 @@ import { memo } from "react";
 
 import { canOpen } from "@xcode/shared/capture";
 import {
+  fuelTag,
   STATUS_META,
   type RevenueCell,
   type RevenueVehicle,
@@ -12,8 +13,8 @@ import { cn } from "../ui";
 import { cellState } from "./capture";
 import type { OpenDay } from "./useCaptureFlow";
 
-// One day of a vehicle's week (v2.29): the amount with the reason in small type under it when the day was low, a
-// reason chip for a no revenue day, "Missing" for a past day with no record, "Due" for today. A cell the person
+// One day of a vehicle's week (v2.29): the amount with the reason in small type under it when the day was low and
+// "Not fueled" under that (v2.36), a reason chip for a no revenue day, "Missing" for a past day with no record, "Due" for today. A cell the person
 // can change is a button; the server says which (canEdit covers the rights and the back-dating limit).
 export const DayCell = memo(function DayCell({
   vehicle,
@@ -32,11 +33,13 @@ export const DayCell = memo(function DayCell({
   const clickable = canOpen(cell, canCapture) && cell.canEdit;
   const meta = STATUS_META[cell.status];
   const now = cell.date === today;
+  const fuel = fuelTag(cell.fuel);
   const content = meta.recorded ? (
     cell.amount !== null ? (
       <>
         {formats.formatNumber(cell.amount)}
         {cell.reason && <small className="rwhy">{cell.reason}</small>}
+        {fuel && <small className="rfuel">{fuel}</small>}
       </>
     ) : (
       <span className="chip mute">{cell.reason}</span>

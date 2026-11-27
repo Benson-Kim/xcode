@@ -188,7 +188,7 @@ BEGIN
       ('securityPolicy', 'refresh_token_days', 'integer', false),
       ('securityPolicy', 'idle_unlock_seconds', 'integer', false),
       ('securityPolicy', 'allow_pin_sign_in', 'boolean', false),
-      ('revenue', 'low_day_threshold', 'decimal', false),
+      ('revenue', 'fuel_question_from', 'decimal', false),
       ('revenue', 'gap_amber_percent', 'decimal', false)
     ) AS f (section, key, kind, nullable)
     WHERE f.section = p_section AND v_value ? f.key;
@@ -313,17 +313,17 @@ BEGIN
           updated_at = p_now;
     ELSIF p_section = 'revenue' THEN
       INSERT INTO tenancy.organization_revenue_settings AS r (
-        organization_id, low_day_threshold, gap_amber_percent, created_at, updated_at
+        organization_id, fuel_question_from, gap_amber_percent, created_at, updated_at
       )
       VALUES (
         p_organization_id,
-        (v_merged ->> 'low_day_threshold')::numeric,
+        (v_merged ->> 'fuel_question_from')::numeric,
         (v_merged ->> 'gap_amber_percent')::numeric,
         p_now,
         p_now
       )
       ON CONFLICT (organization_id) DO UPDATE
-      SET low_day_threshold = EXCLUDED.low_day_threshold,
+      SET fuel_question_from = EXCLUDED.fuel_question_from,
           gap_amber_percent = EXCLUDED.gap_amber_percent,
           updated_at = p_now;
     ELSE
@@ -368,15 +368,15 @@ BEGIN
         CASE
           WHEN json_typeof(v_before) = 'object' THEN
             json_build_object(
-              'lowDayThreshold',
-              v_currency || ' ' || tenancy.fmt_money((v_before ->> 'lowDayThreshold')::numeric),
+              'fuelQuestionFrom',
+              v_currency || ' ' || tenancy.fmt_money((v_before ->> 'fuelQuestionFrom')::numeric),
               'gapAmberPercent', v_before -> 'gapAmberPercent'
             )
           ELSE v_before
         END,
         json_build_object(
-          'lowDayThreshold',
-          v_currency || ' ' || tenancy.fmt_money((v_after ->> 'lowDayThreshold')::numeric),
+          'fuelQuestionFrom',
+          v_currency || ' ' || tenancy.fmt_money((v_after ->> 'fuelQuestionFrom')::numeric),
           'gapAmberPercent', v_after -> 'gapAmberPercent'
         )
       );

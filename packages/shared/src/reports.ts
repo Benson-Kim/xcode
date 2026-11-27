@@ -162,6 +162,7 @@ export const pettyCashExportPath = (query: {
   from: string;
   to: string;
   holderId?: string;
+  vehicleId?: string;
   view: "expenses" | "cash";
   status?: string;
   q?: string;

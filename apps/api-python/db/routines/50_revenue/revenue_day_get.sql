@@ -1,7 +1,7 @@
 -- api.revenue_day_get(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_date date, p_company_id uuid, p_now timestamptz) RETURNS jsonb
--- Purpose: one day of the fleet for capture: {date, business_date, vehicles, truncated}; vehicles are the visible ones in the fleet and not away that day, of the company when given, by registration (ordinal) then id, at most 500 (truncated when more), each {id, company_id, registration, fleet_number, day, last_week}: day is the week grid's cell for the date with the viewer's rights and earliest writable date, last_week the record seven days earlier as {amount, reason (label)} or null. p_date NULL is the business date.
+-- Purpose: one day of the fleet for capture: {date, business_date, vehicles, truncated, fuel_question_from}; vehicles are the visible ones in the fleet and not away that day, of the company when given, by registration (ordinal) then id, at most 500 (truncated when more), each {id, company_id, registration, fleet_number, day, last_week}: day is the week grid's cell for the date with the viewer's rights and earliest writable date, last_week the record seven days earlier as {amount, reason (label)} or null. p_date NULL is the business date.
 -- Callers: RevenueRoutines.day; GetRevenueDay (GET /setup/revenue/day).
--- Reads: setup.fleet_vehicles, revenue.records, and what tenancy.business_date, tenancy.effective_permissions, tenancy.earliest_writable, setup.visible_vehicles, setup.vehicle_away_on, revenue.vehicle_days, revenue.cell and revenue.reason_label read. Writes: nothing.
+-- Reads: setup.fleet_vehicles, revenue.records, and what tenancy.settings_document, tenancy.business_date, tenancy.effective_permissions, tenancy.earliest_writable, setup.visible_vehicles, setup.vehicle_away_on, revenue.vehicle_days, revenue.cell and revenue.reason_label read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 time_zone_invalid via tenancy.business_date, XC422 revenue_day_date_range.
 -- Tests: tests/db/test_revenue_day_routines.py, tests/api/test_revenue_day.py.
 
@@ -83,7 +83,8 @@ BEGIN
     'date', v_day,
     'business_date', v_today,
     'vehicles', coalesce(v_vehicles, '[]'::jsonb),
-    'truncated', v_truncated
+    'truncated', v_truncated,
+    'fuel_question_from', (tenancy.settings_document('revenue') ->> 'fuel_question_from')::numeric
   );
 END;
 $$;

@@ -602,3 +602,71 @@ def test_the_expenses_migration_refuses_to_reverse_over_its_change_log_rows(
                 conn.execute(log, person)
     finally:
         conn.close()
+
+
+def test_the_week_migration_starts_every_week_on_sunday_and_records_when(
+    fresh_owner_url: str,
+) -> None:
+    runner, conn = _runner(fresh_owner_url)
+    slugs = ("monday-week", "saturday-week", "default-week")
+    try:
+        with advisory_lock(conn):
+            runner.migrate(to=22)
+            orgs = {
+                slug: conn.execute(
+                    "INSERT INTO tenancy.organizations (slug, name) VALUES (%s, %s) RETURNING id",
+                    (slug, slug),
+                ).fetchone()["id"]  # type: ignore[index]
+                for slug in slugs
+            }
+            for slug, first_day in (("monday-week", 1), ("saturday-week", 6)):
+                conn.execute(
+                    "INSERT INTO tenancy.organization_localizations "
+                    "(organization_id, first_day_of_week) VALUES (%s, %s)",
+                    (orgs[slug], first_day),
+                )
+            runner.migrate(to=24)
+            days = conn.execute(
+                "SELECT first_day_of_week AS day FROM tenancy.organization_localizations"
+            ).fetchall()
+            moved = conn.execute(
+                "SELECT count(*) AS n FROM tenancy.organizations "
+                "WHERE sunday_week_at > now() - interval '1 hour'"
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO tenancy.organization_localizations (organization_id) VALUES (%s)",
+                (orgs["default-week"],),
+            )
+            default = conn.execute(
+                "SELECT first_day_of_week AS day FROM tenancy.organization_localizations "
+                "WHERE organization_id = %s",
+                (orgs["default-week"],),
+            ).fetchone()
+            with pytest.raises(psycopg.errors.CheckViolation):
+                with conn.transaction():
+                    conn.execute(
+                        "UPDATE tenancy.organization_localizations SET first_day_of_week = 1"
+                    )
+            runner.down(24, confirmed=True, env="testing")
+            kept = conn.execute(
+                "SELECT DISTINCT first_day_of_week AS day FROM tenancy.organization_localizations"
+            ).fetchall()
+            conn.execute("UPDATE tenancy.organization_localizations SET first_day_of_week = 6")
+            column = conn.execute(
+                "SELECT count(*) AS n FROM information_schema.columns "
+                "WHERE table_schema = 'tenancy' AND table_name = 'organizations' "
+                "AND column_name = 'sunday_week_at'"
+            ).fetchone()
+            reverted_default = conn.execute(
+                "SELECT column_default AS d FROM information_schema.columns "
+                "WHERE table_schema = 'tenancy' AND table_name = 'organization_localizations' "
+                "AND column_name = 'first_day_of_week'"
+            ).fetchone()
+    finally:
+        conn.close()
+    assert [row["day"] for row in days] == [0, 0]
+    assert moved == {"n": 3}
+    assert default == {"day": 0}
+    assert [row["day"] for row in kept] == [0]
+    assert column == {"n": 0}
+    assert reverted_default is not None and str(reverted_default["d"]).startswith("1")

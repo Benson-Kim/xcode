@@ -21,6 +21,7 @@ from ...domain.reports import (
     ReportsAccess,
     ReportTable,
     RevenueExportQuery,
+    RevenueImageLog,
 )
 from ...domain.tenancy import TenantContext
 from ..session import call
@@ -99,6 +100,18 @@ class ReportsRoutines:
         )
         return document(_decimal_cells(value), ReportDocument, "api.revenue_export_get")
 
+    async def log_revenue_image(self, log: RevenueImageLog) -> None:
+        await call(
+            self._pool,
+            "revenue_image_log",
+            *_tenant(log.context),
+            log.week_start,
+            log.company_id,
+            log.q,
+            log.context.now,
+            idempotent=True,
+        )
+
     async def export_expenses(self, query: ExpenseExportQuery) -> ReportDocument:
         value = await self._read(
             "expenses_export_get",
@@ -124,6 +137,7 @@ class ReportsRoutines:
             query.q,
             query.format,
             query.context.now,
+            query.vehicle_id,
         )
         return document(_decimal_cells(value), ReportDocument, "api.pettycash_export_get")
 

@@ -1,8 +1,8 @@
--- api.setup_vehicle_create(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_company_id uuid, p_registration text, p_fleet_number text, p_joined_on date, p_day_targets numeric[], p_initial_investment numeric, p_reason text, p_now timestamptz) RETURNS api.write_result
--- Purpose: add a vehicle with a new registration and a fleet number new to its company to a visible company in use, joining on or before the business date, with its first target set of seven day figures from the join date and an optional initial investment (0 is stored as empty); an actor scoped to vehicles only may not.
+-- api.setup_vehicle_create(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_company_id uuid, p_registration text, p_fleet_number text, p_joined_on date, p_day_targets numeric[], p_low_below numeric, p_initial_investment numeric, p_reason text, p_now timestamptz) RETURNS api.write_result
+-- Purpose: add a vehicle with a new registration and a fleet number new to its company to a visible company in use, joining on or before the business date, with its first target set from the join date (seven day figures, or seven zeros while Targets is off and none are given; a low revenue figure, KES 4,000 when none is given) and an optional initial investment (0 is stored as empty); an actor scoped to vehicles only may not.
 -- Callers: SetupRoutines.create_vehicle; CreateVehicle (POST /setup/vehicles).
--- Reads: setup.fleet_vehicles, setup.psv_companies, and what tenancy.business_date, tenancy.actor_scope, tenancy.settings_document and setup.company_visible read. Writes: setup.fleet_vehicles, setup.vehicle_target_sets, and through setup.record_setup_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
--- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 reason_length via tenancy.check_typed_reason, XC422 vehicle_registration_format via setup.registration_normalize, XC422 vehicle_fleet_required via setup.fleet_number, XC422 vehicle_fleet_length via setup.fleet_number, XC422 target_days_required via setup.check_day_targets, XC422 money_invalid via setup.check_day_targets, XC422 money_invalid via tenancy.check_money, XC422 time_zone_invalid via tenancy.business_date, XC422 vehicle_joined_future, XC404 not_found, XC422 vehicle_company_inactive, XC403 permission_missing, XC422 vehicle_registration_taken, XC422 vehicle_fleet_taken.
+-- Reads: setup.fleet_vehicles, setup.psv_companies, and what tenancy.business_date, tenancy.actor_scope, tenancy.settings_document, tenancy.setting_enabled and setup.company_visible read. Writes: setup.fleet_vehicles, setup.vehicle_target_sets, and through setup.record_setup_change tenancy.change_log, tenancy.audit_events and tenancy.organizations.settings_version.
+-- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.enter_organization, XC422 reason_length via tenancy.check_typed_reason, XC422 vehicle_registration_format via setup.registration_normalize, XC422 vehicle_fleet_required via setup.fleet_number, XC422 vehicle_fleet_length via setup.fleet_number, XC422 target_days_required via setup.check_day_targets, XC422 money_invalid via setup.check_day_targets, XC422 money_invalid via setup.check_low_below, XC422 money_invalid via tenancy.check_money, XC422 time_zone_invalid via tenancy.business_date, XC422 vehicle_joined_future, XC404 not_found, XC422 vehicle_company_inactive, XC403 permission_missing, XC422 vehicle_registration_taken, XC422 vehicle_fleet_taken.
 -- Tests: tests/db/test_setup_vehicle_routines.py, tests/api/test_setup_vehicles.py.
 -- A unique_violation from a concurrent create of the same registration or fleet number surfaces as unique_conflict.
 
@@ -15,6 +15,7 @@ CREATE OR REPLACE FUNCTION api.setup_vehicle_create(
   p_fleet_number text,
   p_joined_on date,
   p_day_targets numeric[],
+  p_low_below numeric,
   p_initial_investment numeric,
   p_reason text,
   p_now timestamptz
@@ -29,6 +30,9 @@ DECLARE
   v_reason text;
   v_registration text;
   v_fleet_number text;
+  v_days numeric[];
+  v_low_below numeric;
+  v_currency text;
   v_investment numeric;
   v_today date;
   v_scope tenancy.scope;
@@ -40,7 +44,12 @@ BEGIN
   v_reason := tenancy.check_typed_reason(p_reason);
   v_registration := setup.registration_normalize(p_registration);
   v_fleet_number := setup.fleet_number(p_fleet_number);
-  PERFORM setup.check_day_targets(p_day_targets);
+  IF p_day_targets IS NULL AND NOT tenancy.setting_enabled('targets') THEN
+    v_days := array_fill(0::numeric, ARRAY[7]);
+  ELSE
+    v_days := setup.check_day_targets(p_day_targets);
+  END IF;
+  v_low_below := setup.check_low_below(coalesce(p_low_below, 4000));
   v_investment := nullif(p_initial_investment, 0);
   IF v_investment IS NOT NULL THEN
     PERFORM tenancy.check_money(v_investment);
@@ -90,19 +99,23 @@ BEGIN
   RETURNING id INTO v_id;
   INSERT INTO setup.vehicle_target_sets (
     organization_id, vehicle_id, starts_on, monday, tuesday, wednesday, thursday, friday,
-    saturday, sunday, created_at, created_by
+    saturday, sunday, low_below, created_at, created_by
   )
   VALUES (
-    p_organization_id, v_id, p_joined_on, p_day_targets[1], p_day_targets[2], p_day_targets[3],
-    p_day_targets[4], p_day_targets[5], p_day_targets[6], p_day_targets[7], p_now, p_actor_id
+    p_organization_id, v_id, p_joined_on, v_days[1], v_days[2], v_days[3], v_days[4], v_days[5],
+    v_days[6], v_days[7], v_low_below, p_now, p_actor_id
   );
+  v_currency := tenancy.settings_document('localization') ->> 'currency';
   v_version := setup.record_setup_change(
     'vehicles', v_id, v_id, 'null'::json, setup.vehicle_snapshot(v_id),
     tenancy.compose_reason(
       'Added vehicle ' || v_registration || ', fleet number ' || v_fleet_number || ', to '
-        || v_company_name || ' with a weekly target of '
-        || (tenancy.settings_document('localization') ->> 'currency') || ' '
-        || tenancy.fmt_money(setup.week_total(setup.target_set_on(v_id, p_joined_on)))
+        || v_company_name
+        || CASE WHEN v_days[1] = 0 THEN '' ELSE
+             ' with a weekly target of ' || v_currency || ' '
+             || tenancy.fmt_money(setup.week_total(setup.target_set_on(v_id, p_joined_on)))
+           END
+        || ', low below ' || v_currency || ' ' || tenancy.fmt_money(v_low_below)
         || ' from ' || tenancy.fmt_iso(p_joined_on),
       v_reason
     ),

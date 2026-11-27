@@ -40,7 +40,7 @@ it("keeps the sheet open while its save runs, so the save's answer is never lost
       onOpenGap={onOpenGap}
     />,
   );
-  await fireEvent.changeText(screen.getByLabelText("Revenue amount"), "1500");
+  await fireEvent.changeText(screen.getByLabelText("Revenue amount"), "4500");
   await fireEvent.press(screen.getByRole("button", { name: "Save" }));
   expect(onSave).toHaveBeenCalledTimes(1);
 

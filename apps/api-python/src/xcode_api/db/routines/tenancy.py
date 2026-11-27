@@ -45,6 +45,8 @@ from ...domain.tenancy import (
     RoleSave,
     ScopeOptions,
     SettingsSave,
+    SystemSettings,
+    SystemSettingSave,
     TenantContext,
     UserPreferences,
 )
@@ -321,6 +323,23 @@ class TenancyRoutines:
     async def appearance(self, context: TenantContext) -> Appearance:
         value = await self._read("organization_appearance_get", *_tenant(context), context.now)
         return document(value, Appearance, "api.organization_appearance_get")
+
+    async def system_settings(self, context: TenantContext) -> SystemSettings:
+        value = await self._read("setup_settings_get", *_tenant(context))
+        return document(value, SystemSettings, "api.setup_settings_get")
+
+    async def set_system_setting(self, command: SystemSettingSave) -> SystemSettings:
+        rows = await call(
+            self._pool,
+            "setup_settings_set",
+            *_tenant(command.context),
+            command.key,
+            command.on,
+            command.context.now,
+        )
+        return document(
+            _single(rows, "setup_settings_set"), SystemSettings, "api.setup_settings_set"
+        )
 
     async def preferences(self, context: TenantContext) -> Preferences:
         value = await self._read("preferences_get", *_tenant(context), context.now)

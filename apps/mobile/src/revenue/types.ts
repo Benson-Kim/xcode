@@ -7,9 +7,16 @@ export type {
   RevenueWeek,
   SaveRevenue,
 } from "@xcode/shared/revenue";
-import type { RevenueCell, RevenueReason } from "@xcode/shared/revenue";
+import type {
+  RevenueCell,
+  RevenueFuel,
+  RevenueReason,
+} from "@xcode/shared/revenue";
 
-export type SavedValue = Pick<RevenueCell, "amount" | "reason" | "note"> & {
+export type SavedValue = Pick<
+  RevenueCell,
+  "amount" | "reason" | "note" | "fuel"
+> & {
   version: number | null;
   canEdit?: boolean;
 };
@@ -27,6 +34,8 @@ export interface QueuedCapture {
   amount: number | null;
   reason: RevenueReason | null;
   note: string | null;
+  // v2.37: the fuel answer to send. Left out (as in captures kept before it existed) the saved answer stays.
+  fuel?: RevenueFuel | null;
   version: number | null;
   state: QueueState;
   message: string;

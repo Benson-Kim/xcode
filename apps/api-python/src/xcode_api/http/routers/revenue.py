@@ -113,7 +113,8 @@ async def save_day(
     c: ContainerDep,
 ) -> Response:
     rows = tuple(
-        RevenueDayRow(r.vehicle_id, r.amount, r.reason, r.note, r.version) for r in body.rows
+        RevenueDayRow(r.vehicle_id, r.amount, r.reason, r.note, r.fuel, r.fuel_given(), r.version)
+        for r in body.rows
     )
     result = await c.save_revenue_day.execute(SaveRevenueDayCommand(caller, day, rows))
     return respond(RevenueDaySaved.from_record(result))
@@ -163,6 +164,8 @@ async def save_revenue(
             body.amount,
             body.reason,
             body.note,
+            body.fuel,
+            body.fuel_given(),
             body.version,
             body.captured_at,
         )

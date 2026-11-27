@@ -14,6 +14,8 @@ from ...application.organization.delete_organization_logo import DeleteOrganizat
 from ...application.organization.get_appearance import GetAppearanceQuery
 from ...application.organization.get_organization_settings import GetOrganizationSettingsQuery
 from ...application.organization.get_preferences import GetPreferencesQuery
+from ...application.organization.get_system_settings import GetSystemSettingsQuery
+from ...application.organization.set_system_setting import SetSystemSettingCommand
 from ...application.organization.update_organization_logo import UpdateOrganizationLogoCommand
 from ...application.organization.update_organization_settings import (
     UpdateOrganizationSettingsCommand,
@@ -33,7 +35,9 @@ from ..schemas.organization import (
     SaveLogo,
     SaveOrganizationSettings,
     SaveUserPreferences,
+    SetSystemSetting,
     SettingsSectionResponse,
+    SystemSettingsResponse,
     UserPreferenceDto,
 )
 
@@ -106,6 +110,30 @@ async def delete_organization_logo(
 async def get_appearance(caller: CallerDep, c: ContainerDep) -> Response:
     appearance = await c.get_appearance.execute(GetAppearanceQuery(caller))
     return respond(AppearanceResponse.from_record(appearance))
+
+
+@router.get(
+    "/settings",
+    operation_id="GetSystemSettings",
+    response_model=SystemSettingsResponse,
+    responses=problem_responses(403),
+)
+async def get_system_settings(caller: CallerDep, c: ContainerDep) -> Response:
+    settings = await c.get_system_settings.execute(GetSystemSettingsQuery(caller))
+    return respond(SystemSettingsResponse.from_record(settings))
+
+
+@router.put(
+    "/settings/{key}",
+    operation_id="SetSystemSetting",
+    response_model=SystemSettingsResponse,
+    responses=problem_responses(400, 403, 404),
+)
+async def set_system_setting(
+    key: str, body: SetSystemSetting, caller: CallerDep, c: ContainerDep
+) -> Response:
+    settings = await c.set_system_setting.execute(SetSystemSettingCommand(caller, key, body.on))
+    return respond(SystemSettingsResponse.from_record(settings))
 
 
 @router.get(

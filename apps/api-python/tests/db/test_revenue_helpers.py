@@ -22,8 +22,8 @@ from uuid import UUID
 import pytest
 
 from ..support.scenario import T0, Conn
-from ..support.setup_rows import add_away, add_record, add_target
-from ..support.tenancy import Member, add_company, add_vehicle, provision_member, set_localization
+from ..support.setup_rows import add_away, add_record, add_target, add_target_set, split_week
+from ..support.tenancy import Member, add_company, add_vehicle, provision_member
 
 TODAY = date(2026, 10, 9)
 WEEK = date(2026, 10, 5)
@@ -83,16 +83,15 @@ def _week(
     vehicle: UUID,
     start: date = WEEK,
     *,
-    threshold: int = 4000,
     amber: int = 10,
 ) -> dict[str, Any]:
     with _as(executor, yard.owner):
         return _scalar(
             executor,
             "SELECT revenue.vehicle_week("
-            "array_agg(d ORDER BY d.day), %s, true, true, NULL, %s, %s) "
+            "array_agg(d ORDER BY d.day), %s, true, true, NULL, %s) "
             "FROM revenue.vehicle_days(ARRAY[%s]::uuid[], %s, %s, %s) AS d",
-            (TODAY, threshold, amber, vehicle, start, start + timedelta(days=6), TODAY),
+            (TODAY, amber, vehicle, start, start + timedelta(days=6), TODAY),
         )
 
 
@@ -114,8 +113,8 @@ def _cell(
     labels = {1: "Garage", 3: "No Crew"}
     return _scalar(
         executor,
-        "SELECT revenue.cell(ROW(%s, %s, %s, false, %s, %s, %s, %s, %s, %s, NULL, false, %s)"
-        "::revenue.vehicle_day, %s, %s, %s, %s)",
+        "SELECT revenue.cell(ROW(%s, %s, %s, false, %s, %s, %s, %s, %s, %s, NULL, false, %s, "
+        "4000, NULL)::revenue.vehicle_day, %s, %s, %s, %s)",
         (
             UUID(int=7),
             day,
@@ -447,16 +446,14 @@ def test_reason_spellings_are_the_labels_with_or_without_their_space(
         assert label == ("No Crew" if code == 3 else text)
 
 
-@pytest.mark.parametrize(
-    ("first_day", "start"), [(1, date(2026, 10, 5)), (0, date(2026, 10, 4)), (5, TODAY)]
-)
-def test_the_week_starts_on_the_organization_first_day(
-    executor: Conn, owner_conn: Conn, yard: Yard, first_day: int, start: date
-) -> None:
-    set_localization(owner_conn, yard.owner.org, first_day_of_week=first_day)
+def test_the_week_runs_sunday_to_saturday(executor: Conn, yard: Yard) -> None:
+    sunday = date(2026, 10, 4)
     with _as(executor, yard.owner):
-        for day in (start, start + timedelta(days=3), start + timedelta(days=6)):
-            assert _scalar(executor, "SELECT revenue.week_start(%s)", (day,)) == start
+        for day in (sunday, sunday + timedelta(days=3), sunday + timedelta(days=6)):
+            assert _scalar(executor, "SELECT revenue.week_start(%s)", (day,)) == sunday
+        saturday = sunday - timedelta(days=1)
+        last_sunday = sunday - timedelta(days=7)
+        assert _scalar(executor, "SELECT revenue.week_start(%s)", (saturday,)) == last_sunday
 
 
 def test_a_record_snapshot_reads_as_the_dotnet_entity(
@@ -478,6 +475,7 @@ def test_a_record_snapshot_reads_as_the_dotnet_entity(
             "Amount": None,
             "Reason": "NoCrew",
             "Note": None,
+            "Fuel": None,
             "CapturedAt": stamp,
             "CapturedBy": str(yard.owner.id),
             "UpdatedAt": stamp,
@@ -535,18 +533,28 @@ def test_the_gap_counts_the_days_so_far(executor: Conn, owner_conn: Conn, yard: 
     assert _week(executor, yard, old, WEEK - timedelta(days=7), amber=15)["gap_band"] == "amber"
 
 
-def test_low_days_are_judged_by_their_amount_against_the_threshold(
+def test_low_days_are_judged_by_their_amount_against_the_days_low_figure(
     executor: Conn, owner_conn: Conn, yard: Yard
 ) -> None:
-    kda = _vehicle(owner_conn, yard, "KDA 482M", joined_on=date(2026, 10, 1), target=7000)
     org, by = yard.owner.org, yard.owner.id
-    _record(owner_conn, yard, kda, WEEK, 3999)
-    _record(owner_conn, yard, kda, WEEK + timedelta(days=1), 4000)
-    add_record(owner_conn, org, kda, WEEK + timedelta(days=2), None, recorder=by, reason=2)
-    add_record(owner_conn, org, kda, WEEK + timedelta(days=3), 100, recorder=by, reason=1)
-    assert _week(executor, yard, kda)["below_threshold_days"] == 3
-    assert _week(executor, yard, kda, threshold=4001)["below_threshold_days"] == 4
-    assert _week(executor, yard, kda, threshold=0)["below_threshold_days"] == 1
+
+    def fleet(registration: str, low_below: int) -> UUID:
+        vehicle = add_vehicle(
+            owner_conn, org, yard.north, registration, joined_on=date(2026, 10, 1)
+        )
+        add_target_set(
+            owner_conn, org, vehicle, date(2026, 10, 1), split_week(7000), low_below=low_below
+        )
+        _record(owner_conn, yard, vehicle, WEEK, 3999)
+        _record(owner_conn, yard, vehicle, WEEK + timedelta(days=1), 4000)
+        add_record(owner_conn, org, vehicle, WEEK + timedelta(days=2), None, recorder=by, reason=2)
+        add_record(owner_conn, org, vehicle, WEEK + timedelta(days=3), 100, recorder=by, reason=1)
+        return vehicle
+
+    # The default low figure is 4,000; the records are 3,999, 4,000, a reason alone and 100.
+    assert _week(executor, yard, fleet("KDA 482M", 4000))["below_threshold_days"] == 3
+    assert _week(executor, yard, fleet("KDB 111A", 4001))["below_threshold_days"] == 4
+    assert _week(executor, yard, fleet("KDC 222A", 0))["below_threshold_days"] == 1
 
 
 def test_the_report_figures_sum_the_day_series_inside_each_vehicle_s_window(

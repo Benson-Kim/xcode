@@ -181,7 +181,7 @@ it("gives Savings its own page with the balance, this month's saving, the rule a
     "Engine fund",
     "All vehicles",
     "3,000",
-    "Every SaturdayRevenue KES 60,000 or more over the 7 days to the run",
+    "Every SaturdayRevenue KES 60,000 or more over the last Sunday to Saturday week",
     "3 Oct 20261 saved, 1 waiting for revenue",
     "150,000",
   ]);
@@ -321,7 +321,7 @@ it("opens a saving's runs: each vehicle, the revenue measured and what happened,
   const dialog = await screen.findByRole("dialog", { name: "Engine fund" });
   expect(
     within(dialog).getByText(
-      "Every Saturday. Revenue KES 60,000 or more over the 7 days to the run.",
+      "Every Saturday. Revenue KES 60,000 or more over the last Sunday to Saturday week.",
     ),
   ).toBeInTheDocument();
   expect(

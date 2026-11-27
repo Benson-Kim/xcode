@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -96,6 +96,8 @@ class Permission(StrEnum):
     PEOPLE_SIGN_IN = "people.sign_in"
 
     AUDIT_VIEW = "audit.view"
+
+    SETTINGS_EDIT = "settings.edit"
 
 
 class RetiredPermission(StrEnum):
@@ -199,6 +201,13 @@ class WeekNumbering(StrEnum):
     LOCAL = "local"
 
 
+class FirstDayOfWeek(IntEnum):
+    """The week runs Sunday to Saturday for every organization (design notes Web v2.41): the
+    localization keeps the setting, and Sunday is its only value."""
+
+    SUNDAY = 0
+
+
 class LogoContentType(StrEnum):
     PNG = "image/png"
     JPEG = "image/jpeg"
@@ -236,7 +245,7 @@ class Localization:
     time_zone: str
     date_pattern: DatePattern
     hour12: bool
-    first_day_of_week: int
+    first_day_of_week: FirstDayOfWeek
     week_numbering: WeekNumbering
     currency: str
     use_grouping: bool
@@ -293,11 +302,11 @@ class SecurityPolicy:
 
 @dataclass(frozen=True, slots=True)
 class RevenueSettings:
-    """The low-day threshold (a day below it needs a reason) and the amber band of the gap to
+    """The amount from which the fuel question is asked and the amber band of the gap to
     target, in per cent of the target."""
 
     organization_id: UUID
-    low_day_threshold: Decimal
+    fuel_question_from: Decimal
     gap_amber_percent: Decimal
 
 
@@ -834,7 +843,7 @@ class EffectiveFormats:
     time_zone: str
     date_pattern: DatePattern
     hour12: bool
-    first_day_of_week: int
+    first_day_of_week: FirstDayOfWeek
     week_numbering: WeekNumbering
     currency: str
     use_grouping: bool
@@ -887,6 +896,11 @@ class Appearance:
     lockout_threshold: int
     lockout_minutes: int
     idle_unlock_seconds: int
+    # The calendar date the organization's week moved to Sunday to Saturday; None when it never
+    # ran Monday first.
+    sunday_week_since: date | None
+    # Whether the system setting Targets is on, so screens show or hide target and gap figures.
+    targets: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -943,6 +957,33 @@ class SettingsSave:
     value: Any
     reason: str | None
     expected_version: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class SystemSetting:
+    """One on/off system setting: its key, its label and whether it is on for the
+    organization (its own choice, else the setting's default)."""
+
+    key: str
+    label: str
+    on: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SystemSettings:
+    """The organization's system settings in catalogue order, as ``GET /setup/settings``
+    serves them."""
+
+    settings: tuple[SystemSetting, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SystemSettingSave:
+    """Switch one system setting on or off for the whole organization."""
+
+    context: TenantContext
+    key: str
+    on: bool | None
 
 
 LOGO_MAX_BYTES = 256 * 1024

@@ -47,13 +47,14 @@ async def test_every_member_reads_the_catalogue_in_its_shape(api: AuthApi, clerk
         "Expense items",
         "People and access",
         "Change log",
+        "Settings",
     ]
     for group in groups:
         assert list(group) == ["name", "items"]
         for item in group["items"]:
             assert list(item) == ["key", "label", "needs", "section"]
     keys = [item["key"] for group in groups for item in group["items"]]
-    assert len(keys) == 59
+    assert len(keys) == 60
     for key in ("revenue.capture", "pettycash.approve_item", "people.sign_in", "catalog.stop"):
         assert key in keys
     for key in ("bills.view", "dash.edits", "vehicles.manage", "organization.manage"):
@@ -77,7 +78,7 @@ async def test_roles_need_people_view_and_list_by_name(
     ]
     assert all(list(role) == ["id", "name", "permissions", "builtIn", "version"] for role in roles)
     assert roles[3]["permissions"] == ["dash.gaps", "revenue.view", "revenue.capture"]
-    assert len(roles[2]["permissions"]) == 59
+    assert len(roles[2]["permissions"]) == 60
     refused = await api.client.get("/setup/access/roles", headers=clerk.headers)
     problem(refused, 403, FORBIDDEN)
 

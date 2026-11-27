@@ -25,11 +25,11 @@ describe("PERMISSION_KEYS", () => {
 });
 
 describe("RIGHTS", () => {
-  it("lists the 59 rights of v2.33 once, in catalogue order", () => {
-    expect(RIGHTS).toHaveLength(59);
+  it("lists the 60 rights of v2.38 once, in catalogue order", () => {
+    expect(RIGHTS).toHaveLength(60);
     expect(new Set(RIGHTS).size).toBe(RIGHTS.length);
     expect(RIGHTS[0]).toBe("dash.net");
-    expect(RIGHTS.at(-1)).toBe("audit.view");
+    expect(RIGHTS.at(-1)).toBe("settings.edit");
   });
 
   it("holds the 20 petty cash rights and the four of each of scheduled expenses and savings", () => {
@@ -145,6 +145,14 @@ describe("NAV", () => {
     ]);
   });
 
+  it("keeps only Setup collapsed outside its own pages", () => {
+    expect(
+      NAV_SECTIONS.flatMap((section) =>
+        section.kind === "group" && section.closedOutside ? [section.id] : [],
+      ),
+    ).toEqual(["setup"]);
+  });
+
   it("places every menu entry in exactly one section", () => {
     const placed = NAV_SECTIONS.flatMap((section) => [...section.items]);
     expect([...placed].sort()).toEqual(Object.keys(NAV).sort());
@@ -193,6 +201,16 @@ describe("NAV", () => {
     expect(canSee(NAV.savings, permissionChecker(["scheduled.view"]))).toBe(
       false,
     );
+  });
+
+  it("opens Settings for the organization's settings or the system settings", () => {
+    expect(canSee(NAV.settings, permissionChecker(["settings.edit"]))).toBe(
+      true,
+    );
+    expect(
+      canSee(NAV.settings, permissionChecker(["organization.manage"])),
+    ).toBe(true);
+    expect(canSee(NAV.settings, permissionChecker(["audit.view"]))).toBe(false);
   });
 
   it("keeps the released keys opening their menu entries for a v2.11 phone", () => {

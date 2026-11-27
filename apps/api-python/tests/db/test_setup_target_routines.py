@@ -35,6 +35,7 @@ from ..support.tenancy import (
     set_organization,
     set_override,
     set_scope,
+    set_system_setting,
     settings_version,
 )
 
@@ -69,8 +70,10 @@ def _holding(operator_conn: Conn, owner_conn: Conn, slot: int, *rights: str) -> 
     return who
 
 
-def _save(app_conn: Conn, who: Member, vehicle: UUID, starts_on: Any, days: Any) -> dict[str, Any]:
-    return run(app_conn, "setup_target_set_save", who, vehicle, starts_on, days)
+def _save(
+    app_conn: Conn, who: Member, vehicle: UUID, starts_on: Any, days: Any, low_below: Any = None
+) -> dict[str, Any]:
+    return run(app_conn, "setup_target_set_save", who, vehicle, starts_on, days, low_below)
 
 
 def _sets(owner_conn: Conn, vehicle: UUID) -> list[tuple[date, list[Decimal]]]:
@@ -105,6 +108,7 @@ def test_the_list_is_newest_first_with_the_set_in_force_and_those_that_can_go(
         "starts_on": "2026-03-20",
         "days": [1200, 1200, 1200, 1200, 1200.50, 1800, 600],
         "week_total": 8400.50,
+        "low_below": 4000,
         "in_force": False,
         "can_remove": True,
     }
@@ -158,7 +162,7 @@ def test_a_future_set_is_added_and_logged_with_the_figures_before_and_after(
     assert (log["entity_id"], log["vehicle_id"], log["reason"]) == (
         yard.kda,
         yard.kda,
-        "Target set, KDA 482M",
+        "Target set, KDA 482M, low below KES 4,000",
     )
     assert [s["StartsOn"] for s in json.loads(log["before"])["TargetSets"]] == ["2026-01-01"]
     assert json.loads(log["after"])["TargetSets"][1] == {
@@ -170,6 +174,7 @@ def test_a_future_set_is_added_and_logged_with_the_figures_before_and_after(
         "Friday": 1200.5,
         "Saturday": 1800,
         "Sunday": 600,
+        "LowBelow": 4000,
     }
 
 
@@ -180,7 +185,10 @@ def test_saving_again_on_the_same_date_replaces_the_set_that_has_not_started(
     second = _save(app_conn, yard.owner, yard.kda, date(2026, 3, 20), LATER)
     assert (second["id"], second["outcome"]) == (first["id"], "updated")
     assert _sets(owner_conn, yard.kda) == [(date(2026, 1, 1), SEVEN), (date(2026, 3, 20), LATER)]
-    assert reasons(owner_conn, yard.owner.org, "vehicles") == ["Target set, KDA 482M"] * 2
+    assert (
+        reasons(owner_conn, yard.owner.org, "vehicles")
+        == ["Target set, KDA 482M, low below KES 4,000"] * 2
+    )
 
 
 def test_a_set_from_today_corrects_the_target_in_force_and_may_be_replaced_today(
@@ -204,7 +212,7 @@ def test_a_set_cannot_start_in_the_past(app_conn: Conn, owner_conn: Conn, yard: 
         app_conn,
         "setup_target_set_save",
         yard.owner,
-        [yard.kda, date(2026, 3, 4), LATER],
+        [yard.kda, date(2026, 3, 4), LATER, None],
         "XC422",
         "target_start_past",
     )
@@ -220,7 +228,7 @@ def test_a_set_equal_to_the_one_in_force_on_its_date_is_refused(
         app_conn,
         "setup_target_set_save",
         yard.owner,
-        [yard.kda, starts_on, SEVEN],
+        [yard.kda, starts_on, SEVEN, None],
         "XC422",
         "target_set_unchanged",
     )
@@ -229,15 +237,86 @@ def test_a_set_equal_to_the_one_in_force_on_its_date_is_refused(
         app_conn,
         "setup_target_set_save",
         yard.owner,
-        [yard.kda, date(2026, 3, 25), LATER],
+        [yard.kda, date(2026, 3, 25), LATER, None],
         "XC422",
         "target_set_unchanged",
     )
     assert json.loads(error.diag.message_detail or "") == {"date": "2026-03-25"}
     assert _save(app_conn, yard.owner, yard.kda, date(2026, 3, 19), LATER)["outcome"] == "created"
     assert change_rows(owner_conn, yard.owner.org, "vehicles")[-1]["reason"] == (
-        "Target set, KDA 482M"
+        "Target set, KDA 482M, low below KES 4,000"
     )
+
+
+def _low_figures(owner_conn: Conn, vehicle: UUID) -> list[Decimal]:
+    rows = owner_conn.execute(
+        "SELECT low_below FROM setup.vehicle_target_sets WHERE vehicle_id = %s ORDER BY starts_on",
+        (vehicle,),
+    ).fetchall()
+    return [r["low_below"] for r in rows]
+
+
+def test_a_low_figure_alone_keeps_the_days_and_days_alone_keep_the_low_figure(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    org = yard.owner.org
+    result = _save(app_conn, yard.owner, yard.kda, date(2026, 3, 20), None, Decimal(2500))
+    assert result["outcome"] == "created"
+    assert _sets(owner_conn, yard.kda) == [(date(2026, 1, 1), SEVEN), (date(2026, 3, 20), SEVEN)]
+    assert reasons(owner_conn, org, "vehicles") == ["Target set, KDA 482M, low below KES 2,500"]
+    _save(app_conn, yard.owner, yard.kda, date(2026, 3, 25), LATER)
+    assert _low_figures(owner_conn, yard.kda) == [Decimal(4000), Decimal(2500), Decimal(2500)]
+    for days, low_below in [(None, Decimal(2500)), (LATER, None), (None, None)]:
+        refuses(
+            app_conn,
+            "setup_target_set_save",
+            yard.owner,
+            [yard.kda, date(2026, 3, 30), days, low_below],
+            "XC422",
+            "target_set_unchanged",
+        )
+    assert _save(app_conn, yard.owner, yard.kda, date(2026, 3, 30), None, 0)["outcome"] == "created"
+    assert _low_figures(owner_conn, yard.kda)[-1] == Decimal(0)
+
+
+@pytest.mark.parametrize("low_below", [-1, Decimal("1.005")])
+def test_a_low_figure_below_zero_or_past_two_decimals_is_refused_before_the_vehicle(
+    app_conn: Conn, yard: Yard, low_below: Any
+) -> None:
+    refuses(
+        app_conn,
+        "setup_target_set_save",
+        yard.owner,
+        [UUID(int=1), date(2026, 3, 20), None, low_below],
+        "XC422",
+        "money_invalid",
+    )
+
+
+def test_a_vehicle_without_a_set_needs_days_unless_targets_is_off(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    owner_conn.execute("DELETE FROM setup.vehicle_target_sets WHERE vehicle_id = %s", (yard.kda,))
+    refuses(
+        app_conn,
+        "setup_target_set_save",
+        yard.owner,
+        [yard.kda, date(2026, 3, 20), None, Decimal(3000)],
+        "XC422",
+        "target_days_required",
+    )
+    set_system_setting(owner_conn, yard.owner.org, "targets", on=False)
+    assert _save(app_conn, yard.owner, yard.kda, date(2026, 3, 20), None)["outcome"] == "created"
+    assert _sets(owner_conn, yard.kda) == [(date(2026, 3, 20), [Decimal(0)] * 7)]
+    assert _low_figures(owner_conn, yard.kda) == [Decimal(4000)]
+
+
+def test_with_targets_off_the_days_in_force_are_kept(
+    app_conn: Conn, owner_conn: Conn, yard: Yard
+) -> None:
+    set_system_setting(owner_conn, yard.owner.org, "targets", on=False)
+    _save(app_conn, yard.owner, yard.kda, date(2026, 3, 20), None, Decimal(3000))
+    assert _sets(owner_conn, yard.kda) == [(date(2026, 1, 1), SEVEN), (date(2026, 3, 20), SEVEN)]
 
 
 def test_a_vehicle_that_left_takes_no_new_set(app_conn: Conn, owner_conn: Conn, yard: Yard) -> None:
@@ -248,7 +327,7 @@ def test_a_vehicle_that_left_takes_no_new_set(app_conn: Conn, owner_conn: Conn, 
         app_conn,
         "setup_target_set_save",
         yard.owner,
-        [yard.kda, date(2026, 3, 20), LATER],
+        [yard.kda, date(2026, 3, 20), LATER, None],
         "XC422",
         "vehicle_retired_edit",
     )
@@ -266,7 +345,7 @@ def test_a_save_checks_the_start_then_the_figures_then_the_vehicle(
         ([UUID(int=1), date(2020, 1, 1), WEEK], "XC404", "not_found"),
         ([yard.kda, date(2020, 1, 1), WEEK], "XC422", "target_start_past"),
     ]:
-        refuses(app_conn, "setup_target_set_save", owner, args, sqlstate, code)
+        refuses(app_conn, "setup_target_set_save", owner, [*args, None], sqlstate, code)
 
 
 def test_saving_and_removing_need_vehicles_target_alone(
@@ -281,7 +360,7 @@ def test_saving_and_removing_need_vehicles_target_alone(
             app_conn,
             "setup_target_set_save",
             who,
-            [yard.kda, date(2026, 3, 10), LATER],
+            [yard.kda, date(2026, 3, 10), LATER, None],
             "XC403",
             "permission_missing",
         )
@@ -311,7 +390,7 @@ def test_a_set_that_has_not_started_is_removed_and_logged(
         "2026-03-06",
     ]
     assert json.loads(log["after"])["TargetSets"] == [
-        {"StartsOn": "2026-01-01", **{day: 1000 for day in _DAYS}}
+        {"StartsOn": "2026-01-01", **{day: 1000 for day in _DAYS}, "LowBelow": 4000}
     ]
     refuses(app_conn, "setup_target_set_remove", yard.owner, [later], "XC404", "not_found")
 

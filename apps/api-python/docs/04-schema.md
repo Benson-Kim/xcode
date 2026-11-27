@@ -214,6 +214,7 @@ section 4; nothing serves it over HTTP.
 | `name` | text | no | | `char_length BETWEEN 1 AND 200` |
 | `business_date` | date | yes | | null = follow the calendar in the organization zone |
 | `settings_version` | bigint | no | 1 | the change-log counter; concurrency token of settings |
+| `sunday_week_at` | timestamptz | yes | | when the week moved to Sunday to Saturday (migration 0024 sets it on every organization that existed then); null for an organization made later. Served as its calendar date for the go-live notice |
 | `created_at`, `updated_at` | timestamptz | no | `now()` | |
 
 - Policy: `USING (id = tenancy.current_organization()) WITH CHECK (id = tenancy.current_organization())`.
@@ -257,7 +258,7 @@ PK `organization_id` (FK). Defaults are the .NET domain defaults.
 | `time_zone` | text | `'Africa/Nairobi'` | IANA name; validated by `tenancy.check_time_zone` (routine, not CHECK) |
 | `date_pattern` | text | `'medium'` | IN (`short`, `medium`, `long`) |
 | `hour12` | boolean | false | |
-| `first_day_of_week` | smallint | 1 | `BETWEEN 0 AND 6` (0 = Sunday) |
+| `first_day_of_week` | smallint | 0 | `= 0` (Sunday): the week runs Sunday to Saturday everywhere (design notes Web v2.41, migration 0024; before it, `BETWEEN 0 AND 6` with default 1) |
 | `week_numbering` | text | `'iso8601'` | IN (`iso8601`, `local`) |
 | `currency` | text | `'KES'` | `~ '^[A-Z]{3}$'` |
 | `use_grouping` | boolean | true | wire name `useGrouping`; the legacy `useGroupping` is accepted on input and served in the appearance formats (`docs/06-http-contract.md` section 1.2) |

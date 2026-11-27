@@ -63,7 +63,7 @@ BEGIN
        AND (p_days_back + v_plan.idx) % 11 = 3 THEN
       PERFORM api.revenue_capture(
         p_owner_id, p_organization_id, p_request_id, v_vehicle_id, p_day - 1, v_record.amount + 250,
-        NULL, NULL, v_record.version, NULL, p_at
+        NULL, NULL, NULL, false, v_record.version, NULL, p_at
       );
       PERFORM tenancy.enter_organization_as_operator(p_organization_id);
     END IF;
@@ -93,7 +93,8 @@ BEGIN
 
     PERFORM api.revenue_capture(
       v_actor_id, p_organization_id, p_request_id, v_vehicle_id, p_day, v_amount, v_reason, v_note,
-      NULL, NULL, p_at
+      CASE WHEN v_amount IS NOT NULL AND (p_days_back + v_plan.idx * 3) % 19 = 6 THEN false END,
+      v_amount IS NOT NULL AND (p_days_back + v_plan.idx * 3) % 19 = 6, NULL, NULL, p_at
     );
   END LOOP;
 END;

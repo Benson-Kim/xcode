@@ -1,5 +1,5 @@
--- api.pettycash_day_approve(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_date date, p_to date, p_holder_id uuid, p_now timestamptz) RETURNS jsonb
--- Purpose: approve a day (p_date) or the days p_date..p_to: the waiting expenses not sent back that the actor may see, of one float when p_holder_id is given, dated in the days; those the actor may review (not on their own float, not recorded by them, within their approval limit) are approved and the rest skipped, with no version check and no refusal for a skipped one. One change-log and one audit row per approved entry; answers PettyCashDayApproved {approved, total (signed), skipped}.
+-- api.pettycash_day_approve(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_date date, p_to date, p_holder_id uuid, p_now timestamptz, p_vehicle_id uuid DEFAULT NULL) RETURNS jsonb
+-- Purpose: approve a day (p_date) or the days p_date..p_to: the waiting expenses not sent back that the actor may see, of one float when p_holder_id is given, of one vehicle the actor may see when p_vehicle_id is given, dated in the days; those the actor may review (not on their own float, not recorded by them, within their approval limit) are approved and the rest skipped, with no version check and no refusal for a skipped one. One change-log and one audit row per approved entry; answers PettyCashDayApproved {approved, total (signed), skipped}.
 -- Callers: PettyCashRoutines.approve_day; ApprovePettyCashDay (POST /setup/pettycash/approve-day).
 -- Reads: pettycash.entries, tenancy.memberships, and what tenancy.business_date, tenancy.effective_permissions, setup.visible_vehicles, pettycash.visible_holders and pettycash.entry_visible read. Writes: pettycash.entries, and what pettycash.log writes (row locks on the holders' memberships, in id order, and the entries).
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.require_any_permission, XC422 time_zone_invalid via tenancy.business_date, XC422 pettycash_future_date via pettycash.check_date, XC422 pettycash_too_old via pettycash.check_date, XC422 pettycash_range_both via pettycash.check_period, XC422 history_dates_order via pettycash.check_period, XC422 pettycash_range_length via pettycash.check_period, XC422 pettycash_range_start via pettycash.check_period, XC404 not_found.
@@ -14,7 +14,8 @@ CREATE OR REPLACE FUNCTION api.pettycash_day_approve(
   p_date date,
   p_to date,
   p_holder_id uuid,
-  p_now timestamptz
+  p_now timestamptz,
+  p_vehicle_id uuid DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -55,6 +56,9 @@ BEGIN
     PERFORM tenancy.refuse('not_found', 'XC404');
   END IF;
   v_vehicles := ARRAY(SELECT visible.id FROM setup.visible_vehicles() AS visible (id));
+  IF p_vehicle_id IS NOT NULL AND NOT p_vehicle_id = ANY (v_vehicles) THEN
+    PERFORM tenancy.refuse('not_found', 'XC404');
+  END IF;
   SELECT m.approval_limit INTO v_limit
   FROM tenancy.memberships AS m
   WHERE m.organization_id = p_organization_id AND m.user_id = p_actor_id;
@@ -67,6 +71,7 @@ BEGIN
       AND e.status = 1
       AND e.entry_date BETWEEN v_from AND v_to
       AND (p_holder_id IS NULL OR e.holder_id = p_holder_id)
+      AND (p_vehicle_id IS NULL OR e.vehicle_id = p_vehicle_id)
       AND pettycash.entry_visible(e, v_view_all, v_vehicles)
     ORDER BY e.holder_id
   LOOP
@@ -82,6 +87,7 @@ BEGIN
       AND e.sent_back_note IS NULL
       AND e.entry_date BETWEEN v_from AND v_to
       AND (p_holder_id IS NULL OR e.holder_id = p_holder_id)
+      AND (p_vehicle_id IS NULL OR e.vehicle_id = p_vehicle_id)
       AND pettycash.entry_visible(e, v_view_all, v_vehicles)
     ORDER BY e.id
     FOR UPDATE

@@ -49,6 +49,11 @@ _REASON_SNAPSHOT_NAMES = {
 }
 
 
+class RevenueFuel(StrEnum):
+    YES = "yes"
+    NO = "no"
+
+
 class CellStatus(StrEnum):
     """The state of one day in the revenue grid, in the words the wire and the clients use
     (``packages/shared/src/revenue.ts``, pinned by ``tests/unit/test_permission_keys.py``).
@@ -107,6 +112,8 @@ class RevenueCell:
     amount: Decimal | None
     reason: str | None
     note: str | None
+    fuel: RevenueFuel | None
+    low_below: Decimal
     can_edit: bool
     edited_after_capture: bool
     version: int | None
@@ -129,6 +136,7 @@ class RevenueVehicleWeek:
     gap: Decimal
     gap_band: GapBand | None
     below_threshold_days: int
+    not_fueled_days: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,10 +176,12 @@ class RevenueWeek:
     day_totals: tuple[RevenueDayTotal, ...]
     first_gap: RevenueGap | None
     low_day_threshold: Decimal
+    fuel_question_from: Decimal
     gap_amber_percent: Decimal
     gap: Decimal
     gap_band: GapBand | None
     below_threshold_days: int
+    not_fueled_days: int
     missing_days: int
 
 
@@ -229,6 +239,8 @@ class RevenueCapture:
     amount: Decimal | None
     reason: str | None
     note: str | None
+    fuel: RevenueFuel | None
+    fuel_given: bool
     expected_version: int | None
     captured_at: datetime | None
 
@@ -276,6 +288,7 @@ class RevenueDay:
     date: date
     vehicles: tuple[RevenueDayVehicle, ...]
     truncated: bool
+    fuel_question_from: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,6 +308,8 @@ class RevenueDayRow:
     amount: Decimal | None
     reason: str | None
     note: str | None
+    fuel: RevenueFuel | None
+    fuel_given: bool
     version: int | None
 
 

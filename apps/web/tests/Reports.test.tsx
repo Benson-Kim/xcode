@@ -188,6 +188,17 @@ it("lists only the reports the access allows, under the labels of the catalog", 
   expect(select).toHaveDisplayValue("Net by vehicle");
 });
 
+it("leaves Revenue against target out when the server does (Targets off), and opens Net by vehicle", async () => {
+  const api = renderPage(
+    serveReports({ access: { ...ACCESS, fleet: ["net", "investment"] } }),
+  );
+  const select = await screen.findByLabelText("Report");
+  expect(optionNames(select)).toEqual(["Net by vehicle", "Investment"]);
+  expect(select).toHaveDisplayValue("Net by vehicle");
+  await screen.findByRole("row", { name: /KDA 482M/ });
+  expect(rawReads(api).some((path) => path.includes("/target"))).toBe(false);
+});
+
 it("opens the first allowed report for this week", async () => {
   const api = renderPage();
   expect(

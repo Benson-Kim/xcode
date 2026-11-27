@@ -8,8 +8,8 @@ the revenue settings.
 
 The business date is 7 Oct 2026, a Wednesday (the test clock in Nairobi); weeks start on
 Monday. History before the first request is seeded as ``xcode_owner``. Each organization's
-low-day threshold is set to 100 by the ``owner`` fixture, so the small amounts of the capture
-cases are ordinary days; the low-day tests put back the default of 4,000."""
+low revenue figure is set to 100 by the ``vehicle`` helper, so the small amounts of the
+capture cases are ordinary days."""
 
 from __future__ import annotations
 
@@ -54,10 +54,12 @@ WEEK_KEYS = [
     "dayTotals",
     "firstGap",
     "lowDayThreshold",
+    "fuelQuestionFrom",
     "gapAmberPercent",
     "gap",
     "gapBand",
     "belowThresholdDays",
+    "notFueledDays",
     "missingDays",
 ]
 VEHICLE_KEYS = [
@@ -76,6 +78,7 @@ VEHICLE_KEYS = [
     "gap",
     "gapBand",
     "belowThresholdDays",
+    "notFueledDays",
 ]
 CELL_KEYS = [
     "date",
@@ -84,6 +87,8 @@ CELL_KEYS = [
     "amount",
     "reason",
     "note",
+    "fuel",
+    "lowBelow",
     "canEdit",
     "editedAfterCapture",
     "version",
@@ -118,7 +123,6 @@ async def api(make_api: ApiFactory) -> AuthApi:
 @pytest.fixture
 async def owner(api: AuthApi) -> Member:
     joined = await join(api, email="ann@example.com", phone="0711000111", role="Owner")
-    threshold(api, 100)
     return joined
 
 
@@ -128,15 +132,9 @@ def organization(api: AuthApi) -> UUID:
     return UUID(str(row["id"]))
 
 
-def threshold(api: AuthApi, amount: int | None) -> None:
-    """The organization's low-day threshold, or the default (no row) for ``None``."""
+def clear_revenue_settings(api: AuthApi) -> None:
+    """Remove the revenue settings row so the section reads its defaults."""
     api.owner.execute("DELETE FROM tenancy.organization_revenue_settings")
-    if amount is not None:
-        api.owner.execute(
-            "INSERT INTO tenancy.organization_revenue_settings (organization_id, "
-            "low_day_threshold) VALUES (%s, %s)",
-            (organization(api), amount),
-        )
 
 
 def person(api: AuthApi, member: Member) -> Person:
@@ -155,7 +153,12 @@ async def company(api: AuthApi, owner: Member, name: str) -> str:
 
 
 async def vehicle(
-    api: AuthApi, owner: Member, company_id: str, registration: str, target: int = 7000
+    api: AuthApi,
+    owner: Member,
+    company_id: str,
+    registration: str,
+    target: int = 7000,
+    low_below: int = 100,
 ) -> str:
     body = {
         "companyId": company_id,
@@ -163,6 +166,7 @@ async def vehicle(
         "fleetNumber": registration[-4:],
         "joinedOn": "2026-10-01",
         "dayTargets": [target // 7] * 7,
+        "lowBelow": low_below,
     }
     response = await api.client.post("/setup/vehicles", json=body, headers=owner.headers)
     return str(ok(response)["id"])
@@ -316,6 +320,8 @@ async def test_the_phone_queue_gets_one_answer_per_replayed_entry(
         "amount": 750,
         "reason": None,
         "note": None,
+        "fuel": None,
+        "lowBelow": 100,
         "canEdit": True,
         "editedAfterCapture": False,
         "version": 2,
@@ -384,47 +390,51 @@ async def test_the_week_in_wire_order_with_its_cells_and_figures(
     grid = ok(response)
     assert count == 2
     assert list(grid) == WEEK_KEYS
+    # The week runs Sunday to Saturday: Wednesday 7 October is in the week of Sunday 4 October.
     assert (grid["weekStart"], grid["weekThrough"], grid["currentWeekStart"]) == (
-        "2026-10-05",
-        "2026-10-11",
-        "2026-10-05",
+        "2026-10-04",
+        "2026-10-10",
+        "2026-10-04",
     )
     assert grid["companies"] == [{"id": north, "name": "North Star"}]
     [row] = grid["vehicles"]
     assert list(row) == VEHICLE_KEYS
     assert [list(cell) for cell in row["days"]] == [CELL_KEYS] * 7
-    assert row["days"][0] == {
+    assert (row["days"][0]["date"], row["days"][0]["status"]) == ("2026-10-04", "missing")
+    assert row["days"][1] == {
         "date": "2026-10-05",
         "status": "amount",
         "expected": 1000,
         "amount": 1000,
         "reason": None,
         "note": None,
+        "fuel": None,
+        "lowBelow": 100,
         "canEdit": True,
         "editedAfterCapture": False,
         "version": 1,
     }
-    assert [(c["status"], c["reason"], c["note"]) for c in row["days"][1:4]] == [
+    assert [(c["status"], c["reason"], c["note"]) for c in row["days"][2:5]] == [
         ("missing", None, None),
         ("reason", "Other", "Engine knock"),
         ("future", None, None),
     ]
     assert row["earliestMissing"] == "2026-10-01"
-    # Monday and Tuesday are before the business date and Wednesday is recorded: 3 days of 1,000.
-    assert (row["totalAmount"], row["totalExpected"], row["percent"]) == (1000, 3000, 33)
+    # Sunday to Tuesday are before the business date and Wednesday is recorded: 4 days of 1,000.
+    assert (row["totalAmount"], row["totalExpected"], row["percent"]) == (1000, 4000, 25)
     assert (row["fleetNumber"], row["gap"], row["gapBand"], row["belowThresholdDays"]) == (
         "482M",
-        -2000,
+        -3000,
         "red",
         1,
     )
     assert (grid["lowDayThreshold"], grid["gapAmberPercent"], grid["gap"], grid["gapBand"]) == (
-        100,
+        4000,
         10,
-        -2000,
+        -3000,
         "red",
     )
-    assert (grid["belowThresholdDays"], grid["missingDays"]) == (1, 1)
+    assert (grid["belowThresholdDays"], grid["missingDays"]) == (1, 2)
     assert [list(total) for total in grid["dayTotals"]] == [["date", "amount", "expected"]] * 7
     assert grid["firstGap"] == {"vehicleId": kda, "date": "2026-10-01"}
     assert (grid["pageNumber"], grid["pageSize"], grid["totalVehicles"], grid["truncated"]) == (
@@ -477,12 +487,10 @@ async def test_one_vehicle_in_a_past_week(api: AuthApi, owner: Member) -> None:
             f"/setup/revenue?weekStart=2026-09-30&vehicleId={kda}&page=3", headers=owner.headers
         )
     )
-    assert grid["weekStart"] == "2026-09-28"
+    assert grid["weekStart"] == "2026-09-27"
     [row] = grid["vehicles"]
     assert row["id"] == kda
-    assert [c["status"] for c in row["days"]] == ["none"] * 3 + ["missing", "amount"] + [
-        "missing"
-    ] * 2
+    assert [c["status"] for c in row["days"]] == ["none"] * 4 + ["missing", "amount", "missing"]
     assert (grid["pageNumber"], grid["pageSize"]) == (1, 500)
     problem(
         await api.client.get(f"/setup/revenue?vehicleId={UNKNOWN}", headers=owner.headers),
@@ -541,14 +549,14 @@ async def test_the_dashboard_shows_each_card_to_its_own_permission(
     assert list(cards) == DASHBOARD_KEYS
     assert (cards["period"], cards["from"], cards["through"], cards["businessDate"]) == (
         "week",
-        "2026-10-05",
+        "2026-10-04",
         TODAY,
         TODAY,
     )
     figures = {
-        "revenue": {"revenue": 2200, "expected": 3000, "percent": 73},
+        "revenue": {"revenue": 2200, "expected": 4000, "percent": 55},
         "capture": {"capturedToday": 1, "vehiclesToday": 1},
-        "gaps": {"missingDays": 1, "missingVehicles": 1},
+        "gaps": {"missingDays": 2, "missingVehicles": 1},
         "edits": {"editedRecords": 0},
     }
     for card, values in figures.items():
@@ -563,7 +571,7 @@ async def test_the_dashboard_periods_and_refusals(api: AuthApi, owner: Member) -
     seed(api, owner, kda, "2026-10-01", 600)
     for period, start, revenue in (
         ("today", TODAY, 0),
-        ("week", "2026-10-05", 0),
+        ("week", "2026-10-04", 0),
         ("month", "2026-10-01", 600),
     ):
         cards = ok(
@@ -600,8 +608,9 @@ async def test_the_dashboard_periods_and_refusals(api: AuthApi, owner: Member) -
 
 
 async def test_a_low_day_is_saved_with_its_reason(api: AuthApi, owner: Member) -> None:
-    kda = await vehicle(api, owner, await company(api, owner, "North Star"), "KDA 482M")
-    threshold(api, None)
+    kda = await vehicle(
+        api, owner, await company(api, owner, "North Star"), "KDA 482M", low_below=4000
+    )
     problem(
         await save(api, owner, kda, TODAY, amount=3999.99),
         400,
@@ -610,7 +619,7 @@ async def test_a_low_day_is_saved_with_its_reason(api: AuthApi, owner: Member) -
     )
     saved = ok(await save(api, owner, kda, TODAY, amount=3999.99, reason="Garage"))
     grid = ok(await api.client.get("/setup/revenue", headers=owner.headers))
-    cell = grid["vehicles"][0]["days"][2]
+    cell = grid["vehicles"][0]["days"][3]
     assert (cell["status"], cell["amount"], cell["reason"], cell["version"]) == (
         "amount",
         3999.99,
@@ -630,19 +639,22 @@ async def test_the_week_carries_the_gap_and_the_day_targets(api: AuthApi, owner:
         "fleetNumber": "14",
         "joinedOn": "2026-10-01",
         "dayTargets": [1000, 1000, 1500, 1000, 1000, 2000, 2500],
+        "lowBelow": 100,
     }
     kda = str(ok(await api.client.post("/setup/vehicles", json=body, headers=owner.headers))["id"])
+    seed(api, owner, kda, "2026-10-04", 2500)
     seed(api, owner, kda, "2026-10-05", 1200)
     seed(api, owner, kda, "2026-10-06", 900)
     grid = ok(await api.client.get("/setup/revenue", headers=owner.headers))
     [row] = grid["vehicles"]
-    assert [c["expected"] for c in row["days"]] == [1000, 1000, 1500, 1000, 1000, 2000, 2500]
-    # Monday and Tuesday count; Wednesday (today) does not until it is recorded.
-    assert (row["totalExpected"], row["gap"], row["gapBand"]) == (2000, 100, "green")
-    assert [d["expected"] for d in grid["dayTotals"]] == [1000, 1000, 0, 0, 0, 0, 0]
+    # The targets are kept Monday first; the week shows them from Sunday.
+    assert [c["expected"] for c in row["days"]] == [2500, 1000, 1000, 1500, 1000, 1000, 2000]
+    # Sunday to Tuesday count; Wednesday (today) does not until it is recorded.
+    assert (row["totalExpected"], row["gap"], row["gapBand"]) == (4500, 100, "green")
+    assert [d["expected"] for d in grid["dayTotals"]] == [2500, 1000, 1000, 0, 0, 0, 0]
     ok(await save(api, owner, kda, TODAY, amount=1300))
     row = ok(await api.client.get("/setup/revenue", headers=owner.headers))["vehicles"][0]
-    assert (row["totalExpected"], row["gap"], row["gapBand"]) == (3500, -100, "amber")
+    assert (row["totalExpected"], row["gap"], row["gapBand"]) == (6000, -100, "amber")
 
 
 async def test_the_week_search_matches_registration_or_fleet_number(
@@ -698,24 +710,24 @@ async def test_a_capture_time_moves_the_back_limit_within_72_hours(
 async def test_the_revenue_settings_are_read_and_saved_by_the_owner(
     api: AuthApi, owner: Member
 ) -> None:
-    threshold(api, None)
+    clear_revenue_settings(api)
     settings = ok(await api.client.get("/setup/organization/settings", headers=owner.headers))
     assert list(settings)[-1] == "revenue"
-    assert list(settings["revenue"]) == ["organizationId", "lowDayThreshold", "gapAmberPercent"]
-    assert (settings["revenue"]["lowDayThreshold"], settings["revenue"]["gapAmberPercent"]) == (
-        4000,
+    assert list(settings["revenue"]) == ["organizationId", "fuelQuestionFrom", "gapAmberPercent"]
+    assert (settings["revenue"]["fuelQuestionFrom"], settings["revenue"]["gapAmberPercent"]) == (
+        10000,
         10,
     )
     url = "/setup/organization/settings/revenue"
     saved = await api.client.put(
         url,
-        json={"value": {"lowDayThreshold": 3500.5, "gapAmberPercent": 15}},
+        json={"value": {"fuelQuestionFrom": 12000.5, "gapAmberPercent": 15}},
         headers=owner.headers,
     )
     assert ok(saved) == {"section": "revenue"}
     settings = ok(await api.client.get("/setup/organization/settings", headers=owner.headers))
-    assert (settings["revenue"]["lowDayThreshold"], settings["revenue"]["gapAmberPercent"]) == (
-        3500.5,
+    assert (settings["revenue"]["fuelQuestionFrom"], settings["revenue"]["gapAmberPercent"]) == (
+        12000.5,
         15,
     )
     row = api.owner.execute(
@@ -723,18 +735,20 @@ async def test_the_revenue_settings_are_read_and_saved_by_the_owner(
     ).fetchone()
     assert row == {
         "section": "organization",
-        "reason": "Changed the low-day threshold to KES 3,500.50 and the amber band to 15 per cent",
+        "reason": (
+            "Changed the fuel question amount to KES 12,000.50 and the amber band to 15 per cent"
+        ),
     }
-    for value in ({"lowDayThreshold": -1}, {"gapAmberPercent": 100.5}, {"lowDayThreshold": 1.005}):
+    for value in ({"fuelQuestionFrom": 0}, {"gapAmberPercent": 100.5}, {"fuelQuestionFrom": 1.005}):
         problem(
             await api.client.put(url, json={"value": value}, headers=owner.headers),
             400,
             INVALID,
-            "The low-day threshold must be 0 or more and the amber band 0 to 100 per cent.",
+            "The fuel question amount must be above 0 and the amber band 0 to 100 per cent.",
         )
     clerk = await member(api, "Revenue clerk", "0722000111")
     problem(
-        await api.client.put(url, json={"value": {"lowDayThreshold": 1}}, headers=clerk.headers),
+        await api.client.put(url, json={"value": {"fuelQuestionFrom": 1}}, headers=clerk.headers),
         403,
         FORBIDDEN,
     )
@@ -742,7 +756,7 @@ async def test_the_revenue_settings_are_read_and_saved_by_the_owner(
 
 @pytest.mark.parametrize("number", ["Infinity", "-Infinity", "NaN", "1e999"])
 @pytest.mark.parametrize(
-    ("section", "key"), [("revenue", "lowDayThreshold"), ("securityPolicy", "pinLength")]
+    ("section", "key"), [("revenue", "fuelQuestionFrom"), ("securityPolicy", "pinLength")]
 )
 async def test_a_settings_number_no_json_holds_is_refused_before_the_routine(
     api: AuthApi, owner: Member, number: str, section: str, key: str

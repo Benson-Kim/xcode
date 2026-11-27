@@ -1,5 +1,5 @@
 -- api.setup_vehicle_list(p_actor_id uuid, p_organization_id uuid, p_request_id text, p_page integer, p_page_size integer, p_company_id uuid, p_now timestamptz) RETURNS jsonb
--- Purpose: one page of the vehicles the actor can see, of one company when p_company_id is given (counted and paged as the matches only), by registration, each with its company, fleet number, initial investment, whether it is in the fleet on the business date, the target set in force (its seven day figures and their weekly total), the next set and its start, its target history in the shape released clients read (one entry per set: start, weekly total, ordinal), the scheduled items still posting to it and its away periods; investment viewers without vehicles.view get no target, no history and no scheduled-item count; {total, items}.
+-- Purpose: one page of the vehicles the actor can see, of one company when p_company_id is given (counted and paged as the matches only), by registration, each with its company, fleet number, initial investment, whether it is in the fleet on the business date, the target set in force (its seven day figures, their weekly total and its low revenue figure), the next set (its start, figures and low revenue figure), its target history in the shape released clients read (one entry per set: start, weekly total, ordinal), the scheduled items still posting to it and its away periods; investment viewers without vehicles.view get no target, no history and no scheduled-item count; {total, items}.
 -- Callers: SetupRoutines.list_vehicles; ListVehicles (GET /setup/vehicles).
 -- Reads: setup.fleet_vehicles, setup.psv_companies, setup.vehicle_target_sets, setup.vehicle_away_periods, setup.recurring_items, setup.recurring_versions, setup.recurring_allocations, and what tenancy.business_date, tenancy.has_permission, setup.visible_vehicles, setup.target_set_on and setup.target_on read. Writes: nothing.
 -- Raises: XC403 not_member via tenancy.enter_organization, XC403 permission_missing via tenancy.require_any_permission, XC422 page_out_of_range via tenancy.check_page, XC422 time_zone_invalid via tenancy.business_date.
@@ -114,6 +114,10 @@ BEGIN
                                          (v.in_force).sunday
                                        )
                                 END,
+                 'low_below', CASE
+                                WHEN NOT v_manages OR (v.in_force).id IS NULL THEN NULL
+                                ELSE (v.in_force).low_below
+                              END,
                  'next_target', CASE
                                   WHEN NOT v_manages THEN NULL
                                   ELSE (
@@ -123,7 +127,8 @@ BEGIN
                                                n.monday, n.tuesday, n.wednesday, n.thursday,
                                                n.friday, n.saturday, n.sunday
                                              ),
-                                             'weekly_target', setup.week_total(n)
+                                             'weekly_target', setup.week_total(n),
+                                             'low_below', n.low_below
                                            )
                                     FROM setup.vehicle_target_sets AS n
                                     WHERE n.organization_id = v.organization_id
